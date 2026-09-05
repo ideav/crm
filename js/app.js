@@ -91,7 +91,9 @@ function apiScheme() {
 
 class ApiConfig {
     constructor() {
-        this.host = localStorage.getItem('apiHost') || window.location.hostname;
+        // location.host retains a non-default port (for example :8080 in the
+        // Docker preview); hostname alone silently sent API calls to port 80.
+        this.host = localStorage.getItem('apiHost') || window.location.host || window.location.hostname;
         this.yandexClientId = '959da92b09364e42bf4c7704db0b992f';
     }
 
@@ -155,6 +157,25 @@ async function hasValidAuthToken(host) {
     return false;
 }
 
+async function getCaptchaConfig(host) {
+    try {
+        const response = await fetch(apiScheme() + host + '/my/captcha-config?JSON', {
+            credentials: 'include'
+        });
+        if (!response.ok) throw new Error('HTTP ' + response.status);
+        const data = await response.json();
+        return {
+            required: data.required !== false,
+            siteKey: typeof data.siteKey === 'string' ? data.siteKey : ''
+        };
+    } catch (err) {
+        // Fail closed: a configuration outage must not silently disable the
+        // production captcha. The submit handler will keep the request gated.
+        console.error('[auth] captcha config error:', err);
+        return { required: true, siteKey: '' };
+    }
+}
+
 // ============================================================
 // Notification utility
 // ============================================================
@@ -210,6 +231,22 @@ function resetCaptcha(containerId) {
     if (widgetId !== undefined) {
         window.smartCaptcha.reset(parseInt(widgetId, 10));
     }
+}
+
+let smartCaptchaLoadPromise = null;
+function loadSmartCaptchaScript() {
+    if (window.smartCaptcha) return Promise.resolve();
+    if (smartCaptchaLoadPromise) return smartCaptchaLoadPromise;
+    smartCaptchaLoadPromise = new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = 'https://smartcaptcha.yandexcloud.net/captcha.js';
+        script.async = true;
+        script.dataset.integramSmartCaptcha = 'true';
+        script.addEventListener('load', resolve, { once: true });
+        script.addEventListener('error', () => reject(new Error('SmartCaptcha failed to load')), { once: true });
+        document.head.appendChild(script);
+    });
+    return smartCaptchaLoadPromise;
 }
 
 // ============================================================
@@ -689,6 +726,8 @@ class App {
         // so this flag stays false until the captcha decision is actually reached.
         this._captchaBypass = false;
         this._captchaBypassChecked = false;
+        this._captchaBypassPromise = null;
+        this._captchaClientKey = '';
         this._postLoginUri = '';
         this._postLoginDb = '';
         window._app = this;
@@ -846,11 +885,13 @@ class App {
                         return;
                     }
                 }
+                // Resolve configuration and widget setup before reading its token.
+                const captchaReady = await this._initCaptchaWidgets();
                 const captchaToken = getCaptchaToken('login-captcha-container');
-                // Issue #2947: resolve the captcha bypass lazily, right before the check.
-                await this._ensureCaptchaBypass();
                 if (!this._captchaBypass && captchaToken === null) {
-                    showToast('Пожалуйста, пройдите проверку капчи', 'error');
+                    showToast(captchaReady
+                        ? 'Пожалуйста, пройдите проверку капчи'
+                        : 'Проверка CAPTCHA временно недоступна. Обновите страницу и попробуйте снова.', 'error');
                     loginInProgress = false;
                     return;
                 }
@@ -1218,11 +1259,13 @@ class App {
                     return;
                 }
 
+                // Resolve configuration and widget setup before reading its token.
+                const captchaReady = await this._initCaptchaWidgets();
                 const captchaToken = getCaptchaToken('register-captcha-container');
-                // Issue #2947: resolve the captcha bypass lazily, right before the check.
-                await this._ensureCaptchaBypass();
                 if (!this._captchaBypass && captchaToken === null) {
-                    showToast('Пожалуйста, пройдите проверку капчи', 'error');
+                    showToast(captchaReady
+                        ? 'Пожалуйста, пройдите проверку капчи'
+                        : 'Проверка CAPTCHA временно недоступна. Обновите страницу и попробуйте снова.', 'error');
                     return;
                 }
 
@@ -1379,28 +1422,48 @@ class App {
     // user), never eagerly on every init. The result is memoized so repeated
     // decisions (render, login submit, register submit) reuse the same check.
     async _ensureCaptchaBypass() {
-        if (this._captchaBypassChecked) return this._captchaBypass;
+        if (this._captchaBypassPromise) return this._captchaBypassPromise;
         this._captchaBypassChecked = true;
-        this._captchaBypass = await hasValidAuthToken(this.apiConfig.host);
-        if (this._captchaBypass) this._hideCaptchaWidgets();
-        return this._captchaBypass;
+        this._captchaBypassPromise = (async () => {
+            this._captchaBypass = await hasValidAuthToken(this.apiConfig.host);
+            if (!this._captchaBypass) {
+                const config = await getCaptchaConfig(this.apiConfig.host);
+                this._captchaClientKey = config.siteKey;
+                this._captchaBypass = !config.required;
+            }
+            if (this._captchaBypass) this._hideCaptchaWidgets();
+            return this._captchaBypass;
+        })();
+        return this._captchaBypassPromise;
     }
 
     async _initCaptchaWidgets() {
         // Issue #2906/#2947: query tokens here, right before deciding whether to
         // render the captcha, and skip rendering entirely for returning users.
         await this._ensureCaptchaBypass();
-        if (this._captchaBypass) return;
-        if (!window.smartCaptcha) return;
-        ['login-captcha-container', 'register-captcha-container'].forEach(id => {
-            const el = document.getElementById(id);
-            if (!el || el.dataset.widgetId !== undefined) return;
-            const sitekey = el.dataset.sitekey;
-            if (!sitekey || sitekey.includes('XXXX')) return;
-            const robustness = el.dataset.robustness || 'strict';
-            const widgetId = window.smartCaptcha.render(el, { sitekey, robustness });
-            el.dataset.widgetId = widgetId;
-        });
+        if (this._captchaBypass) return true;
+        try {
+            await loadSmartCaptchaScript();
+            let initialized = false;
+            for (const id of ['login-captcha-container', 'register-captcha-container']) {
+                const el = document.getElementById(id);
+                if (!el) continue;
+                if (el.dataset.widgetId !== undefined) {
+                    initialized = true;
+                    continue;
+                }
+                const sitekey = this._captchaClientKey;
+                if (!sitekey || sitekey.includes('XXXX')) continue;
+                const robustness = el.dataset.robustness || 'strict';
+                const widgetId = window.smartCaptcha.render(el, { sitekey, robustness });
+                el.dataset.widgetId = widgetId;
+                initialized = true;
+            }
+            return initialized;
+        } catch (err) {
+            console.error('[auth] captcha widget error:', err);
+            return false;
+        }
     }
 
     // Issue #2906: hide the captcha containers when a valid token bypasses the captcha.

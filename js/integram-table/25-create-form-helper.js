@@ -16,6 +16,60 @@ class IntegramCreateFormHelper {
         this.reportColumnOptionsCache = null;  // Cache for REPORT_COLUMN dropdown options (issue #607)
     }
 
+    async fetchJson(url, options) {
+        const response = await fetch(url, options);
+        let text = '';
+        let parsed = null;
+
+        if (typeof response.text === 'function') {
+            text = await response.text();
+            if (text !== '') {
+                try {
+                    parsed = JSON.parse(text);
+                } catch (parseError) {
+                    const preview = text.trim()
+                        ? text.trim().slice(0, 300)
+                        : `HTTP ${ response.status } ${ response.statusText }`.trim();
+                    const error = new Error(preview);
+                    error.isNonJsonResponse = true;
+                    error.status = response.status;
+                    throw error;
+                }
+            }
+        } else if (typeof response.json === 'function') {
+            parsed = await response.json();
+        }
+
+        if (response.ok === false) {
+            let message = '';
+            if (parsed && typeof parsed === 'object') {
+                message = parsed.error || parsed.message ||
+                    (Array.isArray(parsed) && parsed[0] && (parsed[0].error || parsed[0].message)) || '';
+            }
+            if (!message) {
+                message = text.trim() || `HTTP ${ response.status } ${ response.statusText }`.trim();
+            }
+            const error = new Error(String(message).slice(0, 300));
+            error.status = response.status;
+            error.response = parsed;
+            throw error;
+        }
+
+        return parsed;
+    }
+
+    normalizeNumericId(value) {
+        const id = value === null || value === undefined ? '' : String(value).trim();
+        return /^\d+$/.test(id) ? id : '';
+    }
+    sanitizeLinkUrl(value) {
+        if (value === null || value === undefined) return '';
+        const url = String(value).trim();
+        const schemeProbe = url.replace(/[\u0000-\u0020\u007f]+/g, '');
+        if (/^(?:javascript|data|vbscript):/i.test(schemeProbe)) return '';
+        if (/^[a-z][a-z0-9+.-]*:/i.test(schemeProbe) && !/^https?:/i.test(schemeProbe)) return '';
+        return url;
+    }
     escapeHtml(text) {
         if (text === null || text === undefined) return '';
         return String(text)
@@ -284,7 +338,7 @@ class IntegramCreateFormHelper {
         // Store reference to overlay on modal for proper cleanup
         modal._overlayElement = overlay;
 
-        const typeName = this.getMetadataName(metadata);
+        const typeName = this.escapeHtml(this.getMetadataName(metadata));
         const title = `Создание: ${typeName}`;
 
         // Build parent info subtitle HTML if parentInfo is provided
@@ -297,7 +351,7 @@ class IntegramCreateFormHelper {
         // Render the form
         const reqs = metadata.reqs || [];
         const recordReqs = recordData && recordData.reqs ? recordData.reqs : {};
-        const regularFields = reqs.filter(req => !req.arr_id);
+        const regularFields = reqs.filter(req => !req.arr_id && this.normalizeNumericId(req.id));
 
         // Build attributes form HTML
         let attributesHtml = this.renderAttributesForm(metadata, recordData, regularFields, recordReqs, fieldValues);
@@ -330,7 +384,7 @@ class IntegramCreateFormHelper {
         document.body.appendChild(modal);
 
         // Load reference options for dropdowns
-        this.loadReferenceOptions(metadata.reqs, modal, fieldValues);
+        this.loadReferenceOptions(regularFields, modal, fieldValues);
 
         // Load GRANT and REPORT_COLUMN dropdown options (issue #577)
         this.loadGrantAndReportColumnOptions(modal);
@@ -366,19 +420,8 @@ class IntegramCreateFormHelper {
 
         overlay.addEventListener('click', closeModal);
 
-        // Close on Escape key (issue #595)
-        const handleEscape = (e) => {
-            if (e.key === 'Escape') {
-                // Only close if this modal is the topmost one
-                const currentDepth = parseInt(modal.dataset.modalDepth) || 0;
-                const maxDepth = window._integramModalDepth || 0;
-                if (currentDepth === maxDepth) {
-                    closeModal();
-                    document.removeEventListener('keydown', handleEscape);
-                }
-            }
-        };
-        document.addEventListener('keydown', handleEscape);
+        // Shared Escape stack closes only the topmost modal and unregisters on removal.
+        itCreateModalCloseHandler(modal, closeModal, this);
 
         // Enter in input/textarea triggers Save (issue #1422)
         modal.addEventListener('keydown', (e) => {
@@ -404,7 +447,7 @@ class IntegramCreateFormHelper {
         const currentDateTimeDisplay = currentDateDisplay + ' ' + now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }); // DD.MM.YYYY HH:MM
 
         // Main value field - render according to base type
-        const typeName = this.getMetadataName(metadata);
+        const typeName = this.escapeHtml(this.getMetadataName(metadata));
         const mainValue = recordData && recordData.obj ? recordData.obj.val || '' : '';
         // For GRANT/REPORT_COLUMN fields, use term from API response for dropdown pre-selection (issue #583)
         const mainTermValue = recordData && recordData.obj && recordData.obj.term !== undefined ? recordData.obj.term : '';
@@ -464,7 +507,7 @@ class IntegramCreateFormHelper {
         // Render requisite fields
         regularFields.forEach(req => {
             const attrs = this.parseAttrs(req.attrs);
-            const fieldName = attrs.alias || req.val;
+            const fieldName = this.escapeHtml(attrs.alias || req.val || '');
             const reqValue = recordReqs[req.id] ? recordReqs[req.id].value || '' : '';
             const baseTypeId = recordReqs[req.id] ? recordReqs[req.id].base || req.type : req.type;
             const baseFormat = this.normalizeFormat(baseTypeId);
@@ -479,7 +522,7 @@ class IntegramCreateFormHelper {
             if (req.ref_id && isMulti) {
                 const currentValue = reqValue || '';
                 html += `
-                    <div class="form-reference-editor form-multi-reference-editor" data-ref-id="${req.id}" data-required="${isRequired}" data-ref-type-id="${req.orig || req.ref_id}" data-multi="1" data-current-value="${this.escapeHtml(currentValue)}">
+                    <div class="form-reference-editor form-multi-reference-editor" data-ref-id="${req.id}" data-required="${isRequired}" data-ref-type-id="${this.normalizeNumericId(req.orig || req.ref_id)}" data-multi="1" data-current-value="${this.escapeHtml(currentValue)}">
                         <div class="inline-editor-reference form-ref-editor-box inline-editor-multi-reference">
                             <div class="multi-ref-tags-container form-multi-ref-tags-container">
                                 <span class="multi-ref-tags-placeholder">Загрузка...</span>
@@ -509,7 +552,7 @@ class IntegramCreateFormHelper {
             else if (req.ref_id) {
                 const currentValue = reqValue || '';
                 html += `
-                    <div class="form-reference-editor" data-ref-id="${req.id}" data-required="${isRequired}" data-ref-type-id="${req.orig || req.ref_id}">
+                    <div class="form-reference-editor" data-ref-id="${req.id}" data-required="${isRequired}" data-ref-type-id="${this.normalizeNumericId(req.orig || req.ref_id)}">
                         <div class="inline-editor-reference form-ref-editor-box">
                             <div class="inline-editor-reference-header">
                                 <input type="text"
@@ -717,8 +760,7 @@ class IntegramCreateFormHelper {
 
             try {
                 const url = `${this.apiBase}/_ref_reqs/${req.id}?JSON&LIMIT=50`;
-                const response = await fetch(url);
-                const data = await response.json();
+                const data = await this.fetchJson(url);
 
                 // Parse options - data is an object {id: text, ...}
                 let optionsHtml = '';
@@ -801,7 +843,7 @@ class IntegramCreateFormHelper {
         }
 
         // Close dropdowns when clicking outside
-        document.addEventListener('click', (e) => {
+        itAddModalDocumentListener(modal, 'click', (e) => {
             if (!e.target.closest('.form-reference-editor')) {
                 modal.querySelectorAll('.form-ref-dropdown').forEach(dropdown => {
                     dropdown.style.display = 'none';
@@ -824,8 +866,7 @@ class IntegramCreateFormHelper {
 
         try {
             const url = `${this.apiBase}/_ref_reqs/${refReqId}?JSON&LIMIT=50`;
-            const response = await fetch(url);
-            const data = await response.json();
+            const data = await this.fetchJson(url);
 
             // Parse options into [id, text] tuples
             const options = Object.entries(data).map(([id, text]) => [id, this.decodeHtmlEntities(text)]);
@@ -899,7 +940,7 @@ class IntegramCreateFormHelper {
                 } else {
                     dropdown.innerHTML = filtered.map(([id, text]) => {
                         const et = self.escapeHtml(self.decodeHtmlEntities(text));
-                        return `<div class="inline-editor-reference-option" data-id="${id}" data-text="${et}" tabindex="0">${et}</div>`;
+                        return `<div class="inline-editor-reference-option" data-id="${self.escapeHtml(id)}" data-text="${et}" tabindex="0">${et}</div>`;
                     }).join('');
                 }
             };
@@ -1004,6 +1045,7 @@ class IntegramCreateFormHelper {
                     const firstOption = dropdown.querySelector('.inline-editor-reference-option');
                     if (firstOption) firstOption.click();
                 } else if (e.key === 'Escape') {
+                    e.preventDefault();
                     dropdown.style.display = 'none';
                     searchInput.blur();
                 }
@@ -1029,6 +1071,7 @@ class IntegramCreateFormHelper {
                     e.preventDefault();
                     option.click();
                 } else if (e.key === 'Escape') {
+                    e.preventDefault();
                     dropdown.style.display = 'none';
                     searchInput.focus();
                 }
@@ -1226,20 +1269,11 @@ class IntegramCreateFormHelper {
             // Create the record
             const url = `${this.apiBase}/_m_new/${this.tableTypeId}?JSON&up=${this.parentId || 1}`;
 
-            const response = await fetch(url, {
+            const result = await this.fetchJson(url, {
                 method: 'POST',
                 headers: headers,
                 body: requestBody
             });
-
-            const text = await response.text();
-            let result;
-
-            try {
-                result = JSON.parse(text);
-            } catch (e) {
-                throw new Error(`Invalid response: ${text}`);
-            }
 
             const serverError = this.getServerError(result);
             if (serverError) {
@@ -1272,6 +1306,12 @@ class IntegramCreateFormHelper {
      * Enhanced with subordinate table tabs and form settings button (issue #837).
      */
     renderEditFormModalStandalone(metadata, recordData, typeId, recordId) {
+        typeId = this.normalizeNumericId(typeId);
+        recordId = this.normalizeNumericId(recordId);
+        if (!typeId || !recordId) {
+            this.showToast('Некорректный идентификатор записи', 'error');
+            return;
+        }
         // Track modal depth for z-index stacking
         if (!window._integramModalDepth) {
             window._integramModalDepth = 0;
@@ -1298,11 +1338,11 @@ class IntegramCreateFormHelper {
         // Store reference to overlay on modal for proper cleanup
         modal._overlayElement = overlay;
 
-        const typeName = this.getMetadataName(metadata);
+        const typeName = this.escapeHtml(this.getMetadataName(metadata));
         const recordVal = recordData && recordData.obj ? recordData.obj.val : '';
         // #3774: DATETIME-главное-значение → дата-время вместо unix-штампа.
-        const title = `Редактирование: ${this.formatRecordTitleValue(recordVal) || typeName}`;
-        const parentId = recordData && recordData.obj ? recordData.obj.parent : 1;
+        const title = `Редактирование: ${this.escapeHtml(this.formatRecordTitleValue(recordVal)) || typeName}`;
+        const parentId = this.normalizeNumericId(recordData && recordData.obj ? recordData.obj.parent : 1) || '1';
 
         // Build record ID link HTML
         const pathParts = window.location.pathname.split('/');
@@ -1310,8 +1350,8 @@ class IntegramCreateFormHelper {
         const tableUrl = `/${dbName}/table/${typeId}?F_U=${parentId || 1}&F_I=${recordId}`;
 
         const recordIdHtml = `
-            <span class="edit-form-record-id" onclick="navigator.clipboard.writeText('${recordId}').then(() => { this.style.color='#28a745'; setTimeout(() => this.style.color='', 1000); })" title="Скопировать ID" style="cursor:pointer;margin-left:8px;font-size: 0.75rem;color:var(--cards-text-secondary);">#${recordId}</span>
-            <a href="${tableUrl}" class="edit-form-table-link" title="Открыть в таблице" target="_blank" style="margin-left:4px;">
+            <button type="button" class="edit-form-record-id" onclick="navigator.clipboard.writeText('${recordId}').then(() => { this.style.color='#28a745'; setTimeout(() => this.style.color='', 1000); })" title="Скопировать ID" aria-label="Скопировать ID ${recordId}" style="margin-left:8px;">#${recordId}</button>
+            <a href="${tableUrl}" class="edit-form-table-link" title="Открыть в таблице" target="_blank" rel="noopener noreferrer" style="margin-left:4px;">
                 <i class="pi pi-table"></i>
             </a>
         `;
@@ -1319,10 +1359,10 @@ class IntegramCreateFormHelper {
         // Render the form
         const reqs = metadata.reqs || [];
         const recordReqs = recordData && recordData.reqs ? recordData.reqs : {};
-        const regularFields = reqs.filter(req => !req.arr_id);
+        const regularFields = reqs.filter(req => !req.arr_id && this.normalizeNumericId(req.id));
 
         // Separate subordinate tables (issue #837)
-        const subordinateTables = reqs.filter(req => req.arr_id);
+        const subordinateTables = reqs.filter(req => this.normalizeNumericId(req.arr_id) && this.normalizeNumericId(req.id));
         const hasSubordinateTables = subordinateTables.length > 0 && recordId;
 
         // Build tabs HTML (issue #837)
@@ -1333,9 +1373,11 @@ class IntegramCreateFormHelper {
 
             subordinateTables.forEach(req => {
                 const attrs = this.parseAttrs(req.attrs);
-                const fieldName = attrs.alias || req.val;
-                const arrCount = recordReqs[req.id] ? recordReqs[req.id].arr || 0 : 0;
-                tabsHtml += `<div class="edit-form-tab" data-tab="sub-${req.id}" data-arr-id="${req.arr_id}" data-req-id="${req.id}">${fieldName} (${arrCount})</div>`;
+                const fieldName = this.escapeHtml(attrs.alias || req.val || '');
+                const arrCount = this.escapeHtml(recordReqs[req.id] ? recordReqs[req.id].arr || 0 : 0);
+                const reqId = this.normalizeNumericId(req.id);
+                const arrId = this.normalizeNumericId(req.arr_id);
+                tabsHtml += `<div class="edit-form-tab" data-tab="sub-${reqId}" data-arr-id="${arrId}" data-req-id="${reqId}">${fieldName} (${arrCount})</div>`;
             });
 
             tabsHtml += `</div>`;
@@ -1365,7 +1407,7 @@ class IntegramCreateFormHelper {
         if (hasSubordinateTables) {
             subordinateTables.forEach(req => {
                 formHtml += `
-                    <div class="edit-form-tab-content" data-tab-content="sub-${req.id}">
+                    <div class="edit-form-tab-content" data-tab-content="sub-${this.normalizeNumericId(req.id)}">
                         <div class="subordinate-table-loading">Загрузка...</div>
                     </div>
                 `;
@@ -1398,7 +1440,7 @@ class IntegramCreateFormHelper {
         }
 
         // Load reference options for dropdowns
-        this.loadReferenceOptions(metadata.reqs, modal, {});
+        this.loadReferenceOptions(regularFields, modal, {});
 
         // Load GRANT and REPORT_COLUMN dropdown options
         this.loadGrantAndReportColumnOptions(modal);
@@ -1443,18 +1485,8 @@ class IntegramCreateFormHelper {
 
         overlay.addEventListener('click', closeModal);
 
-        // Close on Escape key
-        const handleEscape = (e) => {
-            if (e.key === 'Escape') {
-                const currentDepth = parseInt(modal.dataset.modalDepth) || 0;
-                const maxDepth = window._integramModalDepth || 0;
-                if (currentDepth === maxDepth) {
-                    closeModal();
-                    document.removeEventListener('keydown', handleEscape);
-                }
-            }
-        };
-        document.addEventListener('keydown', handleEscape);
+        // Shared Escape stack closes only the topmost modal and unregisters on removal.
+        itCreateModalCloseHandler(modal, closeModal, this);
 
         // Enter in input/textarea triggers Save (issue #1422)
         modal.addEventListener('keydown', (e) => {
@@ -1492,10 +1524,10 @@ class IntegramCreateFormHelper {
                 }
 
                 // Load subordinate table if needed
-                const parentRecordId = modal.dataset.recordId;
+                const parentRecordId = self.normalizeNumericId(modal.dataset.recordId);
                 if (tabId.startsWith('sub-') && tab.dataset.arrId && parentRecordId) {
-                    const arrId = tab.dataset.arrId;
-                    const reqId = tab.dataset.reqId;
+                    const arrId = self.normalizeNumericId(tab.dataset.arrId);
+                    const reqId = self.normalizeNumericId(tab.dataset.reqId);
 
                     // Check if already loaded
                     if (!targetContent.dataset.loaded) {
@@ -1523,6 +1555,12 @@ class IntegramCreateFormHelper {
      * Load subordinate table content (issue #837).
      */
     async loadSubordinateTableStandalone(container, arrId, parentRecordId, reqId) {
+        arrId = this.normalizeNumericId(arrId);
+        parentRecordId = this.normalizeNumericId(parentRecordId);
+        if (!arrId || !parentRecordId) {
+            container.innerHTML = '<div class="subordinate-table-error">Некорректный идентификатор таблицы</div>';
+            return;
+        }
         if (!container.querySelector('.subordinate-table')) {
             container.innerHTML = '<div class="subordinate-table-loading">Загрузка...</div>';
         }
@@ -1540,14 +1578,13 @@ class IntegramCreateFormHelper {
             // Fallback: fetch and render subordinate table data manually
             const metadata = await this.fetchMetadataStandalone(arrId);
             const dataUrl = `${this.apiBase}/object/${arrId}/?JSON_OBJ&F_U=${parentRecordId}`;
-            const dataResponse = await fetch(dataUrl);
-            const data = await dataResponse.json();
+            const data = await this.fetchJson(dataUrl);
 
             this.renderSubordinateTableStandalone(container, metadata, data, arrId, parentRecordId);
 
         } catch (error) {
             console.error('Error loading subordinate table:', error);
-            container.innerHTML = `<div class="subordinate-table-error">Ошибка загрузки: ${error.message}</div>`;
+            container.innerHTML = `<div class="subordinate-table-error">Ошибка загрузки: ${this.escapeHtml(error.message)}</div>`;
         }
     }
 
@@ -1556,6 +1593,8 @@ class IntegramCreateFormHelper {
      * Uses globalMetadata from IntegramTable instances if available to avoid redundant requests (issue #1302).
      */
     async fetchMetadataStandalone(typeId) {
+        typeId = this.normalizeNumericId(typeId);
+        if (!typeId) throw new Error('Некорректный идентификатор типа');
         if (this.metadataCache[typeId]) {
             return this.metadataCache[typeId];
         }
@@ -1601,7 +1640,13 @@ class IntegramCreateFormHelper {
      * Uses the same CSS classes as the main renderSubordinateTable method.
      */
     renderSubordinateTableStandalone(container, metadata, data, arrId, parentRecordId) {
-        const typeName = this.getMetadataName(metadata);
+        arrId = this.normalizeNumericId(arrId);
+        parentRecordId = this.normalizeNumericId(parentRecordId);
+        if (!arrId || !parentRecordId) {
+            container.innerHTML = '<div class="subordinate-table-error">Некорректный идентификатор таблицы</div>';
+            return;
+        }
+        const typeName = this.escapeHtml(this.getMetadataName(metadata));
         const records = Array.isArray(data) ? data : [];
         const reqs = metadata.reqs || [];
 
@@ -1621,7 +1666,7 @@ class IntegramCreateFormHelper {
                     <a href="#" class="subordinate-paste-buffer-btn" title="Вставить из буфера" onclick="event.preventDefault(); event.stopPropagation();">
                         <i class="pi pi-clipboard"></i>
                     </a>
-                    <a href="${subordinateTableUrl}" class="subordinate-table-link" title="Открыть в таблице" target="_blank">
+                    <a href="${subordinateTableUrl}" class="subordinate-table-link" title="Открыть в таблице" target="_blank" rel="noopener noreferrer">
                         <i class="pi pi-table"></i>
                     </a>
                 </div>
@@ -1634,25 +1679,25 @@ class IntegramCreateFormHelper {
             html += `<div class="subordinate-table-wrapper"><table class="subordinate-table"><thead><tr>`;
 
             // Header: main value column + requisite columns
-            html += `<th>${this.escapeHtml(typeName)}</th>`;
+            html += `<th>${typeName}</th>`;
             reqs.forEach(req => {
                 if (!req.arr_id) {
                     const attrs = this.parseAttrs(req.attrs);
-                    const fieldName = attrs.alias || req.val;
-                    html += `<th>${this.escapeHtml(fieldName)}</th>`;
+                    const fieldName = this.escapeHtml(attrs.alias || req.val || '');
+                    html += `<th>${fieldName}</th>`;
                 }
             });
             html += `</tr></thead><tbody>`;
 
             // Data rows
             records.forEach((record, rowIndex) => {
-                const recordId = record.i;
+                const recordId = this.normalizeNumericId(record.i);
                 const values = record.r || [];
                 html += `<tr data-row-id="${recordId}" style="cursor:pointer;">`;
 
                 // Main value column (clickable)
                 const mainValue = this.formatSubordinateCellDisplay(values[0] || '', metadata.type);
-                html += `<td class="subordinate-cell-clickable subordinate-cell-with-row-number" data-row="${rowIndex}" data-record-id="${recordId}" data-type-id="${arrId}">${mainValue}<span class="subordinate-row-number">${rowIndex + 1}</span></td>`;
+                html += `<td class="subordinate-cell-with-row-number${recordId ? ' subordinate-cell-clickable' : ''}" data-row="${rowIndex}" data-record-id="${recordId}" data-type-id="${arrId}">${mainValue}<span class="subordinate-row-number">${rowIndex + 1}</span></td>`;
 
                 // Requisite columns. Вложенные (arr_id) колонки не рисуются, но слот в r[]
                 // занимают — valIdx двигается на каждом реквизите, иначе сдвиг (issue #4124)
@@ -1774,7 +1819,7 @@ class IntegramCreateFormHelper {
 
         // Значение из object/ приходит готовым тегом <a> — не экранируем, добавляем класс
         if (format === 'FILE' && typeof value === 'string' && value.trim().startsWith('<a')) {
-            return value.replace('<a', '<a class="file-link"');
+            return IntegramTable.prototype.sanitizeCellHtml.call(this, value).replace(/^<a\b/i, '<a class="file-link"');
         }
 
         const date = formatIntegramDateCellPlain(value, format);
@@ -1872,6 +1917,8 @@ class IntegramCreateFormHelper {
             window._integramModalDepth = Math.max(0, (window._integramModalDepth || 1) - 1);
         };
 
+        itCreateModalCloseHandler(modal, closeModal, this);
+
         // Close handlers
         modal.querySelector('.edit-form-close').addEventListener('click', closeModal);
         modal.querySelector('.paste-data-cancel-btn').addEventListener('click', closeModal);
@@ -1959,20 +2006,11 @@ class IntegramCreateFormHelper {
 
                 const url = `${apiBase}/_m_new/${arrId}?JSON&up=${parentRecordId}`;
 
-                const response = await fetch(url, {
+                const result = await this.fetchJson(url, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                     body: params.toString()
                 });
-
-                const text = await response.text();
-                let result;
-                try {
-                    result = JSON.parse(text);
-                } catch (e) {
-                    if (!response.ok) throw new Error(text);
-                    result = { success: true };
-                }
 
                 const serverError = this.getServerError(result);
                 if (serverError) {
@@ -1993,8 +2031,7 @@ class IntegramCreateFormHelper {
         const dataUrl = `${apiBase}/object/${arrId}/?JSON_OBJ&F_U=${parentRecordId}&LIMIT=0,${pageSize + 1}`;
 
         try {
-            const dataResponse = await fetch(dataUrl);
-            const data = await dataResponse.json();
+            const data = await this.fetchJson(dataUrl);
             const rows = Array.isArray(data) ? data : [];
             const hasMore = rows.length > pageSize;
             const firstPageRows = hasMore ? rows.slice(0, pageSize) : rows;
@@ -2016,6 +2053,8 @@ class IntegramCreateFormHelper {
      * Open form field settings modal (issue #837).
      */
     openFormFieldSettingsStandalone(typeId, metadata) {
+        typeId = this.normalizeNumericId(typeId);
+        if (!typeId) return;
         const overlay = document.createElement('div');
         overlay.className = 'form-field-settings-overlay';
 
@@ -2052,8 +2091,9 @@ class IntegramCreateFormHelper {
         sortedReqs.forEach(req => {
             if (req.arr_id) return; // Skip subordinate tables
             const attrs = this.parseAttrs(req.attrs);
-            const fieldName = attrs.alias || req.val;
-            const fieldId = req.id;
+            const fieldName = this.escapeHtml(attrs.alias || req.val || '');
+            const fieldId = this.normalizeNumericId(req.id);
+            if (!fieldId) return;
             const isChecked = visibleFields[fieldId] !== false;
 
             modalHtml += `
@@ -2064,7 +2104,7 @@ class IntegramCreateFormHelper {
                                class="form-field-visibility-checkbox"
                                data-field-id="${fieldId}"
                                ${isChecked ? 'checked' : ''}>
-                        <span>${this.escapeHtml(fieldName)}</span>
+                        <span>${fieldName}</span>
                     </label>
                 </div>
             `;
@@ -2129,14 +2169,8 @@ class IntegramCreateFormHelper {
         cancelBtn.addEventListener('click', closeModal);
         overlay.addEventListener('click', closeModal);
 
-        // Close on Escape key
-        const handleEscape = (e) => {
-            if (e.key === 'Escape') {
-                closeModal();
-                document.removeEventListener('keydown', handleEscape);
-            }
-        };
-        document.addEventListener('keydown', handleEscape);
+        // Shared Escape stack closes only the topmost modal and unregisters on removal.
+        itCreateModalCloseHandler(modal, closeModal, this);
 
         saveBtn.addEventListener('click', () => {
             // Save visibility
@@ -2267,7 +2301,7 @@ class IntegramCreateFormHelper {
         let html = '';
 
         // Main value field
-        const typeName = this.getMetadataName(metadata);
+        const typeName = this.escapeHtml(this.getMetadataName(metadata));
         const mainValue = recordData && recordData.obj ? recordData.obj.val || '' : '';
         // Issue #3572: подчинённый объект «Объекты» может прийти меткой без term-префикса
         // «id:» — тогда отдаём метку (опции грантов матчатся по id ИЛИ по метке).
@@ -2305,7 +2339,7 @@ class IntegramCreateFormHelper {
 
         html += `
             <div class="form-field">
-                <label for="field-main">${this.escapeHtml(typeName)}</label>
+                <label for="field-main">${typeName}</label>
                 ${mainFieldHtml}
             </div>
         `;
@@ -2314,7 +2348,7 @@ class IntegramCreateFormHelper {
         for (const req of regularFields) {
             const fieldId = req.id;
             const attrs = this.parseAttrs(req.attrs);
-            const fieldName = attrs.alias || req.val;
+            const fieldName = this.escapeHtml(attrs.alias || req.val || '');
             const isRequired = attrs.required;
             const isMulti = attrs.multi;
             const fieldType = this.normalizeFormat(req.type);
@@ -2328,7 +2362,7 @@ class IntegramCreateFormHelper {
                 // Multi-select reference field (issue #1136)
                 const currentValue = fieldValue || '';
                 fieldHtml = `
-                    <div class="form-reference-editor form-multi-reference-editor" data-ref-id="${fieldId}" data-required="${isRequired}" data-ref-type-id="${req.orig || req.ref_id}" data-multi="1" data-current-value="${this.escapeHtml(currentValue)}">
+                    <div class="form-reference-editor form-multi-reference-editor" data-ref-id="${fieldId}" data-required="${isRequired}" data-ref-type-id="${this.normalizeNumericId(req.orig || req.ref_id)}" data-multi="1" data-current-value="${this.escapeHtml(currentValue)}">
                         <div class="inline-editor-reference form-ref-editor-box inline-editor-multi-reference">
                             <div class="multi-ref-tags-container form-multi-ref-tags-container">
                                 <span class="multi-ref-tags-placeholder">Загрузка...</span>
@@ -2357,7 +2391,7 @@ class IntegramCreateFormHelper {
                 // Single-select reference field (searchable dropdown) (issue #1136)
                 const currentValue = fieldValue || '';
                 fieldHtml = `
-                    <div class="form-reference-editor" data-ref-id="${fieldId}" data-required="${isRequired}" data-ref-type-id="${req.orig || req.ref_id}">
+                    <div class="form-reference-editor" data-ref-id="${fieldId}" data-required="${isRequired}" data-ref-type-id="${this.normalizeNumericId(req.orig || req.ref_id)}">
                         <div class="inline-editor-reference form-ref-editor-box">
                             <div class="inline-editor-reference-header">
                                 <input type="text"
@@ -2414,6 +2448,7 @@ class IntegramCreateFormHelper {
                     }
                 }
 
+                const safeFileHref = this.sanitizeLinkUrl(fileHref);
                 fieldHtml = `
                     <div class="form-file-upload" data-req-id="${fieldId}" data-original-value="${this.escapeHtml(fieldValue)}">
                         <input type="file" class="file-input" id="field-${fieldId}-file" style="display: none;">
@@ -2422,7 +2457,7 @@ class IntegramCreateFormHelper {
                             <button type="button" class="file-select-btn">Выбрать файл</button>
                         </div>
                         <div class="file-preview" style="${hasFile ? 'display: flex;' : 'display: none;'}">
-                            ${fileHref ? `<a href="${this.escapeHtml(fileHref)}" target="_blank" class="file-name file-link">${this.escapeHtml(fileDisplayName)}</a>` : `<span class="file-name">${this.escapeHtml(fileDisplayName)}</span>`}
+                            ${safeFileHref ? `<a href="${this.escapeHtml(safeFileHref)}" target="_blank" rel="noopener noreferrer" class="file-name file-link">${this.escapeHtml(fileDisplayName)}</a>` : `<span class="file-name">${this.escapeHtml(fileDisplayName)}</span>`}
                             <button type="button" class="file-remove-btn" title="Удалить файл"><i class="pi pi-times"></i></button>
                         </div>
                         <input type="hidden" id="field-${fieldId}" name="t${fieldId}" value="${this.escapeHtml(fieldValue)}" ${isRequired ? 'required' : ''} data-file-deleted="false">
@@ -2451,7 +2486,7 @@ class IntegramCreateFormHelper {
 
             html += `
                 <div class="form-field">
-                    <label for="field-${fieldId}">${this.escapeHtml(fieldName)} ${requiredMark}</label>
+                    <label for="field-${fieldId}">${fieldName} ${requiredMark}</label>
                     ${fieldHtml}
                 </div>
             `;
@@ -2559,20 +2594,11 @@ class IntegramCreateFormHelper {
             // Update the record using _m_save (issue #839)
             const url = `${this.apiBase}/_m_save/${recordId}?JSON`;
 
-            const response = await fetch(url, {
+            const result = await this.fetchJson(url, {
                 method: 'POST',
                 headers: headers,
                 body: requestBody
             });
-
-            const text = await response.text();
-            let result;
-
-            try {
-                result = JSON.parse(text);
-            } catch (e) {
-                throw new Error(`Invalid response: ${text}`);
-            }
 
             const serverError = this.getServerError(result);
             if (serverError) {
@@ -2616,6 +2642,8 @@ class IntegramCreateFormHelper {
  * openEditRecordForm(12345, 3596);
  */
 async function openEditRecordForm(recordId, typeId) {
+    recordId = /^\d+$/.test(String(recordId ?? '').trim()) ? String(recordId).trim() : '';
+    typeId = /^\d+$/.test(String(typeId ?? '').trim()) ? String(typeId).trim() : '';
     if (!recordId) {
         console.error('openEditRecordForm: recordId is required');
         return;
@@ -2723,25 +2751,58 @@ if (typeof window !== 'undefined') {
 }
 
 // Auto-initialize tables from data attributes
+function getAvailableAutoInstanceName(requestedName) {
+    const requested = String(requestedName || 'table');
+    const normalized = requested.replace(/[^A-Za-z0-9_$]/g, '_');
+    const baseName = (/^[A-Za-z_$]/.test(normalized) ? normalized : `table_${normalized}`) || 'table';
+    let candidate = baseName;
+    let suffix = 2;
+
+    // Inline handlers require an identifier stored on window. Never replace an
+    // application global or another table instance; choose a stable free alias.
+    while (candidate in window) {
+        candidate = `${baseName}_${suffix}`;
+        suffix += 1;
+    }
+    return candidate;
+}
+
+function registerAutoInstanceAlias(instance, alias) {
+    if (!alias || (alias in window && window[alias] !== instance)) return;
+    window[alias] = instance;
+    instance._globalAliases = instance._globalAliases || [];
+    if (!instance._globalAliases.includes(alias)) {
+        instance._globalAliases.push(alias);
+    }
+}
+
 function autoInitTables() {
     const tables = document.querySelectorAll('[data-integram-table]');
     tables.forEach(element => {
+        // The bundle may be evaluated more than once on pages that replace
+        // partial content. Keep auto-initialization idempotent so the same
+        // element does not accumulate duplicate requests and global listeners.
+        if (element._integramTableInstance) return;
+
+        const requestedInstanceName = element.dataset.instanceName || element.id;
         const options = {
             apiUrl: element.dataset.apiUrl || '',
             pageSize: parseInt(element.dataset.pageSize) || 20,
             cookiePrefix: element.dataset.cookiePrefix || 'integram-table',
             title: element.dataset.title || '',
-            instanceName: element.dataset.instanceName || element.id,
+            instanceName: getAvailableAutoInstanceName(requestedInstanceName),
             dataSource: element.dataset.dataSource || 'report',
             tableTypeId: element.dataset.tableTypeId || null,
             parentId: element.dataset.parentId || null
         };
 
-        // Create instance and store in window if instanceName is provided
         const instance = new IntegramTable(element.id, options);
-        if (options.instanceName) {
-            window[options.instanceName] = instance;
-        }
+        element._integramTableInstance = instance;
+
+        // Preserve a free legacy bracket-notation alias, but never overwrite an
+        // existing global. Inline handlers always use the unique safe alias.
+        registerAutoInstanceAlias(instance, requestedInstanceName);
+        registerAutoInstanceAlias(instance, instance.options.instanceName);
 
         // Register instance in global registry
         if (typeof window !== 'undefined' && window._integramTableInstances) {

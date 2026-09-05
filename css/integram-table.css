@@ -14,14 +14,14 @@
     --md-text-hint: rgba(0, 0, 0, 0.38);
     --md-divider: var(--border-color, rgba(0, 0, 0, 0.12));
     --md-background: var(--bg-secondary, #f8f9fa);
-    --md-surface: var(--card-bg, #ffffff);
+    --md-surface: var(--card-bg, oklch(98% 0.005 250));
     --md-hover: rgba(0, 0, 0, 0.04);
     --md-selected: rgba(59, 130, 246, 0.08);
     --md-elevation-1: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.24);
     --md-elevation-2: 0 3px 6px rgba(0, 0, 0, 0.16), 0 3px 6px rgba(0, 0, 0, 0.23);
     --md-elevation-3: 0 10px 20px rgba(0, 0, 0, 0.19), 0 6px 6px rgba(0, 0, 0, 0.23);
     --md-elevation-4: 0 14px 28px rgba(0, 0, 0, 0.25), 0 10px 10px rgba(0, 0, 0, 0.22);
-    --md-transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    --md-transition: color 180ms cubic-bezier(0.16, 1, 0.3, 1), background-color 180ms cubic-bezier(0.16, 1, 0.3, 1), border-color 180ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 180ms cubic-bezier(0.16, 1, 0.3, 1), opacity 180ms cubic-bezier(0.16, 1, 0.3, 1), transform 180ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 /* Table component styles */
@@ -306,7 +306,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     position: sticky;
     top: 0;
     z-index: 10;
-    cursor: move;
+    cursor: default;
     user-select: none;
 }
 
@@ -325,8 +325,80 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     box-shadow: var(--md-elevation-2);
 }
 
-.integram-table th.drag-over {
-    border-left: 3px solid var(--md-primary);
+.integram-table th.drag-over-before::before,
+.integram-table th.drag-over-after::after {
+    background: var(--it-primary, var(--md-primary));
+    border-radius: 999px;
+    bottom: 4px;
+    box-shadow: 0 0 0 2px var(--it-surface, rgba(255, 255, 255, 0.9));
+    content: "";
+    pointer-events: none;
+    position: absolute;
+    top: 4px;
+    width: 3px;
+    z-index: 14;
+}
+
+.integram-table th.drag-over-before::before {
+    left: -2px;
+}
+
+.integram-table th.drag-over-after::after {
+    right: -2px;
+}
+
+/* During a drag, keep every header cell as one stable drop target. */
+.integram-table.column-drag-active th[data-column-id] > * {
+    pointer-events: none;
+}
+
+.integram-table.column-drag-active th.dragging > .column-drag-handle {
+    pointer-events: auto;
+}
+
+.column-drag-handle {
+    align-items: center;
+    appearance: none;
+    background: transparent;
+    border: 0;
+    border-radius: 5px;
+    color: inherit;
+    cursor: grab;
+    display: inline-flex;
+    height: 26px;
+    justify-content: center;
+    margin: -5px 3px -5px -6px;
+    opacity: 0.48;
+    padding: 0;
+    transition: color 140ms cubic-bezier(0.16, 1, 0.3, 1), background-color 140ms cubic-bezier(0.16, 1, 0.3, 1), opacity 140ms cubic-bezier(0.16, 1, 0.3, 1);
+    touch-action: none;
+    vertical-align: middle;
+    width: 24px;
+}
+
+.column-drag-handle:hover,
+.column-drag-handle:focus-visible {
+    background: var(--it-hover, rgba(0, 0, 0, 0.05));
+    color: var(--it-text, currentColor);
+    opacity: 1;
+}
+
+.column-drag-handle:active {
+    cursor: grabbing;
+}
+
+.column-drag-handle[hidden] {
+    display: none;
+}
+
+.column-reorder-status {
+    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
+    height: 1px;
+    overflow: hidden;
+    position: absolute;
+    white-space: nowrap;
+    width: 1px;
 }
 
 /* Column resize handle */
@@ -359,7 +431,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     top: 50%;
     transform: translateY(-50%);
     background: var(--md-primary);
-    color: white;
+    color: oklch(98% 0.005 250);
     border: none;
     border-radius: 4px;
     width: 24px;
@@ -805,7 +877,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.2s ease;
+    transition: color 160ms ease-out, background-color 160ms ease-out, border-color 160ms ease-out, box-shadow 160ms ease-out, opacity 160ms ease-out, transform 160ms ease-out;
 }
 
 .filter-ref-clear:hover {
@@ -1049,6 +1121,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     border-bottom: none;
     display: flex;
     align-items: center;
+    position: relative;
     transition: background-color 0.15s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -1111,12 +1184,29 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 
 /* Drag-and-drop for column settings list (issue #953) */
 .col-settings-drag-handle {
-    margin-right: 8px;
+    align-items: center;
+    appearance: none;
+    background: transparent;
+    border: 0;
+    border-radius: 5px;
     color: var(--md-text-secondary, #666);
     cursor: grab;
+    display: inline-flex;
+    flex: 0 0 auto;
     font-size: 0.875rem;
+    height: 28px;
+    justify-content: center;
+    margin-right: 6px;
+    opacity: 0.55;
+    padding: 0;
+    transition: opacity 140ms cubic-bezier(0.16, 1, 0.3, 1), background-color 140ms cubic-bezier(0.16, 1, 0.3, 1);
     user-select: none;
-    opacity: 0.5;
+    width: 28px;
+}
+
+.col-settings-drag-handle:not(.col-settings-fixed):hover,
+.col-settings-drag-handle:not(.col-settings-fixed):focus-visible {
+    background: var(--it-hover, rgba(0, 0, 0, 0.05));
 }
 
 .column-settings-item:hover .col-settings-drag-handle {
@@ -1127,8 +1217,33 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     opacity: 0.4;
 }
 
-.column-settings-item.drag-over {
-    border-top: 2px solid var(--md-primary, #1976d2);
+.column-settings-item.drag-over-before::before,
+.column-settings-item.drag-over-after::after {
+    background: var(--it-primary, var(--md-primary, #1976d2));
+    border-radius: 999px;
+    content: "";
+    height: 3px;
+    left: 12px;
+    pointer-events: none;
+    position: absolute;
+    right: 12px;
+    z-index: 1;
+}
+
+.column-settings-item.drag-over-before::before {
+    top: -1px;
+}
+
+.column-settings-item.drag-over-after::after {
+    bottom: -1px;
+}
+
+.column-settings-list--dragging .column-settings-item > * {
+    pointer-events: none;
+}
+
+.column-settings-list--dragging .column-settings-item.dragging > .col-settings-drag-handle {
+    pointer-events: auto;
 }
 
 /* Fixed (first) column in settings list — not draggable, locked icon (issue #962) */
@@ -1285,7 +1400,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     border-radius: 6px;
     font-size: 0.9rem;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: color 160ms ease-out, background-color 160ms ease-out, border-color 160ms ease-out, box-shadow 160ms ease-out, opacity 160ms ease-out, transform 160ms ease-out;
     border: none;
 }
 
@@ -1301,7 +1416,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 
 .col-edit-modal .menu-modal-btn.save {
     background-color: var(--button-primary, #1976d2);
-    color: white;
+    color: oklch(98% 0.005 250);
 }
 
 .col-edit-modal .menu-modal-btn.save:hover {
@@ -1310,7 +1425,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 
 .col-edit-modal .menu-modal-btn.delete {
     background-color: var(--color-danger, #dc3545);
-    color: white;
+    color: oklch(98% 0.005 250);
     margin-right: auto;
 }
 
@@ -1323,7 +1438,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     align-items: center;
     gap: 8px;
     margin-top: 10px;
-    background: var(--color-error-bg, #fff3f3);
+    background: var(--color-error-bg, oklch(98% 0.005 250)3f3);
     border-radius: 4px;
     padding: 8px 12px;
     flex-wrap: wrap;
@@ -1499,7 +1614,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 
 .edit-icon:hover {
     background: var(--md-primary);
-    color: white;
+    color: oklch(98% 0.005 250);
     box-shadow: var(--md-elevation-2);
 }
 
@@ -1702,7 +1817,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     border: 1px solid var(--input-border, #ced4da);
     border-radius: 4px;
     font-size: 0.875rem;
-    background-color: var(--input-bg, white);
+    background-color: var(--input-bg, oklch(98% 0.005 250));
     color: var(--text-primary, inherit);
     cursor: pointer;
 }
@@ -1751,7 +1866,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 
 .edit-form-footer .btn-primary {
     background-color: var(--button-primary, #3b82f6);
-    color: white;
+    color: oklch(98% 0.005 250);
 }
 
 .edit-form-footer .btn-primary:hover {
@@ -1778,7 +1893,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 
 .edit-form-footer .btn-danger {
     background-color: var(--color-danger, #dc3545);
-    color: white;
+    color: oklch(98% 0.005 250);
 }
 
 .edit-form-footer .btn-danger:hover {
@@ -1808,7 +1923,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 .integram-modal-footer .btn-primary:disabled,
 .integram-modal-footer .btn-primary.disabled {
     background-color: var(--text-secondary, #6c757d);
-    color: #fff;
+    color: oklch(98% 0.005 250);
 }
 
 .edit-form-footer .btn-secondary:disabled,
@@ -1827,7 +1942,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 .integram-modal-footer .btn-danger:disabled,
 .integram-modal-footer .btn-danger.disabled {
     background-color: var(--text-secondary, #6c757d);
-    color: #fff;
+    color: oklch(98% 0.005 250);
 }
 
 /* Read-only form fields (issue #1508) */
@@ -1906,25 +2021,25 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 .integram-toast-success {
     background: var(--color-success-bg, #e8f5e9);
     color: var(--color-success, #2e7d32);
-    border-left: 4px solid #4caf50;
+    border: 1px solid #4caf50;
 }
 
 .integram-toast-error {
     background: var(--color-error-bg, #ffebee);
     color: var(--color-error, #c62828);
-    border-left: 4px solid #f44336;
+    border: 1px solid #f44336;
 }
 
 .integram-toast-info {
     background: #e3f2fd;
     color: var(--md-primary-dark, var(--button-primary-hover));
-    border-left: 4px solid #2196f3;
+    border: 1px solid #2196f3;
 }
 
 .integram-toast-warning {
-    background: #fff8e1;
+    background: oklch(98% 0.005 250)8e1;
     color: #f57f17;
-    border-left: 4px solid #ffc107;
+    border: 1px solid #ffc107;
 }
 
 /* Searchable select (dropdown with search) */
@@ -2193,7 +2308,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
 
 .form-field-settings-footer .btn-primary {
     background-color: var(--button-primary, #3b82f6);
-    color: white;
+    color: oklch(98% 0.005 250);
 }
 
 .form-field-settings-footer .btn-primary:hover {
@@ -2638,7 +2753,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     margin-left: 4px;
     font-size: 0.625rem;
     font-weight: 600;
-    color: white;
+    color: oklch(98% 0.005 250);
     background-color: var(--md-primary);
     border-radius: 50%;
     vertical-align: middle;
@@ -2695,7 +2810,7 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.2s ease;
+    transition: color 160ms ease-out, background-color 160ms ease-out, border-color 160ms ease-out, box-shadow 160ms ease-out, opacity 160ms ease-out, transform 160ms ease-out;
     padding: 0;
 }
 
@@ -2963,7 +3078,7 @@ td.cell-saving {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: color 160ms cubic-bezier(0.16, 1, 0.3, 1), background-color 160ms cubic-bezier(0.16, 1, 0.3, 1), border-color 160ms cubic-bezier(0.16, 1, 0.3, 1), opacity 160ms cubic-bezier(0.16, 1, 0.3, 1), transform 160ms cubic-bezier(0.16, 1, 0.3, 1);
     padding: 0;
     font-weight: 300;
 }
@@ -2987,14 +3102,14 @@ td.cell-saving {
     border-radius: 50%;
     border: none;
     background: #4caf50;
-    color: white;
+    color: oklch(98% 0.005 250);
     font-size: 1.125rem;
     line-height: 1;
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: color 160ms cubic-bezier(0.16, 1, 0.3, 1), background-color 160ms cubic-bezier(0.16, 1, 0.3, 1), border-color 160ms cubic-bezier(0.16, 1, 0.3, 1), opacity 160ms cubic-bezier(0.16, 1, 0.3, 1), transform 160ms cubic-bezier(0.16, 1, 0.3, 1);
     padding: 0;
     font-weight: 300;
 }
@@ -3046,7 +3161,7 @@ td.cell-saving {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: color 160ms cubic-bezier(0.16, 1, 0.3, 1), background-color 160ms cubic-bezier(0.16, 1, 0.3, 1), border-color 160ms cubic-bezier(0.16, 1, 0.3, 1), opacity 160ms cubic-bezier(0.16, 1, 0.3, 1), transform 160ms cubic-bezier(0.16, 1, 0.3, 1);
     padding: 0;
     margin-right: 2px;
 }
@@ -3064,7 +3179,7 @@ td.cell-saving {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: color 160ms cubic-bezier(0.16, 1, 0.3, 1), background-color 160ms cubic-bezier(0.16, 1, 0.3, 1), border-color 160ms cubic-bezier(0.16, 1, 0.3, 1), opacity 160ms cubic-bezier(0.16, 1, 0.3, 1), transform 160ms cubic-bezier(0.16, 1, 0.3, 1);
     padding: 0;
     margin-right: 2px;
 }
@@ -3250,8 +3365,7 @@ td:has(.inline-editor-reference) {
 }
 
 /* ========================================
-<<<<<<< issue-360-9f1a1d78c81c
-   File Upload Styles (Inline and Form)
+  File Upload Styles (Inline and Form)
    ======================================== */
 
 /* Inline editor file upload */
@@ -3296,7 +3410,7 @@ td:has(.inline-editor-reference) {
 
 .file-select-btn {
     background-color: var(--md-primary);
-    color: white;
+    color: oklch(98% 0.005 250);
     border: none;
     border-radius: 4px;
     padding: 8px 16px;
@@ -3435,7 +3549,7 @@ td:has(.inline-editor-file) {
    .integram-table-header / .integram-table-controls. */
 .integram-export-menu {
     position: fixed;
-    background: var(--card-bg, white);
+    background: var(--card-bg, oklch(98% 0.005 250));
     border: 1px solid var(--border-color, #dee2e6);
     border-radius: 4px;
     box-shadow: 0 2px 8px rgba(0,0,0,0.15);
@@ -3526,7 +3640,7 @@ tr.row-selected {
     gap: 8px;
     margin-left: 8px;
     padding: 4px 8px;
-    background: #fff3cd;
+    background: oklch(98% 0.005 250)3cd;
     border: 1px solid #ffc107;
     border-radius: 4px;
     font-size: 0.8125rem;
@@ -3546,7 +3660,7 @@ tr.row-selected {
     gap: 8px;
     margin-left: 8px;
     padding: 4px 8px;
-    background: #fff3cd;
+    background: oklch(98% 0.005 250)3cd;
     border: 1px solid #ffc107;
     border-radius: 4px;
     font-size: 0.8125rem;
@@ -3601,7 +3715,7 @@ tr.row-selected {
 }
 
 .integram-modal {
-    background: var(--md-surface, white);
+    background: var(--md-surface, oklch(98% 0.005 250));
     border-radius: 4px;
     box-shadow: var(--md-elevation-4, 0 14px 28px rgba(0, 0, 0, 0.25), 0 10px 10px rgba(0, 0, 0, 0.22));
     max-width: 500px;
@@ -3639,7 +3753,7 @@ tr.row-selected {
     color: var(--md-primary, #1976d2);
     text-decoration: none;
     font-weight: 500;
-    transition: var(--md-transition, all 0.3s cubic-bezier(0.4, 0, 0.2, 1));
+    transition: var(--md-transition);
 }
 
 .integram-modal-link:hover {
@@ -3680,7 +3794,7 @@ tr.row-selected {
     margin-right: 8px;
     font-size: 0.75rem;
     font-weight: 600;
-    color: white;
+    color: oklch(98% 0.005 250);
     background-color: var(--md-primary, #1976d2);
     border-radius: 50%;
     flex-shrink: 0;
@@ -3702,7 +3816,7 @@ tr.row-selected {
     margin-right: 6px;
     font-size: 0.625rem;
     font-weight: 600;
-    color: white;
+    color: oklch(98% 0.005 250);
     background-color: var(--md-primary, #1976d2);
     border-radius: 50%;
     vertical-align: middle;
@@ -3719,7 +3833,7 @@ tr.row-selected {
     font-weight: 500;
     color: var(--md-text-primary, rgba(0, 0, 0, 0.87));
     vertical-align: top;
-    border-right: 2px solid var(--md-primary, #1976d2);  /* Blue right border for grouping columns */
+    border-right: 1px solid var(--md-primary, #1976d2);
     padding: 12px 16px;
     position: relative;
 }
@@ -3729,7 +3843,7 @@ tr.row-selected {
  */
 .group-cell:first-child,
 .integram-table td.group-cell:first-of-type {
-    border-left: 3px solid var(--md-primary, #1976d2);  /* Blue left border for grouping columns */
+    border-left: 0;
 }
 
 /* Nested grouping levels get slightly different shading */
@@ -3766,7 +3880,7 @@ tr.row-selected {
 /* Scroll counter in grouping mode */
 .scroll-counter.grouping-mode {
     background-color: rgba(25, 118, 210, 0.08);
-    border-left: 3px solid var(--md-primary, #1976d2);
+    border: 1px solid var(--md-primary, #1976d2);
 }
 
 /* Compact mode adjustments for grouping */
@@ -3794,7 +3908,7 @@ tr.row-selected {
     top: 50%;
     transform: translateY(-50%);
     background: var(--md-primary, #1976d2);
-    color: white;
+    color: oklch(98% 0.005 250);
     border: none;
     border-radius: 4px;
     width: 20px;
@@ -3984,7 +4098,7 @@ tr.row-selected {
     border: none;
     border-radius: 4px;
     background: var(--button-primary, #3b82f6);
-    color: white;
+    color: oklch(98% 0.005 250);
     cursor: pointer;
     font-size: 0.75rem;
     font-weight: 500;
@@ -4049,7 +4163,7 @@ tr.row-selected {
     background-color: #f97316;
     border: 1px solid #f97316;
     border-radius: 4px;
-    color: #fff;
+    color: oklch(98% 0.005 250);
     cursor: pointer;
     font-size: 0.85rem;
     font-weight: 500;
@@ -4118,7 +4232,7 @@ tr.row-selected {
 }
 
 .paste-preview-cell:focus {
-    background: var(--md-surface, #fff);
+    background: var(--md-surface, oklch(98% 0.005 250));
     border-color: var(--md-primary, #1976d2);
 }
 
@@ -4250,4 +4364,991 @@ tr.row-selected {
 /* Filter row — fix column separator color on dark background (issue #1593) */
 [data-theme="dark"] .filter-row td {
     border-right-color: rgba(255, 255, 255, 0.06);
+}
+
+/* ========================================
+   IMPECCABLE POLISH SYSTEM
+   Calm, trustworthy operator UI with a shared token layer.
+   ======================================== */
+:root {
+    --it-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif;
+    --it-primary: var(--button-primary, oklch(55% 0.18 255));
+    --it-primary-hover: var(--button-primary-hover, oklch(48% 0.17 255));
+    --it-primary-soft: oklch(95% 0.035 255);
+    --it-canvas: var(--bg-secondary, oklch(97% 0.008 250));
+    --it-surface: var(--card-bg, oklch(99% 0.004 250));
+    --it-surface-raised: oklch(98% 0.008 250);
+    --it-text: var(--text-primary, oklch(28% 0.025 250));
+    --it-text-muted: var(--text-secondary, oklch(52% 0.025 250));
+    --it-text-hint: oklch(64% 0.018 250);
+    --it-border: var(--border-color, oklch(88% 0.014 250));
+    --it-border-strong: oklch(78% 0.024 250);
+    --it-hover: oklch(95.5% 0.012 250);
+    --it-selected: oklch(94% 0.04 255);
+    --it-focus: oklch(62% 0.18 255);
+    --it-danger: var(--color-error, oklch(52% 0.19 25));
+    --it-danger-soft: var(--color-error-bg, oklch(96% 0.035 25));
+    --it-success: var(--color-success, oklch(49% 0.14 150));
+    --it-success-soft: var(--color-success-bg, oklch(96% 0.035 150));
+    --it-warning: oklch(50% 0.13 75);
+    --it-warning-soft: oklch(96% 0.04 85);
+    --it-info: oklch(48% 0.15 250);
+    --it-info-soft: oklch(96% 0.035 250);
+    --it-radius-sm: 7px;
+    --it-radius-md: 10px;
+    --it-radius-lg: 14px;
+    --it-shadow-sm: 0 1px 2px oklch(24% 0.02 250 / 0.08), 0 4px 12px oklch(24% 0.02 250 / 0.05);
+    --it-shadow-md: 0 12px 32px oklch(20% 0.025 250 / 0.16), 0 2px 8px oklch(20% 0.025 250 / 0.08);
+    --it-motion-fast: 140ms cubic-bezier(0.16, 1, 0.3, 1);
+    --it-motion-base: 220ms cubic-bezier(0.16, 1, 0.3, 1);
+
+    --md-primary: var(--it-primary);
+    --md-primary-dark: var(--it-primary-hover);
+    --md-primary-light: oklch(70% 0.14 255);
+    --md-text-primary: var(--it-text);
+    --md-text-secondary: var(--it-text-muted);
+    --md-text-hint: var(--it-text-hint);
+    --md-divider: var(--it-border);
+    --md-background: var(--it-canvas);
+    --md-surface: var(--it-surface);
+    --md-hover: var(--it-hover);
+    --md-selected: var(--it-selected);
+    --md-elevation-1: var(--it-shadow-sm);
+    --md-elevation-2: var(--it-shadow-sm);
+    --md-elevation-3: var(--it-shadow-md);
+    --md-elevation-4: var(--it-shadow-md);
+}
+
+.integram-table-wrapper {
+    color: var(--it-text);
+    font-family: var(--it-font);
+    padding-bottom: 48px;
+}
+
+.integram-table-header {
+    align-items: flex-start;
+    gap: 16px;
+    margin-bottom: 12px;
+    overflow: visible;
+    padding: 12px 12px 0;
+}
+
+.integram-table-title-area {
+    min-height: 40px;
+    min-width: 0;
+}
+
+.integram-table-title {
+    color: var(--it-text);
+    font-size: clamp(1.125rem, 1rem + 0.35vw, 1.375rem);
+    font-weight: 650;
+    letter-spacing: -0.015em;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+}
+
+.integram-table-controls {
+    align-items: stretch;
+    flex-wrap: wrap;
+    gap: 6px;
+    justify-content: flex-end;
+    overflow: visible;
+}
+
+.integram-table-settings,
+.integram-table-checkbox-toggle {
+    appearance: none;
+    background: var(--it-surface);
+    border: 1px solid var(--it-border);
+    border-radius: var(--it-radius-sm);
+    color: var(--it-text-muted);
+    font: inherit;
+    min-height: 40px;
+    min-width: 42px;
+    padding: 6px 9px;
+    transition: color var(--it-motion-fast), background-color var(--it-motion-fast), border-color var(--it-motion-fast), box-shadow var(--it-motion-fast), transform var(--it-motion-fast);
+}
+
+.integram-table-settings-refresh {
+    border: 1px solid var(--it-border) !important;
+}
+
+.integram-table-settings .pi,
+.integram-table-checkbox-toggle .pi {
+    font-size: 1rem;
+}
+
+.integram-table-settings .btn-label {
+    font-size: 0.75rem;
+    font-weight: 550;
+    letter-spacing: 0.01em;
+    line-height: 1.15;
+}
+
+.integram-table-settings:hover,
+.integram-table-checkbox-toggle:hover {
+    background: var(--it-hover);
+    border-color: var(--it-border-strong);
+    color: var(--it-text);
+}
+
+.integram-table-settings:active,
+.integram-table-checkbox-toggle:active {
+    transform: translateY(1px);
+}
+
+.integram-table-settings.active,
+.integram-table-settings[aria-pressed="true"],
+.integram-table-checkbox-toggle.active,
+.integram-table-checkbox-toggle[aria-pressed="true"] {
+    background: var(--it-primary-soft);
+    border-color: color-mix(in oklch, var(--it-primary) 55%, var(--it-border));
+    color: var(--it-primary-hover);
+}
+
+.integram-table-container {
+    background: var(--it-surface);
+    border: 1px solid var(--it-border);
+    border-radius: var(--it-radius-md);
+    box-shadow: var(--it-shadow-sm);
+    scrollbar-color: var(--it-border-strong) transparent;
+    scrollbar-gutter: stable;
+}
+
+.integram-table {
+    background: var(--it-surface);
+    box-shadow: none;
+    color: var(--it-text);
+}
+
+.integram-table th {
+    background: var(--it-canvas);
+    border-bottom-color: var(--it-border);
+    border-right-color: var(--it-border);
+    color: var(--it-text-muted);
+    font-size: 0.8125rem;
+    font-weight: 650;
+    letter-spacing: 0.01em;
+    padding: 10px 12px;
+}
+
+.integram-table td {
+    border-bottom-color: var(--it-border);
+    color: var(--it-text);
+    font-size: 0.875rem;
+    line-height: 1.45;
+    padding: 10px 12px;
+}
+
+.integram-table tbody tr {
+    transition: background-color var(--it-motion-fast);
+}
+
+.integram-table tbody tr:hover {
+    background: var(--it-hover);
+}
+
+.integram-table tbody tr.row-selected,
+.integram-table tbody tr.row-selected:hover {
+    background: var(--it-selected);
+}
+
+.integram-table th.drag-over-before::before,
+.integram-table th.drag-over-after::after {
+    background: var(--it-primary);
+    box-shadow: 0 0 0 2px var(--it-surface);
+}
+
+.column-header-content {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    border-radius: 5px;
+    color: inherit;
+    cursor: pointer;
+    font: inherit;
+    margin: -4px 0;
+    max-width: calc(100% - 8px);
+    padding: 4px 10px 4px 0;
+    text-align: left;
+}
+
+.column-header-content:hover {
+    color: var(--it-text);
+}
+
+.column-add-btn,
+.group-cell-add-btn,
+.edit-icon,
+.column-ref-link {
+    display: flex;
+    opacity: 0;
+    pointer-events: none;
+    transition: color var(--it-motion-fast), background-color var(--it-motion-fast), box-shadow var(--it-motion-fast), opacity var(--it-motion-fast), transform var(--it-motion-fast);
+}
+
+.integram-table th:hover .column-add-btn,
+.integram-table th:focus-within .column-add-btn,
+.column-add-btn:focus-visible,
+.group-cell:hover .group-cell-add-btn,
+.group-cell:focus-within .group-cell-add-btn,
+.group-cell-add-btn:focus-visible,
+.editable-cell:hover .edit-icon,
+.editable-cell:focus-within .edit-icon,
+.edit-icon:focus-visible,
+.integram-table th:hover .column-ref-link,
+.integram-table th:focus-within .column-ref-link,
+.column-ref-link:focus-visible {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.column-add-btn,
+.group-cell-add-btn {
+    background: var(--it-primary);
+    border-radius: 6px;
+    color: oklch(98% 0.005 250);
+    min-height: 28px;
+    min-width: 28px;
+}
+
+.edit-icon {
+    appearance: none;
+    background: var(--it-surface-raised);
+    border: 1px solid var(--it-border);
+    color: var(--it-text-muted);
+    min-height: 28px;
+    min-width: 28px;
+}
+
+.add-column-header-cell {
+    color: var(--it-text-muted);
+    cursor: default !important;
+    min-width: 44px !important;
+    padding: 0 !important;
+    width: 44px !important;
+}
+
+.add-column-header-button {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    color: inherit;
+    cursor: pointer;
+    display: inline-grid;
+    font: inherit;
+    min-height: 44px;
+    min-width: 44px;
+    place-items: center;
+}
+
+.add-column-header-cell:has(.add-column-header-button:hover) {
+    background: var(--it-primary-soft);
+    color: var(--it-primary-hover);
+}
+
+.filter-row td {
+    background: var(--it-surface-raised);
+    border-bottom-color: var(--it-border);
+    border-right-color: var(--it-border);
+    padding: 4px 6px;
+}
+
+.filter-icon-inside {
+    appearance: none;
+    background: var(--it-surface-raised);
+    border: 1px solid var(--it-border);
+    border-radius: 6px;
+    color: var(--it-text-muted);
+    font: inherit;
+    font-size: 0.8125rem;
+    height: 28px;
+    left: 4px;
+    min-width: 28px;
+    padding: 0 5px;
+}
+
+.filter-input-with-icon,
+.filter-ref-trigger {
+    background: var(--it-surface);
+    border: 1px solid transparent;
+    border-radius: var(--it-radius-sm);
+    color: var(--it-text);
+    height: 38px;
+    min-height: 38px;
+    padding-left: 36px;
+}
+
+.filter-input-with-icon:hover,
+.filter-ref-trigger:hover {
+    border-color: var(--it-border-strong);
+}
+
+.filter-input-with-icon:focus,
+.filter-ref-trigger:focus {
+    border-color: var(--it-primary);
+    box-shadow: none;
+}
+
+.filter-ref-dropdown,
+.searchable-select-dropdown,
+.inline-editor-reference-dropdown,
+.integram-export-menu {
+    background: var(--it-surface);
+    border: 1px solid var(--it-border);
+    border-radius: var(--it-radius-md);
+    box-shadow: var(--it-shadow-md);
+    color: var(--it-text);
+    overflow: hidden;
+}
+
+.export-menu-item {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    color: var(--it-text);
+    font: inherit;
+    min-height: 44px;
+    padding: 10px 14px;
+    text-align: left;
+    width: 100%;
+}
+
+.export-menu-item:hover,
+.export-menu-item:focus-visible {
+    background: var(--it-hover);
+}
+
+.hidden-filter-badges-container {
+    background: var(--it-warning-soft);
+    border: 1px solid color-mix(in oklch, var(--it-warning) 24%, var(--it-border));
+    border-radius: var(--it-radius-md);
+    gap: 6px;
+    margin: 0 12px 10px;
+    padding: 8px 10px;
+}
+
+.hidden-filter-badge {
+    background: var(--it-surface);
+    border: 1px solid color-mix(in oklch, var(--it-warning) 35%, var(--it-border));
+    border-radius: 999px;
+    color: var(--it-text);
+    min-height: 32px;
+    padding: 3px 4px 3px 10px;
+}
+
+.hidden-filter-badge-name,
+.hidden-filter-badge-value {
+    color: var(--it-text);
+}
+
+.hidden-filter-badge-value {
+    background: var(--it-warning-soft);
+    border-radius: 4px;
+}
+
+.hidden-filter-badge-remove {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    border-radius: 50%;
+    color: var(--it-text-muted);
+    display: inline-grid;
+    font: inherit;
+    height: 28px;
+    margin: 0;
+    padding: 0;
+    place-items: center;
+    width: 28px;
+}
+
+.hidden-filter-badge-remove:hover {
+    background: var(--it-danger-soft);
+    color: var(--it-danger);
+}
+
+.group-cell,
+.group-cell[data-group-level="1"],
+.group-cell[data-group-level="2"],
+.group-cell[data-group-level="3"] {
+    background: var(--it-primary-soft);
+    border-left: 0;
+    border-right: 1px solid color-mix(in oklch, var(--it-primary) 30%, var(--it-border));
+    color: var(--it-text);
+}
+
+.integram-table tbody tr:has(.group-cell):hover .group-cell {
+    background: color-mix(in oklch, var(--it-primary-soft) 70%, var(--it-hover));
+}
+
+.scroll-counter.grouping-mode {
+    background: var(--it-primary-soft);
+    border: 1px solid color-mix(in oklch, var(--it-primary) 30%, var(--it-border));
+}
+
+.integram-table-empty-row:hover {
+    background: transparent !important;
+}
+
+.integram-table-empty-row td {
+    padding: 0;
+}
+
+.integram-table-empty-state {
+    align-items: center;
+    color: var(--it-text-muted);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    justify-content: center;
+    min-height: 176px;
+    padding: 28px 20px;
+    text-align: center;
+}
+
+.integram-table-empty-state .pi {
+    color: var(--it-primary);
+    font-size: 1.5rem;
+    margin-bottom: 2px;
+}
+
+.integram-table-empty-state span {
+    color: var(--it-text);
+    font-size: 0.9375rem;
+    font-weight: 650;
+}
+
+.integram-table-empty-state small {
+    color: var(--it-text-muted);
+    font-size: 0.8125rem;
+}
+
+.scroll-counter {
+    background: var(--it-surface);
+    border: 1px solid var(--it-border);
+    border-radius: var(--it-radius-md);
+    box-shadow: var(--it-shadow-sm);
+    color: var(--it-text-muted);
+    font-size: 0.8125rem;
+    gap: 2px;
+    min-height: 38px;
+    padding: 6px 10px;
+}
+
+.total-count-unknown,
+.total-count-known {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    border-radius: 4px;
+    color: var(--it-primary-hover);
+    font: inherit;
+    font-weight: 650;
+    margin: -4px 0;
+    min-height: 28px;
+    min-width: 28px;
+    padding: 3px 5px;
+}
+
+.add-row-btn,
+.paste-data-btn {
+    border-radius: 6px;
+    font-size: 0.8125rem;
+    height: 30px;
+    min-width: 32px;
+}
+
+.paste-data-btn {
+    border-color: var(--it-border-strong);
+    color: var(--it-text-muted);
+}
+
+body.integram-modal-open {
+    overflow: hidden;
+}
+
+.edit-form-overlay,
+.column-settings-overlay,
+.form-field-settings-overlay,
+.integram-modal-overlay {
+    backdrop-filter: none;
+    background: oklch(18% 0.02 250 / 0.54);
+}
+
+.edit-form-modal,
+.column-settings-modal,
+.form-field-settings-modal,
+.grouping-settings-modal,
+.integram-modal,
+.col-edit-modal {
+    background: var(--it-surface);
+    border: 1px solid var(--it-border);
+    border-radius: var(--it-radius-lg);
+    box-shadow: var(--it-shadow-md);
+    color: var(--it-text);
+}
+
+.column-settings-modal {
+    padding: 22px;
+}
+
+.edit-form-header,
+.form-field-settings-header,
+.integram-modal-header {
+    border-bottom-color: var(--it-border);
+    padding: 18px 22px;
+}
+
+.edit-form-header h3,
+.form-field-settings-header h3,
+.integram-modal-header h3,
+.column-settings-modal > h3,
+.grouping-settings-modal > h3 {
+    color: var(--it-text);
+    font-size: 1.125rem;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+    line-height: 1.35;
+}
+
+.edit-form-body,
+.form-field-settings-body,
+.integram-modal-body {
+    padding: 18px 22px;
+}
+
+.edit-form-footer,
+.form-field-settings-footer,
+.integram-modal-footer {
+    border-top-color: var(--it-border);
+    gap: 8px;
+    padding: 14px 22px;
+}
+
+.edit-form .form-group {
+    margin-bottom: 16px;
+}
+
+.edit-form .form-group label,
+.table-settings-item > label {
+    color: var(--it-text);
+    font-size: 0.8125rem;
+    font-weight: 650;
+}
+
+.edit-form .form-control,
+.edit-form .date-picker,
+.edit-form .datetime-picker,
+.column-settings-modal .form-control,
+.form-field-settings-modal .form-control,
+.integram-modal input,
+.integram-modal select,
+.integram-modal textarea {
+    background: var(--it-surface);
+    border: 1px solid var(--it-border-strong);
+    border-radius: var(--it-radius-sm);
+    color: var(--it-text);
+    font-family: inherit;
+    font-size: 0.875rem;
+    min-height: 40px;
+    padding: 9px 11px;
+    transition: border-color var(--it-motion-fast), box-shadow var(--it-motion-fast), background-color var(--it-motion-fast);
+}
+
+.edit-form .form-control:hover,
+.edit-form .date-picker:hover,
+.edit-form .datetime-picker:hover,
+.column-settings-modal .form-control:hover,
+.form-field-settings-modal .form-control:hover {
+    border-color: var(--it-text-muted);
+}
+
+.edit-form-footer .btn,
+.form-field-settings-footer .btn,
+.integram-modal-footer .btn,
+.column-settings-modal .btn,
+.grouping-settings-modal .btn,
+.col-edit-modal .menu-modal-btn,
+.btn-preview {
+    border-radius: var(--it-radius-sm);
+    font-family: inherit;
+    font-size: 0.875rem;
+    font-weight: 650;
+    min-height: 40px;
+    padding: 9px 16px;
+    transition: color var(--it-motion-fast), background-color var(--it-motion-fast), border-color var(--it-motion-fast), box-shadow var(--it-motion-fast), transform var(--it-motion-fast);
+}
+
+.edit-form-close,
+.form-field-settings-close,
+.btn-icon {
+    border-radius: var(--it-radius-sm);
+    color: var(--it-text-muted);
+}
+
+.column-settings-list,
+.grouping-columns-list {
+    scrollbar-color: var(--it-border-strong) transparent;
+}
+
+.column-settings-item,
+.grouping-column-item,
+.table-settings-item {
+    border-radius: var(--it-radius-sm);
+}
+
+.column-settings-item:hover,
+.grouping-column-item:hover,
+.table-settings-item:hover {
+    background: var(--it-hover);
+}
+
+.integram-toast {
+    align-items: flex-start;
+    animation: it-toast-in var(--it-motion-base);
+    background: var(--it-surface);
+    border: 1px solid var(--it-border);
+    border-left-width: 1px;
+    border-radius: var(--it-radius-md);
+    box-shadow: var(--it-shadow-md);
+    color: var(--it-text);
+    display: grid;
+    font-size: 0.875rem;
+    gap: 10px;
+    grid-template-columns: 24px minmax(0, 1fr) 32px;
+    letter-spacing: 0;
+    min-width: min(340px, calc(100vw - 32px));
+    padding: 12px;
+}
+
+@keyframes it-toast-in {
+    from { opacity: 0; transform: translateY(-8px) scale(0.98); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.integram-toast-success {
+    background: var(--it-success-soft);
+    border-color: color-mix(in oklch, var(--it-success) 35%, var(--it-border));
+    color: var(--it-text);
+}
+
+.integram-toast-error {
+    background: var(--it-danger-soft);
+    border-color: color-mix(in oklch, var(--it-danger) 35%, var(--it-border));
+    color: var(--it-text);
+}
+
+.integram-toast-info {
+    background: var(--it-info-soft);
+    border-color: color-mix(in oklch, var(--it-info) 35%, var(--it-border));
+    color: var(--it-text);
+}
+
+.integram-toast-warning {
+    background: var(--it-warning-soft);
+    border-color: color-mix(in oklch, var(--it-warning) 35%, var(--it-border));
+    color: var(--it-text);
+}
+
+.integram-toast-icon {
+    align-items: center;
+    background: var(--it-surface);
+    border: 1px solid currentColor;
+    border-radius: 50%;
+    color: var(--it-info);
+    display: inline-flex;
+    font-size: 0.75rem;
+    font-weight: 750;
+    height: 22px;
+    justify-content: center;
+    width: 22px;
+}
+
+.integram-toast-success .integram-toast-icon { color: var(--it-success); }
+.integram-toast-error .integram-toast-icon { color: var(--it-danger); }
+.integram-toast-warning .integram-toast-icon { color: var(--it-warning); }
+
+.integram-toast-content {
+    align-self: center;
+    line-height: 1.45;
+    min-width: 0;
+}
+
+.integram-toast-dismiss {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    border-radius: 6px;
+    color: var(--it-text-muted);
+    cursor: pointer;
+    font: inherit;
+    font-size: 1.25rem;
+    height: 32px;
+    line-height: 1;
+    padding: 0;
+    width: 32px;
+}
+
+.integram-toast-dismiss:hover {
+    background: color-mix(in oklch, var(--it-text) 8%, transparent);
+    color: var(--it-text);
+}
+
+.integram-toast.fade-out {
+    animation: fadeOut var(--it-motion-base);
+}
+
+.integram-table-wrapper :is(button, a, input, select, textarea, [tabindex]):focus-visible {
+    outline: 2px solid var(--it-focus) !important;
+    outline-offset: 2px !important;
+    box-shadow: none !important;
+}
+
+.integram-table-settings:focus-visible,
+.integram-table-checkbox-toggle:focus-visible,
+.column-header-content:focus-visible,
+.column-drag-handle:focus-visible,
+.column-add-btn:focus-visible,
+.group-cell-add-btn:focus-visible,
+.edit-icon:focus-visible,
+.column-ref-link:focus-visible,
+.add-column-header-button:focus-visible,
+.filter-icon-inside:focus-visible,
+.filter-input-with-icon:focus-visible,
+.filter-ref-trigger:focus-visible,
+.export-menu-item:focus-visible,
+.hidden-filter-badge-remove:focus-visible,
+.total-count-unknown:focus-visible,
+.total-count-known:focus-visible,
+.add-row-btn:focus-visible,
+.paste-data-btn:focus-visible,
+.edit-form-close:focus-visible,
+.form-field-settings-close:focus-visible,
+.btn-icon:focus-visible,
+.integram-toast-dismiss:focus-visible,
+.edit-form-modal :is(button, a, input, select, textarea):focus-visible,
+.column-settings-modal :is(button, a, input, select, textarea):focus-visible,
+.form-field-settings-modal :is(button, a, input, select, textarea):focus-visible,
+.grouping-settings-modal :is(button, a, input, select, textarea):focus-visible,
+.integram-modal :is(button, a, input, select, textarea):focus-visible,
+.btn-outline-secondary:focus-visible,
+.btn-link:focus-visible {
+    outline: 2px solid var(--it-focus) !important;
+    outline-offset: 2px !important;
+    box-shadow: none !important;
+}
+
+[data-theme="dark"] {
+    --it-primary: var(--button-primary, oklch(72% 0.13 255));
+    --it-primary-hover: var(--button-primary-hover, oklch(80% 0.1 255));
+    --it-primary-soft: oklch(31% 0.055 255);
+    --it-canvas: var(--bg-secondary, oklch(22% 0.015 250));
+    --it-surface: var(--card-bg, oklch(25% 0.016 250));
+    --it-surface-raised: oklch(29% 0.018 250);
+    --it-text: var(--text-primary, oklch(92% 0.012 250));
+    --it-text-muted: var(--text-secondary, oklch(73% 0.02 250));
+    --it-text-hint: oklch(63% 0.018 250);
+    --it-border: var(--border-color, oklch(38% 0.018 250));
+    --it-border-strong: oklch(49% 0.026 250);
+    --it-hover: oklch(31% 0.02 250);
+    --it-selected: oklch(34% 0.065 255);
+    --it-focus: oklch(76% 0.14 255);
+    --it-danger-soft: oklch(30% 0.065 25);
+    --it-success-soft: oklch(30% 0.05 150);
+    --it-warning-soft: oklch(31% 0.05 75);
+    --it-info-soft: oklch(30% 0.055 250);
+    --it-shadow-sm: 0 1px 2px oklch(8% 0.01 250 / 0.3), 0 6px 16px oklch(8% 0.01 250 / 0.18);
+    --it-shadow-md: 0 18px 42px oklch(8% 0.01 250 / 0.45), 0 3px 10px oklch(8% 0.01 250 / 0.24);
+}
+
+[data-theme="dark"] .integram-toast-info,
+[data-theme="dark"] .integram-toast-success,
+[data-theme="dark"] .integram-toast-error,
+[data-theme="dark"] .integram-toast-warning {
+    color: var(--it-text);
+    border-left-color: var(--it-border);
+}
+
+@media (max-width: 768px) {
+    .integram-table-wrapper {
+        padding-bottom: 60px;
+    }
+
+    .integram-table-header {
+        align-items: stretch;
+        flex-direction: column;
+        gap: 10px;
+        padding: 10px 8px 0;
+    }
+
+    .integram-table-title-area {
+        min-height: 44px;
+    }
+
+    .integram-table-controls {
+        flex-wrap: nowrap;
+        justify-content: flex-start;
+        margin: 0 -8px;
+        overflow-x: auto;
+        overflow-y: hidden;
+        padding: 0 8px 8px;
+        scrollbar-color: var(--it-border-strong) transparent;
+        scrollbar-width: thin;
+    }
+
+    .integram-table-controls::-webkit-scrollbar {
+        display: block;
+        height: 4px;
+    }
+
+    .integram-table-controls::-webkit-scrollbar-thumb {
+        background: var(--it-border-strong);
+        border-radius: 4px;
+    }
+
+    .integram-table-settings,
+    .integram-table-checkbox-toggle,
+    .add-column-header-button,
+    .export-menu-item,
+    .hidden-filter-badge-remove,
+    .add-row-btn,
+    .paste-data-btn,
+    .edit-form-footer .btn,
+    .form-field-settings-footer .btn,
+    .integram-modal-footer .btn,
+    .column-settings-modal .btn,
+    .grouping-settings-modal .btn,
+    .col-edit-modal .menu-modal-btn,
+    .btn-preview {
+        min-height: 44px;
+    }
+
+    .integram-table-settings {
+        min-width: 46px;
+        padding-inline: 10px;
+    }
+
+    .integram-table-container {
+        border-left: 0;
+        border-radius: 0;
+        border-right: 0;
+    }
+
+    .integram-table-empty-state {
+        min-height: 150px;
+    }
+
+    .scroll-counter {
+        bottom: 12px;
+        left: 8px !important;
+        max-width: calc(100vw - 16px);
+        min-height: 44px;
+    }
+
+    .edit-form-modal,
+    .column-settings-modal,
+    .form-field-settings-modal,
+    .grouping-settings-modal,
+    .integram-modal,
+    .col-edit-modal {
+        border-radius: 12px;
+        max-height: calc(100dvh - 16px);
+    }
+
+    .edit-form-header,
+    .form-field-settings-header,
+    .integram-modal-header,
+    .edit-form-body,
+    .form-field-settings-body,
+    .integram-modal-body {
+        padding: 14px 16px;
+    }
+
+    .edit-form-footer,
+    .form-field-settings-footer,
+    .integram-modal-footer {
+        align-items: stretch;
+        flex-direction: column-reverse;
+        padding: 12px 16px max(12px, env(safe-area-inset-bottom));
+    }
+
+    .edit-form-footer-buttons {
+        display: contents;
+    }
+
+    .integram-toast {
+        left: 16px;
+        max-width: none;
+        min-width: 0;
+        right: 16px;
+        top: max(16px, env(safe-area-inset-top));
+        width: auto;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .integram-table-wrapper *,
+    .integram-table-wrapper *::before,
+    .integram-table-wrapper *::after,
+    .edit-form-modal,
+    .column-settings-modal,
+    .form-field-settings-modal,
+    .grouping-settings-modal,
+    .integram-modal,
+    .integram-toast {
+        animation-duration: 1ms !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+        transition-duration: 1ms !important;
+    }
+}
+
+@media (forced-colors: active) {
+    .integram-table-settings.active,
+    .integram-table-settings[aria-pressed="true"],
+    .integram-table-checkbox-toggle[aria-pressed="true"],
+    .integram-table tbody tr.row-selected {
+        outline: 2px solid Highlight;
+        outline-offset: -2px;
+    }
+}
+/* Final modal sizing and programmatic focus treatment. */
+.table-settings-modal {
+    box-sizing: border-box;
+    max-width: none;
+    width: min(640px, calc(100vw - 32px));
+}
+
+.edit-form-modal:focus,
+.column-settings-modal:focus,
+.form-field-settings-modal:focus,
+.grouping-settings-modal:focus,
+.integram-modal:focus,
+.col-edit-modal:focus {
+    outline: 2px solid color-mix(in oklch, var(--it-focus) 32%, transparent);
+    outline-offset: 2px;
+}
+
+.table-settings-modal .table-settings-item {
+    padding: 9px 4px;
+}
+
+.table-settings-modal .column-settings-list {
+    display: grid;
+    gap: 2px;
+}
+.edit-form-record-id {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    border-radius: 5px;
+    color: var(--it-text-muted);
+    font: inherit;
+    font-size: 0.8125rem;
+    padding: 4px 6px;
+}
+
+.edit-form-record-id:hover {
+    background: var(--it-hover);
+    color: var(--it-text);
 }

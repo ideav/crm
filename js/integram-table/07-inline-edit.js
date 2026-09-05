@@ -256,51 +256,232 @@
         }
 
         attachEventListeners() {
+            // Delegation also covers links inserted after an inline edit.
+            // The full value is data, never JavaScript source.
+            if (!this._fullValueClickHandler) {
+                this._fullValueClickHandler = (event) => {
+                    const link = event.target.closest && event.target.closest('.show-full-value');
+                    if (!link || !this.container.contains(link)) return;
+                    event.preventDefault();
+                    event.stopImmediatePropagation();
+                    this.showFullValue(event, link.dataset.fullValue || '');
+                };
+                this.container.addEventListener('click', this._fullValueClickHandler);
+            }
+
+            if (!this._tableButtonClickHandler) {
+                this._tableButtonClickHandler = (event) => {
+                    const button = event.target.closest && event.target.closest('.integram-action-button[data-button-action]');
+                    if (!button || !this.container.contains(button)) return;
+                    this.runTableButtonAction(event, button);
+                };
+                this.container.addEventListener('click', this._tableButtonClickHandler);
+            }
+
             // Determine the first visible column ID — it cannot be moved (issue #951)
             const firstVisibleColumnId = this.columnOrder.find(id => this.visibleColumns.includes(id));
+            const clearColumnDragIndicators = () => {
+                this.container.querySelectorAll('.drag-over-before, .drag-over-after').forEach(el => {
+                    el.classList.remove('drag-over-before', 'drag-over-after');
+                });
+            };
+            const getDropPosition = (event, th, draggedId) => {
+                const rect = th.getBoundingClientRect();
+                const preferredPosition = event.clientX >= rect.left + rect.width / 2 ? 'after' : 'before';
+                const visibleOrder = this.columnOrder.filter(id => this.visibleColumns.includes(id));
+                return this.resolveColumnDropPosition(
+                    draggedId,
+                    th.dataset.columnId,
+                    preferredPosition,
+                    visibleOrder
+                );
+            };
+            const showDropPosition = (th, position) => {
+                clearColumnDragIndicators();
+                th.classList.add(position === 'after' ? 'drag-over-after' : 'drag-over-before');
+            };
+            const autoScrollColumns = (clientX) => {
+                const scroller = this.container.querySelector('.integram-table-container');
+                if (!scroller || scroller.scrollWidth <= scroller.clientWidth) return;
+                const rect = scroller.getBoundingClientRect();
+                const edge = Math.min(72, Math.max(40, rect.width * 0.12));
+                let delta = 0;
+                if (clientX < rect.left + edge) {
+                    const strength = Math.min(1, Math.max(0, (rect.left + edge - clientX) / edge));
+                    delta = -Math.ceil(6 + 18 * strength);
+                } else if (clientX > rect.right - edge) {
+                    const strength = Math.min(1, Math.max(0, (clientX - (rect.right - edge)) / edge));
+                    delta = Math.ceil(6 + 18 * strength);
+                }
+                if (delta !== 0) scroller.scrollLeft += delta;
+            };
+            const announceColumnMove = (columnId, direction) => {
+                const schedule = typeof requestAnimationFrame === 'function'
+                    ? requestAnimationFrame
+                    : callback => setTimeout(callback, 0);
+                schedule(() => {
+                    const handle = [...this.container.querySelectorAll('.column-drag-handle')]
+                        .find(candidate => candidate.dataset.columnId === columnId);
+                    if (handle) handle.focus({ preventScroll: true });
+                    let status = this.container.querySelector('.column-reorder-status');
+                    if (!status) {
+                        status = document.createElement('span');
+                        status.className = 'column-reorder-status';
+                        status.setAttribute('role', 'status');
+                        status.setAttribute('aria-live', 'polite');
+                        this.container.appendChild(status);
+                    }
+                    const column = this.columns.find(col => col.id === columnId);
+                    status.textContent = `Столбец «${ column ? column.name : columnId }» перемещён ${ direction }.`;
+                });
+            };
 
-            const headers = this.container.querySelectorAll('th[draggable]');
+            const headers = this.container.querySelectorAll('th[data-column-id]');
             headers.forEach(th => {
                 const columnId = th.dataset.columnId;
+                const dragHandle = th.querySelector('.column-drag-handle');
+                if (!dragHandle) return;
 
-                // The first column is not draggable and cannot be a drop target (issue #951)
+                // The first column is fixed. Hiding its handle keeps that constraint clear.
                 if (columnId === firstVisibleColumnId) {
-                    th.removeAttribute('draggable');
+                    dragHandle.draggable = false;
+                    dragHandle.hidden = true;
+                    dragHandle.tabIndex = -1;
+                    dragHandle.setAttribute('aria-hidden', 'true');
+                    th.classList.add('column-fixed');
                     return;
                 }
 
-                th.addEventListener('dragstart', (e) => {
-                    e.dataTransfer.effectAllowed = 'move';
-                    e.dataTransfer.setData('text/plain', th.dataset.columnId);
-                    th.classList.add('dragging');
-                });
-
-                th.addEventListener('dragend', (e) => {
-                    th.classList.remove('dragging');
-                    document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
-                });
-
-                th.addEventListener('dragover', (e) => {
-                    e.preventDefault();
-                    e.dataTransfer.dropEffect = 'move';
-                    th.classList.add('drag-over');
-                });
-
-                th.addEventListener('dragleave', (e) => {
-                    th.classList.remove('drag-over');
-                });
-
-                th.addEventListener('drop', (e) => {
-                    e.preventDefault();
-                    const draggedId = e.dataTransfer.getData('text/plain');
-                    const targetId = th.dataset.columnId;
-
-                    // Prevent dropping onto the first column or dropping a column onto itself (issue #951, #966)
-                    if (draggedId !== targetId && draggedId !== firstVisibleColumnId && targetId !== firstVisibleColumnId) {
-                        this.reorderColumns(draggedId, targetId);
+                dragHandle.addEventListener('dragstart', (event) => {
+                    event.stopPropagation();
+                    this._columnDragState = { draggedId: columnId, targetId: null, position: null };
+                    if (event.dataTransfer) {
+                        event.dataTransfer.effectAllowed = 'move';
+                        event.dataTransfer.setData('text/plain', columnId);
                     }
+                    th.classList.add('dragging');
+                    const table = th.closest('.integram-table');
+                    if (table) table.classList.add('column-drag-active');
+                });
 
-                    th.classList.remove('drag-over');
+                dragHandle.addEventListener('dragend', () => {
+                    th.classList.remove('dragging');
+                    const table = th.closest('.integram-table');
+                    if (table) table.classList.remove('column-drag-active');
+                    clearColumnDragIndicators();
+                    this._columnDragState = null;
+                });
+
+                dragHandle.addEventListener('keydown', (event) => {
+                    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+                    event.preventDefault();
+                    const visibleOrder = this.columnOrder.filter(id => this.visibleColumns.includes(id));
+                    const currentIndex = visibleOrder.indexOf(columnId);
+                    const movingLeft = event.key === 'ArrowLeft';
+                    const targetId = visibleOrder[currentIndex + (movingLeft ? -1 : 1)];
+                    if (!targetId || targetId === firstVisibleColumnId) return;
+                    const moved = this.reorderColumns(columnId, targetId, movingLeft ? 'before' : 'after');
+                    if (moved) announceColumnMove(columnId, movingLeft ? 'влево' : 'вправо');
+                });
+
+                let pointerDrag = null;
+                const finishPointerDrag = (commit) => {
+                    if (!pointerDrag) return;
+                    const dragState = this._columnDragState;
+                    const shouldCommit = commit && pointerDrag.active && dragState && dragState.targetId;
+                    const draggedId = dragState && dragState.draggedId;
+                    const targetId = dragState && dragState.targetId;
+                    const position = dragState && dragState.position;
+                    if (dragHandle.hasPointerCapture && dragHandle.hasPointerCapture(pointerDrag.pointerId)) {
+                        dragHandle.releasePointerCapture(pointerDrag.pointerId);
+                    }
+                    pointerDrag = null;
+                    th.classList.remove('dragging');
+                    const table = th.closest('.integram-table');
+                    if (table) table.classList.remove('column-drag-active');
+                    clearColumnDragIndicators();
+                    this._columnDragState = null;
+                    if (shouldCommit) this.reorderColumns(draggedId, targetId, position);
+                };
+
+                dragHandle.addEventListener('pointerdown', (event) => {
+                    if (event.pointerType === 'mouse') return;
+                    event.preventDefault();
+                    pointerDrag = {
+                        pointerId: event.pointerId,
+                        startX: event.clientX,
+                        startY: event.clientY,
+                        active: false
+                    };
+                    if (dragHandle.setPointerCapture) dragHandle.setPointerCapture(event.pointerId);
+                });
+
+                dragHandle.addEventListener('pointermove', (event) => {
+                    if (!pointerDrag || pointerDrag.pointerId !== event.pointerId) return;
+                    if (!pointerDrag.active) {
+                        const distance = Math.hypot(event.clientX - pointerDrag.startX, event.clientY - pointerDrag.startY);
+                        if (distance < 8) return;
+                        pointerDrag.active = true;
+                        this._columnDragState = { draggedId: columnId, targetId: null, position: null };
+                        th.classList.add('dragging');
+                        const table = th.closest('.integram-table');
+                        if (table) table.classList.add('column-drag-active');
+                    }
+                    event.preventDefault();
+                    autoScrollColumns(event.clientX);
+                    const pointedElement = document.elementFromPoint(event.clientX, event.clientY);
+                    const target = pointedElement && pointedElement.closest('th[data-column-id]');
+                    const targetId = target && target.dataset.columnId;
+                    if (!target || targetId === columnId || targetId === firstVisibleColumnId) {
+                        clearColumnDragIndicators();
+                        this._columnDragState.targetId = null;
+                        this._columnDragState.position = null;
+                        return;
+                    }
+                    const position = getDropPosition(event, target, columnId);
+                    this._columnDragState.targetId = targetId;
+                    this._columnDragState.position = position;
+                    showDropPosition(target, position);
+                });
+
+                dragHandle.addEventListener('pointerup', (event) => {
+                    if (!pointerDrag || pointerDrag.pointerId !== event.pointerId) return;
+                    event.preventDefault();
+                    finishPointerDrag(true);
+                });
+
+                dragHandle.addEventListener('pointercancel', () => finishPointerDrag(false));
+
+                const updateDropTarget = (event) => {
+                    const dragState = this._columnDragState;
+                    if (!dragState || dragState.draggedId === columnId || columnId === firstVisibleColumnId) return false;
+                    event.preventDefault();
+                    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+                    const position = getDropPosition(event, th, dragState.draggedId);
+                    dragState.targetId = columnId;
+                    dragState.position = position;
+                    showDropPosition(th, position);
+                    autoScrollColumns(event.clientX);
+                    return true;
+                };
+
+                th.addEventListener('dragenter', updateDropTarget);
+                th.addEventListener('dragover', updateDropTarget);
+
+                th.addEventListener('dragleave', (event) => {
+                    if (event.relatedTarget && th.contains(event.relatedTarget)) return;
+                    th.classList.remove('drag-over-before', 'drag-over-after');
+                });
+
+                th.addEventListener('drop', (event) => {
+                    const dragState = this._columnDragState;
+                    if (!dragState || dragState.draggedId === columnId || columnId === firstVisibleColumnId) return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    const position = getDropPosition(event, th, dragState.draggedId);
+                    clearColumnDragIndicators();
+                    this.reorderColumns(dragState.draggedId, columnId, position);
+                    this._columnDragState = null;
                 });
             });
 
@@ -449,9 +630,12 @@
                 });
             });
 
-            // Use event delegation for cell clicks - attaches to container once, handles all cells
-            // This ensures listeners work even when cells are updated/recreated
-            this.container.addEventListener('click', (e) => {
+            // Use event delegation for cell clicks on the persistent container.
+            // Replace the previous handler so re-renders cannot accumulate callbacks.
+            if (this._cellClickHandler) {
+                this.container.removeEventListener('click', this._cellClickHandler);
+            }
+            this._cellClickHandler = (e) => {
                 const td = e.target.closest('td');
                 if (!td) return;
 
@@ -518,7 +702,8 @@
                         }
                     }
                 }
-            });
+            };
+            this.container.addEventListener('click', this._cellClickHandler);
 
             // Checkbox selection handlers
             if (this.checkboxMode) {
@@ -526,9 +711,7 @@
                 if (selectAll) {
                     selectAll.addEventListener('change', (e) => {
                         if (e.target.checked) {
-                            for (let i = 0; i < this.data.length; i++) {
-                                this.selectedRows.add(i);
-                            }
+                            this.getSelectableRowKeys().forEach(key => this.selectedRows.add(key));
                         } else {
                             this.selectedRows.clear();
                         }
@@ -540,10 +723,12 @@
                 rowCheckboxes.forEach(cb => {
                     cb.addEventListener('change', (e) => {
                         const rowIndex = parseInt(e.target.dataset.rowIndex);
+                        const rowKey = this.getRowSelectionKey(rowIndex);
+                        if (rowKey === null) return;
                         if (e.target.checked) {
-                            this.selectedRows.add(rowIndex);
+                            this.selectedRows.add(rowKey);
                         } else {
-                            this.selectedRows.delete(rowIndex);
+                            this.selectedRows.delete(rowKey);
                         }
                         this.renderPreservingScroll(() => this.render());
                     });
@@ -1476,7 +1661,7 @@
                     const id = String(rec.i);
                     const text = (rec.r && rec.r[0] != null) ? String(rec.r[0]) : `#${ id }`;
                     const escaped = this.escapeHtml(text);
-                    return `<div class="inline-editor-reference-option" data-id="${ id }" data-text="${ escaped }" tabindex="0">${ escaped }</div>`;
+                    return `<div class="inline-editor-reference-option" data-id="${ this.escapeHtml(id) }" data-text="${ escaped }" tabindex="0">${ escaped }</div>`;
                 }).join('');
             };
 
@@ -1496,7 +1681,7 @@
                     }
                     target.innerHTML = entries.map(([tId, tName]) => {
                         const escaped = this.escapeHtml(String(tName));
-                        return `<div class="inline-editor-reference-option inline-editor-any-ref-table-option" data-table-id="${ tId }" data-text="${ escaped }" tabindex="0">${ escaped }</div>`;
+                        return `<div class="inline-editor-reference-option inline-editor-any-ref-table-option" data-table-id="${ this.escapeHtml(tId) }" data-text="${ escaped }" tabindex="0">${ escaped }</div>`;
                     }).join('');
                     target.querySelectorAll('.inline-editor-any-ref-table-option').forEach(opt => {
                         opt.addEventListener('click', async (e) => {
@@ -1788,7 +1973,7 @@
                     const optionsHtml = availableOptions.length > 0
                         ? availableOptions.map(([id, text]) => {
                             const escapedText = this.escapeHtml(this.decodeHtmlEntities(text));
-                            return `<div class="inline-editor-reference-option" data-id="${id}" data-text="${escapedText}" tabindex="0">${escapedText}</div>`;
+                            return `<div class="inline-editor-reference-option" data-id="${this.escapeHtml(id)}" data-text="${escapedText}" tabindex="0">${escapedText}</div>`;
                         }).join('')
                         : '<div class="inline-editor-reference-empty">Нет доступных значений</div>';
 
@@ -1877,7 +2062,7 @@
                                     dropdown.innerHTML = serverFiltered.length > 0
                                         ? serverFiltered.map(([id, text]) => {
                                             const et = this.escapeHtml(this.decodeHtmlEntities(text));
-                                            return `<div class="inline-editor-reference-option" data-id="${id}" data-text="${et}" tabindex="0">${et}</div>`;
+                                            return `<div class="inline-editor-reference-option" data-id="${this.escapeHtml(id)}" data-text="${et}" tabindex="0">${et}</div>`;
                                         }).join('')
                                         : '<div class="inline-editor-reference-empty">Нет доступных значений</div>';
                                 } catch (err) {
@@ -1887,7 +2072,7 @@
                                 dropdown.innerHTML = filtered.length > 0
                                     ? filtered.map(([id, text]) => {
                                         const et = this.escapeHtml(this.decodeHtmlEntities(text));
-                                        return `<div class="inline-editor-reference-option" data-id="${id}" data-text="${et}" tabindex="0">${et}</div>`;
+                                        return `<div class="inline-editor-reference-option" data-id="${this.escapeHtml(id)}" data-text="${et}" tabindex="0">${et}</div>`;
                                     }).join('')
                                     : '<div class="inline-editor-reference-empty">Нет доступных значений</div>';
                             }
@@ -2020,19 +2205,11 @@
                     ? `${apiBase}/_m_save/${parentInfo.parentRecordId}?JSON`
                     : `${apiBase}/_m_set/${parentInfo.parentRecordId}?JSON`;
 
-                const response = await fetch(url, {
+                const result = await this.fetchJson(url, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                     body: params.toString()
                 });
-
-                const responseText = await response.text();
-                let result;
-                try {
-                    result = JSON.parse(responseText);
-                } catch (jsonError) {
-                    throw new Error(`Невалидный JSON ответ: ${responseText}`);
-                }
 
                 const serverError = this.getServerError(result);
                 if (serverError) {
@@ -2070,7 +2247,7 @@
                 // Issue #3454: справочник типа DATETIME → метку показываем датой, не штампом.
                 const decodedText = this.formatReferenceOptionLabel(this.decodeHtmlEntities(text), column);
                 const escapedText = this.escapeHtml(decodedText);
-                return `<div class="inline-editor-reference-option" data-id="${id}" data-text="${escapedText}" tabindex="0">${escapedText}</div>`;
+                return `<div class="inline-editor-reference-option" data-id="${this.escapeHtml(id)}" data-text="${escapedText}" tabindex="0">${escapedText}</div>`;
             }).join('');
         }
 
@@ -2144,23 +2321,13 @@
                     : `${apiBase}/_m_set/${parentInfo.parentRecordId}?JSON`;
 
 
-                const response = await fetch(url, {
+                const result = await this.fetchJson(url, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/x-www-form-urlencoded'
                     },
                     body: params.toString()
                 });
-
-                let result;
-                const responseText = await response.text();
-
-                try {
-                    result = JSON.parse(responseText);
-                } catch (jsonError) {
-                    // Invalid JSON response
-                    throw new Error(`Невалидный JSON ответ: ${responseText}`);
-                }
 
                 // Check if response has error key anywhere in the JSON
                 const serverError = this.getServerError(result);
@@ -2240,13 +2407,13 @@
             // Store reference to overlay on modal for proper cleanup
             modal._overlayElement = overlay;
 
-            const typeName = this.getMetadataName(metadata);
+            const typeName = this.escapeHtml(this.getMetadataName(metadata));
             const title = `Создание: ${typeName}`;
             const decodedInitialValue = this.decodeHtmlEntities(initialValue);
 
             // Build attributes form HTML (similar to renderAttributesForm but simplified for create mode)
             const reqs = metadata.reqs || [];
-            const regularFields = reqs.filter(req => !req.arr_id);
+            const regularFields = reqs.filter(req => !req.arr_id && this.normalizeNumericId(req.id));
 
             // Get current date/datetime for default values
             const now = new Date();
@@ -2302,7 +2469,7 @@
             // Add all fields of this type
             regularFields.forEach(req => {
                 const attrs = this.parseAttrs(req.attrs);
-                const fieldName = attrs.alias || req.val;
+                const fieldName = this.escapeHtml(attrs.alias || req.val || '');
                 const isRequired = attrs.required;
 
                 attributesHtml += `<div class="form-group">`;
@@ -2315,7 +2482,7 @@
                 if (req.ref_id) {
                     // Render as reference dropdown (same as in edit form)
                     attributesHtml += `
-                        <div class="form-reference-editor" data-ref-id="${req.id}" data-required="${isRequired}" data-ref-type-id="${req.orig || req.ref_id}">
+                        <div class="form-reference-editor" data-ref-id="${req.id}" data-required="${isRequired}" data-ref-type-id="${this.normalizeNumericId(req.orig || req.ref_id)}">
                             <div class="inline-editor-reference form-ref-editor-box">
                                 <div class="inline-editor-reference-header">
                                     <input type="text"
@@ -2408,19 +2575,8 @@
 
             overlay.addEventListener('click', closeModal);
 
-            // Close on Escape key (issue #595)
-            const handleEscape = (e) => {
-                if (e.key === 'Escape') {
-                    // Only close if this modal is the topmost one
-                    const currentDepth = parseInt(modal.dataset.modalDepth) || 0;
-                    const maxDepth = window._integramModalDepth || 0;
-                    if (currentDepth === maxDepth) {
-                        closeModal();
-                        document.removeEventListener('keydown', handleEscape);
-                    }
-                }
-            };
-            document.addEventListener('keydown', handleEscape);
+            // Shared Escape stack closes only the topmost modal and unregisters on removal.
+            itCreateModalCloseHandler(modal, closeModal, this);
 
             // Enter in input/textarea triggers Save (issue #1422)
             modal.addEventListener('keydown', (e) => {
@@ -2478,27 +2634,13 @@
             const url = `${apiBase}/_m_new/${typeId}?JSON&up=1`;
 
             try {
-                const response = await fetch(url, {
+                const result = await this.fetchJson(url, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/x-www-form-urlencoded'
                     },
                     body: params.toString()
                 });
-
-                const text = await response.text();
-
-                let result;
-                try {
-                    result = JSON.parse(text);
-                } catch (e) {
-                    // If not JSON, check if it's an error message
-                    if (text.includes('error') || !response.ok) {
-                        throw new Error(text);
-                    }
-                    // Otherwise treat as success
-                    result = { success: true };
-                }
 
                 const serverError = this.getServerError(result);
                 if (serverError) {
@@ -2636,37 +2778,29 @@
                 }
 
                 // For FILE type with a pending file, send directly as multipart (issue #1310)
-                let response;
+                let requestOptions;
                 if (format === 'FILE' && fileToUpload) {
                     const formData = new FormData();
                     if (typeof xsrf !== 'undefined') {
                         formData.append('_xsrf', xsrf);
                     }
                     formData.append(`t${ colType }`, fileToUpload);
-                    response = await fetch(url, {
+                    requestOptions = {
                         method: 'POST',
                         body: formData
-                    });
+                    };
                 } else {
                     params.append(`t${ colType }`, newValue);
-                    response = await fetch(url, {
+                    requestOptions = {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/x-www-form-urlencoded'
                         },
                         body: params.toString()
-                    });
+                    };
                 }
 
-                let result;
-                const responseText = await response.text();
-
-                try {
-                    result = JSON.parse(responseText);
-                } catch (jsonError) {
-                    // Invalid JSON response
-                    throw new Error(`Невалидный JSON ответ: ${responseText}`);
-                }
+                const result = await this.fetchJson(url, requestOptions);
 
                 // Check if response has error key anywhere in the JSON
                 const serverError = this.getServerError(result);
@@ -2743,25 +2877,13 @@
                 const parentIdForNew = (this.options.parentId && parseInt(this.options.parentId) > 1) ? this.options.parentId : 1;
                 const url = `${apiBase}/_m_new/${tableTypeId}?JSON&up=${parentIdForNew}`;
 
-                const response = await fetch(url, {
+                const result = await this.fetchJson(url, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/x-www-form-urlencoded'
                     },
                     body: params.toString()
                 });
-
-                const responseText = await response.text();
-
-                let result;
-                try {
-                    result = JSON.parse(responseText);
-                } catch (e) {
-                    if (responseText.includes('error') || !response.ok) {
-                        throw new Error(responseText);
-                    }
-                    result = { success: true };
-                }
 
                 const serverError = this.getServerError(result);
                 if (serverError) {
@@ -2953,13 +3075,8 @@
             // Apply truncation if enabled
             if (this.settings.truncateLongValues && escapedValue.length > 127) {
                 const truncated = escapedValue.substring(0, 127);
-                const fullValueEscaped = escapedValue
-                    .replace(/\\/g, '\\\\')
-                    .replace(/\n/g, '\\n')
-                    .replace(/\r/g, '\\r')
-                    .replace(/'/g, '\\\'');
-                const instanceName = this.options.instanceName;
-                escapedValue = `${ truncated }<a href="#" class="show-full-value" onclick="window.${ instanceName }.showFullValue(event, '${ fullValueEscaped }'); return false;">...</a>`;
+                const fullValueAttr = this.escapeHtml(String(displayValue));
+                escapedValue = `${ truncated }<a href="#" class="show-full-value" data-full-value="${ fullValueAttr }">...</a>`;
             }
 
             // Update data attribute with full value for editing
@@ -2977,8 +3094,8 @@
 
             // Issue #1404: For reference fields, wrap the value in a hyperlink inside cell-content-wrapper
             const cellIsRef = cell.dataset.ref === '1';
-            const cellRefValueId = cell.dataset.refValueId;
-            const cellEditTypeId = cell.dataset.editTypeId;
+            const cellRefValueId = this.normalizeNumericId(cell.dataset.refValueId);
+            const cellEditTypeId = this.normalizeNumericId(cell.dataset.editTypeId);
             if (cellIsRef && cellRefValueId && cellEditTypeId && !cell.dataset.array) {
                 const pathParts = window.location.pathname.split('/');
                 const dbName = pathParts.length >= 2 ? pathParts[1] : '';
@@ -2992,25 +3109,29 @@
                 const editIconHtml = hasEditIcon.outerHTML;
                 const cellRecordId = cell.dataset.refValueId || cell.dataset.recordId || '';
                 cell.innerHTML = `<div class="cell-content-wrapper"><span title="${ cellRecordId }">${ escapedValue }</span>${ editIconHtml }</div>`;
+                // Issue #4385: keep the ID readable on the parent cell when the edit icon covers the wrapper
+                if (cellRecordId) { cell.setAttribute('title', cellRecordId); }
             } else {
                 // Issue #915: If the cell was empty (no edit icon) and now has a value,
                 // add the edit icon using the stored data-edit-type-id attribute
-                const editTypeId = cell.dataset.editTypeId;
+                const editTypeId = this.normalizeNumericId(cell.dataset.editTypeId);
                 // Issue #921: For reference fields, use data-ref-value-id as the record ID
                 // (the reference's own ID, e.g. role ID 520), not data-record-id (the parent
                 // row's ID, e.g. user ID 557). data-ref-value-id is updated by saveReferenceEdit.
-                const editRecordId = cell.dataset.refValueId || cell.dataset.recordId;
-                const editRowIndex = cell.dataset.rowIndex;
+                const editRecordId = this.normalizeNumericId(cell.dataset.refValueId || cell.dataset.recordId);
+                const editRowIndex = parseInt(cell.dataset.rowIndex, 10);
                 const hasNewValue = newValue !== null && newValue !== undefined && newValue !== '';
-                if (hasNewValue && editTypeId && editRecordId && editRecordId !== '' && editRecordId !== '0' && editRecordId !== 'dynamic') {
+                if (hasNewValue && editTypeId && editRecordId && Number.isInteger(editRowIndex) && editRowIndex >= 0) {
                     const instanceName = this.options.instanceName;
                     // Issue #1810: any-ref cell — resolve real table via get_record before opening form
                     const isAnyRefCell = cell.dataset.anyRef === '1';
                     const editIconOnclick = isAnyRefCell
                         ? `window.${ instanceName }.openAnyRefEditForm('${ editRecordId }', ${ editRowIndex }); event.stopPropagation();`
                         : `window.${ instanceName }.openEditForm('${ editRecordId }', '${ editTypeId }', ${ editRowIndex }); event.stopPropagation();`;
-                    const editIcon = `<span class="edit-icon" onclick="${ editIconOnclick }" title="Редактировать"><i class="pi pi-pencil" style="font-size: 0.875rem;"></i></span>`;
+                    const editIcon = `<button type="button" class="edit-icon" onclick="${ editIconOnclick }" title="Редактировать" aria-label="Редактировать значение"><i class="pi pi-pencil" style="font-size: 0.875rem;"></i></button>`;
                     cell.innerHTML = `<div class="cell-content-wrapper"><span title="${ editRecordId }">${ escapedValue }</span>${ editIcon }</div>`;
+                    // Issue #4385: keep the ID readable on the parent cell when the edit icon covers the wrapper
+                    if (editRecordId) { cell.setAttribute('title', editRecordId); }
                 } else {
                     cell.innerHTML = escapedValue;
                 }

@@ -7,8 +7,8 @@
 //    and that call is inside _ensureCaptchaBypass.
 // 2. _ensureCaptchaBypass is async and memoizes via _captchaBypassChecked.
 // 3. _initCaptchaWidgets is async and awaits _ensureCaptchaBypass.
-// 4. The login submit handler awaits _ensureCaptchaBypass before the captcha gate.
-// 5. The register submit handler awaits _ensureCaptchaBypass before the captcha gate.
+// 4. The login submit handler initializes captcha before reading its token.
+// 5. The register submit handler initializes captcha before reading its token.
 // 6. init() does NOT call hasValidAuthToken directly.
 //
 // Run with: node experiments/issue-2947-lazy-token.test.js
@@ -90,28 +90,28 @@ function extractBlock(defPattern) {
         '_initCaptchaWidgets awaits _ensureCaptchaBypass');
 }
 
-// 4. Login submit handler awaits _ensureCaptchaBypass before the captcha gate.
-//    Locate getCaptchaToken('login-captcha-container') then check the next few lines.
+// 4. Login submit handler initializes captcha before reading the token, avoiding
+//    a race between async configuration/widget setup and a fast submit.
 {
     const captchaGetIdx = lines.findIndex(l => /getCaptchaToken\('login-captcha-container'\)/.test(l));
     assert(captchaGetIdx !== -1, 'login submit: getCaptchaToken call found');
 
     if (captchaGetIdx !== -1) {
-        const snippet = lines.slice(captchaGetIdx, captchaGetIdx + 5).join('\n');
-        assert(/await\s+this\._ensureCaptchaBypass\s*\(/.test(snippet),
-            'login submit: await _ensureCaptchaBypass appears right after getCaptchaToken');
+        const snippet = lines.slice(Math.max(0, captchaGetIdx - 4), captchaGetIdx + 2).join('\n');
+        assert(/await\s+this\._initCaptchaWidgets\s*\(/.test(snippet),
+            'login submit: captcha widget is initialized before getCaptchaToken');
     }
 }
 
-// 5. Register submit handler awaits _ensureCaptchaBypass before the captcha gate.
+// 5. Register submit follows the same race-free ordering.
 {
     const captchaGetIdx = lines.findIndex(l => /getCaptchaToken\('register-captcha-container'\)/.test(l));
     assert(captchaGetIdx !== -1, 'register submit: getCaptchaToken call found');
 
     if (captchaGetIdx !== -1) {
-        const snippet = lines.slice(captchaGetIdx, captchaGetIdx + 5).join('\n');
-        assert(/await\s+this\._ensureCaptchaBypass\s*\(/.test(snippet),
-            'register submit: await _ensureCaptchaBypass appears right after getCaptchaToken');
+        const snippet = lines.slice(Math.max(0, captchaGetIdx - 4), captchaGetIdx + 2).join('\n');
+        assert(/await\s+this\._initCaptchaWidgets\s*\(/.test(snippet),
+            'register submit: captcha widget is initialized before getCaptchaToken');
     }
 }
 

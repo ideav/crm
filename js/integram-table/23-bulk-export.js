@@ -56,14 +56,20 @@
          * Bulk delete selected rows
          */
         async bulkDelete() {
-            const selectedIndices = Array.from(this.selectedRows).sort((a, b) => a - b);
-            if (selectedIndices.length === 0) return;
+            const selectedIds = Array.from(this.selectedRows);
+            if (selectedIds.length === 0) return;
 
-            // Collect record info for deletion
+            // Resolve the selected stable IDs against the current result set.
+            // Never translate a saved row position after sort/filter/reload.
             const records = [];
-            for (const rowIndex of selectedIndices) {
-                const rawItem = this.rawObjectData[rowIndex];
-                if (rawItem && rawItem.i) {
+            const rawItemsById = new Map(
+                this.rawObjectData
+                    .filter(rawItem => rawItem && rawItem.i !== null && rawItem.i !== undefined && rawItem.i !== '')
+                    .map(rawItem => [String(rawItem.i), rawItem])
+            );
+            for (const selectedId of selectedIds) {
+                const rawItem = rawItemsById.get(String(selectedId));
+                if (rawItem) {
                     const firstColValue = (rawItem.r && rawItem.r[0]) || '';
                     records.push({ id: rawItem.i, value: firstColValue });
                 }
@@ -120,20 +126,11 @@
                         params.append('_xsrf', xsrf);
                     }
 
-                    const response = await fetch(`${ apiBase }/_m_del/${ record.id }?JSON`, {
+                    const result = await this.fetchJson(`${ apiBase }/_m_del/${ record.id }?JSON`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                         body: params.toString()
                     });
-
-                    const text = await response.text();
-                    let result;
-                    try {
-                        result = JSON.parse(text);
-                    } catch (parseErr) {
-                        // Invalid JSON response - report as warning but don't stop
-                        warnings.push(`#${ record.id } : ${ record.value } : ${ text }`);
-                    }
 
                     // Check for error key in the response
                     if (result) {
@@ -308,8 +305,7 @@
             this.appendCurrentFilters(params);
 
             const url = `${ apiBase }/object/${ this.objectTableId }/?JSON_OBJ&${ params }`;
-            const response = await fetch(url);
-            const result = await response.json();
+            const result = await this.fetchJson(url);
             return parseInt(result.count, 10);
         }
 
@@ -388,14 +384,11 @@
             };
 
             try {
-                const response = await fetch(`${ apiBase }/object/${ this.objectTableId }/?JSON`, {
+                const result = await this.fetchJson(`${ apiBase }/object/${ this.objectTableId }/?JSON`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                     body: params.toString()
                 });
-                const responseText = await response.text();
-                let result = null;
-                try { result = JSON.parse(responseText); } catch (e) { result = null; }
 
                 const errMsg = result && (result.error || (Array.isArray(result) && result[0] && result[0].error));
                 if (errMsg) {
@@ -407,7 +400,7 @@
                     // Non-JSON / unexpected response (e.g. permission die() text).
                     textEl.textContent = 'Удаление не выполнено';
                     errorsDiv.style.display = 'block';
-                    errorsDiv.innerHTML = `<div class="alert alert-danger">${ this.escapeHtml(responseText.slice(0, 300)) }</div>`;
+                    errorsDiv.innerHTML = '<div class="alert alert-danger">Некорректный ответ сервера</div>';
                     showClose();
                 } else {
                     const deleted = parseInt(result.deleted, 10) || 0;
@@ -450,10 +443,22 @@
             if (!menu) return;
 
             const isVisible = menu.style.display !== 'none';
+            const trigger = event && event.currentTarget
+                ? event.currentTarget
+                : document.querySelector(`[aria-controls="${ menuId }"]`);
 
-            // Hide all export menus first
+            const removeOutsideHandler = targetMenu => {
+                if (!targetMenu || !targetMenu._integramExportCloseHandler) return;
+                document.removeEventListener('click', targetMenu._integramExportCloseHandler);
+                targetMenu._integramExportCloseHandler = null;
+            };
+
+            // Keep visual and assistive states in sync across every table instance.
             document.querySelectorAll('.integram-export-menu').forEach(m => {
+                removeOutsideHandler(m);
                 m.style.display = 'none';
+                const owner = document.querySelector(`[aria-controls="${ m.id }"]`);
+                if (owner) owner.setAttribute('aria-expanded', 'false');
             });
 
             if (!isVisible) {
@@ -464,9 +469,7 @@
                 }
 
                 // Position the menu below the button using fixed coordinates.
-                const btn = event && event.currentTarget
-                    ? event.currentTarget
-                    : document.querySelector(`#${ menuId }`)?.previousElementSibling;
+                const btn = trigger;
                 if (btn) {
                     const rect = btn.getBoundingClientRect();
                     menu.style.position = 'fixed';
@@ -476,17 +479,42 @@
                 }
 
                 menu.style.display = 'block';
+                if (trigger) trigger.setAttribute('aria-expanded', 'true');
 
-                // Close menu when clicking outside
-                setTimeout(() => {
-                    const closeHandler = (e) => {
-                        if (!menu.contains(e.target) && !e.target.closest('.integram-table-export-container')) {
-                            menu.style.display = 'none';
-                            document.removeEventListener('click', closeHandler);
+                const items = Array.from(menu.querySelectorAll('[role="menuitem"]'));
+                menu.onkeydown = (keyboardEvent) => {
+                    const currentIndex = items.indexOf(document.activeElement);
+                    if (keyboardEvent.key === 'Escape') {
+                        keyboardEvent.preventDefault();
+                        menu.style.display = 'none';
+                        removeOutsideHandler(menu);
+                        if (trigger) {
+                            trigger.setAttribute('aria-expanded', 'false');
+                            trigger.focus();
                         }
-                    };
-                    document.addEventListener('click', closeHandler);
-                }, 0);
+                    } else if (keyboardEvent.key === 'ArrowDown' || keyboardEvent.key === 'ArrowUp') {
+                        keyboardEvent.preventDefault();
+                        const direction = keyboardEvent.key === 'ArrowDown' ? 1 : -1;
+                        const nextIndex = currentIndex < 0
+                            ? (direction > 0 ? 0 : items.length - 1)
+                            : (currentIndex + direction + items.length) % items.length;
+                        if (items[nextIndex]) items[nextIndex].focus();
+                    }
+                };
+                if (event && event.detail === 0 && items[0]) items[0].focus();
+
+                // Close menu when clicking outside. The current trigger click is ignored
+                // because its target still belongs to .integram-table-export-container.
+                const closeHandler = (outsideEvent) => {
+                    if (!menu.contains(outsideEvent.target) && !outsideEvent.target.closest('.integram-table-export-container')) {
+                        menu.style.display = 'none';
+                        if (trigger) trigger.setAttribute('aria-expanded', 'false');
+                        document.removeEventListener('click', closeHandler);
+                        menu._integramExportCloseHandler = null;
+                    }
+                };
+                menu._integramExportCloseHandler = closeHandler;
+                document.addEventListener('click', closeHandler);
             }
         }
 
@@ -501,6 +529,12 @@
             const menu = document.getElementById(menuId);
             if (menu) {
                 menu.style.display = 'none';
+                if (menu._integramExportCloseHandler) {
+                    document.removeEventListener('click', menu._integramExportCloseHandler);
+                    menu._integramExportCloseHandler = null;
+                }
+                const trigger = document.querySelector(`[aria-controls="${ menuId }"]`);
+                if (trigger) trigger.setAttribute('aria-expanded', 'false');
             }
 
             try {
@@ -551,33 +585,49 @@
 
         /**
          * Load all data matching current filters for export
-         * Requests all data in a single request with LIMIT=1000000
+         * Requests data in bounded pages and refuses silent truncation above the safety cap
          * @returns {Promise<Array>} Array of all data rows
          */
         async loadAllDataForExport() {
-            try {
-                let json;
-                const maxLimit = 1000000; // Request up to 1 million records in single request
+            const batchSize = 5000;
+            const maximumRows = 1000000;
+            const rows = [];
+            const useTableSource = this.getDataSourceType() === 'table' ||
+                (this.objectTableId && !this.options.tableTypeId);
+            const savedTableTypeId = this.options.tableTypeId;
 
-                if (this.getDataSourceType() === 'table' || (this.objectTableId && !this.options.tableTypeId)) {
-                    // Load data from table format (issue #697)
-                    // Use objectTableId if tableTypeId is not explicitly set (auto-detected JSON_OBJ format)
-                    const savedTableTypeId = this.options.tableTypeId;
-                    if (!this.options.tableTypeId && this.objectTableId) {
-                        this.options.tableTypeId = this.objectTableId;
-                    }
-                    json = await this.loadDataFromTableForExport(0, maxLimit);
-                    this.options.tableTypeId = savedTableTypeId;
-                } else {
-                    // Load data from report format
-                    json = await this.loadDataFromReportForExport(0, maxLimit);
+            try {
+                if (useTableSource && !this.options.tableTypeId && this.objectTableId) {
+                    this.options.tableTypeId = this.objectTableId;
                 }
 
-                return json.rows || [];
+                let offset = 0;
+                while (true) {
+                    // Fetch one extra row across the whole export so hitting the cap
+                    // is reported instead of silently producing a truncated file.
+                    const remainingWithProbe = maximumRows + 1 - rows.length;
+                    const limit = Math.min(batchSize, remainingWithProbe);
+                    const page = useTableSource
+                        ? await this.loadDataFromTableForExport(offset, limit)
+                        : await this.loadDataFromReportForExport(offset, limit);
+                    const pageRows = page && Array.isArray(page.rows) ? page.rows : [];
 
+                    for (const row of pageRows) rows.push(row);
+                    if (rows.length > maximumRows) {
+                        throw new Error(`Экспорт ограничен ${ maximumRows } строками. Уточните фильтр и повторите.`);
+                    }
+                    if (pageRows.length < limit) break;
+                    offset += pageRows.length;
+                }
+
+                return rows;
             } catch (error) {
                 console.error('Error loading export data:', error);
                 throw error;
+            } finally {
+                if (useTableSource) {
+                    this.options.tableTypeId = savedTableTypeId;
+                }
             }
         }
 
@@ -628,8 +678,7 @@
             }
 
             const separator = baseUrl.includes('?') ? '&' : '?';
-            const response = await fetch(`${ baseUrl }${ separator }${ params }`);
-            const json = await response.json();
+            const json = await this.fetchJson(`${ baseUrl }${ separator }${ params }`);
 
             // Check if this is object format
             if (this.isObjectFormat(json)) {
@@ -675,6 +724,9 @@
             if (this.options.parentId) {
                 params.set('F_U', this.options.parentId);
             }
+            if (this.options.recordId) {
+                params.set('F_I', this.options.recordId);
+            }
 
             // Apply current filters
             const filters = this.filters || {};
@@ -700,8 +752,7 @@
             const apiBase = this.getApiBase();
             const url = `${ apiBase }/object/${ this.options.tableTypeId }/?${ params }`;
 
-            const response = await fetch(url);
-            const json = await response.json();
+            const json = await this.fetchJson(url);
 
             // Parse JSON_OBJ format
             if (this.isJsonDataArrayFormat(json)) {
@@ -725,7 +776,7 @@
                     // Resolve the symbolic format exactly as renderCell does so the export
                     // matches what is shown on screen (issue #3763).
                     const format = this.resolveColumnFormat(col);
-                    let value = cellValue || '';
+                    let value = cellValue ?? '';
 
                     // Issue #378, #925: For reference fields and GRANT/REPORT_COLUMN, remove "id:" prefix from "id:Value" format
                     const isRefField = col.ref_id != null || (col.ref && col.ref !== 0);
@@ -788,7 +839,7 @@
                     // Resolve the symbolic format exactly as renderCell does so the export
                     // matches what is shown on screen (issue #3763).
                     const format = this.resolveColumnFormat(col);
-                    let value = cellValue || '';
+                    let value = cellValue ?? '';
 
                     // Issue #378, #925: For reference fields and GRANT/REPORT_COLUMN, remove "id:" prefix from "id:Value" format
                     const isRefField = col.ref_id != null || (col.ref && col.ref !== 0);
@@ -838,27 +889,30 @@
             });
         }
 
+        /** Prefix formula-like CSV values so spreadsheet programs keep them as text. */
+        neutralizeCsvFormula(value) {
+            const cell = value === null || value === undefined ? '' : String(value);
+            return /^[\s\u0000-\u001F\u007F-\u009F\uFEFF]*[=+\-@]/u.test(cell) ? "'" + cell : cell;
+        }
+
+        escapeCsvCell(value) {
+            const cell = this.neutralizeCsvFormula(value);
+            return /[",\r\n]/.test(cell) ? '"' + cell.replace(/"/g, '""') + '"' : cell;
+        }
+
         /**
          * Export data to CSV format
          * @param {Array} data - Array of data rows
          * @param {Array} columns - Array of column definitions
          */
         exportToCSV(data, columns) {
-            // Prepare CSV content
-            const headers = columns.map(col => col.name);
+            // Prepare CSV content. Headers and values are both neutralized so a
+            // spreadsheet cannot interpret server-controlled text as a formula.
+            const headers = columns.map(col => this.escapeCsvCell(col.name));
             const csvRows = [headers];
 
-            // Add data rows
             data.forEach(row => {
-                const csvRow = row.map(cell => {
-                    // Escape quotes and wrap in quotes if contains comma, newline, or quote
-                    const cellStr = String(cell);
-                    if (cellStr.includes(',') || cellStr.includes('\n') || cellStr.includes('"')) {
-                        return '"' + cellStr.replace(/"/g, '""') + '"';
-                    }
-                    return cellStr;
-                });
-                csvRows.push(csvRow);
+                csvRows.push(row.map(cell => this.escapeCsvCell(cell)));
             });
 
             // Join rows with newlines
@@ -982,6 +1036,12 @@
             const menu = document.getElementById(menuId);
             if (menu) {
                 menu.style.display = 'none';
+                if (menu._integramExportCloseHandler) {
+                    document.removeEventListener('click', menu._integramExportCloseHandler);
+                    menu._integramExportCloseHandler = null;
+                }
+                const trigger = document.querySelector(`[aria-controls="${ menuId }"]`);
+                if (trigger) trigger.setAttribute('aria-expanded', 'false');
             }
 
             try {

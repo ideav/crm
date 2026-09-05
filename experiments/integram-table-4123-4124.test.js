@@ -116,8 +116,8 @@ assertEqual(cellsTypes[2], 'ТО',
     '#4123: ссылка без префикса "id:"');
 assertEqual(cellsTypes[3], '<span class="boolean-check"><i class="pi pi-check"></i></span>',
     '#4123: BOOLEAN — иконкой');
-assertEqual(cellsTypes[4], '<a class="file-link" href="/f/1.pdf">акт.pdf</a>',
-    '#4123: FILE — живой ссылкой, а не экранированным тегом');
+assertEqual(cellsTypes[4], '&lt;a href=&quot;/f/1.pdf&quot;&gt;акт.pdf&lt;/a&gt;',
+    '#4123: FILE — безопасно деградирует без DOM-санификатора');
 
 // BOOLEAN=false и экранирование обычного текста
 const metaBool = {

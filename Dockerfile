@@ -10,7 +10,7 @@ RUN apt-get update \
         openssl \
         unzip \
     && docker-php-ext-install mysqli mbstring zip \
-    && a2enmod rewrite ssl \
+    && a2enmod rewrite ssl headers \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /var/www/html
@@ -32,6 +32,7 @@ RUN mkdir -p \
     && cp -a /var/www/html/templates/my/. /usr/local/share/integram/templates-custom-seed/my/ \
     && cp -a /var/www/html/templates/ru/. /usr/local/share/integram/templates-custom-seed/ru/ \
     && cp -a /var/www/html/templates/ru/. /usr/local/share/integram/templates-custom-seed/en/ \
+    && sed -i 's/\r$//' /usr/local/bin/integram-entrypoint \
     && chmod +x /usr/local/bin/integram-entrypoint \
     && chown -R www-data:www-data /var/www/html/logs /var/www/html/templates /var/www/html/download
 

@@ -14,6 +14,181 @@
  * - Clickable "?" to fetch total record count
  */
 
+const itModalEscapeState = {
+    stack: [],
+    keydownHandler: null,
+    cleanupByModal: new WeakMap(),
+    nextLabelId: 1
+};
+
+function itAddModalDocumentListener(modal, type, handler, options) {
+    if (!itIsModalConnected(modal)) return () => {};
+    document.addEventListener(type, handler, options);
+    const cleanup = () => document.removeEventListener(type, handler, options);
+    const cleanups = itModalEscapeState.cleanupByModal.get(modal) || [];
+    cleanups.push(cleanup);
+    itModalEscapeState.cleanupByModal.set(modal, cleanups);
+    return cleanup;
+}
+
+function itIsModalConnected(modal) {
+    if (!modal) return false;
+    if (typeof modal.isConnected === 'boolean') return modal.isConnected;
+    return !!(document.documentElement && document.documentElement.contains(modal));
+}
+
+/**
+ * Register a modal in the shared Escape stack and return an idempotent close
+ * function. A single document listener serves every table instance, so closing
+ * a modal by a button, backdrop, save action, or DOM removal cannot leave a
+ * stale global keydown listener behind.
+ */
+function itCreateModalCloseHandler(modal, closeCallback, owner = null) {
+    let active = true;
+    let observer = null;
+    const entry = { modal, close: null, unregister: null };
+    const previouslyFocused = document.activeElement;
+    const dialogSelector = '.edit-form-modal, .column-settings-modal, .grouping-settings-modal, .form-field-settings-modal, .integram-modal, .col-edit-modal, [role="dialog"]';
+    const dialog = modal.matches && modal.matches(dialogSelector)
+        ? modal
+        : (modal.querySelector ? modal.querySelector(dialogSelector) : null);
+
+    entry.dialog = dialog;
+    if (dialog) {
+        dialog.setAttribute('role', 'dialog');
+        dialog.setAttribute('aria-modal', 'true');
+        if (!dialog.hasAttribute('tabindex')) dialog.setAttribute('tabindex', '-1');
+        const heading = dialog.querySelector('h1, h2, h3, .modal-title');
+        if (heading) {
+            if (!heading.id) {
+                heading.id = `integram-modal-title-${ itModalEscapeState.nextLabelId++ }`;
+            }
+            dialog.setAttribute('aria-labelledby', heading.id);
+        } else if (!dialog.hasAttribute('aria-label')) {
+            dialog.setAttribute('aria-label', 'Диалоговое окно');
+        }
+    }
+    if (document.body && document.body.classList && typeof document.body.classList.add === 'function') {
+        document.body.classList.add('integram-modal-open');
+    }
+
+    const unregister = () => {
+        if (!active) return;
+        active = false;
+        if (observer) observer.disconnect();
+        const cleanups = itModalEscapeState.cleanupByModal.get(modal) || [];
+        cleanups.forEach(cleanup => cleanup());
+        itModalEscapeState.cleanupByModal.delete(modal);
+        if (owner && owner._modalCloseHandlers) owner._modalCloseHandlers.delete(close);
+        const index = itModalEscapeState.stack.indexOf(entry);
+        if (index !== -1) itModalEscapeState.stack.splice(index, 1);
+        if (itModalEscapeState.stack.length === 0) {
+            if (itModalEscapeState.keydownHandler) {
+                document.removeEventListener('keydown', itModalEscapeState.keydownHandler);
+                itModalEscapeState.keydownHandler = null;
+            }
+            if (document.body && document.body.classList && typeof document.body.classList.remove === 'function') {
+                document.body.classList.remove('integram-modal-open');
+            }
+        }
+    };
+
+    const close = (...args) => {
+        if (!active) return;
+        unregister();
+        const result = closeCallback(...args);
+        const restoreFocus = () => {
+            if (previouslyFocused && previouslyFocused.isConnected && typeof previouslyFocused.focus === 'function') {
+                try {
+                    previouslyFocused.focus({ preventScroll: true });
+                } catch (error) {
+                    previouslyFocused.focus();
+                }
+            }
+        };
+        if (typeof requestAnimationFrame === 'function') requestAnimationFrame(restoreFocus);
+        else if (typeof setTimeout === 'function') setTimeout(restoreFocus, 0);
+        else restoreFocus();
+        return result;
+    };
+
+    if (owner) {
+        if (!(owner._modalCloseHandlers instanceof Set)) owner._modalCloseHandlers = new Set();
+        owner._modalCloseHandlers.add(close);
+    }
+
+    entry.close = close;
+    entry.unregister = unregister;
+    itModalEscapeState.stack.push(entry);
+
+    if (!itModalEscapeState.keydownHandler) {
+        itModalEscapeState.keydownHandler = (event) => {
+            if (event.defaultPrevented) return;
+            while (itModalEscapeState.stack.length > 0) {
+                const top = itModalEscapeState.stack[itModalEscapeState.stack.length - 1];
+                if (!itIsModalConnected(top.modal)) {
+                    top.unregister();
+                    continue;
+                }
+
+                if (event.key === 'Escape') {
+                    if (typeof event.preventDefault === 'function') event.preventDefault();
+                    top.close();
+                    return;
+                }
+
+                if (event.key === 'Tab') {
+                    const dialogElement = top.dialog || top.modal;
+                    const candidates = Array.from(dialogElement.querySelectorAll('button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])'))
+                        .filter(element => !element.disabled && element.getAttribute('aria-hidden') !== 'true' && element.offsetParent !== null);
+                    if (candidates.length === 0) {
+                        if (typeof event.preventDefault === 'function') event.preventDefault();
+                        if (typeof dialogElement.focus === 'function') dialogElement.focus();
+                        return;
+                    }
+                    const first = candidates[0];
+                    const last = candidates[candidates.length - 1];
+                    if (event.shiftKey && (document.activeElement === first || !dialogElement.contains(document.activeElement))) {
+                        if (typeof event.preventDefault === 'function') event.preventDefault();
+                        last.focus();
+                    } else if (!event.shiftKey && (document.activeElement === last || !dialogElement.contains(document.activeElement))) {
+                        if (typeof event.preventDefault === 'function') event.preventDefault();
+                        first.focus();
+                    }
+                    return;
+                }
+                return;
+            }
+        };
+        document.addEventListener('keydown', itModalEscapeState.keydownHandler);
+    }
+
+    const focusDialog = () => {
+        if (!active || !dialog || !itIsModalConnected(modal) || dialog.contains(document.activeElement)) return;
+        const autofocus = dialog.querySelector('[autofocus]');
+        const target = autofocus || dialog;
+        if (typeof target.focus === 'function') {
+            try {
+                target.focus({ preventScroll: true });
+            } catch (error) {
+                target.focus();
+            }
+        }
+    };
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(focusDialog);
+    else if (typeof setTimeout === 'function') setTimeout(focusDialog, 0);
+    else focusDialog();
+
+    if (typeof MutationObserver !== 'undefined' && document.documentElement) {
+        observer = new MutationObserver(() => {
+            if (!itIsModalConnected(modal)) unregister();
+        });
+        observer.observe(document.documentElement, { childList: true, subtree: true });
+    }
+
+    return close;
+}
+
 class IntegramTable{
         constructor(containerId, options = {}) {
             this.container = document.getElementById(containerId);
@@ -22,20 +197,29 @@ class IntegramTable{
             const urlParams = new URLSearchParams(window.location.search);
             const urlParentId = urlParams.get('parentId') || urlParams.get('F_U') || urlParams.get('up');
             const urlRecordId = urlParams.get('F_I');  // Record ID filter from URL (issue #563)
+            const normalizeNumericId = candidate => {
+                const value = candidate === null || candidate === undefined ? '' : String(candidate).trim();
+                return /^\d+$/.test(value) ? value : null;
+            };
+            const requestedInstanceName = String(options.instanceName || 'table');
+            const normalizedInstanceName = requestedInstanceName.replace(/[^A-Za-z0-9_$]/g, '_');
+            const safeInstanceName = /^[A-Za-z_$]/.test(normalizedInstanceName)
+                ? normalizedInstanceName
+                : 'table_' + normalizedInstanceName;
 
             this.options = {
                 apiUrl: options.apiUrl || '',
                 pageSize: options.pageSize || 20,
                 cookiePrefix: options.cookiePrefix || 'integram-table',
                 title: options.title || '',
-                instanceName: options.instanceName || 'table',
+                instanceName: safeInstanceName || 'table',
                 onCellClick: options.onCellClick || null,
                 onDataLoad: options.onDataLoad || null,
                 // New options for dual data source support
                 dataSource: options.dataSource || 'report',  // 'report' or 'table'
                 tableTypeId: options.tableTypeId || null,   // Required for dataSource='table'
-                parentId: options.parentId || urlParentId || null,  // Parent ID for table data source
-                recordId: options.recordId || urlRecordId || null,  // Record ID filter for table data source (issue #563)
+                parentId: normalizeNumericId(options.parentId || urlParentId),  // Parent ID for table data source
+                recordId: normalizeNumericId(options.recordId || urlRecordId),  // Record ID filter for table data source (issue #563)
                 debug: options.debug || false  // Enable debug tracing
             };
 
@@ -51,6 +235,10 @@ class IntegramTable{
             this.isFetchingTotalCount = false;  // True while re-requesting the total count (issue #2795)
             this.hasMore = true;  // Whether there are more records to load
             this.isLoading = false;  // Prevent multiple simultaneous loads
+            this._loadDataPromise = null;  // Promise for the full active load queue
+            this._loadRequestVersion = 0;  // Invalidates responses superseded by a refresh
+            this._destroyed = false;  // Prevents late async work after teardown
+            this._reloadQueued = false;  // Coalesces refreshes requested during an active load
             this.pendingRequests = 0;  // In-flight server requests; drives the toolbar AJAX spinner
             this.filters = {};
             this.columnOrder = [];
@@ -73,7 +261,7 @@ class IntegramTable{
             this.refFetchCache = {};  // Cache for fetchReferenceOptions results by composite key (issue #1571)
             this.editableColumns = new Map();  // Map of column IDs to their corresponding ID column IDs
             this.checkboxMode = false;  // Whether checkbox selection column is visible
-            this.selectedRows = new Set();  // Set of selected row indices
+            this.selectedRows = new Set();  // Set of selected record IDs (normalized to strings)
             this.globalMetadata = null;  // Global metadata for determining parent relationships
             this.globalMetadataPromise = null;  // Promise for in-progress globalMetadata fetch (issue #789)
             this.currentEditingCell = null;  // Track currently editing cell
@@ -179,6 +367,49 @@ class IntegramTable{
             this.refTextFilterTypes = new Set(['~', '^', '!', '@', '!@']);
 
             this.init();
+        }
+
+        /**
+         * Return the stable selection key for a rendered row.
+         * Row positions change after sorting/filtering, so they must never be used
+         * as destructive-action identifiers.
+         */
+        getRowSelectionKey(rowIndex) {
+            const rawItem = this.rawObjectData && this.rawObjectData[rowIndex];
+            if (!rawItem || rawItem.i === null || rawItem.i === undefined || rawItem.i === '') {
+                return null;
+            }
+            return String(rawItem.i);
+        }
+
+        isRowSelected(rowIndex) {
+            const key = this.getRowSelectionKey(rowIndex);
+            return key !== null && this.selectedRows.has(key);
+        }
+
+        getSelectableRowKeys() {
+            const keys = [];
+            for (let rowIndex = 0; rowIndex < this.data.length; rowIndex++) {
+                const key = this.getRowSelectionKey(rowIndex);
+                if (key !== null) keys.push(key);
+            }
+            return keys;
+        }
+
+        areAllSelectableRowsSelected() {
+            const keys = this.getSelectableRowKeys();
+            return keys.length > 0 && keys.every(key => this.selectedRows.has(key));
+        }
+
+        pruneSelectedRows() {
+            if (!(this.selectedRows instanceof Set)) {
+                this.selectedRows = new Set();
+                return;
+            }
+            const visibleKeys = new Set(this.getSelectableRowKeys());
+            for (const key of this.selectedRows) {
+                if (!visibleKeys.has(key)) this.selectedRows.delete(key);
+            }
         }
 
         /**
@@ -410,6 +641,8 @@ class IntegramTable{
         }
 
         init() {
+            if (this._destroyed) return;
+
             // Remove padding from the parent container so the table fills full width (issue #887)
             if (this.container && this.container.parentElement) {
                 this.container.parentElement.parentElement.style.padding = '0';
@@ -423,7 +656,125 @@ class IntegramTable{
             this.loadData();
         }
 
+        /**
+         * Release global resources owned by this table instance. This is safe to
+         * call more than once and invalidates any in-flight load before detaching
+         * listeners, observers, timers, registry entries, and automatic aliases.
+         */
+        destroy(options = {}) {
+            if (this._destroyed) return;
+            this._destroyed = true;
+            this._loadRequestVersion = (this._loadRequestVersion || 0) + 1;
+            this._reloadQueued = false;
+            this.hasMore = false;
+            this.isLoading = false;
+
+            const removeListener = (target, type, handler, listenerOptions) => {
+                if (target && handler && typeof target.removeEventListener === 'function') {
+                    target.removeEventListener(type, handler, listenerOptions);
+                }
+            };
+
+            removeListener(this.container, 'click', this._fullValueClickHandler);
+            removeListener(this.container, 'click', this._tableButtonClickHandler);
+            removeListener(this.container, 'click', this._cellClickHandler);
+            removeListener(this._scrollListenerContainer || window, 'scroll', this.scrollListener);
+            removeListener(document, 'keydown', this.plusKeyListener);
+            removeListener(window, 'resize', this._containerHeightResizeListener);
+            removeListener(this._tableScrollElement, 'scroll', this.tableScrollListener);
+            removeListener(this._stickyScrollbarElement, 'scroll', this.stickyScrollListener);
+            removeListener(this._stickyScrollContainer || window, 'scroll', this.stickyVisibilityListener);
+            removeListener(window, 'resize', this.stickyVisibilityListener);
+            removeListener(window, 'resize', this.scrollCounterResizeListener);
+            removeListener(window, 'scroll', this.scrollCounterScrollListener, true);
+
+            if (this._modalCloseHandlers instanceof Set) {
+                const closeHandlers = Array.from(this._modalCloseHandlers);
+                this._modalCloseHandlers.clear();
+                closeHandlers.reverse().forEach(close => {
+                    try {
+                        close();
+                    } catch (error) {
+                        console.error('Failed to close table modal during destroy:', error);
+                    }
+                });
+            }
+
+            if (typeof this.closeRefFilterDropdown === 'function') {
+                this.closeRefFilterDropdown();
+            }
+            removeListener(document, 'click', this.handleRefFilterDropdownOutsideClick);
+
+            ['filterTimeout', '_checkAndLoadMoreTimer', '_navigateTimer', '_refFilterOutsideClickTimer']
+                .forEach(field => {
+                    if (this[field] !== null && this[field] !== undefined) clearTimeout(this[field]);
+                    this[field] = null;
+                });
+
+            if (this._containerHeightObserver) this._containerHeightObserver.disconnect();
+            if (this.scrollCounterResizeObserver) this.scrollCounterResizeObserver.disconnect();
+            if (this._columnResizeCleanup) this._columnResizeCleanup();
+
+            [
+                '_fullValueClickHandler', '_tableButtonClickHandler', '_cellClickHandler',
+                'scrollListener', '_scrollListenerContainer', 'plusKeyListener',
+                '_containerHeightResizeListener', '_containerHeightObserver',
+                'tableScrollListener', '_tableScrollElement', 'stickyScrollListener',
+                '_stickyScrollbarElement', 'stickyVisibilityListener', '_stickyScrollContainer',
+                'scrollCounterResizeListener', 'scrollCounterScrollListener',
+                'scrollCounterResizeObserver', '_columnResizeCleanup', '_modalCloseHandlers'
+            ].forEach(field => { this[field] = null; });
+
+            const registry = typeof window !== 'undefined' && window._integramTableInstances;
+            if (Array.isArray(registry)) {
+                for (let index = registry.length - 1; index >= 0; index -= 1) {
+                    if (registry[index] === this) registry.splice(index, 1);
+                }
+            }
+
+            const aliases = new Set(Array.isArray(this._globalAliases) ? this._globalAliases : []);
+            if (this.options && this.options.instanceName) aliases.add(this.options.instanceName);
+            aliases.forEach(alias => {
+                if (window[alias] === this) {
+                    try {
+                        delete window[alias];
+                    } catch (error) {
+                        window[alias] = undefined;
+                    }
+                }
+            });
+            this._globalAliases = [];
+
+            const container = this.container;
+            if (container && container._integramTableInstance === this) {
+                delete container._integramTableInstance;
+            }
+            if (options.clearContainer !== false && container) {
+                container.innerHTML = '';
+            }
+
+            this.currentEditingCell = null;
+            this.pendingCellClick = null;
+            this.pendingNewRow = null;
+            this.columns = [];
+            this.data = [];
+            this.rawObjectData = [];
+            this.groupedData = [];
+            if (this.selectedRows && typeof this.selectedRows.clear === 'function') this.selectedRows.clear();
+            this.metadataCache = {};
+            this.metadataFetchPromises = {};
+            this.globalMetadata = null;
+            this.globalMetadataPromise = null;
+            if (this.options) {
+                this.options.onCellClick = null;
+                this.options.onDataLoad = null;
+            }
+            this.container = null;
+        }
+
         async loadGlobalMetadata() {
+            if (this._destroyed) return;
+
             // If already loaded on this instance, return immediately (issue #1455)
             if (this.globalMetadata) {
                 return;
@@ -477,7 +828,7 @@ class IntegramTable{
             }
 
             const metadata = await fetchPromise;
-            if (metadata) {
+            if (metadata && !this._destroyed) {
                 this.applyGlobalMetadata(metadata);
             }
         }
@@ -489,6 +840,7 @@ class IntegramTable{
          * asynchronously and may fire after the user has scrolled (issue #2744).
          */
         applyGlobalMetadata(metadata) {
+            if (this._destroyed) return;
             this.globalMetadata = metadata;
             if (this.columns.length > 0) {
                 this.renderPreservingScroll(() => this.render());
@@ -518,6 +870,8 @@ class IntegramTable{
          * Used to display breadcrumb-like title: "{parent table name} {record value}: {current table name}"
          */
         async loadParentInfo() {
+            if (this._destroyed) return;
+
             try {
                 // Only fetch parent info if parentId is numeric and > 1
                 const parentId = parseInt(this.options.parentId, 10);
@@ -532,6 +886,7 @@ class IntegramTable{
                     return;
                 }
                 const data = await response.json();
+                if (this._destroyed) return;
                 if (data && data.id) {
                     this.parentInfo = {
                         id: data.id,
@@ -578,7 +933,8 @@ class IntegramTable{
                 const parentTypeName = this.escapeHtml(this.parentInfo.type || '');
                 // #3247: первая колонка-DATETIME родителя приходит unix-штампом — форматируем.
                 const parentVal = this.escapeHtml(this.formatRecordTitleValue(this.parentInfo.val || ''));
-                const parentObjId = this.parentInfo.obj || '';
+                const parentObjValue = String(this.parentInfo.obj || '');
+                const parentObjId = /^\d+$/.test(parentObjValue) ? parentObjValue : '';
                 const parentUp = parseInt(this.parentInfo.up, 10) || 0;
                 const parentRecordId = this.options.parentId || '';
                 const currentTitle = this.escapeHtml(this.options.title || '');
@@ -605,9 +961,9 @@ class IntegramTable{
          */
         renderCheckboxToggleHtml() {
             const instanceName = this.options.instanceName;
-            return `<div class="integram-table-checkbox-toggle${ this.checkboxMode ? ' active' : '' }" onclick="window.${ instanceName }.toggleCheckboxMode()" title="Выбор строк в таблице">
+            return `<button type="button" class="integram-table-checkbox-toggle${ this.checkboxMode ? ' active' : '' }" onclick="window.${ instanceName }.toggleCheckboxMode()" title="Выбор строк в таблице" aria-label="Режим выбора строк" aria-pressed="${ this.checkboxMode ? 'true' : 'false' }">
                 <i class="pi pi-check-square"></i>
-            </div>`;
+            </button>`;
         }
 
         /**
@@ -643,6 +999,8 @@ class IntegramTable{
         }
 
         async loadData(append = false) {
+            if (this._destroyed) return;
+
             // Block appending when there are no more records, and block scroll-triggered
             // appends while a new row is pending creation (issue #2059): re-rendering
             // would destroy the unsaved row and lose the editor focus.
@@ -658,29 +1016,49 @@ class IntegramTable{
                 append = false;
             }
 
-            // Dedupe concurrent loads. When a load is already running, return its
-            // in-flight promise instead of a no-op so callers that `await this.loadData(...)`
-            // wait for columns/data to be rebuilt. Returning early used to leave
-            // this.columns = [], which produced an empty "Настройки колонок таблицы" form
-            // after deleting and immediately re-creating a column: closeColumnSettings()
-            // fires an un-awaited refresh and the following `await this.loadData(...)`
-            // short-circuited before the columns were rebuilt (issue #2824).
-            // Non-append (refresh) calls are still allowed even when hasMore is false so the
-            // refresh button keeps working (issue #1516).
-            if (this.isLoading) {
-                return this._loadDataPromise || undefined;
+            // Serialize loads so infinite-scroll pages cannot overlap. A full refresh
+            // requested while another load is in flight invalidates that response and
+            // queues one latest-state reload. Multiple refreshes are coalesced.
+            if (this._loadDataPromise) {
+                if (!append) {
+                    this._loadRequestVersion = (this._loadRequestVersion || 0) + 1;
+                    this._reloadQueued = true;
+                }
+                return this._loadDataPromise;
             }
 
-            this.isLoading = true;
-            this._loadDataPromise = this._runLoadData(append);
+            const initialVersion = (this._loadRequestVersion || 0) + 1;
+            this._loadRequestVersion = initialVersion;
+
+            const runQueue = async () => {
+                let nextAppend = append;
+                let requestVersion = initialVersion;
+
+                do {
+                    this._reloadQueued = false;
+                    this.isLoading = true;
+                    await this._runLoadData(nextAppend, requestVersion);
+
+                    if (!this._reloadQueued) break;
+                    nextAppend = false;
+                    requestVersion = this._loadRequestVersion;
+                } while (true);
+            };
+
+            const loadPromise = runQueue();
+            this._loadDataPromise = loadPromise;
             try {
-                return await this._loadDataPromise;
+                return await loadPromise;
             } finally {
-                this._loadDataPromise = null;
+                if (this._loadDataPromise === loadPromise) {
+                    this._loadDataPromise = null;
+                    this.isLoading = false;
+                }
             }
         }
 
-        async _runLoadData(append = false) {
+        async _runLoadData(append = false, requestVersion = this._loadRequestVersion || 0) {
+            const isObsolete = () => this._destroyed || requestVersion !== (this._loadRequestVersion || 0);
             // Marks the window in which a pending metadataStale flag may be acted on
             // (issue #4364) — see shouldRebuildColumns().
             this._fullReload = !append;
@@ -690,18 +1068,64 @@ class IntegramTable{
                 let json;
                 let newRows = [];
 
-                if (this.getDataSourceType() === 'table') {
+                const dataSourceType = this.getDataSourceType();
+                if (dataSourceType === 'table') {
                     // Load data from table format (object/{typeId}/?JSON_OBJ&F_U={parentId}) (issue #697)
                     json = await this.loadDataFromTable(append);
+                    if (isObsolete()) return;
                 } else {
                     // Load data from report format (default behavior) (issue #697)
                     json = await this.loadDataFromReport(append);
+                    if (isObsolete()) return;
                     // Auto-set table title from report header if not explicitly provided (issue #537)
                     if (json && !this.options.title && json.header) {
                         this.options.title = json.header;
                     }
                 }
 
+                const isGroupingMode = this.groupingEnabled && this.groupingColumns.length > 0;
+                if (isGroupingMode && json) {
+                    const groupingPageSize = 1000;
+                    const maximumGroupedRows = 1000000;
+                    const allRows = [];
+                    const allRawData = [];
+                    let groupedColumns = json.columns || [];
+                    let page = json;
+
+                    while (page) {
+                        let pageRows = Array.isArray(page.rows) ? page.rows : [];
+                        let pageRawData = Array.isArray(page.rawData) ? page.rawData : [];
+                        const pageHasMore = pageRows.length > groupingPageSize;
+                        if (pageHasMore) {
+                            pageRows = pageRows.slice(0, groupingPageSize);
+                            pageRawData = pageRawData.slice(0, groupingPageSize);
+                        }
+
+                        allRows.push(...pageRows);
+                        allRawData.push(...pageRawData);
+                        if (!pageHasMore) break;
+                        if (allRows.length >= maximumGroupedRows) {
+                            throw new Error(`Группировка ограничена ${ maximumGroupedRows } строками. Уточните фильтр.`);
+                        }
+
+                        // The data loaders calculate their offset from loadedRecords.
+                        // No page is rendered until the complete grouped set is ready.
+                        this.loadedRecords = allRows.length;
+                        this.columns = groupedColumns;
+                        page = dataSourceType === 'table'
+                            ? await this.loadDataFromTable(true)
+                            : await this.loadDataFromReport(true);
+                        if (isObsolete()) return;
+                        groupedColumns = page && page.columns ? page.columns : groupedColumns;
+                    }
+
+                    json = {
+                        ...json,
+                        columns: groupedColumns,
+                        rows: allRows,
+                        rawData: allRawData
+                    };
+                }
                 // The reload went through: whatever the data source was, the columns now
                 // describe the rows we are about to show, so the flag has done its job.
                 // Clearing it here also keeps report-shaped sources — which build their
@@ -714,6 +1138,8 @@ class IntegramTable{
                 // If server returned null or empty result, treat as empty (issue #1514)
                 if (!json) {
                     this.data = [];
+                    this.rawObjectData = [];
+                    this.selectedRows.clear();
                     this.loadedRecords = 0;
                     this.hasMore = false;
                     this.totalRows = 0;
@@ -724,20 +1150,10 @@ class IntegramTable{
                 newRows = json.rows || [];
                 this.columns = json.columns || [];
 
-                // In grouping mode, disable infinite scroll and use all data (up to 1000)
-                const isGroupingMode = this.groupingEnabled && this.groupingColumns.length > 0;
+                // Grouped pages have already been fully accumulated above. Ordinary
+                // table pages retain the existing pageSize + 1 look-ahead behavior.
+                this.hasMore = isGroupingMode ? false : newRows.length > this.options.pageSize;
 
-                // Check if there are more records (we requested pageSize + 1)
-                // In grouping mode, we fetched up to 1000 records at once
-                if (isGroupingMode) {
-                    // Grouping mode: no pagination, show all fetched data
-                    this.hasMore = false;
-                } else {
-                    this.hasMore = newRows.length > this.options.pageSize;
-                }
-
-                // Keep only pageSize records; also trim rawData to stay aligned
-                // In grouping mode, keep all data (up to 1000)
                 let rawData = json.rawData || [];
                 if (!isGroupingMode && this.hasMore) {
                     newRows = newRows.slice(0, this.options.pageSize);
@@ -756,6 +1172,10 @@ class IntegramTable{
                     this.loadedRecords = 0;
                     // Replace raw object data if present
                     this.rawObjectData = rawData;
+                    // Keep only selections that still refer to records in the
+                    // replacement result set. This prevents hidden/stale rows
+                    // from being deleted after a filter or refresh.
+                    this.pruneSelectedRows();
                 }
 
                 this.loadedRecords += newRows.length;
@@ -822,6 +1242,7 @@ class IntegramTable{
                     window.requestAnimationFrame(() => this.restoreScrollState(appendScrollState));
                 }
             } catch (error) {
+                if (isObsolete()) return;
                 console.error('Error loading data:', error);
                 // Stop auto-loading after a failed request (issue #2763).
                 // handleLoadDataError() re-renders the table to keep the filter
@@ -836,8 +1257,10 @@ class IntegramTable{
                 this._fullReload = false;
                 this.isLoading = false;
                 this.endRequest();
-                // Check if table fits on screen and needs more data
-                this.checkAndLoadMore();
+                // Only the newest completed state may trigger pagination.
+                if (!isObsolete() && !this._reloadQueued) {
+                    this.checkAndLoadMore();
+                }
             }
         }
 
@@ -890,7 +1313,7 @@ class IntegramTable{
             }
 
             if (!append) {
-                this.container.innerHTML = `<div class="alert alert-danger">Ошибка загрузки данных: ${ message }</div>`;
+                this.container.innerHTML = `<div class="alert alert-danger">Ошибка загрузки данных: ${ this.escapeHtml(message) }</div>`;
             } else {
                 this.showToast(`Ошибка загрузки данных: ${ message }`, 'error');
             }
@@ -903,30 +1326,56 @@ class IntegramTable{
          * server message instead of a cryptic "Unexpected token ..." parse error
          * (issue #2758).
          */
-        async fetchJson(url) {
-            const response = await fetch(url);
-            const text = await response.text();
+        async fetchJson(url, options) {
+            const response = await fetch(url, options);
+            let text = '';
+            let parsed = null;
 
-            try {
-                return text === '' ? null : JSON.parse(text);
-            } catch (parseError) {
-                const trimmed = (text || '').trim();
-                const preview = trimmed
-                    ? trimmed.slice(0, 300)
-                    : `HTTP ${ response.status } ${ response.statusText }`.trim();
-                const error = new Error(preview);
-                error.isNonJsonResponse = true;
+            if (typeof response.text === 'function') {
+                text = await response.text();
+                if (text !== '') {
+                    try {
+                        parsed = JSON.parse(text);
+                    } catch (parseError) {
+                        const preview = text.trim()
+                            ? text.trim().slice(0, 300)
+                            : `HTTP ${ response.status } ${ response.statusText }`.trim();
+                        const error = new Error(preview);
+                        error.isNonJsonResponse = true;
+                        error.status = response.status;
+                        throw error;
+                    }
+                }
+            } else if (typeof response.json === 'function') {
+                // Compatibility for lightweight Response mocks used by embedders/tests.
+                parsed = await response.json();
+            }
+
+            if (response.ok === false) {
+                let message = '';
+                if (parsed && typeof parsed === 'object') {
+                    message = parsed.error || parsed.message ||
+                        (Array.isArray(parsed) && parsed[0] && (parsed[0].error || parsed[0].message)) || '';
+                }
+                if (!message) {
+                    message = text.trim() || `HTTP ${ response.status } ${ response.statusText }`.trim();
+                }
+                const error = new Error(String(message).slice(0, 300));
                 error.status = response.status;
+                error.response = parsed;
                 throw error;
             }
+
+            return parsed;
         }
 
         async loadDataFromReport(append = false) {
             // Original report-based data loading logic
-            // In grouping mode, use LIMIT=1000 and disable scrolling (issue #502)
+            // Grouping uses bounded 1,000-row pages with one look-ahead row.
             const isGroupingMode = this.groupingEnabled && this.groupingColumns.length > 0;
-            const requestSize = isGroupingMode ? 1000 : (this.options.pageSize + 1);
-            const offset = (append && !isGroupingMode) ? this.loadedRecords : 0;
+            const pageSize = isGroupingMode ? 1000 : this.options.pageSize;
+            const requestSize = pageSize + 1;
+            const offset = append ? this.loadedRecords : 0;
 
             const params = new URLSearchParams();
 
@@ -1159,10 +1608,11 @@ class IntegramTable{
 
             this.objectTableId = this.options.tableTypeId;  // Store table ID for _count=1 queries
 
-            // In grouping mode, use LIMIT=1000 and disable scrolling (issue #502)
+            // Grouping uses bounded 1,000-row pages with one look-ahead row.
             const isGroupingMode = this.groupingEnabled && this.groupingColumns.length > 0;
-            const requestSize = isGroupingMode ? 1000 : (this.options.pageSize + 1);
-            const offset = (append && !isGroupingMode) ? this.loadedRecords : 0;
+            const pageSize = isGroupingMode ? 1000 : this.options.pageSize;
+            const requestSize = pageSize + 1;
+            const offset = append ? this.loadedRecords : 0;
 
             // First load, fetch metadata to get column information
             if (this.columns.length === 0) {
@@ -1429,10 +1879,11 @@ class IntegramTable{
             const apiBase = this.getApiBase();
             const tableId = metadata.id;
             this.objectTableId = tableId;  // Store table ID for _count=1 queries
-            // In grouping mode, use LIMIT=1000 and disable scrolling (issue #502)
+            // Grouping uses bounded 1,000-row pages with one look-ahead row.
             const isGroupingMode = this.groupingEnabled && this.groupingColumns.length > 0;
-            const requestSize = isGroupingMode ? 1000 : (this.options.pageSize + 1);
-            const offset = (append && !isGroupingMode) ? this.loadedRecords : 0;
+            const pageSize = isGroupingMode ? 1000 : this.options.pageSize;
+            const requestSize = pageSize + 1;
+            const offset = append ? this.loadedRecords : 0;
             let dataUrl = `${ apiBase }/object/${ tableId }/?JSON_OBJ&LIMIT=${ offset },${ requestSize }`;
 
             // Add parent ID filter if present (issue #563)
@@ -1476,9 +1927,8 @@ class IntegramTable{
                 dataUrl += `&${ pageParams.toString() }`;
             }
 
-            // Fetch data
-            const dataResponse = await fetch(dataUrl);
-            const dataArray = await dataResponse.json();
+            // Fetch data through the shared status/JSON validator.
+            const dataArray = await this.fetchJson(dataUrl);
 
             // Detect metadata drift: the metadata response and the data response
             // were fetched separately, so they may disagree if the schema
@@ -1725,8 +2175,7 @@ class IntegramTable{
                     countUrl = `${ this.options.apiUrl }${ separator }${ params }`;
                 }
 
-                const response = await fetch(countUrl);
-                const result = await response.json();
+                const result = await this.fetchJson(countUrl);
                 this.totalRows = parseInt(result.count, 10);
             } catch (error) {
                 console.error('Error fetching total count:', error);
@@ -1903,6 +2352,8 @@ class IntegramTable{
         }
 
         render() {
+            if (this._destroyed) return;
+
             // Guard against missing container
             if (!this.container) {
                 console.error('Cannot render: container element not found');
@@ -1942,79 +2393,79 @@ class IntegramTable{
                                 <i class="pi pi-spin pi-spinner"></i>
                                 <span class="integram-table-ajax-spinner-counter">${ (this.pendingRequests || 0) > 1 ? `(${ this.pendingRequests })` : '' }</span>
                             </div>
-                            <div class="integram-table-settings integram-table-settings-refresh" onclick="window.${ instanceName }.refreshData()" title="Обновить">
+                            <button type="button" class="integram-table-settings integram-table-settings-refresh" onclick="window.${ instanceName }.refreshData()" title="Обновить" aria-label="Обновить">
                                 <i class="pi pi-refresh"></i>
-                            </div>
+                            </button>
                             ${ this.groupingEnabled ? `
-                            <div class="integram-table-settings" onclick="window.${ instanceName }.clearGrouping()" title="Очистить группировку">
+                            <button type="button" class="integram-table-settings" onclick="window.${ instanceName }.clearGrouping()" title="Очистить группировку" aria-label="Очистить группировку">
                                 <i class="pi pi-undo"></i>
                                 ${ !this.settings.hideMenuButtonLabels ? '<span class="btn-label">очистить</span>' : '' }
-                            </div>
+                            </button>
                             ` : '' }
-                            <div class="integram-table-settings${ this.groupingEnabled ? ' active' : '' }" onclick="window.${ instanceName }.openGroupingSettings()" title="Группы">
+                            <button type="button" class="integram-table-settings${ this.groupingEnabled ? ' active' : '' }" onclick="window.${ instanceName }.openGroupingSettings()" title="Группы" aria-label="Настроить группировку" aria-pressed="${ this.groupingEnabled ? 'true' : 'false' }">
                                 <i class="pi pi-objects-column"></i>
                                 ${ !this.settings.hideMenuButtonLabels ? '<span class="btn-label">группы</span>' : '' }
-                            </div>
+                            </button>
                             ${ this.hasActiveFilters() ? `
-                            <div class="integram-table-settings" onclick="window.${ instanceName }.clearAllFilters()" title="Очистить фильтры">
+                            <button type="button" class="integram-table-settings" onclick="window.${ instanceName }.clearAllFilters()" title="Очистить фильтры" aria-label="Очистить фильтры">
                                 <i class="pi pi-filter-slash"></i>
                                 ${ !this.settings.hideMenuButtonLabels ? '<span class="btn-label">очистить</span>' : '' }
-                            </div>
+                            </button>
                             ` : '' }
-                            <div class="integram-table-settings${ this.filtersEnabled ? ' active' : '' }" onclick="window.${ instanceName }.toggleFilters()" title="Фильтры">
+                            <button type="button" class="integram-table-settings${ this.filtersEnabled ? ' active' : '' }" onclick="window.${ instanceName }.toggleFilters()" title="Фильтры" aria-label="Показать фильтры" aria-pressed="${ this.filtersEnabled ? 'true' : 'false' }">
                                 <i class="pi pi-filter"></i>
                                 ${ !this.settings.hideMenuButtonLabels ? '<span class="btn-label">фильтры</span>' : '' }
-                            </div>
+                            </button>
                             ${ this.isExportAllowed() ? `
                             <div class="integram-table-export-container">
-                                <div class="integram-table-settings" onclick="window.${ instanceName }.toggleExportMenu(event)" title="Экспорт">
+                                <button type="button" class="integram-table-settings" onclick="window.${ instanceName }.toggleExportMenu(event)" title="Экспорт" aria-label="Экспортировать данные" aria-haspopup="menu" aria-expanded="false" aria-controls="${ instanceName }-export-menu">
                                     <i class="pi pi-download"></i>
                                     ${ !this.settings.hideMenuButtonLabels ? '<span class="btn-label">экспорт</span>' : '' }
-                                </div>
-                                <div class="integram-export-menu" id="${ instanceName }-export-menu" style="display: none;">
-                                    <div class="export-menu-item" onclick="window.${ instanceName }.exportTable('xlsx')">
+                                </button>
+                                <div class="integram-export-menu" id="${ instanceName }-export-menu" role="menu" aria-label="Варианты экспорта" style="display: none;">
+                                    <button type="button" class="export-menu-item" role="menuitem" onclick="window.${ instanceName }.exportTable('xlsx')">
                                         <span class="export-icon"><i class="pi pi-file-excel"></i></span> XLSX (Excel)
-                                    </div>
-                                    <div class="export-menu-item" onclick="window.${ instanceName }.exportTable('xls')">
+                                    </button>
+                                    <button type="button" class="export-menu-item" role="menuitem" onclick="window.${ instanceName }.exportTable('xls')">
                                         <span class="export-icon"><i class="pi pi-file-excel"></i></span> XLS (Excel 97-2003)
-                                    </div>
-                                    <div class="export-menu-item" onclick="window.${ instanceName }.exportTable('csv')">
+                                    </button>
+                                    <button type="button" class="export-menu-item" role="menuitem" onclick="window.${ instanceName }.exportTable('csv')">
                                         <span class="export-icon"><i class="pi pi-file"></i></span> CSV
-                                    </div>
-                                    <div class="export-menu-item" onclick="window.${ instanceName }.copyToBuffer()">
+                                    </button>
+                                    <button type="button" class="export-menu-item" role="menuitem" onclick="window.${ instanceName }.copyToBuffer()">
                                         <span class="export-icon"><i class="pi pi-copy"></i></span> В буфер
-                                    </div>
+                                    </button>
                                 </div>
                             </div>
                             ` : '' }
                             ${ this.checkboxMode && this.selectedRows.size > 0 && this.isTableWritable() ? `
-                            <button class="btn btn-sm btn-danger integram-bulk-delete-btn" id="${ instanceName }-bulk-delete-btn" onclick="window.${ instanceName }.showBulkDeleteConfirm(event)">
+                            <button type="button" class="btn btn-sm btn-danger integram-bulk-delete-btn" id="${ instanceName }-bulk-delete-btn" onclick="window.${ instanceName }.showBulkDeleteConfirm(event)">
                                 Удалить (${ this.selectedRows.size })
                             </button>
                             ` : '' }
                             ${ this.isTableDeletable() && this.isTableWritable() ? `
-                            <div class="integram-table-settings integram-table-settings-filter-delete" onclick="window.${ instanceName }.showFilterDeleteConfirm(event)" title="Удалить записи, удовлетворяющие заданному фильтру">
+                            <button type="button" class="integram-table-settings integram-table-settings-filter-delete" onclick="window.${ instanceName }.showFilterDeleteConfirm(event)" title="Удалить записи, удовлетворяющие заданному фильтру" aria-label="Удалить записи, удовлетворяющие заданному фильтру">
                                 <i class="pi pi-trash"></i>
                                 ${ !this.settings.hideMenuButtonLabels ? '<span class="btn-label">Удалить</span>' : '' }
-                            </div>
+                            </button>
                             ` : '' }
-                            <div class="integram-table-settings" onclick="window.${ instanceName }.copyConfigUrl()" title="Скопировать ссылку с текущими фильтрами и группами">
+                            <button type="button" class="integram-table-settings" onclick="window.${ instanceName }.copyConfigUrl()" title="Скопировать ссылку с текущими фильтрами и группами" aria-label="Скопировать ссылку с текущими фильтрами и группами">
                                 <i class="pi pi-copy"></i>
                                 ${ !this.settings.hideMenuButtonLabels ? '<span class="btn-label">ссылка</span>' : '' }
-                            </div>
-                            <div class="integram-table-settings" onclick="window.${ instanceName }.openTableSettings()" title="Настройка таблицы">
+                            </button>
+                            <button type="button" class="integram-table-settings" onclick="window.${ instanceName }.openTableSettings()" title="Настройка таблицы" aria-label="Настройка таблицы">
                                 <i class="pi pi-cog"></i>
                                 ${ !this.settings.hideMenuButtonLabels ? '<span class="btn-label">вид</span>' : '' }
-                            </div>
-                            <div class="integram-table-settings" onclick="window.${ instanceName }.openColumnSettings()" title="Настройка колонок">
+                            </button>
+                            <button type="button" class="integram-table-settings" onclick="window.${ instanceName }.openColumnSettings()" title="Настройка колонок" aria-label="Настройка колонок">
                                 <i class="pi pi-th-large"></i>
                                 ${ !this.settings.hideMenuButtonLabels ? '<span class="btn-label">колонки</span>' : '' }
-                            </div>
+                            </button>
                         </div>
                     </div>
                     ${ this.renderHiddenFilterBadges() }
                     <div class="integram-table-container">
-                        <table class="integram-table${ this.settings.compact ? ' compact' : '' }">
+                        <table class="integram-table${ this.settings.compact ? ' compact' : '' }" aria-label="${ this.escapeHtml(this.options.title || 'Данные') }">
                         <thead>
                             ${ (() => {
                                 // Smart header grouping (issue #1540, #1624)
@@ -2041,10 +2492,10 @@ class IntegramTable{
                                     // Multi-row smart header
                                     const rowsOfCells = this.renderSmartHeaderRows(smartTree, smartDepth, 0, instanceName, groupingColumnSet);
                                     const checkboxHtml = this.checkboxMode
-                                        ? `<th class="checkbox-column-header" rowspan="${ smartDepth }"><input type="checkbox" class="row-select-all" title="Выбрать все" ${ this.data.length > 0 && this.selectedRows.size === this.data.length ? 'checked' : '' }></th>`
+                                        ? `<th class="checkbox-column-header" rowspan="${ smartDepth }"><input type="checkbox" class="row-select-all" title="Выбрать все" ${ this.areAllSelectableRowsSelected() ? 'checked' : '' }></th>`
                                         : '';
                                     const addColHtml = this.isStructureWritable()
-                                        ? `<th class="add-column-header-cell" rowspan="${ smartDepth }" style="width: 36px; min-width: 36px;" title="Добавить колонку" onclick="window.${ instanceName }.quickAddColumn()"><i class="pi pi-plus"></i></th>`
+                                        ? `<th class="add-column-header-cell" rowspan="${ smartDepth }" style="width: 36px; min-width: 36px;"><button type="button" class="add-column-header-button" title="Добавить колонку" aria-label="Добавить колонку" onclick="window.${ instanceName }.quickAddColumn()"><i class="pi pi-plus" aria-hidden="true"></i></button></th>`
                                         : '';
                                     return rowsOfCells.map((cells, rowIdx) => `
                                         <tr>
@@ -2069,33 +2520,35 @@ class IntegramTable{
                                     : headerColumns.map(col => {
                                         const width = this.columnWidths[col.id];
                                         const widthStyle = width ? ` style="width: ${ width }px; min-width: ${ width }px;"` : '';
-                                        const addButtonHtml = this.shouldShowAddButton(col) ?
-                                            `<button class="column-add-btn" onclick="window.${ instanceName }.openColumnCreateForm('${ col.id }')" title="Создать запись"><i class="pi pi-plus"></i></button>` : '';
+                                        const actionColumnId = this.normalizeNumericId(col.id);
+                                        const addButtonHtml = this.shouldShowAddButton(col) && actionColumnId ?
+                                            `<button class="column-add-btn" onclick="window.${ instanceName }.openColumnCreateForm('${ actionColumnId }')" title="Создать запись"><i class="pi pi-plus"></i></button>` : '';
                                         let sortIndicator = '';
                                         if (this.sortColumn === col.id) {
                                             sortIndicator = this.sortDirection === 'asc' ? '<i class="pi pi-sort-amount-up-alt" style="font-size:0.75em;"></i> ' : '<i class="pi pi-sort-amount-down" style="font-size:0.75em;"></i> ';
                                         }
-                                        const refTypeId = col.ref;
+                                        const refTypeId = this.normalizeNumericId(col.ref);
                                         const refIconHtml = refTypeId ? (() => {
                                             const dbName = window.db || window.location.pathname.split('/')[1];
-                                            return `<a class="column-ref-link" href="/${dbName}/table/${refTypeId}" target="_blank" title="Открыть справочник в новой вкладке" onclick="event.stopPropagation()"><i class="pi pi-external-link"></i></a>`;
+                                            return `<a class="column-ref-link" href="/${dbName}/table/${refTypeId}" target="_blank" rel="noopener noreferrer" title="Открыть справочник в новой вкладке" onclick="event.stopPropagation()"><i class="pi pi-external-link"></i></a>`;
                                         })() : '';
                                         return `
-                                            <th data-column-id="${ col.id }" draggable="true" title="${ col.id }"${ widthStyle }>
-                                                <span class="column-header-content" data-column-id="${ col.id }" title="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ sortIndicator }${ col.name }</span>
+                                            <th data-column-id="${ this.escapeHtml(col.id) }" title="${ this.escapeHtml(col.id) }"${ widthStyle }>
+                                                <button type="button" class="column-drag-handle" draggable="true" data-column-id="${ this.escapeHtml(col.id) }" title="Перетащите для изменения порядка" aria-label="Переместить столбец ${ this.escapeHtml(col.name) }. Используйте стрелки влево и вправо"><i class="pi pi-bars" aria-hidden="true"></i></button>
+                                                <button type="button" class="column-header-content" data-column-id="${ this.escapeHtml(col.id) }" title="${ this.escapeHtml(col.id) }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }" aria-label="Сортировать по столбцу ${ this.escapeHtml(col.name) }">${ sortIndicator }${ this.escapeHtml(col.name) }</button>
                                                 ${ refIconHtml }
                                                 ${ addButtonHtml }
-                                                <div class="column-resize-handle" data-column-id="${ col.id }"></div>
+                                                <div class="column-resize-handle" data-column-id="${ this.escapeHtml(col.id) }"></div>
                                             </th>
                                         `;
                                     }).join('');
 
                                 return `
                                     <tr>
-                                        ${ this.checkboxMode ? `<th class="checkbox-column-header"><input type="checkbox" class="row-select-all" title="Выбрать все" ${ this.data.length > 0 && this.selectedRows.size === this.data.length ? 'checked' : '' }></th>` : '' }
+                                        ${ this.checkboxMode ? `<th class="checkbox-column-header"><input type="checkbox" class="row-select-all" title="Выбрать все" ${ this.areAllSelectableRowsSelected() ? 'checked' : '' }></th>` : '' }
                                         ${ singleRowCells }
                                         ${ this.settings.showReferences && (this.objectTableId || this.options.tableTypeId) ? `<th class="references-column-header" title="Таблицы, где эта таблица используется как справочник">Связи</th>` : '' }
-                                        ${ this.isStructureWritable() ? `<th class="add-column-header-cell" style="width: 36px; min-width: 36px;" title="Добавить колонку" onclick="window.${ instanceName }.quickAddColumn()"><i class="pi pi-plus"></i></th>` : '' }
+                                        ${ this.isStructureWritable() ? `<th class="add-column-header-cell" style="width: 36px; min-width: 36px;"><button type="button" class="add-column-header-button" title="Добавить колонку" aria-label="Добавить колонку" onclick="window.${ instanceName }.quickAddColumn()"><i class="pi pi-plus" aria-hidden="true"></i></button></th>` : '' }
                                     </tr>
                                     ${ this.filtersEnabled ? `
                                     <tr class="filter-row">
@@ -2114,16 +2567,26 @@ class IntegramTable{
                         <tbody>
                             ${ this.groupingEnabled && this.groupedData.length > 0 ?
                                 this.renderGroupedRows(orderedColumns, instanceName) :
-                                this.data.map((row, rowIndex) => `
-                                    <tr class="${ this.selectedRows.has(rowIndex) ? 'row-selected' : '' }">
-                                        ${ this.checkboxMode ? `<td class="checkbox-column-cell"><input type="checkbox" class="row-select-checkbox" data-row-index="${ rowIndex }" ${ this.selectedRows.has(rowIndex) ? 'checked' : '' }></td>` : '' }
+                                this.data.length > 0 ? this.data.map((row, rowIndex) => `
+                                    <tr class="${ this.isRowSelected(rowIndex) ? 'row-selected' : '' }">
+                                        ${ this.checkboxMode ? `<td class="checkbox-column-cell"><input type="checkbox" class="row-select-checkbox" data-row-index="${ rowIndex }" ${ this.isRowSelected(rowIndex) ? 'checked' : '' }></td>` : '' }
                                         ${ orderedColumns.map((col, colIndex) => {
                                             const cellValue = row[this.columns.indexOf(col)];
                                             return this.renderCell(col, cellValue, rowIndex, colIndex);
                                         }).join('') }
                                         ${ this.settings.showReferences && (this.objectTableId || this.options.tableTypeId) ? this.renderReferencesCell(rowIndex) : '' }
                                     </tr>
-                                `).join('')
+                                `).join('') : `
+                                    <tr class="integram-table-empty-row">
+                                        <td colspan="${ Math.max(1, orderedColumns.length + (this.checkboxMode ? 1 : 0) + (this.settings.showReferences && (this.objectTableId || this.options.tableTypeId) ? 1 : 0) + (this.isStructureWritable() ? 1 : 0)) }">
+                                            <div class="integram-table-empty-state" role="status">
+                                                <i class="pi ${ (this.pendingRequests || 0) > 0 ? 'pi-spin pi-spinner' : 'pi-inbox' }" aria-hidden="true"></i>
+                                                <span>${ (this.pendingRequests || 0) > 0 ? 'Загружаем данные…' : 'Записей пока нет' }</span>
+                                                <small>${ (this.pendingRequests || 0) > 0 ? 'Это займёт несколько секунд' : (this.hasActiveFilters() ? 'Попробуйте изменить или очистить фильтры' : 'Новые записи появятся здесь') }</small>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                `
                             }
                         </tbody>
                         </table>
@@ -2203,13 +2666,13 @@ class IntegramTable{
                     return `
                         <td>
                             <div class="filter-cell-wrapper">
-                                <span class="filter-icon-inside" data-column-id="${ column.id }">
+                                <button type="button" class="filter-icon-inside" data-column-id="${ this.escapeHtml(column.id) }" title="Изменить условие фильтра" aria-label="Условие фильтра: ${ currentFilter.type }. Изменить">
                                     ${ currentFilter.type }
-                                </span>
+                                </button>
                                 <input type="text"
                                        class="filter-input-with-icon filter-ref-text-input"
-                                       data-column-id="${ column.id }"
-                                       value="${ displayValue }"
+                                       data-column-id="${ this.escapeHtml(column.id) }"
+                                       value="${ this.escapeHtml(displayValue) }"
                                        placeholder="${ placeholder }"
                                        autocomplete="off">
                             </div>
@@ -2256,13 +2719,13 @@ class IntegramTable{
                 return `
                     <td>
                         <div class="filter-cell-wrapper">
-                            <span class="filter-icon-inside" data-column-id="${ column.id }">
-                                ${ currentFilter.type }
-                            </span>
+                            <button type="button" class="filter-icon-inside" data-column-id="${ this.escapeHtml(column.id) }" title="Изменить условие фильтра" aria-label="Условие фильтра: ${ currentFilter.type }. Изменить">
+                                    ${ currentFilter.type }
+                                </button>
                             <button type="button"
                                     class="filter-ref-trigger"
-                                    data-column-id="${ column.id }"
-                                    data-selected-ids="${ Array.from(selectedIds).join(',') }"
+                                    data-column-id="${ this.escapeHtml(column.id) }"
+                                    data-selected-ids="${ this.escapeHtml(Array.from(selectedIds).join(',')) }"
                                     title="${ escapedDisplayText || 'Выбрать значение...' }">
                                 <span class="filter-ref-trigger-text${ escapedDisplayText ? '' : ' filter-ref-trigger-text--placeholder' }">${ escapedDisplayText || 'Выбрать...' }</span>
                                 <span class="filter-ref-trigger-arrow">▼</span>
@@ -2283,12 +2746,12 @@ class IntegramTable{
                 return `
                     <td>
                         <div class="filter-cell-wrapper">
-                            <span class="filter-icon-inside" data-column-id="${ column.id }">
-                                ${ currentFilter.type }
-                            </span>
+                            <button type="button" class="filter-icon-inside" data-column-id="${ this.escapeHtml(column.id) }" title="Изменить условие фильтра" aria-label="Условие фильтра: ${ currentFilter.type }. Изменить">
+                                    ${ currentFilter.type }
+                                </button>
                             <input type="${ inputType }"
                                    class="filter-input-with-icon filter-date-picker"
-                                   data-column-id="${ column.id }"
+                                   data-column-id="${ this.escapeHtml(column.id) }"
                                    data-is-datetime="${ isDateTime ? '1' : '0' }"
                                    value="${ html5Value }">
                         </div>
@@ -2316,12 +2779,12 @@ class IntegramTable{
                 return `
                     <td>
                         <div class="filter-cell-wrapper filter-range-wrapper">
-                            <span class="filter-icon-inside" data-column-id="${ column.id }">
-                                ${ currentFilter.type }
-                            </span>
+                            <button type="button" class="filter-icon-inside" data-column-id="${ this.escapeHtml(column.id) }" title="Изменить условие фильтра" aria-label="Условие фильтра: ${ currentFilter.type }. Изменить">
+                                    ${ currentFilter.type }
+                                </button>
                             <input type="${ inputType }"
                                    class="filter-input-with-icon filter-range-input"
-                                   data-column-id="${ column.id }"
+                                   data-column-id="${ this.escapeHtml(column.id) }"
                                    data-range-part="from"${ dtAttr }
                                    value="${ escAttr(fromVal) }"
                                    placeholder="от"
@@ -2329,7 +2792,7 @@ class IntegramTable{
                             <span class="filter-range-sep">—</span>
                             <input type="${ inputType }"
                                    class="filter-input-with-icon filter-range-input"
-                                   data-column-id="${ column.id }"
+                                   data-column-id="${ this.escapeHtml(column.id) }"
                                    data-range-part="to"${ dtAttr }
                                    value="${ escAttr(toVal) }"
                                    placeholder="до"
@@ -2342,13 +2805,13 @@ class IntegramTable{
             return `
                 <td>
                     <div class="filter-cell-wrapper">
-                        <span class="filter-icon-inside" data-column-id="${ column.id }">
-                            ${ currentFilter.type }
-                        </span>
+                        <button type="button" class="filter-icon-inside" data-column-id="${ this.escapeHtml(column.id) }" title="Изменить условие фильтра" aria-label="Условие фильтра: ${ currentFilter.type }. Изменить">
+                                    ${ currentFilter.type }
+                                </button>
                         <input type="text"
                                class="filter-input-with-icon"
-                               data-column-id="${ column.id }"
-                               value="${ displayValue }"
+                               data-column-id="${ this.escapeHtml(column.id) }"
+                               value="${ this.escapeHtml(displayValue) }"
                                placeholder="${ placeholder }"
                                autocomplete="off">
                     </div>
@@ -2579,6 +3042,9 @@ class IntegramTable{
                 }
             }
 
+            if (refValueId && !isArrayField) {
+                refValueId = this.normalizeNumericId(refValueId) || null;
+            }
             // Check if this column has a style column
             if (this.styleColumns[column.id]) {
                 const styleColId = this.styleColumns[column.id];
@@ -2586,7 +3052,10 @@ class IntegramTable{
                 if (styleColIndex !== -1 && this.data[rowIndex]) {
                     const styleValue = this.data[rowIndex][styleColIndex];
                     if (styleValue) {
-                        customStyle = ` style="${ styleValue }"`;
+                        const safeStyle = this.sanitizeCellStyle(styleValue);
+                        if (safeStyle) {
+                            customStyle = ` style="${ this.escapeHtml(safeStyle) }"`;
+                        }
                     }
                 }
             }
@@ -2597,26 +3066,27 @@ class IntegramTable{
             }
 
             // Handle table requisites (subordinate tables) - display as link with table icon
-            if (column.arr_id) {
+            const subordinateTypeId = this.normalizeNumericId(column.arr_id);
+            if (subordinateTypeId) {
                 cellClass = 'subordinate-link-cell';
-                const count = value !== null && value !== undefined && value !== '' ? value : 0;
+                const count = this.escapeHtml(value !== null && value !== undefined && value !== '' ? value : 0);
                 const instanceName = this.options.instanceName;
                 // Get the record ID from rawObjectData for this row
                 let recordId = null;
                 if (this.rawObjectData && this.rawObjectData[rowIndex]) {
-                    recordId = this.rawObjectData[rowIndex].i;
+                    recordId = this.normalizeNumericId(this.rawObjectData[rowIndex].i);
                 }
                 if (recordId) {
                     // Build URL for "Open in new window" link (issue #729, #733)
                     const pathParts = window.location.pathname.split('/');
                     const dbName = pathParts.length >= 2 ? pathParts[1] : '';
-                    const subordinateTableUrl = `/${dbName}/table/${column.arr_id}?F_U=${recordId}`;
+                    const subordinateTableUrl = `/${dbName}/table/${subordinateTypeId}?F_U=${recordId}`;
                     // Issue #733: Split into two links - table icon opens new window, count opens modal
-                    displayValue = `<a href="${subordinateTableUrl}" class="subordinate-table-icon-link" target="${column.arr_id}" title="Открыть в новом окне" onclick="event.stopPropagation();"><i class="pi pi-table"></i></a><a href="#" class="subordinate-count-link" onclick="window.${ instanceName }.openSubordinateTableFromCell(event, ${ column.arr_id }, ${ recordId }); return false;" title="Посмотреть подчиненную таблицу">(${ count })</a>`;
+                    displayValue = `<a href="${subordinateTableUrl}" class="subordinate-table-icon-link" target="${subordinateTypeId}" rel="noopener noreferrer" title="Открыть в новом окне" onclick="event.stopPropagation();"><i class="pi pi-table"></i></a><a href="#" class="subordinate-count-link" onclick="window.${ instanceName }.openSubordinateTableFromCell(event, ${ subordinateTypeId }, ${ recordId }); return false;" title="Посмотреть подчиненную таблицу">(${ count })</a>`;
                 } else {
                     displayValue = `<span class="table-icon"><i class="pi pi-table"></i></span><span class="subordinate-count">(${ count })</span>`;
                 }
-                return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }" data-arr-id="${ column.arr_id }"${ dataTypeAttrs }${ customStyle }>${ displayValue }</td>`;
+                return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }" data-arr-id="${ subordinateTypeId }"${ dataTypeAttrs }${ customStyle }>${ displayValue }</td>`;
             }
 
             switch (format) {
@@ -2668,46 +3138,54 @@ class IntegramTable{
                     if (value && value !== '') {
                         // Check if value is already an HTML anchor tag (from object/ endpoint)
                         if (typeof value === 'string' && value.trim().startsWith('<a')) {
-                            // Value is already HTML link - add file-link class and render as-is
-                            displayValue = value.replace('<a', '<a class="file-link"');
+                            // Preserve the server-provided link semantics after allow-list sanitization.
+                            const safeFileLink = this.sanitizeCellHtml(value);
+                            displayValue = safeFileLink.replace(/^<a\b/i, '<a class="file-link"');
                             return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }"${ dataTypeAttrs }${ customStyle }>${ displayValue }</td>`;
                         }
                         // Display as a download link if value is a path
                         const apiBase = this.getApiBase();
                         const fileName = value.split('/').pop() || value;
-                        displayValue = `<a href="${ apiBase }/file/${ value }" target="_blank" class="file-link" title="Скачать файл">${ this.escapeHtml(fileName) }</a>`;
+                        const encodedPath = String(value).split('/').map(segment => encodeURIComponent(segment)).join('/');
+                        const safeHref = this.escapeHtml(apiBase + '/file/' + encodedPath);
+                        displayValue = `<a href="${ safeHref }" target="_blank" rel="noopener noreferrer" class="file-link" title="Скачать файл">${ this.escapeHtml(fileName) }</a>`;
                         return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }"${ dataTypeAttrs }${ customStyle }>${ displayValue }</td>`;
                     }
                     break;
                 case 'HTML':
-                    return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }"${ dataTypeAttrs }${ customStyle }>${ displayValue }</td>`;
+                    return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }"${ dataTypeAttrs }${ customStyle }>${ this.sanitizeCellHtml(displayValue) }</td>`;
                 case 'BUTTON': {
                     const pathParts = window.location.pathname.split('/');
                     const dbName = pathParts.length >= 2 ? pathParts[1] : '';
-                    let recordId = null;
-                    if (this.rawObjectData && this.rawObjectData[rowIndex]) {
-                        recordId = this.rawObjectData[rowIndex].i;
-                    }
-                    const btnValue = value !== null && value !== undefined ? String(value) : '';
-                    let btnHref, btnTarget, btnOnclick;
-                    if (btnValue.match(/^https?:\/\//i)) {
-                        btnHref = btnValue;
-                        btnTarget = recordId !== null ? String(recordId) : '_blank';
-                    } else if (btnValue.match(/^\w[\w.]*\s*\([\s\S]*\)\s*;?\s*$/)) {
-                        // Value is a JS function call (e.g. newApi('POST','...','','reloadAllIntegramTables'))
-                        btnOnclick = btnValue.replace(/;?\s*$/, '') + '; event.stopPropagation();';
+                    const btnValue = value !== null && value !== undefined ? String(value).trim() : '';
+                    const parsedAction = this.parseButtonAction(btnValue);
+                    let buttonHtml = '';
+
+                    if (parsedAction) {
+                        const actionAttr = this.escapeHtml(btnValue);
+                        buttonHtml = `<button type="button" class="btn btn-sm btn-primary integram-action-button" data-button-action="${ actionAttr }" title="Выполнить действие"><i class="pi pi-play"></i></button>`;
                     } else if (btnValue) {
-                        btnHref = `/${dbName}/${btnValue.replace(/^\//, '')}`;
-                        btnTarget = '_blank';
+                        const candidate = /^https?:\/\//i.test(btnValue)
+                            ? btnValue
+                            : '/' + encodeURIComponent(dbName) + '/' + btnValue.replace(/^\/+/, '');
+                        try {
+                            const url = new URL(candidate, window.location.origin);
+                            if (url.protocol === 'http:' || url.protocol === 'https:') {
+                                const href = url.origin === window.location.origin
+                                    ? url.pathname + url.search + url.hash
+                                    : url.href;
+                                const safeHref = this.escapeHtml(href);
+                                buttonHtml = `<a href="${ safeHref }" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-primary" title="Открыть"><i class="pi pi-play"></i></a>`;
+                            }
+                        } catch (error) {
+                            console.warn('[integram-table] Invalid BUTTON URL blocked', error);
+                        }
                     }
-                    if (btnOnclick) {
-                        displayValue = `<button class="btn btn-sm btn-primary" onclick="${ btnOnclick.replace(/"/g, '&quot;') }"><i class="pi pi-play"></i></button>`;
-                    } else if (btnHref) {
-                        displayValue = `<a href="${ btnHref }" target="${ btnTarget }" onclick="event.stopPropagation();"><button class="btn btn-sm btn-primary"><i class="pi pi-play"></i></button></a>`;
-                    } else {
-                        displayValue = `<button class="btn btn-sm btn-primary"><i class="pi pi-play"></i></button>`;
+
+                    if (!buttonHtml) {
+                        buttonHtml = '<button type="button" class="btn btn-sm btn-primary" disabled title="Небезопасное действие заблокировано"><i class="pi pi-play"></i></button>';
                     }
-                    return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }"${ dataTypeAttrs }${ customStyle } style="text-align: center;">${ displayValue }</td>`;
+                    return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }"${ dataTypeAttrs }${ customStyle } style="text-align: center;">${ buttonHtml }</td>`;
                 }
             }
 
@@ -2743,14 +3221,8 @@ class IntegramTable{
                     // then linkify both the truncated display portion and the full value for the modal.
                     if (this.settings.truncateLongValues && escapedValue.length > 127) {
                         const truncatedEscaped = escapedValue.substring(0, 127);
-                        const fullLinkified = this.linkifyText(escapedValue);
-                        const fullValueEscaped = fullLinkified
-                            .replace(/\\/g, '\\\\')
-                            .replace(/\n/g, '\\n')
-                            .replace(/\r/g, '\\r')
-                            .replace(/'/g, '\\\'');
-                        const instanceName = this.options.instanceName;
-                        escapedValue = `${ this.linkifyText(truncatedEscaped) }<a href="#" class="show-full-value" onclick="window.${ instanceName }.showFullValue(event, '${ fullValueEscaped }'); return false;">...</a>`;
+                        const fullValueAttr = this.escapeHtml(String(displayValue));
+                        escapedValue = `${ this.linkifyText(truncatedEscaped) }<a href="#" class="show-full-value" data-full-value="${ fullValueAttr }">...</a>`;
                     } else {
                         escapedValue = this.linkifyText(escapedValue);
                     }
@@ -2760,14 +3232,8 @@ class IntegramTable{
             // Truncate long values if setting is enabled (for non-linkified formats)
             if (this.settings.truncateLongValues && escapedValue.length > 127 && format !== 'SHORT' && format !== 'CHARS' && format !== 'MEMO') {
                 const truncated = escapedValue.substring(0, 127);
-                // Properly escape all JavaScript special characters for use in onclick string literal
-                const fullValueEscaped = escapedValue
-                    .replace(/\\/g, '\\\\')   // Escape backslashes first
-                    .replace(/\n/g, '\\n')    // Escape newlines
-                    .replace(/\r/g, '\\r')    // Escape carriage returns
-                    .replace(/'/g, '\\\'');   // Escape single quotes
-                const instanceName = this.options.instanceName;
-                escapedValue = `${ truncated }<a href="#" class="show-full-value" onclick="window.${ instanceName }.showFullValue(event, '${ fullValueEscaped }'); return false;">...</a>`;
+                const fullValueAttr = this.escapeHtml(String(displayValue));
+                escapedValue = `${ truncated }<a href="#" class="show-full-value" data-full-value="${ fullValueAttr }">...</a>`;
             }
 
             // Track typeId computed in the edit icon block for use in editableAttrs
@@ -2843,6 +3309,8 @@ class IntegramTable{
                     typeId = fallbackTypeId;
                 }
 
+                recordId = this.normalizeNumericId(recordId);
+                typeId = this.normalizeNumericId(typeId);
                 const instanceName = this.options.instanceName;
                 // Only show edit icon if recordId exists (disable creating new records)
                 // In object format: show edit icon ONLY for first column or reference fields
@@ -2915,7 +3383,7 @@ class IntegramTable{
                     // Issue #1794: For "any record" link type, also wrap in lazy-resolved hyperlink
                     let displayContent = escapedValue;
                     if (isRefField && refValueId && !isArrayField) {
-                        const refTypeId = column.orig || column.ref_id || typeId;
+                        const refTypeId = this.normalizeNumericId(column.orig || column.ref_id || typeId);
                         if (refTypeId) {
                             const pathParts = window.location.pathname.split('/');
                             const dbName = pathParts.length >= 2 ? pathParts[1] : '';
@@ -2929,7 +3397,7 @@ class IntegramTable{
                     const editIconOnclick = isAnyRecordLink
                         ? `window.${ instanceName }.openAnyRefEditForm('${ recordId }', ${ rowIndex }); event.stopPropagation();`
                         : `window.${ instanceName }.openEditForm('${ recordId }', '${ typeId }', ${ rowIndex }); event.stopPropagation();`;
-                    const editIcon = `<span class="edit-icon" onclick="${ editIconOnclick }" title="Редактировать"><i class="pi pi-pencil" style="font-size: 0.875rem;"></i></span>`;
+                    const editIcon = `<button type="button" class="edit-icon" onclick="${ editIconOnclick }" title="Редактировать" aria-label="Редактировать значение"><i class="pi pi-pencil" style="font-size: 0.875rem;"></i></button>`;
                     escapedValue = `<div class="cell-content-wrapper"><span title="${ recordId }">${ displayContent }</span>${ editIcon }</div>`;
                     cellTitleId = recordId; // Issue #4385: expose ID on the parent <td>
                 }
@@ -2938,7 +3406,7 @@ class IntegramTable{
             // Issue #1404: For reference fields without edit icon, still wrap value in a hyperlink
             // inside a cell-content-wrapper when the referenced record ID is available
             if (isRefField && refValueId && !isArrayField && !escapedValue.includes('cell-content-wrapper')) {
-                const refTypeId = column.orig || column.ref_id;
+                const refTypeId = this.normalizeNumericId(column.orig || column.ref_id);
                 if (refTypeId) {
                     const pathParts = window.location.pathname.split('/');
                     const dbName = pathParts.length >= 2 ? pathParts[1] : '';
@@ -3012,6 +3480,10 @@ class IntegramTable{
                     }
                 }
 
+                if (recordId !== 'new') {
+                    recordId = this.normalizeNumericId(recordId);
+                }
+
                 // For reference fields, we allow editing even with empty values as long as we can determine parent record
                 // For non-reference fields, we still require a valid recordId
                 // In object format, check for ref_id existence; in report format, check ref === 1
@@ -3027,11 +3499,11 @@ class IntegramTable{
                     // Add ref attribute if this is a reference field
                     const refAttr = isRefField ? ` data-col-ref="1"` : '';
                     // Store parsed reference value ID from "id:Value" format
-                    const refValueIdAttr = refValueId ? ` data-ref-value-id="${ refValueId }"` : '';
+                    const refValueIdAttr = refValueId ? ` data-ref-value-id="${ this.escapeHtml(refValueId) }"` : '';
                     // Store full value for editing (escape for HTML attribute)
-                    const fullValueAttr = fullValueForEditing ? ` data-full-value="${ fullValueForEditing.replace(/"/g, '&quot;') }"` : '';
+                    const fullValueAttr = fullValueForEditing ? ` data-full-value="${ this.escapeHtml(fullValueForEditing) }"` : '';
                     // Issue #863: For multi-select fields, store raw "ids:values" string so editor can resolve IDs directly
-                    const rawValueAttr = multiRawValue ? ` data-raw-value="${ multiRawValue.replace(/"/g, '&quot;') }"` : '';
+                    const rawValueAttr = multiRawValue ? ` data-raw-value="${ this.escapeHtml(multiRawValue) }"` : '';
                     // Use 'dynamic' as placeholder for recordId if it's empty (will be determined at edit time)
                     const recordIdAttr = recordId && recordId !== '' && recordId !== '0' ? recordId : 'dynamic';
                     // Use paramId for object format (metadata ID), otherwise fall back to type (data type)
@@ -3039,7 +3511,7 @@ class IntegramTable{
                     // Issue #915: Store typeId for edit icon so updateCellDisplay can add it
                     // when an empty cell gets its first value filled in
                     const editTypeIdAttr = editIconTypeId ? ` data-edit-type-id="${ editIconTypeId }"` : '';
-                    editableAttrs = ` data-editable="true" data-record-id="${ recordIdAttr }" data-col-id="${ column.id }" data-col-type="${ colTypeForParam }" data-col-format="${ format }" data-row-index="${ rowIndex }"${ refAttr }${ refValueIdAttr }${ fullValueAttr }${ rawValueAttr }${ editTypeIdAttr }`;
+                    editableAttrs = ` data-editable="true" data-record-id="${ this.escapeHtml(recordIdAttr) }" data-col-id="${ this.escapeHtml(column.id) }" data-col-type="${ this.escapeHtml(colTypeForParam) }" data-col-format="${ format }" data-row-index="${ rowIndex }"${ refAttr }${ refValueIdAttr }${ fullValueAttr }${ rawValueAttr }${ editTypeIdAttr }`;
                     cellClass += ' inline-editable';
                     if (window.INTEGRAM_DEBUG) {
                         console.log(`  ✓ Cell will be editable with recordId=${recordIdAttr}`);
@@ -3059,7 +3531,7 @@ class IntegramTable{
 
             // Issue #4385: mirror the record/reference ID onto the parent <td> title so the
             // ID stays discoverable even when the .edit-icon covers the inner wrapper entirely.
-            const cellTitleAttr = cellTitleId ? ` title="${ cellTitleId }"` : '';
+            const cellTitleAttr = cellTitleId ? ` title="${ this.escapeHtml(cellTitleId) }"` : '';
             return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }"${ dataTypeAttrs }${ customStyle }${ editableAttrs }${ cellTitleAttr }>${ escapedValue }${ rowNumberHtml }</td>`;
         }
 
@@ -3087,13 +3559,13 @@ class IntegramTable{
 
             this.groupedData.forEach((rowInfo, rowIndex) => {
                 const row = rowInfo.data;
-                const selectedClass = this.selectedRows.has(rowInfo.originalIndex) ? 'row-selected' : '';
+                const selectedClass = this.isRowSelected(rowInfo.originalIndex) ? 'row-selected' : '';
 
                 rowsHtml += `<tr class="${ selectedClass }">`;
 
                 // Add checkbox column if enabled
                 if (this.checkboxMode) {
-                    rowsHtml += `<td class="checkbox-column-cell"><input type="checkbox" class="row-select-checkbox" data-row-index="${ rowInfo.originalIndex }" ${ this.selectedRows.has(rowInfo.originalIndex) ? 'checked' : '' }></td>`;
+                    rowsHtml += `<td class="checkbox-column-cell"><input type="checkbox" class="row-select-checkbox" data-row-index="${ rowInfo.originalIndex }" ${ this.isRowSelected(rowInfo.originalIndex) ? 'checked' : '' }></td>`;
                 }
 
                 // Render group cells (with rowspan if this row starts a new group)
@@ -3116,7 +3588,7 @@ class IntegramTable{
                             : '';
 
                         // Render the group cell with special styling
-                        rowsHtml += `<td class="group-cell"${ rowspan } data-group-column="${ groupCell.colId }">`;
+                        rowsHtml += `<td class="group-cell"${ rowspan } data-group-column="${ this.escapeHtml(groupCell.colId) }">`;
                         rowsHtml += `<span class="group-cell-content">${ this.escapeHtml(String(cellValue || '')) }</span>`;
                         rowsHtml += addButtonHtml;
                         rowsHtml += `</td>`;
@@ -3283,8 +3755,9 @@ class IntegramTable{
                         const rowspan = totalDepth - depth;
                         const width = this.columnWidths[col.id];
                         const widthStyle = width ? ` style="width: ${ width }px; min-width: ${ width }px;"` : '';
-                        const addButtonHtml = this.shouldShowAddButton(col) ?
-                            `<button class="column-add-btn" onclick="window.${ instanceName }.openColumnCreateForm('${ col.id }')" title="Создать запись"><i class="pi pi-plus"></i></button>` : '';
+                        const actionColumnId = this.normalizeNumericId(col.id);
+                        const addButtonHtml = this.shouldShowAddButton(col) && actionColumnId ?
+                            `<button class="column-add-btn" onclick="window.${ instanceName }.openColumnCreateForm('${ actionColumnId }')" title="Создать запись"><i class="pi pi-plus"></i></button>` : '';
                         let sortIndicator = '';
                         if (this.sortColumn === col.id) {
                             sortIndicator = this.sortDirection === 'asc'
@@ -3298,24 +3771,25 @@ class IntegramTable{
                         const groupingClass = isGroupingCol ? ' group-header' : '';
                         const groupingOrder = isGroupingCol ? this.groupingColumns.indexOf(col.id) + 1 : '';
                         const groupingBadge = isGroupingCol ? `<span class="grouping-header-badge">${ groupingOrder }</span>` : '';
-                        const refTypeId = col.ref_id;
+                        const refTypeId = this.normalizeNumericId(col.ref_id);
                         const refIconHtml = refTypeId ? (() => {
                             const dbName = window.db || window.location.pathname.split('/')[1];
-                            return `<a class="column-ref-link" href="/${dbName}/table/${refTypeId}" target="_blank" title="Открыть справочник в новой вкладке" onclick="event.stopPropagation()"><i class="pi pi-external-link"></i></a>`;
+                            return `<a class="column-ref-link" href="/${dbName}/table/${refTypeId}" target="_blank" rel="noopener noreferrer" title="Открыть справочник в новой вкладке" onclick="event.stopPropagation()"><i class="pi pi-external-link"></i></a>`;
                         })() : '';
                         rows[depth].push(`
-                            <th data-column-id="${ col.id }" draggable="true" title="${ col.id }"${ widthStyle }${ rowspan > 1 ? ` rowspan="${ rowspan }"` : '' } class="${ groupingClass }">
-                                <span class="column-header-content" data-column-id="${ col.id }" title="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ groupingBadge }${ sortIndicator }${ displayName }</span>
+                            <th data-column-id="${ this.escapeHtml(col.id) }" title="${ this.escapeHtml(col.id) }"${ widthStyle }${ rowspan > 1 ? ` rowspan="${ rowspan }"` : '' } class="${ groupingClass }">
+                                <button type="button" class="column-drag-handle" draggable="true" data-column-id="${ this.escapeHtml(col.id) }" title="Перетащите для изменения порядка" aria-label="Переместить столбец ${ this.escapeHtml(displayName) }. Используйте стрелки влево и вправо"><i class="pi pi-bars" aria-hidden="true"></i></button>
+                                <button type="button" class="column-header-content" data-column-id="${ this.escapeHtml(col.id) }" title="${ this.escapeHtml(col.id) }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }" aria-label="Сортировать по столбцу ${ this.escapeHtml(displayName) }">${ groupingBadge }${ sortIndicator }${ this.escapeHtml(displayName) }</button>
                                 ${ refIconHtml }
                                 ${ addButtonHtml }
-                                <div class="column-resize-handle" data-column-id="${ col.id }"></div>
+                                <div class="column-resize-handle" data-column-id="${ this.escapeHtml(col.id) }"></div>
                             </th>
                         `);
                     } else {
                         // Display prefix with dots replaced by spaces (issue #1565)
                         const displayPrefix = node.prefix.replace(/\./g, ' ');
                         rows[depth].push(`
-                            <th class="smart-header-group" colspan="${ node.span }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ displayPrefix }</th>
+                            <th class="smart-header-group" colspan="${ node.span }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ this.escapeHtml(displayPrefix) }</th>
                         `);
                         visit(node.children, depth + 1);
                     }
@@ -3347,8 +3821,9 @@ class IntegramTable{
             return allCols.map(col => {
                 const width = this.columnWidths[col.id];
                 const widthStyle = width ? ` style="width: ${ width }px; min-width: ${ width }px;"` : '';
-                const addButtonHtml = this.shouldShowAddButton(col) ?
-                    `<button class="column-add-btn" onclick="window.${ instanceName }.openColumnCreateForm('${ col.id }')" title="Создать запись"><i class="pi pi-plus"></i></button>` : '';
+                const actionColumnId = this.normalizeNumericId(col.id);
+                const addButtonHtml = this.shouldShowAddButton(col) && actionColumnId ?
+                    `<button class="column-add-btn" onclick="window.${ instanceName }.openColumnCreateForm('${ actionColumnId }')" title="Создать запись"><i class="pi pi-plus"></i></button>` : '';
 
                 // Add sort indicator if this column is sorted
                 let sortIndicator = '';
@@ -3362,18 +3837,19 @@ class IntegramTable{
                 const groupingOrder = isGroupingCol ? this.groupingColumns.indexOf(col.id) + 1 : '';
                 const groupingBadge = isGroupingCol ? `<span class="grouping-header-badge">${ groupingOrder }</span>` : '';
 
-                const refTypeId = col.ref_id;
+                const refTypeId = this.normalizeNumericId(col.ref_id);
                 const refIconHtml = refTypeId ? (() => {
                     const dbName = window.db || window.location.pathname.split('/')[1];
-                    return `<a class="column-ref-link" href="/${dbName}/table/${refTypeId}" target="_blank" title="Открыть справочник в новой вкладке" onclick="event.stopPropagation()"><i class="pi pi-external-link"></i></a>`;
+                    return `<a class="column-ref-link" href="/${dbName}/table/${refTypeId}" target="_blank" rel="noopener noreferrer" title="Открыть справочник в новой вкладке" onclick="event.stopPropagation()"><i class="pi pi-external-link"></i></a>`;
                 })() : '';
 
                 return `
-                    <th data-column-id="${ col.id }" draggable="true" title="${ col.id }"${ widthStyle } class="${ groupingClass }">
-                        <span class="column-header-content" data-column-id="${ col.id }" title="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ groupingBadge }${ sortIndicator }${ col.name }</span>
+                    <th data-column-id="${ this.escapeHtml(col.id) }" title="${ this.escapeHtml(col.id) }"${ widthStyle } class="${ groupingClass }">
+                        <button type="button" class="column-drag-handle" draggable="true" data-column-id="${ this.escapeHtml(col.id) }" title="Перетащите для изменения порядка" aria-label="Переместить столбец ${ this.escapeHtml(col.name) }. Используйте стрелки влево и вправо"><i class="pi pi-bars" aria-hidden="true"></i></button>
+                        <button type="button" class="column-header-content" data-column-id="${ this.escapeHtml(col.id) }" title="${ this.escapeHtml(col.id) }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }" aria-label="Сортировать по столбцу ${ this.escapeHtml(col.name) }">${ groupingBadge }${ sortIndicator }${ this.escapeHtml(col.name) }</button>
                         ${ refIconHtml }
                         ${ addButtonHtml }
-                        <div class="column-resize-handle" data-column-id="${ col.id }"></div>
+                        <div class="column-resize-handle" data-column-id="${ this.escapeHtml(col.id) }"></div>
                     </th>
                 `;
             }).join('');
@@ -3414,9 +3890,9 @@ class IntegramTable{
                 return `<span class="total-count-loading" title="Подсчёт..."><i class="pi pi-spin pi-spinner"></i></span>`;
             }
             if (this.totalRows === null) {
-                return `<span class="total-count-unknown" onclick="window.${ instanceName }.fetchTotalCount()" title="Нажмите, чтобы узнать общее количество">?</span>`;
+                return `<button type="button" class="total-count-unknown" onclick="window.${ instanceName }.fetchTotalCount()" title="Узнать общее количество" aria-label="Узнать общее количество записей">?</button>`;
             }
-            return `<span class="total-count-known" onclick="window.${ instanceName }.fetchTotalCount()" title="Нажмите, чтобы пересчитать общее количество">${ this.totalRows }</span>`;
+            return `<button type="button" class="total-count-known" onclick="window.${ instanceName }.fetchTotalCount()" title="Пересчитать общее количество" aria-label="Пересчитать общее количество записей: ${ this.totalRows }">${ this.totalRows }</button>`;
         }
 
         /**
@@ -3509,6 +3985,7 @@ class IntegramTable{
                 window._integramModalDepth = Math.max(0, (window._integramModalDepth || 1) - 1);
             };
 
+            itCreateModalCloseHandler(modal, closeModal, this);
             modal.querySelector('.edit-form-close').addEventListener('click', closeModal);
             modal.querySelector('#paste-data-cancel-btn').addEventListener('click', closeModal);
             overlay.addEventListener('click', closeModal);
@@ -3605,11 +4082,11 @@ class IntegramTable{
             previewModal._overlayElement = previewOverlay;
 
             // Build table HTML with editable cells
-            const theadCols = colHeaders.map(h => `<th>${h}</th>`).join('');
+            const theadCols = colHeaders.map(h => `<th>${ this.escapeHtml(String(h)) }</th>`).join('');
             const tbodyRows = parsedRows.map((row, rowIdx) => {
                 const cells = orderedColIds.map((colId, colIdx) => {
                     const val = row[colIdx] !== undefined ? row[colIdx] : '';
-                    return `<td><input class="paste-preview-cell" data-row="${rowIdx}" data-col="${colIdx}" value="${val.replace(/"/g, '&quot;')}"></td>`;
+                    return `<td><input class="paste-preview-cell" data-row="${rowIdx}" data-col="${colIdx}" value="${ this.escapeHtml(String(val)) }"></td>`;
                 });
                 return `<tr>${cells.join('')}</tr>`;
             }).join('');
@@ -3645,6 +4122,7 @@ class IntegramTable{
                 window._integramModalDepth = Math.max(0, (window._integramModalDepth || 1) - 1);
             };
 
+            itCreateModalCloseHandler(previewModal, closePreview, this);
             previewModal.querySelector('.edit-form-close').addEventListener('click', closePreview);
             previewModal.querySelector('#paste-preview-cancel-btn').addEventListener('click', closePreview);
             previewOverlay.addEventListener('click', closePreview);
@@ -4259,51 +4737,232 @@ class IntegramTable{
         }
 
         attachEventListeners() {
+            // Delegation also covers links inserted after an inline edit.
+            // The full value is data, never JavaScript source.
+            if (!this._fullValueClickHandler) {
+                this._fullValueClickHandler = (event) => {
+                    const link = event.target.closest && event.target.closest('.show-full-value');
+                    if (!link || !this.container.contains(link)) return;
+                    event.preventDefault();
+                    event.stopImmediatePropagation();
+                    this.showFullValue(event, link.dataset.fullValue || '');
+                };
+                this.container.addEventListener('click', this._fullValueClickHandler);
+            }
+
+            if (!this._tableButtonClickHandler) {
+                this._tableButtonClickHandler = (event) => {
+                    const button = event.target.closest && event.target.closest('.integram-action-button[data-button-action]');
+                    if (!button || !this.container.contains(button)) return;
+                    this.runTableButtonAction(event, button);
+                };
+                this.container.addEventListener('click', this._tableButtonClickHandler);
+            }
+
             // Determine the first visible column ID — it cannot be moved (issue #951)
             const firstVisibleColumnId = this.columnOrder.find(id => this.visibleColumns.includes(id));
+            const clearColumnDragIndicators = () => {
+                this.container.querySelectorAll('.drag-over-before, .drag-over-after').forEach(el => {
+                    el.classList.remove('drag-over-before', 'drag-over-after');
+                });
+            };
+            const getDropPosition = (event, th, draggedId) => {
+                const rect = th.getBoundingClientRect();
+                const preferredPosition = event.clientX >= rect.left + rect.width / 2 ? 'after' : 'before';
+                const visibleOrder = this.columnOrder.filter(id => this.visibleColumns.includes(id));
+                return this.resolveColumnDropPosition(
+                    draggedId,
+                    th.dataset.columnId,
+                    preferredPosition,
+                    visibleOrder
+                );
+            };
+            const showDropPosition = (th, position) => {
+                clearColumnDragIndicators();
+                th.classList.add(position === 'after' ? 'drag-over-after' : 'drag-over-before');
+            };
+            const autoScrollColumns = (clientX) => {
+                const scroller = this.container.querySelector('.integram-table-container');
+                if (!scroller || scroller.scrollWidth <= scroller.clientWidth) return;
+                const rect = scroller.getBoundingClientRect();
+                const edge = Math.min(72, Math.max(40, rect.width * 0.12));
+                let delta = 0;
+                if (clientX < rect.left + edge) {
+                    const strength = Math.min(1, Math.max(0, (rect.left + edge - clientX) / edge));
+                    delta = -Math.ceil(6 + 18 * strength);
+                } else if (clientX > rect.right - edge) {
+                    const strength = Math.min(1, Math.max(0, (clientX - (rect.right - edge)) / edge));
+                    delta = Math.ceil(6 + 18 * strength);
+                }
+                if (delta !== 0) scroller.scrollLeft += delta;
+            };
+            const announceColumnMove = (columnId, direction) => {
+                const schedule = typeof requestAnimationFrame === 'function'
+                    ? requestAnimationFrame
+                    : callback => setTimeout(callback, 0);
+                schedule(() => {
+                    const handle = [...this.container.querySelectorAll('.column-drag-handle')]
+                        .find(candidate => candidate.dataset.columnId === columnId);
+                    if (handle) handle.focus({ preventScroll: true });
+                    let status = this.container.querySelector('.column-reorder-status');
+                    if (!status) {
+                        status = document.createElement('span');
+                        status.className = 'column-reorder-status';
+                        status.setAttribute('role', 'status');
+                        status.setAttribute('aria-live', 'polite');
+                        this.container.appendChild(status);
+                    }
+                    const column = this.columns.find(col => col.id === columnId);
+                    status.textContent = `Столбец «${ column ? column.name : columnId }» перемещён ${ direction }.`;
+                });
+            };
 
-            const headers = this.container.querySelectorAll('th[draggable]');
+            const headers = this.container.querySelectorAll('th[data-column-id]');
             headers.forEach(th => {
                 const columnId = th.dataset.columnId;
+                const dragHandle = th.querySelector('.column-drag-handle');
+                if (!dragHandle) return;
 
-                // The first column is not draggable and cannot be a drop target (issue #951)
+                // The first column is fixed. Hiding its handle keeps that constraint clear.
                 if (columnId === firstVisibleColumnId) {
-                    th.removeAttribute('draggable');
+                    dragHandle.draggable = false;
+                    dragHandle.hidden = true;
+                    dragHandle.tabIndex = -1;
+                    dragHandle.setAttribute('aria-hidden', 'true');
+                    th.classList.add('column-fixed');
                     return;
                 }
 
-                th.addEventListener('dragstart', (e) => {
-                    e.dataTransfer.effectAllowed = 'move';
-                    e.dataTransfer.setData('text/plain', th.dataset.columnId);
-                    th.classList.add('dragging');
-                });
-
-                th.addEventListener('dragend', (e) => {
-                    th.classList.remove('dragging');
-                    document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
-                });
-
-                th.addEventListener('dragover', (e) => {
-                    e.preventDefault();
-                    e.dataTransfer.dropEffect = 'move';
-                    th.classList.add('drag-over');
-                });
-
-                th.addEventListener('dragleave', (e) => {
-                    th.classList.remove('drag-over');
-                });
-
-                th.addEventListener('drop', (e) => {
-                    e.preventDefault();
-                    const draggedId = e.dataTransfer.getData('text/plain');
-                    const targetId = th.dataset.columnId;
-
-                    // Prevent dropping onto the first column or dropping a column onto itself (issue #951, #966)
-                    if (draggedId !== targetId && draggedId !== firstVisibleColumnId && targetId !== firstVisibleColumnId) {
-                        this.reorderColumns(draggedId, targetId);
+                dragHandle.addEventListener('dragstart', (event) => {
+                    event.stopPropagation();
+                    this._columnDragState = { draggedId: columnId, targetId: null, position: null };
+                    if (event.dataTransfer) {
+                        event.dataTransfer.effectAllowed = 'move';
+                        event.dataTransfer.setData('text/plain', columnId);
                     }
+                    th.classList.add('dragging');
+                    const table = th.closest('.integram-table');
+                    if (table) table.classList.add('column-drag-active');
+                });
 
-                    th.classList.remove('drag-over');
+                dragHandle.addEventListener('dragend', () => {
+                    th.classList.remove('dragging');
+                    const table = th.closest('.integram-table');
+                    if (table) table.classList.remove('column-drag-active');
+                    clearColumnDragIndicators();
+                    this._columnDragState = null;
+                });
+
+                dragHandle.addEventListener('keydown', (event) => {
+                    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+                    event.preventDefault();
+                    const visibleOrder = this.columnOrder.filter(id => this.visibleColumns.includes(id));
+                    const currentIndex = visibleOrder.indexOf(columnId);
+                    const movingLeft = event.key === 'ArrowLeft';
+                    const targetId = visibleOrder[currentIndex + (movingLeft ? -1 : 1)];
+                    if (!targetId || targetId === firstVisibleColumnId) return;
+                    const moved = this.reorderColumns(columnId, targetId, movingLeft ? 'before' : 'after');
+                    if (moved) announceColumnMove(columnId, movingLeft ? 'влево' : 'вправо');
+                });
+
+                let pointerDrag = null;
+                const finishPointerDrag = (commit) => {
+                    if (!pointerDrag) return;
+                    const dragState = this._columnDragState;
+                    const shouldCommit = commit && pointerDrag.active && dragState && dragState.targetId;
+                    const draggedId = dragState && dragState.draggedId;
+                    const targetId = dragState && dragState.targetId;
+                    const position = dragState && dragState.position;
+                    if (dragHandle.hasPointerCapture && dragHandle.hasPointerCapture(pointerDrag.pointerId)) {
+                        dragHandle.releasePointerCapture(pointerDrag.pointerId);
+                    }
+                    pointerDrag = null;
+                    th.classList.remove('dragging');
+                    const table = th.closest('.integram-table');
+                    if (table) table.classList.remove('column-drag-active');
+                    clearColumnDragIndicators();
+                    this._columnDragState = null;
+                    if (shouldCommit) this.reorderColumns(draggedId, targetId, position);
+                };
+
+                dragHandle.addEventListener('pointerdown', (event) => {
+                    if (event.pointerType === 'mouse') return;
+                    event.preventDefault();
+                    pointerDrag = {
+                        pointerId: event.pointerId,
+                        startX: event.clientX,
+                        startY: event.clientY,
+                        active: false
+                    };
+                    if (dragHandle.setPointerCapture) dragHandle.setPointerCapture(event.pointerId);
+                });
+
+                dragHandle.addEventListener('pointermove', (event) => {
+                    if (!pointerDrag || pointerDrag.pointerId !== event.pointerId) return;
+                    if (!pointerDrag.active) {
+                        const distance = Math.hypot(event.clientX - pointerDrag.startX, event.clientY - pointerDrag.startY);
+                        if (distance < 8) return;
+                        pointerDrag.active = true;
+                        this._columnDragState = { draggedId: columnId, targetId: null, position: null };
+                        th.classList.add('dragging');
+                        const table = th.closest('.integram-table');
+                        if (table) table.classList.add('column-drag-active');
+                    }
+                    event.preventDefault();
+                    autoScrollColumns(event.clientX);
+                    const pointedElement = document.elementFromPoint(event.clientX, event.clientY);
+                    const target = pointedElement && pointedElement.closest('th[data-column-id]');
+                    const targetId = target && target.dataset.columnId;
+                    if (!target || targetId === columnId || targetId === firstVisibleColumnId) {
+                        clearColumnDragIndicators();
+                        this._columnDragState.targetId = null;
+                        this._columnDragState.position = null;
+                        return;
+                    }
+                    const position = getDropPosition(event, target, columnId);
+                    this._columnDragState.targetId = targetId;
+                    this._columnDragState.position = position;
+                    showDropPosition(target, position);
+                });
+
+                dragHandle.addEventListener('pointerup', (event) => {
+                    if (!pointerDrag || pointerDrag.pointerId !== event.pointerId) return;
+                    event.preventDefault();
+                    finishPointerDrag(true);
+                });
+
+                dragHandle.addEventListener('pointercancel', () => finishPointerDrag(false));
+
+                const updateDropTarget = (event) => {
+                    const dragState = this._columnDragState;
+                    if (!dragState || dragState.draggedId === columnId || columnId === firstVisibleColumnId) return false;
+                    event.preventDefault();
+                    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+                    const position = getDropPosition(event, th, dragState.draggedId);
+                    dragState.targetId = columnId;
+                    dragState.position = position;
+                    showDropPosition(th, position);
+                    autoScrollColumns(event.clientX);
+                    return true;
+                };
+
+                th.addEventListener('dragenter', updateDropTarget);
+                th.addEventListener('dragover', updateDropTarget);
+
+                th.addEventListener('dragleave', (event) => {
+                    if (event.relatedTarget && th.contains(event.relatedTarget)) return;
+                    th.classList.remove('drag-over-before', 'drag-over-after');
+                });
+
+                th.addEventListener('drop', (event) => {
+                    const dragState = this._columnDragState;
+                    if (!dragState || dragState.draggedId === columnId || columnId === firstVisibleColumnId) return;
+                    event.preventDefault();
+                    event.stopPropagation();
+                    const position = getDropPosition(event, th, dragState.draggedId);
+                    clearColumnDragIndicators();
+                    this.reorderColumns(dragState.draggedId, columnId, position);
+                    this._columnDragState = null;
                 });
             });
 
@@ -4452,9 +5111,12 @@ class IntegramTable{
                 });
             });
 
-            // Use event delegation for cell clicks - attaches to container once, handles all cells
-            // This ensures listeners work even when cells are updated/recreated
-            this.container.addEventListener('click', (e) => {
+            // Use event delegation for cell clicks on the persistent container.
+            // Replace the previous handler so re-renders cannot accumulate callbacks.
+            if (this._cellClickHandler) {
+                this.container.removeEventListener('click', this._cellClickHandler);
+            }
+            this._cellClickHandler = (e) => {
                 const td = e.target.closest('td');
                 if (!td) return;
 
@@ -4521,7 +5183,8 @@ class IntegramTable{
                         }
                     }
                 }
-            });
+            };
+            this.container.addEventListener('click', this._cellClickHandler);
 
             // Checkbox selection handlers
             if (this.checkboxMode) {
@@ -4529,9 +5192,7 @@ class IntegramTable{
                 if (selectAll) {
                     selectAll.addEventListener('change', (e) => {
                         if (e.target.checked) {
-                            for (let i = 0; i < this.data.length; i++) {
-                                this.selectedRows.add(i);
-                            }
+                            this.getSelectableRowKeys().forEach(key => this.selectedRows.add(key));
                         } else {
                             this.selectedRows.clear();
                         }
@@ -4543,10 +5204,12 @@ class IntegramTable{
                 rowCheckboxes.forEach(cb => {
                     cb.addEventListener('change', (e) => {
                         const rowIndex = parseInt(e.target.dataset.rowIndex);
+                        const rowKey = this.getRowSelectionKey(rowIndex);
+                        if (rowKey === null) return;
                         if (e.target.checked) {
-                            this.selectedRows.add(rowIndex);
+                            this.selectedRows.add(rowKey);
                         } else {
-                            this.selectedRows.delete(rowIndex);
+                            this.selectedRows.delete(rowKey);
                         }
                         this.renderPreservingScroll(() => this.render());
                     });
@@ -5479,7 +6142,7 @@ class IntegramTable{
                     const id = String(rec.i);
                     const text = (rec.r && rec.r[0] != null) ? String(rec.r[0]) : `#${ id }`;
                     const escaped = this.escapeHtml(text);
-                    return `<div class="inline-editor-reference-option" data-id="${ id }" data-text="${ escaped }" tabindex="0">${ escaped }</div>`;
+                    return `<div class="inline-editor-reference-option" data-id="${ this.escapeHtml(id) }" data-text="${ escaped }" tabindex="0">${ escaped }</div>`;
                 }).join('');
             };
 
@@ -5499,7 +6162,7 @@ class IntegramTable{
                     }
                     target.innerHTML = entries.map(([tId, tName]) => {
                         const escaped = this.escapeHtml(String(tName));
-                        return `<div class="inline-editor-reference-option inline-editor-any-ref-table-option" data-table-id="${ tId }" data-text="${ escaped }" tabindex="0">${ escaped }</div>`;
+                        return `<div class="inline-editor-reference-option inline-editor-any-ref-table-option" data-table-id="${ this.escapeHtml(tId) }" data-text="${ escaped }" tabindex="0">${ escaped }</div>`;
                     }).join('');
                     target.querySelectorAll('.inline-editor-any-ref-table-option').forEach(opt => {
                         opt.addEventListener('click', async (e) => {
@@ -5791,7 +6454,7 @@ class IntegramTable{
                     const optionsHtml = availableOptions.length > 0
                         ? availableOptions.map(([id, text]) => {
                             const escapedText = this.escapeHtml(this.decodeHtmlEntities(text));
-                            return `<div class="inline-editor-reference-option" data-id="${id}" data-text="${escapedText}" tabindex="0">${escapedText}</div>`;
+                            return `<div class="inline-editor-reference-option" data-id="${this.escapeHtml(id)}" data-text="${escapedText}" tabindex="0">${escapedText}</div>`;
                         }).join('')
                         : '<div class="inline-editor-reference-empty">Нет доступных значений</div>';
 
@@ -5880,7 +6543,7 @@ class IntegramTable{
                                     dropdown.innerHTML = serverFiltered.length > 0
                                         ? serverFiltered.map(([id, text]) => {
                                             const et = this.escapeHtml(this.decodeHtmlEntities(text));
-                                            return `<div class="inline-editor-reference-option" data-id="${id}" data-text="${et}" tabindex="0">${et}</div>`;
+                                            return `<div class="inline-editor-reference-option" data-id="${this.escapeHtml(id)}" data-text="${et}" tabindex="0">${et}</div>`;
                                         }).join('')
                                         : '<div class="inline-editor-reference-empty">Нет доступных значений</div>';
                                 } catch (err) {
@@ -5890,7 +6553,7 @@ class IntegramTable{
                                 dropdown.innerHTML = filtered.length > 0
                                     ? filtered.map(([id, text]) => {
                                         const et = this.escapeHtml(this.decodeHtmlEntities(text));
-                                        return `<div class="inline-editor-reference-option" data-id="${id}" data-text="${et}" tabindex="0">${et}</div>`;
+                                        return `<div class="inline-editor-reference-option" data-id="${this.escapeHtml(id)}" data-text="${et}" tabindex="0">${et}</div>`;
                                     }).join('')
                                     : '<div class="inline-editor-reference-empty">Нет доступных значений</div>';
                             }
@@ -6023,19 +6686,11 @@ class IntegramTable{
                     ? `${apiBase}/_m_save/${parentInfo.parentRecordId}?JSON`
                     : `${apiBase}/_m_set/${parentInfo.parentRecordId}?JSON`;
 
-                const response = await fetch(url, {
+                const result = await this.fetchJson(url, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                     body: params.toString()
                 });
-
-                const responseText = await response.text();
-                let result;
-                try {
-                    result = JSON.parse(responseText);
-                } catch (jsonError) {
-                    throw new Error(`Невалидный JSON ответ: ${responseText}`);
-                }
 
                 const serverError = this.getServerError(result);
                 if (serverError) {
@@ -6073,7 +6728,7 @@ class IntegramTable{
                 // Issue #3454: справочник типа DATETIME → метку показываем датой, не штампом.
                 const decodedText = this.formatReferenceOptionLabel(this.decodeHtmlEntities(text), column);
                 const escapedText = this.escapeHtml(decodedText);
-                return `<div class="inline-editor-reference-option" data-id="${id}" data-text="${escapedText}" tabindex="0">${escapedText}</div>`;
+                return `<div class="inline-editor-reference-option" data-id="${this.escapeHtml(id)}" data-text="${escapedText}" tabindex="0">${escapedText}</div>`;
             }).join('');
         }
 
@@ -6147,23 +6802,13 @@ class IntegramTable{
                     : `${apiBase}/_m_set/${parentInfo.parentRecordId}?JSON`;
 
 
-                const response = await fetch(url, {
+                const result = await this.fetchJson(url, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/x-www-form-urlencoded'
                     },
                     body: params.toString()
                 });
-
-                let result;
-                const responseText = await response.text();
-
-                try {
-                    result = JSON.parse(responseText);
-                } catch (jsonError) {
-                    // Invalid JSON response
-                    throw new Error(`Невалидный JSON ответ: ${responseText}`);
-                }
 
                 // Check if response has error key anywhere in the JSON
                 const serverError = this.getServerError(result);
@@ -6243,13 +6888,13 @@ class IntegramTable{
             // Store reference to overlay on modal for proper cleanup
             modal._overlayElement = overlay;
 
-            const typeName = this.getMetadataName(metadata);
+            const typeName = this.escapeHtml(this.getMetadataName(metadata));
             const title = `Создание: ${typeName}`;
             const decodedInitialValue = this.decodeHtmlEntities(initialValue);
 
             // Build attributes form HTML (similar to renderAttributesForm but simplified for create mode)
             const reqs = metadata.reqs || [];
-            const regularFields = reqs.filter(req => !req.arr_id);
+            const regularFields = reqs.filter(req => !req.arr_id && this.normalizeNumericId(req.id));
 
             // Get current date/datetime for default values
             const now = new Date();
@@ -6305,7 +6950,7 @@ class IntegramTable{
             // Add all fields of this type
             regularFields.forEach(req => {
                 const attrs = this.parseAttrs(req.attrs);
-                const fieldName = attrs.alias || req.val;
+                const fieldName = this.escapeHtml(attrs.alias || req.val || '');
                 const isRequired = attrs.required;
 
                 attributesHtml += `<div class="form-group">`;
@@ -6318,7 +6963,7 @@ class IntegramTable{
                 if (req.ref_id) {
                     // Render as reference dropdown (same as in edit form)
                     attributesHtml += `
-                        <div class="form-reference-editor" data-ref-id="${req.id}" data-required="${isRequired}" data-ref-type-id="${req.orig || req.ref_id}">
+                        <div class="form-reference-editor" data-ref-id="${req.id}" data-required="${isRequired}" data-ref-type-id="${this.normalizeNumericId(req.orig || req.ref_id)}">
                             <div class="inline-editor-reference form-ref-editor-box">
                                 <div class="inline-editor-reference-header">
                                     <input type="text"
@@ -6411,19 +7056,8 @@ class IntegramTable{
 
             overlay.addEventListener('click', closeModal);
 
-            // Close on Escape key (issue #595)
-            const handleEscape = (e) => {
-                if (e.key === 'Escape') {
-                    // Only close if this modal is the topmost one
-                    const currentDepth = parseInt(modal.dataset.modalDepth) || 0;
-                    const maxDepth = window._integramModalDepth || 0;
-                    if (currentDepth === maxDepth) {
-                        closeModal();
-                        document.removeEventListener('keydown', handleEscape);
-                    }
-                }
-            };
-            document.addEventListener('keydown', handleEscape);
+            // Shared Escape stack closes only the topmost modal and unregisters on removal.
+            itCreateModalCloseHandler(modal, closeModal, this);
 
             // Enter in input/textarea triggers Save (issue #1422)
             modal.addEventListener('keydown', (e) => {
@@ -6481,27 +7115,13 @@ class IntegramTable{
             const url = `${apiBase}/_m_new/${typeId}?JSON&up=1`;
 
             try {
-                const response = await fetch(url, {
+                const result = await this.fetchJson(url, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/x-www-form-urlencoded'
                     },
                     body: params.toString()
                 });
-
-                const text = await response.text();
-
-                let result;
-                try {
-                    result = JSON.parse(text);
-                } catch (e) {
-                    // If not JSON, check if it's an error message
-                    if (text.includes('error') || !response.ok) {
-                        throw new Error(text);
-                    }
-                    // Otherwise treat as success
-                    result = { success: true };
-                }
 
                 const serverError = this.getServerError(result);
                 if (serverError) {
@@ -6639,37 +7259,29 @@ class IntegramTable{
                 }
 
                 // For FILE type with a pending file, send directly as multipart (issue #1310)
-                let response;
+                let requestOptions;
                 if (format === 'FILE' && fileToUpload) {
                     const formData = new FormData();
                     if (typeof xsrf !== 'undefined') {
                         formData.append('_xsrf', xsrf);
                     }
                     formData.append(`t${ colType }`, fileToUpload);
-                    response = await fetch(url, {
+                    requestOptions = {
                         method: 'POST',
                         body: formData
-                    });
+                    };
                 } else {
                     params.append(`t${ colType }`, newValue);
-                    response = await fetch(url, {
+                    requestOptions = {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/x-www-form-urlencoded'
                         },
                         body: params.toString()
-                    });
+                    };
                 }
 
-                let result;
-                const responseText = await response.text();
-
-                try {
-                    result = JSON.parse(responseText);
-                } catch (jsonError) {
-                    // Invalid JSON response
-                    throw new Error(`Невалидный JSON ответ: ${responseText}`);
-                }
+                const result = await this.fetchJson(url, requestOptions);
 
                 // Check if response has error key anywhere in the JSON
                 const serverError = this.getServerError(result);
@@ -6746,25 +7358,13 @@ class IntegramTable{
                 const parentIdForNew = (this.options.parentId && parseInt(this.options.parentId) > 1) ? this.options.parentId : 1;
                 const url = `${apiBase}/_m_new/${tableTypeId}?JSON&up=${parentIdForNew}`;
 
-                const response = await fetch(url, {
+                const result = await this.fetchJson(url, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/x-www-form-urlencoded'
                     },
                     body: params.toString()
                 });
-
-                const responseText = await response.text();
-
-                let result;
-                try {
-                    result = JSON.parse(responseText);
-                } catch (e) {
-                    if (responseText.includes('error') || !response.ok) {
-                        throw new Error(responseText);
-                    }
-                    result = { success: true };
-                }
 
                 const serverError = this.getServerError(result);
                 if (serverError) {
@@ -6956,13 +7556,8 @@ class IntegramTable{
             // Apply truncation if enabled
             if (this.settings.truncateLongValues && escapedValue.length > 127) {
                 const truncated = escapedValue.substring(0, 127);
-                const fullValueEscaped = escapedValue
-                    .replace(/\\/g, '\\\\')
-                    .replace(/\n/g, '\\n')
-                    .replace(/\r/g, '\\r')
-                    .replace(/'/g, '\\\'');
-                const instanceName = this.options.instanceName;
-                escapedValue = `${ truncated }<a href="#" class="show-full-value" onclick="window.${ instanceName }.showFullValue(event, '${ fullValueEscaped }'); return false;">...</a>`;
+                const fullValueAttr = this.escapeHtml(String(displayValue));
+                escapedValue = `${ truncated }<a href="#" class="show-full-value" data-full-value="${ fullValueAttr }">...</a>`;
             }
 
             // Update data attribute with full value for editing
@@ -6980,8 +7575,8 @@ class IntegramTable{
 
             // Issue #1404: For reference fields, wrap the value in a hyperlink inside cell-content-wrapper
             const cellIsRef = cell.dataset.ref === '1';
-            const cellRefValueId = cell.dataset.refValueId;
-            const cellEditTypeId = cell.dataset.editTypeId;
+            const cellRefValueId = this.normalizeNumericId(cell.dataset.refValueId);
+            const cellEditTypeId = this.normalizeNumericId(cell.dataset.editTypeId);
             if (cellIsRef && cellRefValueId && cellEditTypeId && !cell.dataset.array) {
                 const pathParts = window.location.pathname.split('/');
                 const dbName = pathParts.length >= 2 ? pathParts[1] : '';
@@ -7000,21 +7595,21 @@ class IntegramTable{
             } else {
                 // Issue #915: If the cell was empty (no edit icon) and now has a value,
                 // add the edit icon using the stored data-edit-type-id attribute
-                const editTypeId = cell.dataset.editTypeId;
+                const editTypeId = this.normalizeNumericId(cell.dataset.editTypeId);
                 // Issue #921: For reference fields, use data-ref-value-id as the record ID
                 // (the reference's own ID, e.g. role ID 520), not data-record-id (the parent
                 // row's ID, e.g. user ID 557). data-ref-value-id is updated by saveReferenceEdit.
-                const editRecordId = cell.dataset.refValueId || cell.dataset.recordId;
-                const editRowIndex = cell.dataset.rowIndex;
+                const editRecordId = this.normalizeNumericId(cell.dataset.refValueId || cell.dataset.recordId);
+                const editRowIndex = parseInt(cell.dataset.rowIndex, 10);
                 const hasNewValue = newValue !== null && newValue !== undefined && newValue !== '';
-                if (hasNewValue && editTypeId && editRecordId && editRecordId !== '' && editRecordId !== '0' && editRecordId !== 'dynamic') {
+                if (hasNewValue && editTypeId && editRecordId && Number.isInteger(editRowIndex) && editRowIndex >= 0) {
                     const instanceName = this.options.instanceName;
                     // Issue #1810: any-ref cell — resolve real table via get_record before opening form
                     const isAnyRefCell = cell.dataset.anyRef === '1';
                     const editIconOnclick = isAnyRefCell
                         ? `window.${ instanceName }.openAnyRefEditForm('${ editRecordId }', ${ editRowIndex }); event.stopPropagation();`
                         : `window.${ instanceName }.openEditForm('${ editRecordId }', '${ editTypeId }', ${ editRowIndex }); event.stopPropagation();`;
-                    const editIcon = `<span class="edit-icon" onclick="${ editIconOnclick }" title="Редактировать"><i class="pi pi-pencil" style="font-size: 0.875rem;"></i></span>`;
+                    const editIcon = `<button type="button" class="edit-icon" onclick="${ editIconOnclick }" title="Редактировать" aria-label="Редактировать значение"><i class="pi pi-pencil" style="font-size: 0.875rem;"></i></button>`;
                     cell.innerHTML = `<div class="cell-content-wrapper"><span title="${ editRecordId }">${ escapedValue }</span>${ editIcon }</div>`;
                     // Issue #4385: keep the ID readable on the parent cell when the edit icon covers the wrapper
                     if (editRecordId) { cell.setAttribute('title', editRecordId); }
@@ -7262,8 +7857,10 @@ class IntegramTable{
             if (!targetCell) return;
 
             // Small delay to ensure DOM is updated after save
-            setTimeout(() => {
-                this.startInlineEdit(targetCell);
+            if (this._navigateTimer !== null && this._navigateTimer !== undefined) clearTimeout(this._navigateTimer);
+            this._navigateTimer = setTimeout(() => {
+                this._navigateTimer = null;
+                if (!this._destroyed) this.startInlineEdit(targetCell);
             }, 50);
         }
 
@@ -7330,7 +7927,7 @@ class IntegramTable{
         }
 
         restoreScrollState(scrollState) {
-            if (!scrollState) return;
+            if (this._destroyed || !scrollState) return;
 
             const scrollContainer = this.getScrollContainer();
             if (!scrollContainer) return;
@@ -7524,9 +8121,13 @@ class IntegramTable{
 
         checkAndLoadMore() {
             // Check if table fits entirely on screen and there are more records
-            setTimeout(() => {
+            if (this._checkAndLoadMoreTimer !== null && this._checkAndLoadMoreTimer !== undefined) {
+                clearTimeout(this._checkAndLoadMoreTimer);
+            }
+            this._checkAndLoadMoreTimer = setTimeout(() => {
+                this._checkAndLoadMoreTimer = null;
                 // First check if container exists
-                if (!this.container) return;
+                if (this._destroyed || !this.container) return;
                 const tableWrapper = this.container.querySelector('.integram-table-wrapper');
                 const decision = this.getScrollLoadDecision(tableWrapper, 'post-render-check');
                 this.traceScrollLoadDecision(decision);
@@ -7544,8 +8145,13 @@ class IntegramTable{
             if (this._containerHeightObserver) {
                 this._containerHeightObserver.disconnect();
             }
+            if (this._containerHeightResizeListener) {
+                window.removeEventListener('resize', this._containerHeightResizeListener);
+                this._containerHeightResizeListener = null;
+            }
             if (typeof ResizeObserver === 'undefined') {
-                window.addEventListener('resize', () => this.updateContainerHeight());
+                this._containerHeightResizeListener = () => this.updateContainerHeight();
+                window.addEventListener('resize', this._containerHeightResizeListener);
                 return;
             }
             this._containerHeightObserver = new ResizeObserver(() => this.updateContainerHeight());
@@ -7629,10 +8235,10 @@ class IntegramTable{
 
             // Remove existing listeners if any
             if (this.tableScrollListener) {
-                tableContainer.removeEventListener('scroll', this.tableScrollListener);
+                (this._tableScrollElement || tableContainer).removeEventListener('scroll', this.tableScrollListener);
             }
             if (this.stickyScrollListener) {
-                stickyScrollbar.removeEventListener('scroll', this.stickyScrollListener);
+                (this._stickyScrollbarElement || stickyScrollbar).removeEventListener('scroll', this.stickyScrollListener);
             }
             if (this.stickyVisibilityListener) {
                 (this._stickyScrollContainer || window).removeEventListener('scroll', this.stickyVisibilityListener);
@@ -7640,6 +8246,8 @@ class IntegramTable{
             }
 
             this._stickyScrollContainer = scrollContainer;
+            this._tableScrollElement = tableContainer;
+            this._stickyScrollbarElement = stickyScrollbar;
 
             // Attach listeners
             this.tableScrollListener = syncFromTable;
@@ -7751,12 +8359,20 @@ class IntegramTable{
                         this.columnWidths[columnId] = newWidth;
                     };
 
-                    const onMouseUp = () => {
+                    if (this._columnResizeCleanup) this._columnResizeCleanup();
+                    const cleanupResize = () => {
                         document.removeEventListener('mousemove', onMouseMove);
                         document.removeEventListener('mouseup', onMouseUp);
-                        this.saveColumnState();
+                        if (this._columnResizeCleanup === cleanupResize) {
+                            this._columnResizeCleanup = null;
+                        }
+                    };
+                    const onMouseUp = () => {
+                        cleanupResize();
+                        if (!this._destroyed) this.saveColumnState();
                     };
 
+                    this._columnResizeCleanup = cleanupResize;
                     document.addEventListener('mousemove', onMouseMove);
                     document.addEventListener('mouseup', onMouseUp);
                 });
@@ -7910,24 +8526,42 @@ class IntegramTable{
             }
         }
 
-        reorderColumns(draggedId, targetId) {
+        resolveColumnDropPosition(draggedId, targetId, preferredPosition, orderedIds = this.columnOrder) {
+            const normalizedPosition = preferredPosition === 'after' ? 'after' : 'before';
+            const draggedIndex = orderedIds.indexOf(draggedId);
+            const targetIndex = orderedIds.indexOf(targetId);
+
+            if (draggedIndex === -1 || targetIndex === -1) return normalizedPosition;
+
+            // The near half of an adjacent target would otherwise resolve to the
+            // column's current position. Crossing into that neighbour should swap it.
+            if (normalizedPosition === 'before' && draggedIndex + 1 === targetIndex) return 'after';
+            if (normalizedPosition === 'after' && draggedIndex - 1 === targetIndex) return 'before';
+
+            return normalizedPosition;
+        }
+
+        reorderColumns(draggedId, targetId, position = 'before') {
             const draggedIndex = this.columnOrder.indexOf(draggedId);
             const targetIndex = this.columnOrder.indexOf(targetId);
 
-            if (draggedIndex === -1 || targetIndex === -1) return;
+            if (draggedIndex === -1 || targetIndex === -1) return false;
 
             // The first column (index 0) cannot be moved and cannot be a drop target (issue #958)
-            if (draggedIndex === 0 || targetIndex === 0) return;
+            if (draggedIndex === 0 || targetIndex === 0) return false;
 
-            // Adjust targetIndex: removing draggedId shifts all elements after it left by one (issue #962)
-            const adjustedTargetIndex = targetIndex > draggedIndex ? targetIndex - 1 : targetIndex;
+            // Resolve the insertion point after removing the dragged column. Keeping the
+            // before/after intent explicit makes drops on either half of a header predictable.
+            const nextOrder = [...this.columnOrder];
+            nextOrder.splice(draggedIndex, 1);
+            const targetIndexAfterRemoval = nextOrder.indexOf(targetId);
+            const insertionIndex = targetIndexAfterRemoval + (position === 'after' ? 1 : 0);
+            nextOrder.splice(insertionIndex, 0, draggedId);
 
             // If the column would end up in the same position, skip all side effects (issue #966)
-            if (adjustedTargetIndex === draggedIndex) return;
+            if (nextOrder.every((id, index) => id === this.columnOrder[index])) return false;
 
-            this.columnOrder.splice(draggedIndex, 1);
-            this.columnOrder.splice(adjustedTargetIndex, 0, draggedId);
-
+            this.columnOrder = nextOrder;
             this.saveColumnState();
 
             // Persist the new column order to the backend (issue #951, #956, #958)
@@ -7943,6 +8577,7 @@ class IntegramTable{
             }
 
             this.render();
+            return true;
         }
 
         /**
@@ -7965,7 +8600,7 @@ class IntegramTable{
                 if (typeof xsrf !== 'undefined') {
                     params.append('_xsrf', xsrf);
                 }
-                await fetch(`${apiBase}/_d_ord/${columnId}?JSON`, {
+                await this.fetchJson(`${apiBase}/_d_ord/${columnId}?JSON`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                     body: params.toString()
@@ -8070,26 +8705,24 @@ class IntegramTable{
                         const displayName = alias
                             ? `${ this.escapeHtml(alias) } <span class="col-original-name">(${this.escapeHtml(originalName)})</span>`
                             : this.escapeHtml(col.name);
-                        // First column: not draggable, no drag handle, shows lock icon (issue #962)
-                        // Other columns: draggable, show 1-based position number among requisites (issue #962)
-                        const draggableAttr = isFirst ? 'draggable="false"' : 'draggable="true"';
+                        // First column is fixed. Every other row exposes a dedicated drag handle.
                         const handleOrLock = isFirst
                             ? `<span class="col-settings-drag-handle col-settings-fixed" title="Первая колонка зафиксирована">&#128274;</span>`
-                            : `<span class="col-settings-drag-handle" title="Перетащите для изменения порядка">&#9776;</span><span class="col-settings-order-num">${ idx }</span>`;
+                            : `<button type="button" class="col-settings-drag-handle" draggable="true" data-column-id="${ this.escapeHtml(col.id) }" title="Перетащите для изменения порядка" aria-label="Переместить столбец ${ this.escapeHtml(col.name) }. Используйте стрелки вверх и вниз"><i class="pi pi-bars" aria-hidden="true"></i></button><span class="col-settings-order-num">${ idx }</span>`;
                         return `
-                        <div class="column-settings-item ${ isFirst ? 'column-settings-item--fixed' : '' }" ${ draggableAttr } data-column-id="${ col.id }">
+                        <div class="column-settings-item ${ isFirst ? 'column-settings-item--fixed' : '' }" data-column-id="${ this.escapeHtml(col.id) }">
                             ${ handleOrLock }
                             ${ this.getColTypeIcon(col) }
                             <label style="flex: 1; margin: 0;">
                                 <input type="checkbox"
-                                       data-column-id="${ col.id }"
+                                       data-column-id="${ this.escapeHtml(col.id) }"
                                        ${ this.visibleColumns.includes(col.id) ? 'checked' : '' }>
                                 ${ displayName }
                                 ${ isRequired ? '<span class="col-required-badge" title="Обязательно к заполнению">*</span>' : '' }
                                 ${ isMulti ? '<span class="col-multi-badge" title="Выбор нескольких значений">&#9641;</span>' : '' }
                                 ${ isKey ? '<span class="col-key-badge" title="Поле входит в проверку уникальности"><i class="pi pi-key" aria-hidden="true"></i></span>' : '' }
                             </label>
-                            <button class="btn-col-edit" data-col-id="${ col.id }" title="Редактировать колонку">
+                            <button class="btn-col-edit" data-col-id="${ this.escapeHtml(col.id) }" title="Редактировать колонку">
                                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12.146 0.146009C12.2408 0.0522494 12.3679 0 12.5005 0C12.6331 0 12.7602 0.0522494 12.854 0.146009L15.854 3.14601C15.9006 3.19245 15.9375 3.24763 15.9627 3.30838C15.9879 3.36912 16.0009 3.43424 16.0009 3.50001C16.0009 3.56578 15.9879 3.6309 15.9627 3.69164C15.9375 3.75239 15.9006 3.80756 15.854 3.85401L5.85399 13.854C5.806 13.9017 5.74885 13.9391 5.68599 13.964L0.685989 15.964C0.595125 16.0004 0.495585 16.0093 0.399709 15.9896C0.303832 15.9699 0.215836 15.9226 0.14663 15.8534C0.0774234 15.7842 0.0300499 15.6962 0.0103825 15.6003C-0.00928499 15.5044 -0.000381488 15.4049 0.0359892 15.314L2.03599 10.314C2.06092 10.2511 2.09834 10.194 2.14599 10.146L12.146 0.146009ZM11.207 2.50001L13.5 4.79301L14.793 3.50001L12.5 1.20701L11.207 2.50001ZM12.793 5.50001L10.5 3.20701L3.99999 9.70701V10H4.49999C4.6326 10 4.75977 10.0527 4.85354 10.1465C4.94731 10.2402 4.99999 10.3674 4.99999 10.5V11H5.49999C5.6326 11 5.75977 11.0527 5.85354 11.1465C5.94731 11.2402 5.99999 11.3674 5.99999 11.5V12H6.29299L12.793 5.50001ZM3.03199 10.675L2.92599 10.781L1.39799 14.602L5.21899 13.074L5.32499 12.968C5.22961 12.9324 5.14738 12.8685 5.0893 12.7848C5.03123 12.7012 5.00007 12.6018 4.99999 12.5V12H4.49999C4.36738 12 4.2402 11.9473 4.14644 11.8536C4.05267 11.7598 3.99999 11.6326 3.99999 11.5V11H3.49999C3.39817 10.9999 3.2988 10.9688 3.21517 10.9107C3.13153 10.8526 3.06763 10.7704 3.03199 10.675Z" fill="currentColor"/></svg>
                             </button>
                         </div>`;
@@ -8112,7 +8745,7 @@ class IntegramTable{
                 if (helpBtnNoAccess) helpBtnNoAccess.style.display = 'none';
                 const addColBtnNoAccess = modal.querySelector(`#add-column-btn-${instanceName}`);
                 if (addColBtnNoAccess) addColBtnNoAccess.style.display = 'none';
-                modal.querySelectorAll('.column-settings-item').forEach(item => { item.setAttribute('draggable', 'false'); });
+                modal.querySelectorAll('.col-settings-drag-handle').forEach(handle => { handle.setAttribute('draggable', 'false'); });
             }
 
             // Attach help button handler (issue #968)
@@ -8161,86 +8794,109 @@ class IntegramTable{
             overlay.addEventListener('click', () => this.closeColumnSettings());
 
             // Drag-and-drop reordering of columns in the settings list (issue #953)
-            const columnList = modal.querySelector(`#column-settings-list-${instanceName}`);
+            const columnList = modal.querySelector('#column-settings-list-' + instanceName);
             let dragItem = null;
+            const clearSettingsDropIndicators = () => {
+                columnList.querySelectorAll('.drag-over-before, .drag-over-after').forEach(el => {
+                    el.classList.remove('drag-over-before', 'drag-over-after');
+                });
+            };
+            const getSettingsDropPosition = (event, target) => {
+                const rect = target.getBoundingClientRect();
+                const preferredPosition = event.clientY >= rect.top + rect.height / 2 ? 'after' : 'before';
+                return this.resolveColumnDropPosition(
+                    dragItem && dragItem.dataset.columnId,
+                    target.dataset.columnId,
+                    preferredPosition,
+                    this.columnOrder
+                );
+            };
+            const placeSettingsItem = (item, target, position) => {
+                if (position === 'after') columnList.insertBefore(item, target.nextSibling);
+                else columnList.insertBefore(item, target);
+            };
 
-            columnList.addEventListener('dragstart', (e) => {
-                const item = e.target.closest('.column-settings-item');
-                // Prevent dragging the first (fixed) column (issue #962)
-                if (item && item.dataset.columnId === firstColId) {
-                    e.preventDefault();
+            columnList.addEventListener('dragstart', (event) => {
+                const handle = event.target.closest('.col-settings-drag-handle[draggable="true"]');
+                const item = handle && handle.closest('.column-settings-item');
+                if (!item || item.dataset.columnId === firstColId) {
+                    event.preventDefault();
                     return;
                 }
                 dragItem = item;
-                if (dragItem) dragItem.classList.add('dragging');
+                dragItem.classList.add('dragging');
+                columnList.classList.add('column-settings-list--dragging');
+                if (event.dataTransfer) {
+                    event.dataTransfer.effectAllowed = 'move';
+                    event.dataTransfer.setData('text/plain', item.dataset.columnId);
+                }
             });
 
             columnList.addEventListener('dragend', () => {
                 if (dragItem) dragItem.classList.remove('dragging');
-                columnList.querySelectorAll('.column-settings-item').forEach(el => el.classList.remove('drag-over'));
+                columnList.classList.remove('column-settings-list--dragging');
+                clearSettingsDropIndicators();
                 dragItem = null;
             });
 
-            columnList.addEventListener('dragover', (e) => {
-                e.preventDefault();
-                const target = e.target.closest('.column-settings-item');
-                if (target && target !== dragItem) {
-                    columnList.querySelectorAll('.column-settings-item').forEach(el => el.classList.remove('drag-over'));
-                    target.classList.add('drag-over');
+            const updateSettingsDropTarget = (event) => {
+                if (!dragItem) return false;
+                const target = event.target.closest('.column-settings-item');
+                if (!target || target === dragItem || target.classList.contains('column-settings-item--fixed')) {
+                    clearSettingsDropIndicators();
+                    return false;
                 }
+                event.preventDefault();
+                if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+                const position = getSettingsDropPosition(event, target);
+                clearSettingsDropIndicators();
+                target.classList.add(position === 'after' ? 'drag-over-after' : 'drag-over-before');
+                return true;
+            };
+
+            columnList.addEventListener('dragenter', updateSettingsDropTarget);
+            columnList.addEventListener('dragover', updateSettingsDropTarget);
+
+            columnList.addEventListener('dragleave', (event) => {
+                const target = event.target.closest('.column-settings-item');
+                if (!target || (event.relatedTarget && target.contains(event.relatedTarget))) return;
+                target.classList.remove('drag-over-before', 'drag-over-after');
             });
 
-            columnList.addEventListener('drop', (e) => {
-                e.preventDefault();
-                const target = e.target.closest('.column-settings-item');
-                if (target && target !== dragItem && dragItem) {
-                    const draggedId = dragItem.dataset.columnId;
-                    const targetId = target.dataset.columnId;
-                    // Prevent moving the first column or dropping onto the first column (issue #958)
-                    const firstColumnId = this.columnOrder[0];
-                    if (draggedId === firstColumnId || targetId === firstColumnId) {
-                        columnList.querySelectorAll('.column-settings-item').forEach(el => el.classList.remove('drag-over'));
-                        return;
-                    }
-                    // Determine insert position based on mouse Y relative to target midpoint (issue #958)
-                    // This allows moving a column to the last position (insert after target)
-                    const targetRect = target.getBoundingClientRect();
-                    const midY = targetRect.top + targetRect.height / 2;
-                    if (e.clientY > midY) {
-                        // Insert after target
-                        columnList.insertBefore(dragItem, target.nextSibling);
-                        // For reorderColumns, use the element after the dragged item as the target
-                        // If there's nothing after, append to end — reorderColumns handles index-based placement
-                        const nextSibling = target.nextSibling === dragItem ? target.nextSibling && target.nextSibling.nextSibling : target.nextSibling;
-                        if (nextSibling && nextSibling.dataset && nextSibling.dataset.columnId) {
-                            this._columnSettingsChanged = true;
-                            this.reorderColumns(draggedId, nextSibling.dataset.columnId);
-                        } else {
-                            // Move to the last position: splice to end
-                            const draggedIdx = this.columnOrder.indexOf(draggedId);
-                            // Skip if already at the last position (issue #966)
-                            if (draggedIdx > 0 && draggedIdx < this.columnOrder.length - 1) {
-                                this._columnSettingsChanged = true;
-                                this.columnOrder.splice(draggedIdx, 1);
-                                this.columnOrder.push(draggedId);
-                                this.saveColumnState();
-                                const newOrderIndex = this.columnOrder.indexOf(draggedId);
-                                if (newOrderIndex >= 0) {
-                                    this.saveColumnOrderToServer(draggedId, newOrderIndex);
-                                }
-                                this.render();
-                            }
-                        }
-                    } else {
-                        // Insert before target
-                        columnList.insertBefore(dragItem, target);
-                        this._columnSettingsChanged = true;
-                        this.reorderColumns(draggedId, targetId);
-                    }
-                }
-                columnList.querySelectorAll('.column-settings-item').forEach(el => el.classList.remove('drag-over'));
-                // Refresh order number badges after drop (issue #962)
+            columnList.addEventListener('drop', (event) => {
+                const target = event.target.closest('.column-settings-item');
+                if (!target || !dragItem || target === dragItem || target.classList.contains('column-settings-item--fixed')) return;
+                event.preventDefault();
+                event.stopPropagation();
+                const draggedId = dragItem.dataset.columnId;
+                const targetId = target.dataset.columnId;
+                const position = getSettingsDropPosition(event, target);
+                placeSettingsItem(dragItem, target, position);
+                this._columnSettingsChanged = true;
+                this.reorderColumns(draggedId, targetId, position);
+                clearSettingsDropIndicators();
                 refreshOrderBadges();
+            });
+
+            columnList.addEventListener('keydown', (event) => {
+                if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+                const handle = event.target.closest('.col-settings-drag-handle[draggable="true"]');
+                const item = handle && handle.closest('.column-settings-item');
+                if (!item) return;
+                const movableItems = [...columnList.querySelectorAll('.column-settings-item:not(.column-settings-item--fixed)')];
+                const currentIndex = movableItems.indexOf(item);
+                const movingUp = event.key === 'ArrowUp';
+                const target = movableItems[currentIndex + (movingUp ? -1 : 1)];
+                if (!target) return;
+                event.preventDefault();
+                const position = movingUp ? 'before' : 'after';
+                placeSettingsItem(item, target, position);
+                const moved = this.reorderColumns(item.dataset.columnId, target.dataset.columnId, position);
+                if (moved) {
+                    this._columnSettingsChanged = true;
+                    refreshOrderBadges();
+                    handle.focus({ preventScroll: true });
+                }
             });
 
             // Update the 1-based order number badges to reflect current DOM order (issue #962)
@@ -8252,14 +8908,8 @@ class IntegramTable{
                 });
             };
 
-            // Close on Escape key (issue #595)
-            const handleEscape = (e) => {
-                if (e.key === 'Escape') {
-                    this.closeColumnSettings();
-                    document.removeEventListener('keydown', handleEscape);
-                }
-            };
-            document.addEventListener('keydown', handleEscape);
+            // Shared Escape stack closes only the topmost modal and unregisters on removal.
+            itCreateModalCloseHandler(modal, () => this.closeColumnSettings(), this);
         }
 
         /**
@@ -8269,10 +8919,15 @@ class IntegramTable{
          * Logic taken from templates/object.html.
          */
         showColumnEditForm(col) {
+            if (!col || !this.normalizeNumericId(col.id)) {
+                this.showToast('Некорректный идентификатор колонки', 'error');
+                return;
+            }
             const instanceName = this.options.instanceName;
             const apiBase = this.getApiBase();
             const parsedAttrs = this.parseAttrs(col.attrs);
-            const isRef = col.ref_id != null || (col.ref && col.ref !== 0);
+            const refTypeId = this.normalizeNumericId(col.ref || col.orig || col.ref_id);
+            const isRef = !!refTypeId && (col.ref_id != null || (col.ref && col.ref !== 0));
             const isFreeLink = String(col.type) === '1';
             const isMulti = parsedAttrs.multi;
             const isRequired = parsedAttrs.required;
@@ -8311,8 +8966,9 @@ class IntegramTable{
             const availableTypes = isFirstColumn ? firstColumnTypes : baseTypes;
 
             // If the column's current type is not in the list, add it so the select shows the correct value
-            if (!isRef && col.type && !availableTypes.find(t => String(t.id) === String(col.type))) {
-                availableTypes.push({ id: parseInt(col.type), name: `Тип #${ col.type }` });
+            const numericColType = this.normalizeNumericId(col.type);
+            if (!isRef && numericColType && !availableTypes.find(t => String(t.id) === numericColType)) {
+                availableTypes.push({ id: numericColType, name: `Тип #${ numericColType }` });
             }
 
             const colEditOverlay = document.createElement('div');
@@ -8332,11 +8988,10 @@ class IntegramTable{
             const currentName = col.val || col.name;
 
             // For reference columns, build a grey hyperlink to table/{ref} instead of an editable name input (issue #1435)
-            const refTypeId = col.ref || col.orig || col.ref_id;
-            const dbName = window.location.pathname.split('/')[1];
+            const dbName = encodeURIComponent(window.location.pathname.split('/')[1] || '');
             const refTableUrl = refTypeId ? `/${ dbName }/table/${ refTypeId }` : '#';
             const nameFieldHtml = isRef
-                ? `<a href="${ this.escapeHtml(refTableUrl) }" target="${ refTypeId }" style="color: grey;">${ this.escapeHtml(currentName) }</a>`
+                ? `<a href="${ this.escapeHtml(refTableUrl) }" target="${ refTypeId }" rel="noopener noreferrer" style="color: grey;">${ this.escapeHtml(currentName) }</a>`
                 : `<input type="text" id="col-edit-name-${instanceName}" class="form-control form-control-sm col-edit-input" value="${ this.escapeHtml(currentName) }" placeholder="Введите название колонки" autocomplete="off">`;
             const uniqueKeyTitle = 'Система контролирует уникальность комбинации первой колонки и всех ключей';
 
@@ -8351,7 +9006,7 @@ class IntegramTable{
                         <label class="col-edit-label">Базовый тип:</label>
                         ${ isFreeLink ? `<span class="col-edit-value">Свободная ссылка</span>`
                             : !isRef ? `<select id="col-edit-type-${instanceName}" class="form-control form-control-sm col-edit-select">
-                            ${ availableTypes.map(t => `<option value="${t.id}" ${ String(col.type) === String(t.id) ? 'selected' : '' }>${t.name}</option>`).join('') }
+                            ${ availableTypes.map(t => `<option value="${ this.escapeHtml(t.id) }" ${ String(col.type) === String(t.id) ? 'selected' : '' }>${ this.escapeHtml(t.name) }</option>`).join('') }
                         </select>` : `<span class="col-edit-value">Ссылочный тип (справочник)</span>` }
                     </div>
                     ${ isFirstColumn ? `<div class="col-edit-row">
@@ -8429,6 +9084,8 @@ class IntegramTable{
                 colEditOverlay.remove();
                 colEditModal.remove();
             };
+
+            itCreateModalCloseHandler(colEditModal, closeColEdit, this);
 
             const refreshCurrentTableAfterDelete = async () => {
                 this.metadataCache = {};
@@ -8599,7 +9256,7 @@ class IntegramTable{
                     const refTypeId = col.orig || col.ref_id;
                     if (refTypeId) {
                         const dbName = window.location.pathname.split('/')[1];
-                        window.open(`/${dbName}/object/${refTypeId}`, '_blank');
+                        window.open(`/${dbName}/object/${refTypeId}`, '_blank', 'noopener,noreferrer');
                     }
                 });
             }
@@ -9315,7 +9972,7 @@ class IntegramTable{
             ensureGlobalMetadataForSuggestions();
 
             // Hide suggestions when clicking outside
-            document.addEventListener('click', (e) => {
+            itAddModalDocumentListener(modal, 'click', (e) => {
                 if (!nameInput.contains(e.target) && !suggestionsDiv.contains(e.target)) {
                     suggestionsDiv.style.display = 'none';
                 }
@@ -9362,7 +10019,8 @@ class IntegramTable{
 
                     if (result.success) {
                         // Add column to the table's internal state first so getColTypeIcon can use it
-                        const newColumnId = String(result.columnId);
+                        const newColumnId = this.normalizeNumericId(result.columnId);
+                        if (!newColumnId) throw new Error('Сервер вернул некорректный ID колонки');
                         const isFreeLink = Number(baseTypeId) === 1;
                         let newCol = null;
                         try {
@@ -9401,13 +10059,12 @@ class IntegramTable{
                         if (columnList) {
                             const newItem = document.createElement('div');
                             newItem.className = 'column-settings-item';
-                            newItem.setAttribute('draggable', 'true');
                             newItem.dataset.columnId = newColumnId;
                             // Determine 1-based position number among non-fixed columns (issue #970)
                             const nonFixedCount = columnList.querySelectorAll('.column-settings-item:not(.column-settings-item--fixed)').length;
                             const orderNum = nonFixedCount + 1;
                             newItem.innerHTML = `
-                                <span class="col-settings-drag-handle" title="Перетащите для изменения порядка">&#9776;</span><span class="col-settings-order-num">${orderNum}</span>
+                                <button type="button" class="col-settings-drag-handle" draggable="true" data-column-id="${newColumnId}" title="Перетащите для изменения порядка" aria-label="Переместить столбец ${this.escapeHtml(columnName)}. Используйте стрелки вверх и вниз"><i class="pi pi-bars" aria-hidden="true"></i></button><span class="col-settings-order-num">${orderNum}</span>
                                 ${this.getColTypeIcon(newCol)}
                                 <label style="flex: 1; margin: 0;">
                                     <input type="checkbox" data-column-id="${newColumnId}" checked>
@@ -9487,14 +10144,8 @@ class IntegramTable{
             // Focus on the name input
             modal.querySelector(`#new-column-name-${instanceName}`).focus();
 
-            // Close on Escape key
-            const handleEscape = (e) => {
-                if (e.key === 'Escape') {
-                    closeAddColumnModal();
-                    document.removeEventListener('keydown', handleEscape);
-                }
-            };
-            document.addEventListener('keydown', handleEscape);
+            // Shared Escape stack closes only the topmost modal and unregisters on removal.
+            itCreateModalCloseHandler(modal, closeAddColumnModal, this);
         }
 
         /**
@@ -9679,7 +10330,7 @@ class IntegramTable{
             overlay.className = 'column-settings-overlay';
 
             const modal = document.createElement('div');
-            modal.className = 'column-settings-modal';
+            modal.className = 'column-settings-modal table-settings-modal';
             const instanceName = this.options.instanceName;
 
             modal.innerHTML = `
@@ -9853,14 +10504,8 @@ class IntegramTable{
 
             overlay.addEventListener('click', () => this.closeTableSettings());
 
-            // Close on Escape key (issue #595)
-            const handleEscape = (e) => {
-                if (e.key === 'Escape') {
-                    this.closeTableSettings();
-                    document.removeEventListener('keydown', handleEscape);
-                }
-            };
-            document.addEventListener('keydown', handleEscape);
+            // Shared Escape stack closes only the topmost modal and unregisters on removal.
+            itCreateModalCloseHandler(modal, () => this.closeTableSettings(), this);
         }
 
         closeTableSettings() {
@@ -9946,16 +10591,19 @@ class IntegramTable{
                 recordId = this.rawObjectData[rowIndex].i;
             }
 
-            if (!recordId) {
+            if (!recordId || !/^\d+$/.test(String(recordId))) {
                 return `<td class="references-column-cell"></td>`;
             }
 
             const pathParts = window.location.pathname.split('/');
-            const dbName = pathParts.length >= 2 ? pathParts[1] : '';
+            const dbName = pathParts.length >= 2 ? encodeURIComponent(pathParts[1]) : '';
 
             const links = backRefs.map(ref => {
-                const href = `/${dbName}/table/${ref.tableId}?FR_${ref.fieldId}=@${recordId}`;
-                const label = `${ref.tableName}.${ref.fieldName}`;
+                const tableId = String(ref.tableId || '');
+                const fieldId = String(ref.fieldId || '');
+                if (!/^\d+$/.test(tableId) || !/^\d+$/.test(fieldId)) return '';
+                const href = `/${dbName}/table/${tableId}?FR_${fieldId}=@${recordId}`;
+                const label = this.escapeHtml(`${ref.tableName}.${ref.fieldName}`);
                 return `<a href="${href}" class="reference-link" style="color: #9ca3af;" title="${label}">${label}</a>`;
             }).join(', ');
 
@@ -9976,15 +10624,22 @@ class IntegramTable{
                     <button class="full-value-copy-btn" title="Копировать в буфер"><i class="pi pi-copy"></i></button>
                 </div>
                 <div class="full-value-content" style="max-height: 400px; overflow-y: auto; margin: 15px 0; padding: 10px; background: #f8f9fa; border-radius: 4px; cursor: pointer;" title="Нажмите, чтобы скопировать">
-                    <pre style="white-space: pre-wrap; word-wrap: break-word; margin: 0;">${ fullValue }</pre>
+                    <pre style="white-space: pre-wrap; word-wrap: break-word; margin: 0;"></pre>
                 </div>
                 <div style="text-align: right;">
-                    <button class="btn btn-secondary" onclick="this.closest('.column-settings-modal').remove(); document.querySelector('.column-settings-overlay').remove();">Закрыть</button>
+                    <button class="btn btn-secondary full-value-close-btn">Закрыть</button>
                 </div>
             `;
 
+            modal.querySelector('pre').textContent = String(fullValue ?? '');
+            const closeModal = () => {
+                modal.remove();
+                overlay.remove();
+            };
+
             // Extract plain text for clipboard (strip HTML tags from linkified content) - issue #1465
             const plainText = modal.querySelector('pre').textContent;
+            modal.querySelector('.full-value-close-btn').addEventListener('click', closeModal);
 
             // Copy to clipboard helper - issue #1465
             const copyToClipboard = (btn) => {
@@ -10010,20 +10665,10 @@ class IntegramTable{
             document.body.appendChild(overlay);
             document.body.appendChild(modal);
 
-            overlay.addEventListener('click', () => {
-                modal.remove();
-                overlay.remove();
-            });
+            overlay.addEventListener('click', closeModal);
 
-            // Close on Escape key (issue #595)
-            const handleEscape = (e) => {
-                if (e.key === 'Escape') {
-                    modal.remove();
-                    overlay.remove();
-                    document.removeEventListener('keydown', handleEscape);
-                }
-            };
-            document.addEventListener('keydown', handleEscape);
+            // Shared Escape stack closes only the topmost modal and unregisters on removal.
+            itCreateModalCloseHandler(modal, closeModal, this);
         }
 
         toggleFilters() {
@@ -10058,13 +10703,13 @@ class IntegramTable{
                         const isSelected = this.groupingColumns.includes(col.id);
                         const order = isSelected ? this.groupingColumns.indexOf(col.id) + 1 : '';
                         return `
-                            <div class="column-settings-item grouping-column-item" data-column-id="${ col.id }">
+                            <div class="column-settings-item grouping-column-item" data-column-id="${ this.escapeHtml(col.id) }">
                                 <label>
                                     <input type="checkbox"
-                                           data-column-id="${ col.id }"
+                                           data-column-id="${ this.escapeHtml(col.id) }"
                                            ${ isSelected ? 'checked' : '' }>
                                     <span class="grouping-order-badge" style="${ isSelected ? '' : 'display: none;' }">${ order }</span>
-                                    ${ col.name }
+                                    ${ this.escapeHtml(col.name) }
                                 </label>
                             </div>
                         `;
@@ -10120,7 +10765,7 @@ class IntegramTable{
                 this.groupingColumns = [...selectedOrder];
                 this.groupingEnabled = this.groupingColumns.length > 0;
 
-                // If grouping is enabled, reload data with LIMIT=1000
+                // If grouping is enabled, reload all matching data in bounded pages
                 if (this.groupingEnabled) {
                     this.data = [];
                     this.loadedRecords = 0;
@@ -10145,14 +10790,8 @@ class IntegramTable{
             modal.querySelector('#close-grouping-btn').addEventListener('click', closeModal);
             overlay.addEventListener('click', closeModal);
 
-            // Close on Escape key (issue #595)
-            const handleEscape = (e) => {
-                if (e.key === 'Escape') {
-                    closeModal();
-                    document.removeEventListener('keydown', handleEscape);
-                }
-            };
-            document.addEventListener('keydown', handleEscape);
+            // Shared Escape stack closes only the topmost modal and unregisters on removal.
+            itCreateModalCloseHandler(modal, closeModal, this);
         }
 
         /**
@@ -10272,11 +10911,18 @@ class IntegramTable{
                 return String(displayA).toLowerCase().localeCompare(String(displayB).toLowerCase(), 'ru');
             };
 
-            // Sort data by grouping columns (using display values for reference fields)
-            const sortedData = [...this.data].sort((a, b) => {
+            // Sort row data together with raw record metadata. Keeping both arrays
+            // aligned is essential for editing, selection and bulk actions after the
+            // grouped view changes row order.
+            const hasAlignedRawData = Array.isArray(this.rawObjectData) &&
+                this.rawObjectData.length === this.data.length;
+            const sortedEntries = this.data.map((row, index) => ({
+                row,
+                raw: hasAlignedRawData ? this.rawObjectData[index] : null
+            })).sort((entryA, entryB) => {
                 for (const info of groupColInfo) {
-                    const valA = a[info.index];
-                    const valB = b[info.index];
+                    const valA = entryA.row[info.index];
+                    const valB = entryB.row[info.index];
 
                     // Issue #529: Use type-aware comparison
                     const comparison = compareGroupingValues(valA, valB, info.column);
@@ -10284,6 +10930,7 @@ class IntegramTable{
                 }
                 return 0;
             });
+            const sortedData = sortedEntries.map(entry => entry.row);
 
             // Create grouped structure
             // Each row gets info about which group cells should be displayed (rowspan)
@@ -10359,8 +11006,11 @@ class IntegramTable{
                 prevGroupDisplayValues = groupDisplayValues;
             });
 
-            // Replace data with sorted data for rendering
+            // Replace data with sorted data for rendering and keep record IDs aligned.
             this.data = sortedData;
+            if (hasAlignedRawData) {
+                this.rawObjectData = sortedEntries.map(entry => entry.raw);
+            }
         }
 
         hasActiveFilters() {
@@ -10629,7 +11279,8 @@ class IntegramTable{
 
                 // Check for FR_ prefix
                 if (key.startsWith('FR_')) {
-                    const colId = key.substring(3);  // Remove 'FR_' prefix
+                    const colId = this.normalizeNumericId(key.substring(3));  // Remove 'FR_' prefix
+                    if (!colId) continue;
                     const parsed = this.parseFilterValue(value);
                     urlFilters[colId] = {
                         type: parsed.type,
@@ -10645,7 +11296,8 @@ class IntegramTable{
                 // Check for F_ prefix (alternative filter format) - issue #549
                 // Note: F_U is excluded above as it's used for parentId
                 else if (key.startsWith('F_')) {
-                    const colId = key.substring(2);  // Remove 'F_' prefix
+                    const colId = this.normalizeNumericId(key.substring(2));  // Remove 'F_' prefix
+                    if (!colId) continue;
                     const parsed = this.parseFilterValue(value);
                     urlFilters[colId] = {
                         type: parsed.type,
@@ -10660,7 +11312,8 @@ class IntegramTable{
                 }
                 // Check for TO_ prefix (range filter second part)
                 else if (key.startsWith('TO_')) {
-                    const colId = key.substring(3);  // Remove 'TO_' prefix
+                    const colId = this.normalizeNumericId(key.substring(3));  // Remove 'TO_' prefix
+                    if (!colId) continue;
                     // If we already have a FR_ or F_ for this column, combine into range
                     if (urlFilters[colId]) {
                         urlFilters[colId].type = '...';
@@ -10980,6 +11633,8 @@ class IntegramTable{
 
             const instanceName = this.options.instanceName;
             const badges = hiddenFilters.map(hf => {
+                const colId = String(hf.colId || '');
+                if (!/^\d+$/.test(colId)) return '';
                 const filterTypeSymbol = hf.filter.type || '^';
                 // Use resolved text label for @id-based filters when available (issue #551)
                 const activeFilter = this.filters[hf.colId];
@@ -10989,10 +11644,10 @@ class IntegramTable{
                 const displayValue = resolvedLabel ? `${filterTypeSymbol} ${resolvedLabel}` : filterTypeSymbol;
 
                 return `
-                    <span class="hidden-filter-badge" data-col-id="${hf.colId}">
-                        <span class="hidden-filter-badge-name">${hf.colName}</span>
-                        <span class="hidden-filter-badge-value">${displayValue}</span>
-                        <span class="hidden-filter-badge-remove" onclick="window.${instanceName}.removeUrlFilter('${hf.colId}')" title="Удалить фильтр"><i class="pi pi-times"></i></span>
+                    <span class="hidden-filter-badge" data-col-id="${colId}">
+                        <span class="hidden-filter-badge-name">${this.escapeHtml(hf.colName)}</span>
+                        <span class="hidden-filter-badge-value">${this.escapeHtml(displayValue)}</span>
+                        <button type="button" class="hidden-filter-badge-remove" onclick="window.${instanceName}.removeUrlFilter('${colId}')" title="Удалить фильтр" aria-label="Удалить фильтр ${this.escapeHtml(hf.colName)}"><i class="pi pi-times" aria-hidden="true"></i></button>
                     </span>
                 `;
             }).join('');
@@ -11446,6 +12101,8 @@ class IntegramTable{
         }
 
         async fetchMetadata(typeId) {
+            typeId = this.normalizeNumericId(typeId);
+            if (!typeId) throw new Error('Некорректный идентификатор типа');
             // Use globalMetadata if available - it already contains metadata for all tables (issue #779)
             if (this.globalMetadata) {
                 const cachedItem = this.globalMetadata.find(item => item.id === typeId || item.id === Number(typeId));
@@ -11601,6 +12258,10 @@ class IntegramTable{
         }
 
         async fetchReferenceOptions(requisiteId, recordId = 0, searchQuery = '', extraParams = {}, attrs = '') {
+            requisiteId = this.normalizeNumericId(requisiteId);
+            if (!requisiteId) return [];
+            const normalizedRecordId = this.normalizeNumericId(recordId);
+            recordId = normalizedRecordId && normalizedRecordId !== '0' ? normalizedRecordId : 0;
             const apiBase = this.getApiBase();
             // Determine whether to include id parameter: only when attrs contains a query (square bracket expression)
             const hasQuery = /\[.+\]/.test(attrs || '');
@@ -11835,7 +12496,7 @@ class IntegramTable{
                     const isSelected = selSet.has(String(id));
                     const escapedText = String(this.formatReferenceOptionLabel(text, refColumn)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
                     return `
-                        <label class="filter-ref-option" data-id="${id}">
+                        <label class="filter-ref-option" data-id="${this.escapeHtml(id)}">
                             <input type="checkbox" value="${id}" ${isSelected ? 'checked' : ''}>
                             <span class="filter-ref-option-text">${escapedText}</span>
                         </label>
@@ -11972,8 +12633,14 @@ class IntegramTable{
             });
 
             // Close dropdown when clicking outside
-            setTimeout(() => {
-                document.addEventListener('click', this.handleRefFilterDropdownOutsideClick);
+            if (this._refFilterOutsideClickTimer !== null && this._refFilterOutsideClickTimer !== undefined) {
+                clearTimeout(this._refFilterOutsideClickTimer);
+            }
+            this._refFilterOutsideClickTimer = setTimeout(() => {
+                this._refFilterOutsideClickTimer = null;
+                if (!this._destroyed && this.currentRefFilterDropdown) {
+                    document.addEventListener('click', this.handleRefFilterDropdownOutsideClick);
+                }
             }, 0);
         }
 
@@ -12044,11 +12711,15 @@ class IntegramTable{
          * Close the reference filter dropdown (issue #797).
          */
         closeRefFilterDropdown() {
+            if (this._refFilterOutsideClickTimer !== null && this._refFilterOutsideClickTimer !== undefined) {
+                clearTimeout(this._refFilterOutsideClickTimer);
+                this._refFilterOutsideClickTimer = null;
+            }
             if (this.currentRefFilterDropdown) {
                 this.currentRefFilterDropdown.element.remove();
                 this.currentRefFilterDropdown = null;
-                document.removeEventListener('click', this.handleRefFilterDropdownOutsideClick);
             }
+            document.removeEventListener('click', this.handleRefFilterDropdownOutsideClick);
         }
 
         /**
@@ -12365,41 +13036,44 @@ class IntegramTable{
             // Store reference to overlay on modal for proper cleanup
             modal._overlayElement = overlay;
 
-            const typeName = this.getMetadataName(metadata);
+            const rawTypeName = this.getMetadataName(metadata);
+            const typeName = this.escapeHtml(rawTypeName);
             const firstColumnValue = !isCreate && recordData && recordData.obj ? recordData.obj.val : null;
             // #3774: если главное значение таблицы — DATETIME, API отдаёт его unix-штампом —
             // в заголовке показываем дату-время (как в .integram-title-link, #3247), а не штамп.
             // Сырое firstColumnValue не меняем: оно идёт в dataset (имя для пароль-приглашения
             // #1481) и сравнения; форматируем только видимый текст заголовка/вкладки браузера.
             const firstColumnDisplay = firstColumnValue != null ? this.formatRecordTitleValue(firstColumnValue) : null;
-            const title = isCreate ? `Создание: ${ typeName }` : `Редактирование: ${ firstColumnDisplay || typeName }`;
+            const title = isCreate ? `Создание: ${ typeName }` : `Редактирование: ${ this.escapeHtml(firstColumnDisplay || rawTypeName) }`;
+            const safeTypeId = this.normalizeNumericId(typeId);
             const instanceName = this.options.instanceName;
 
             // Save and update navbar-workspace + document.title with object value
             const navbarWorkspace = document.querySelector('.navbar-workspace');
             const prevWorkspaceText = navbarWorkspace ? navbarWorkspace.textContent : null;
             const prevDocTitle = document.title;
-            const objectValue = firstColumnDisplay || typeName;
+            const objectValue = firstColumnDisplay || rawTypeName;
             const truncatedValue = objectValue && objectValue.length > 32 ? objectValue.slice(0, 32) + '...' : objectValue;
             if (navbarWorkspace) navbarWorkspace.textContent = truncatedValue;
             document.title = truncatedValue;
-            const recordId = recordData && recordData.obj ? recordData.obj.id : null;
+            const recordId = this.normalizeNumericId(recordData && recordData.obj ? recordData.obj.id : null);
             // Issue #616: For create mode, use F_U from URL as parent when F_U > 1
-            const defaultParentId = (this.options.parentId && parseInt(this.options.parentId) > 1) ? this.options.parentId : 1;
-            const parentId = recordData && recordData.obj && recordData.obj.parent ? recordData.obj.parent : defaultParentId;
+            const configuredParentId = this.normalizeNumericId(this.options.parentId);
+            const defaultParentId = configuredParentId && Number(configuredParentId) > 1 ? configuredParentId : '1';
+            const parentId = this.normalizeNumericId(recordData && recordData.obj && recordData.obj.parent ? recordData.obj.parent : defaultParentId) || defaultParentId;
 
             // Build record ID and table link HTML for edit mode (issue #563)
             let recordIdHtml = '';
-            if (!isCreate && recordId) {
+            if (!isCreate && recordId && safeTypeId) {
                 // Extract database name from URL path
                 const pathParts = window.location.pathname.split('/');
                 const dbName = pathParts.length >= 2 ? pathParts[1] : '';
                 // Build table URL with filters: /{dbName}/table/{typeId}?F_U={parentId}&F_I={recordId}
-                const tableUrl = `/${dbName}/table/${typeId}?F_U=${parentId || 1}&F_I=${recordId}`;
+                const tableUrl = `/${dbName}/table/${safeTypeId}?F_U=${parentId}&F_I=${recordId}`;
 
                 recordIdHtml = `
-                    <span class="edit-form-record-id" onclick="window.${instanceName}.copyRecordIdToClipboard('${recordId}')" title="Скопировать ID">#${recordId}</span>
-                    <a href="${tableUrl}" class="edit-form-table-link" title="Открыть в таблице" target="_blank">
+                    <button type="button" class="edit-form-record-id" onclick="window.${instanceName}.copyRecordIdToClipboard('${recordId}')" title="Скопировать ID" aria-label="Скопировать ID ${recordId}">#${recordId}</button>
+                    <a href="${tableUrl}" class="edit-form-table-link" title="Открыть в таблице" target="_blank" rel="noopener noreferrer">
                         <i class="pi pi-table"></i>
                     </a>
                 `;
@@ -12416,8 +13090,8 @@ class IntegramTable{
                 return orderA - orderB;
             });
 
-            const regularFields = sortedReqs.filter(req => !req.arr_id);
-            const subordinateTables = sortedReqs.filter(req => req.arr_id);
+            const regularFields = sortedReqs.filter(req => !req.arr_id && this.normalizeNumericId(req.id));
+            const subordinateTables = sortedReqs.filter(req => this.normalizeNumericId(req.arr_id) && this.normalizeNumericId(req.id));
 
             // Build tabs HTML
             let tabsHtml = '';
@@ -12429,9 +13103,11 @@ class IntegramTable{
 
                 subordinateTables.forEach(req => {
                     const attrs = this.parseAttrs(req.attrs);
-                    const fieldName = attrs.alias || req.val;
-                    const arrCount = recordReqs[req.id] ? recordReqs[req.id].arr || 0 : 0;
-                    tabsHtml += `<div class="edit-form-tab" data-tab="sub-${ req.id }" data-arr-id="${ req.arr_id }" data-req-id="${ req.id }">${ fieldName } (${ arrCount })</div>`;
+                    const fieldName = this.escapeHtml(attrs.alias || req.val || '');
+                    const arrCount = this.escapeHtml(recordReqs[req.id] ? recordReqs[req.id].arr || 0 : 0);
+                    const reqId = this.normalizeNumericId(req.id);
+                    const arrId = this.normalizeNumericId(req.arr_id);
+                    tabsHtml += `<div class="edit-form-tab" data-tab="sub-${ reqId }" data-arr-id="${ arrId }" data-req-id="${ reqId }">${ fieldName } (${ arrCount })</div>`;
                 });
 
                 tabsHtml += `</div>`;
@@ -12473,7 +13149,7 @@ class IntegramTable{
             if (hasSubordinateTables) {
                 subordinateTables.forEach(req => {
                     formHtml += `
-                        <div class="edit-form-tab-content" data-tab-content="sub-${ req.id }">
+                        <div class="edit-form-tab-content" data-tab-content="sub-${ this.normalizeNumericId(req.id) }">
                             <div class="subordinate-table-loading">Загрузка...</div>
                         </div>
                     `;
@@ -12534,7 +13210,7 @@ class IntegramTable{
             }
 
             // Load reference options for dropdowns (scoped to this modal)
-            this.loadReferenceOptions(metadata.reqs, recordId || 0, modal);
+            this.loadReferenceOptions(regularFields, recordId || 0, modal);
 
             // Load GRANT and REPORT_COLUMN dropdown options (issue #577)
             this.loadGrantAndReportColumnOptions(modal);
@@ -12621,19 +13297,8 @@ class IntegramTable{
 
             overlay.addEventListener('click', closeModal);
 
-            // Close on Escape key (issue #595)
-            const handleEscape = (e) => {
-                if (e.key === 'Escape') {
-                    // Only close if this modal is the topmost one
-                    const currentDepth = parseInt(modal.dataset.modalDepth) || 0;
-                    const maxDepth = window._integramModalDepth || 0;
-                    if (currentDepth === maxDepth) {
-                        closeModal();
-                        document.removeEventListener('keydown', handleEscape);
-                    }
-                }
-            };
-            document.addEventListener('keydown', handleEscape);
+            // Shared Escape stack closes only the topmost modal and unregisters on removal.
+            itCreateModalCloseHandler(modal, closeModal, this);
 
             // Enter in input/textarea triggers Save (issue #1422)
             if (saveBtn) {
@@ -12678,7 +13343,7 @@ class IntegramTable{
             const mainFieldReadOnly = formIsReadOnly;
 
             // Main value field - render according to base type
-            const typeName = this.getMetadataName(metadata);
+            const typeName = this.escapeHtml(this.getMetadataName(metadata));
             const mainValue = recordData && recordData.obj ? recordData.obj.val : '';
             // For GRANT/REPORT_COLUMN fields, use term from API response for dropdown pre-selection (issue #583)
             // Issue #3572: для подчинённой таблицы значение «Объекты» может прийти меткой
@@ -12788,7 +13453,7 @@ class IntegramTable{
 
             sortedFields.forEach(req => {
                 const attrs = this.parseAttrs(req.attrs);
-                const fieldName = attrs.alias || req.val;
+                const fieldName = this.escapeHtml(attrs.alias || req.val || '');
                 const storedValue = recordReqs[req.id] ? recordReqs[req.id].value : '';
                 const baseTypeId = recordReqs[req.id] ? recordReqs[req.id].base : req.type;
                 const baseFormat = this.normalizeFormat(baseTypeId);
@@ -12854,7 +13519,7 @@ class IntegramTable{
                 else if (req.ref_id && isMulti) {
                     const currentValue = reqValue || '';
                     html += `
-                        <div class="form-reference-editor form-multi-reference-editor" data-ref-id="${ req.id }" data-required="${ isRequired }" data-ref-type-id="${ req.orig || req.ref_id }" data-ref-base-type="${ req.type }" data-multi="1" data-current-value="${ this.escapeHtml(currentValue) }">
+                        <div class="form-reference-editor form-multi-reference-editor" data-ref-id="${ req.id }" data-required="${ isRequired }" data-ref-type-id="${ this.normalizeNumericId(req.orig || req.ref_id) }" data-ref-base-type="${ this.escapeHtml(req.type) }" data-multi="1" data-current-value="${ this.escapeHtml(currentValue) }">
                             <div class="inline-editor-reference form-ref-editor-box inline-editor-multi-reference">
                                 <div class="multi-ref-tags-container form-multi-ref-tags-container">
                                     <span class="multi-ref-tags-placeholder">Загрузка...</span>
@@ -12884,7 +13549,7 @@ class IntegramTable{
                 else if (req.ref_id) {
                     const currentValue = reqValue || '';
                     html += `
-                        <div class="form-reference-editor" data-ref-id="${ req.id }" data-required="${ isRequired }" data-ref-type-id="${ req.orig || req.ref_id }" data-ref-base-type="${ req.type }">
+                        <div class="form-reference-editor" data-ref-id="${ req.id }" data-required="${ isRequired }" data-ref-type-id="${ this.normalizeNumericId(req.orig || req.ref_id) }" data-ref-base-type="${ this.escapeHtml(req.type) }">
                             <div class="inline-editor-reference form-ref-editor-box">
                                 <div class="inline-editor-reference-header">
                                     <input type="text"
@@ -12943,7 +13608,7 @@ class IntegramTable{
                     let hasFile = false;
 
                     if (reqValue && reqValue !== '') {
-                        // Check if value contains HTML link: <a target="_blank" href="/path/to/file">filename.ext</a>
+                        // Check if value contains HTML link: <a target="_blank" rel="noopener noreferrer" href="/path/to/file">filename.ext</a>
                         const linkMatch = reqValue.match(/<a[^>]*href=["']([^"']+)["'][^>]*>([^<]+)<\/a>/i);
                         if (linkMatch) {
                             fileHref = linkMatch[1];
@@ -12957,6 +13622,7 @@ class IntegramTable{
                         }
                     }
 
+                    const safeFileHref = this.sanitizeLinkUrl(fileHref);
                     html += `
                         <div class="form-file-upload" data-req-id="${ req.id }" data-original-value="${ this.escapeHtml(reqValue) }">
                             <input type="file" class="file-input" id="field-${ req.id }-file" style="display: none;">
@@ -12965,7 +13631,7 @@ class IntegramTable{
                                 <button type="button" class="file-select-btn">Выбрать файл</button>
                             </div>
                             <div class="file-preview" style="${ hasFile ? 'display: flex;' : 'display: none;' }">
-                                ${ fileHref ? `<a href="${ this.escapeHtml(fileHref) }" target="_blank" class="file-name file-link">${ this.escapeHtml(fileName) }</a>` : `<span class="file-name">${ this.escapeHtml(fileName) }</span>` }
+                                ${ safeFileHref ? `<a href="${ this.escapeHtml(safeFileHref) }" target="_blank" rel="noopener noreferrer" class="file-name file-link">${ this.escapeHtml(fileName) }</a>` : `<span class="file-name">${ this.escapeHtml(fileName) }</span>` }
                                 <button type="button" class="file-remove-btn" title="Удалить файл"><i class="pi pi-times"></i></button>
                             </div>
                             <input type="hidden" id="field-${ req.id }" name="t${ req.id }" value="${ this.escapeHtml(reqValue) }" ${ isRequired ? 'required' : '' } data-file-deleted="false">
@@ -13032,10 +13698,10 @@ class IntegramTable{
 
                     // Load subordinate table if needed
                     // Use modal.dataset.recordId to support nested modals (issue #741)
-                    const parentRecordId = modal.dataset.recordId;
+                    const parentRecordId = this.normalizeNumericId(modal.dataset.recordId);
                     if (tabId.startsWith('sub-') && tab.dataset.arrId && parentRecordId) {
-                        const arrId = tab.dataset.arrId;
-                        const reqId = tab.dataset.reqId;
+                        const arrId = this.normalizeNumericId(tab.dataset.arrId);
+                        const reqId = this.normalizeNumericId(tab.dataset.reqId);
 
                         // Check if already loaded
                         if (!targetContent.dataset.loaded) {
@@ -13062,6 +13728,12 @@ class IntegramTable{
         }
 
         async loadSubordinateTable(container, arrId, parentRecordId, reqId) {
+            arrId = this.normalizeNumericId(arrId);
+            parentRecordId = this.normalizeNumericId(parentRecordId);
+            if (!arrId || !parentRecordId) {
+                container.innerHTML = '<div class="subordinate-table-error">Некорректный идентификатор таблицы</div>';
+                return;
+            }
             const hasContent = !!container.querySelector('.subordinate-table');
             if (hasContent) {
                 // Keep existing content visible but dimmed, show spinner overlay (issue #2580)
@@ -13086,8 +13758,7 @@ class IntegramTable{
                 const pageSize = this.options.pageSize || 20;
                 const apiBase = this.getApiBase();
                 const dataUrl = `${ apiBase }/object/${ arrId }/?JSON_OBJ&F_U=${ parentRecordId }&LIMIT=0,${ pageSize + 1 }`;
-                const dataResponse = await fetch(dataUrl);
-                const data = await dataResponse.json();
+                const data = await this.fetchJson(dataUrl);
 
                 // Determine if there are more records (issue #1640)
                 const rows = Array.isArray(data) ? data : [];
@@ -13109,7 +13780,7 @@ class IntegramTable{
 
             } catch (error) {
                 console.error('Error loading subordinate table:', error);
-                container.innerHTML = `<div class="subordinate-table-error">Ошибка загрузки: ${ error.message }</div>`;
+                container.innerHTML = `<div class="subordinate-table-error">Ошибка загрузки: ${ this.escapeHtml(error.message) }</div>`;
             }
         }
 
@@ -13198,8 +13869,7 @@ class IntegramTable{
                 const apiBase = this.getApiBase();
                 const dataUrl = `${ apiBase }/object/${ arrId }/?JSON_OBJ&F_U=${ parentRecordId }&LIMIT=${ offset },${ pageSize + 1 }`;
 
-                const dataResponse = await fetch(dataUrl);
-                const data = await dataResponse.json();
+                const data = await this.fetchJson(dataUrl);
                 const newRows = Array.isArray(data) ? data : [];
                 const hasMore = newRows.length > pageSize;
                 const pageRows = hasMore ? newRows.slice(0, pageSize) : newRows;
@@ -13223,7 +13893,7 @@ class IntegramTable{
 
                     pageRows.forEach((row, rowOffset) => {
                         const rowIndex = startRowIndex + rowOffset;
-                        const rowId = row.i;
+                        const rowId = this.normalizeNumericId(row.i);
                         const values = row.r || [];
                         const tr = document.createElement('tr');
                         tr.dataset.rowId = rowId;
@@ -13244,7 +13914,7 @@ class IntegramTable{
                             displayMainValue = this.highlightSearchTerm(displayMainValue, searchTerm);
                         }
                         const mainTd = document.createElement('td');
-                        mainTd.className = 'subordinate-cell-clickable';
+                        mainTd.className = rowId ? 'subordinate-cell-clickable' : '';
                         mainTd.dataset.rowId = rowId;
                         mainTd.dataset.typeId = arrId;
                         mainTd.innerHTML = displayMainValue;
@@ -13258,10 +13928,11 @@ class IntegramTable{
                             const cellValue = values[idx + 1] !== undefined ? values[idx + 1] : '';
                             const td = document.createElement('td');
                             if (req.arr_id) {
-                                const count = typeof cellValue === 'number' ? cellValue : (cellValue || 0);
-                                const nestedTableUrl = `/${dbName}/table/${req.arr_id}?F_U=${rowId}`;
+                                const count = this.escapeHtml(typeof cellValue === 'number' ? cellValue : (cellValue || 0));
+                                const nestedTypeId = this.normalizeNumericId(req.arr_id);
+                                const nestedTableUrl = nestedTypeId && rowId ? `/${dbName}/table/${nestedTypeId}?F_U=${rowId}` : '';
                                 td.className = 'subordinate-nested-count';
-                                td.innerHTML = `<a href="${nestedTableUrl}" class="subordinate-table-icon-link" target="${req.arr_id}" title="Открыть в новом окне" onclick="event.stopPropagation();"><i class="pi pi-table"></i></a><a href="#" class="subordinate-count-link" onclick="window.${instanceName}.openSubordinateTableFromCell(event, ${req.arr_id}, ${rowId}); return false;" title="Посмотреть подчиненную таблицу">(${count})</a>`;
+                                td.innerHTML = nestedTableUrl ? `<a href="${nestedTableUrl}" class="subordinate-table-icon-link" target="${nestedTypeId}" rel="noopener noreferrer" title="Открыть в новом окне" onclick="event.stopPropagation();"><i class="pi pi-table"></i></a><a href="#" class="subordinate-count-link" onclick="window.${instanceName}.openSubordinateTableFromCell(event, ${nestedTypeId}, ${rowId}); return false;" title="Посмотреть подчиненную таблицу">(${count})</a>` : `<span class="subordinate-count">(${count})</span>`;
                             } else {
                                 let displayValue = this.formatSubordinateCellValue(cellValue, req);
                                 if (searchTerm) {
@@ -13309,8 +13980,15 @@ class IntegramTable{
          * @param {number} parentRecordId - Parent record ID
          */
         async openSubordinateTableFromCell(event, arrId, parentRecordId) {
+            arrId = this.normalizeNumericId(arrId);
+            parentRecordId = this.normalizeNumericId(parentRecordId);
             event.preventDefault();
             event.stopPropagation();
+
+            if (!arrId || !parentRecordId) {
+                this.showToast('Некорректный идентификатор таблицы', 'error');
+                return;
+            }
 
             // Remember the clicked cell so we can update its count on close (issue #1839)
             const clickedCountCell = event.target.closest('td');
@@ -13362,7 +14040,7 @@ class IntegramTable{
                 modal.style.zIndex = baseZIndex + 1;
                 modal.dataset.modalDepth = modalDepth;
 
-                const typeName = this.getMetadataName(metadata);
+                const typeName = this.escapeHtml(this.getMetadataName(metadata));
                 const headerTitle = parentRecordValue ? `${ this.escapeHtml(parentRecordValue) } / ${ typeName }` : typeName;
 
                 modal.innerHTML = `
@@ -13426,19 +14104,8 @@ class IntegramTable{
                 modal.querySelector('.subordinate-modal-close').addEventListener('click', closeModal);
                 overlay.addEventListener('click', closeModal);
 
-                // Close on Escape key (issue #595)
-                const handleEscape = (e) => {
-                    if (e.key === 'Escape') {
-                        // Only close if this modal is the topmost one
-                        const currentDepth = parseInt(modal.dataset.modalDepth) || 0;
-                        const maxDepth = window._integramModalDepth || 0;
-                        if (currentDepth === maxDepth) {
-                            closeModal();
-                            document.removeEventListener('keydown', handleEscape);
-                        }
-                    }
-                };
-                document.addEventListener('keydown', handleEscape);
+                // Shared Escape stack closes only the topmost modal and unregisters on removal.
+                itCreateModalCloseHandler(modal, closeModal, this);
 
             } catch (error) {
                 console.error('Error opening subordinate table:', error);
@@ -13447,6 +14114,12 @@ class IntegramTable{
         }
 
         renderSubordinateTable(container, metadata, data, arrId, parentRecordId, sortState = null, searchTerm = '') {
+            arrId = this.normalizeNumericId(arrId);
+            parentRecordId = this.normalizeNumericId(parentRecordId);
+            if (!arrId || !parentRecordId) {
+                container.innerHTML = '<div class="subordinate-table-error">Некорректный идентификатор таблицы</div>';
+                return;
+            }
             const instanceName = this.options.instanceName;
             let rows = Array.isArray(data) ? [...data] : [];
             const reqs = metadata.reqs || [];
@@ -13509,7 +14182,7 @@ class IntegramTable{
                         <a href="#" class="subordinate-paste-buffer-btn" title="Вставить из буфера" onclick="event.preventDefault(); event.stopPropagation();">
                             <i class="pi pi-clipboard"></i>
                         </a>
-                        <a href="${subordinateTableUrl}" class="subordinate-table-link" title="Открыть в таблице" target="_blank">
+                        <a href="${subordinateTableUrl}" class="subordinate-table-link" title="Открыть в таблице" target="_blank" rel="noopener noreferrer">
                             <i class="pi pi-table"></i>
                         </a>
                     </div>
@@ -13533,14 +14206,14 @@ class IntegramTable{
                     const sortPriority = sortInfo ? sortState.indexOf(sortInfo) + 1 : '';
                     const priorityBadge = sortState.length > 1 && sortPriority ? `<span class="subordinate-sort-priority">${ sortPriority }</span>` : '';
 
-                    html += `<th class="subordinate-sortable-header" data-col-index="${ colIdx }">${ col.name }${ sortIndicator }${ priorityBadge }</th>`;
+                    html += `<th class="subordinate-sortable-header" data-col-index="${ colIdx }">${ this.escapeHtml(col.name) }${ sortIndicator }${ priorityBadge }</th>`;
                 });
 
                 html += `</tr></thead><tbody>`;
 
                 // Data rows
                 rows.forEach((row, rowIndex) => {
-                    const rowId = row.i;
+                    const rowId = this.normalizeNumericId(row.i);
                     const values = row.r || [];
 
                     html += `<tr data-row-id="${ rowId }" draggable="false">`;
@@ -13555,17 +14228,18 @@ class IntegramTable{
                     if (searchTerm) {
                         displayMainValue = this.highlightSearchTerm(displayMainValue, searchTerm);
                     }
-                    html += `<td class="subordinate-cell-clickable" data-row-id="${ rowId }" data-type-id="${ arrId }">${ displayMainValue }</td>`;
+                    html += `<td${ rowId ? ' class="subordinate-cell-clickable"' : '' } data-row-id="${ rowId }" data-type-id="${ arrId }">${ displayMainValue }</td>`;
 
                     // Other columns
                     reqs.forEach((req, idx) => {
                         const cellValue = values[idx + 1] !== undefined ? values[idx + 1] : '';
 
                         if (req.arr_id) {
-                            const count = typeof cellValue === 'number' ? cellValue : (cellValue || 0);
+                            const count = this.escapeHtml(typeof cellValue === 'number' ? cellValue : (cellValue || 0));
+                            const nestedTypeId = this.normalizeNumericId(req.arr_id);
                             // Issue #737: Use the same icon styling as .subordinate-link-cell in main table
-                            const nestedTableUrl = `/${dbName}/table/${req.arr_id}?F_U=${rowId}`;
-                            html += `<td class="subordinate-nested-count"><a href="${nestedTableUrl}" class="subordinate-table-icon-link" target="${req.arr_id}" title="Открыть в новом окне" onclick="event.stopPropagation();"><i class="pi pi-table"></i></a><a href="#" class="subordinate-count-link" onclick="window.${instanceName}.openSubordinateTableFromCell(event, ${req.arr_id}, ${rowId}); return false;" title="Посмотреть подчиненную таблицу">(${count})</a></td>`;
+                            const nestedTableUrl = nestedTypeId && rowId ? `/${dbName}/table/${nestedTypeId}?F_U=${rowId}` : '';
+                            html += `<td class="subordinate-nested-count">${ nestedTableUrl ? `<a href="${nestedTableUrl}" class="subordinate-table-icon-link" target="${nestedTypeId}" rel="noopener noreferrer" title="Открыть в новом окне" onclick="event.stopPropagation();"><i class="pi pi-table"></i></a><a href="#" class="subordinate-count-link" onclick="window.${instanceName}.openSubordinateTableFromCell(event, ${nestedTypeId}, ${rowId}); return false;" title="Посмотреть подчиненную таблицу">(${count})</a>` : `<span class="subordinate-count">(${count})</span>` }</td>`;
                         } else {
                             let displayValue = this.formatSubordinateCellValue(cellValue, req);
                             if (searchTerm) {
@@ -13835,6 +14509,8 @@ class IntegramTable{
                 window._integramModalDepth = Math.max(0, (window._integramModalDepth || 1) - 1);
             };
 
+            itCreateModalCloseHandler(modal, closeModal, this);
+
             // Close handlers
             modal.querySelector('.edit-form-close').addEventListener('click', closeModal);
             modal.querySelector('.paste-data-cancel-btn').addEventListener('click', closeModal);
@@ -13957,8 +14633,7 @@ class IntegramTable{
             const dataUrl = `${apiBase}/object/${arrId}/?JSON_OBJ&F_U=${parentRecordId}&LIMIT=0,${pageSize + 1}`;
 
             try {
-                const dataResponse = await fetch(dataUrl);
-                const data = await dataResponse.json();
+                const data = await this.fetchJson(dataUrl);
                 const rows = Array.isArray(data) ? data : [];
                 const hasMore = rows.length > pageSize;
                 const firstPageRows = hasMore ? rows.slice(0, pageSize) : rows;
@@ -14145,19 +14820,11 @@ class IntegramTable{
             }
 
             try {
-                const response = await fetch(`${apiBase}/_m_ord/${movedRecordId}?JSON`, {
+                const result = await this.fetchJson(`${apiBase}/_m_ord/${movedRecordId}?JSON`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                     body: params.toString()
                 });
-
-                const responseText = await response.text();
-                let result;
-                try {
-                    result = JSON.parse(responseText);
-                } catch (jsonError) {
-                    throw new Error(`Невалидный JSON ответ: ${responseText}`);
-                }
 
                 const serverError = this.getServerError(result);
                 if (serverError) {
@@ -14333,8 +15000,8 @@ class IntegramTable{
                     case 'FILE':
                         // Check if value is already an HTML anchor tag (from object/ endpoint)
                         if (typeof value === 'string' && value.trim().startsWith('<a')) {
-                            // Value is already HTML link - add file-link class and return as-is
-                            return value.replace('<a', '<a class="file-link"');
+                            // Preserve the link after allow-list sanitization.
+                            return this.sanitizeCellHtml(value).replace(/^<a\b/i, '<a class="file-link"');
                         }
                         break;
                 }
@@ -14394,12 +15061,12 @@ class IntegramTable{
             const cascadeOffset = (modalDepth - 1) * 6;
             modal.style.transform = `translate(calc(-50% + ${cascadeOffset}px), calc(-50% + ${cascadeOffset}px))`;
 
-            const typeName = this.getMetadataName(metadata);
+            const typeName = this.escapeHtml(this.getMetadataName(metadata));
             const title = `Создание: ${ typeName }`;
 
             // Build form for regular fields only (no nested subordinate tables in create mode)
             const reqs = metadata.reqs || [];
-            const regularFields = reqs.filter(req => !req.arr_id);
+            const regularFields = reqs.filter(req => !req.arr_id && this.normalizeNumericId(req.id));
 
             // Determine the type of the main (first column) field
             const mainFieldType = this.normalizeFormat(metadata.type);
@@ -14461,7 +15128,7 @@ class IntegramTable{
 
             regularFields.forEach(req => {
                 const attrs = this.parseAttrs(req.attrs);
-                const fieldName = attrs.alias || req.val;
+                const fieldName = this.escapeHtml(attrs.alias || req.val || '');
                 const baseFormat = this.normalizeFormat(req.type);
                 const isRequired = attrs.required;
                 const isMulti = attrs.multi;
@@ -14472,7 +15139,7 @@ class IntegramTable{
                 // Multi-select reference field (issue #1772)
                 if (req.ref_id && isMulti) {
                     formHtml += `
-                        <div class="form-reference-editor form-multi-reference-editor" data-ref-id="${ req.id }" data-required="${ isRequired }" data-ref-type-id="${ req.orig || req.ref_id }" data-ref-base-type="${ req.type }" data-multi="1" data-current-value="">
+                        <div class="form-reference-editor form-multi-reference-editor" data-ref-id="${ req.id }" data-required="${ isRequired }" data-ref-type-id="${ this.normalizeNumericId(req.orig || req.ref_id) }" data-ref-base-type="${ this.escapeHtml(req.type) }" data-multi="1" data-current-value="">
                             <div class="inline-editor-reference form-ref-editor-box inline-editor-multi-reference">
                                 <div class="multi-ref-tags-container form-multi-ref-tags-container">
                                     <span class="multi-ref-tags-placeholder">Загрузка...</span>
@@ -14501,7 +15168,7 @@ class IntegramTable{
                 // Single-select reference field
                 else if (req.ref_id) {
                     formHtml += `
-                        <div class="form-reference-editor" data-ref-id="${ req.id }" data-required="${ isRequired }" data-ref-type-id="${ req.orig || req.ref_id }" data-ref-base-type="${ req.type }">
+                        <div class="form-reference-editor" data-ref-id="${ req.id }" data-required="${ isRequired }" data-ref-type-id="${ this.normalizeNumericId(req.orig || req.ref_id) }" data-ref-base-type="${ this.escapeHtml(req.type) }">
                             <div class="inline-editor-reference form-ref-editor-box">
                                 <div class="inline-editor-reference-header">
                                     <input type="text"
@@ -14608,19 +15275,8 @@ class IntegramTable{
             modal.querySelector('.subordinate-cancel-btn').addEventListener('click', closeModal);
             overlay.addEventListener('click', closeModal);
 
-            // Close on Escape key (issue #595)
-            const handleEscape = (e) => {
-                if (e.key === 'Escape') {
-                    // Only close if this modal is the topmost one
-                    const currentDepth = parseInt(modal.dataset.modalDepth) || 0;
-                    const maxDepth = window._integramModalDepth || 0;
-                    if (currentDepth === maxDepth) {
-                        closeModal();
-                        document.removeEventListener('keydown', handleEscape);
-                    }
-                }
-            };
-            document.addEventListener('keydown', handleEscape);
+            // Shared Escape stack closes only the topmost modal and unregisters on removal.
+            itCreateModalCloseHandler(modal, closeModal, this);
 
             // Enter in input/textarea triggers Save (issue #1467)
             const saveBtn = modal.querySelector('#subordinate-save-btn');
@@ -14670,21 +15326,11 @@ class IntegramTable{
                 const url = `${ apiBase }/_m_new/${ arrId }?JSON&up=${ parentRecordId }`;
 
                 try {
-                    const response = await fetch(url, {
+                    const result = await this.fetchJson(url, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                         body: params.toString()
                     });
-
-                    let result;
-                    const responseText = await response.text();
-
-                    try {
-                        result = JSON.parse(responseText);
-                    } catch (jsonError) {
-                        // Invalid JSON response
-                        throw new Error(`Невалидный JSON ответ: ${responseText}`);
-                    }
 
                     const serverError = this.getServerError(result);
                     if (serverError) {
@@ -14733,7 +15379,15 @@ class IntegramTable{
             const resetBtns = modal.querySelectorAll('.pwd-reset-btn');
             const resetMailBtns = modal.querySelectorAll('.pwd-reset-mail-btn');
 
-            const generatePassword = () => (Math.random().toString(36) + Math.random().toString(36)).replace(/\./g, '').substr(1, 8);
+            const generatePassword = () => {
+                try {
+                    return this.generateSecurePassword();
+                } catch (error) {
+                    console.error('Secure password generation failed:', error);
+                    this.showCopyNotification('Не удалось безопасно сгенерировать пароль', true, 5000);
+                    return null;
+                }
+            };
 
             const copyToClipboard = (text) => {
                 if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -14762,6 +15416,7 @@ class IntegramTable{
                     const pwdInput = modal.querySelector(`#field-${ fieldId }`);
                     if (!pwdInput) return;
                     const pwd = generatePassword();
+                    if (!pwd) return;
                     pwdInput.value = pwd;
                     copyToClipboard(pwd);
                     showCopied(fieldId);
@@ -14783,6 +15438,7 @@ class IntegramTable{
                         return;
                     }
                     const pwd = generatePassword();
+                    if (!pwd) return;
                     pwdInput.value = pwd;
                     const db = window.location.pathname.split('/')[1] || '';
                     // Build login link without prepending username as a separate line (issue #1591)
@@ -15073,7 +15729,7 @@ class IntegramTable{
 
                 // Issue #853: Handle multi-select reference editors separately
                 if (wrapper.dataset.multi === '1') {
-                    this.initFormMultiReferenceEditor(wrapper, refReqId, recordId, refAttrs);
+                    this.initFormMultiReferenceEditor(wrapper, refReqId, recordId, refAttrs, modalElement);
                     continue;
                 }
 
@@ -15214,7 +15870,7 @@ class IntegramTable{
                     }
 
                     // Hide dropdown when clicking outside the reference editor wrapper
-                    document.addEventListener('click', (e) => {
+                    itAddModalDocumentListener(modalElement, 'click', (e) => {
                         if (!wrapper.contains(e.target)) {
                             dropdown.style.display = 'none';
                         }
@@ -15315,7 +15971,7 @@ class IntegramTable{
                         const id = String(rec.i);
                         const text = (rec.r && rec.r[0] != null) ? String(rec.r[0]) : `#${ id }`;
                         const escaped = this.escapeHtml(text);
-                        return `<div class="inline-editor-reference-option" data-id="${ id }" data-text="${ escaped }" tabindex="0">${ escaped }</div>`;
+                        return `<div class="inline-editor-reference-option" data-id="${ this.escapeHtml(id) }" data-text="${ escaped }" tabindex="0">${ escaped }</div>`;
                     }).join('');
                 };
 
@@ -15334,7 +15990,7 @@ class IntegramTable{
                         }
                         dropdown.innerHTML = entries.map(([tId, tName]) => {
                             const escaped = this.escapeHtml(String(tName));
-                            return `<div class="inline-editor-reference-option form-any-ref-table-option" data-table-id="${ tId }" data-text="${ escaped }" tabindex="0">${ escaped }</div>`;
+                            return `<div class="inline-editor-reference-option form-any-ref-table-option" data-table-id="${ this.escapeHtml(tId) }" data-text="${ escaped }" tabindex="0">${ escaped }</div>`;
                         }).join('');
                         // Table selected: load its records (issue #1807)
                         dropdown.querySelectorAll('.form-any-ref-table-option').forEach(opt => {
@@ -15498,7 +16154,7 @@ class IntegramTable{
                 }
 
                 // Close dropdown when clicking outside
-                document.addEventListener('click', (e) => {
+                itAddModalDocumentListener(container, 'click', (e) => {
                     if (!wrapper.contains(e.target)) {
                         dropdown.style.display = 'none';
                     }
@@ -15511,7 +16167,7 @@ class IntegramTable{
          * Shows selected values as removable tags and a search input to add more.
          * Updates the hidden input with comma-separated selected IDs.
          */
-        async initFormMultiReferenceEditor(wrapper, refReqId, recordId, attrs = '') {
+        async initFormMultiReferenceEditor(wrapper, refReqId, recordId, attrs = '', modalElement = null) {
             const searchInput = wrapper.querySelector('.form-ref-search');
             const dropdown = wrapper.querySelector('.form-ref-dropdown');
             const hiddenInput = wrapper.querySelector('.form-multi-ref-value');
@@ -15593,7 +16249,7 @@ class IntegramTable{
                     } else {
                         dropdown.innerHTML = filtered.map(([id, text]) => {
                             const et = this.escapeHtml(this.decodeHtmlEntities(text));
-                            return `<div class="inline-editor-reference-option" data-id="${id}" data-text="${et}" tabindex="0">${et}</div>`;
+                            return `<div class="inline-editor-reference-option" data-id="${this.escapeHtml(id)}" data-text="${et}" tabindex="0">${et}</div>`;
                         }).join('');
                     }
                 };
@@ -15728,7 +16384,7 @@ class IntegramTable{
                 });
 
                 // Hide dropdown when clicking outside
-                document.addEventListener('click', (e) => {
+                itAddModalDocumentListener(modalElement || wrapper, 'click', (e) => {
                     if (!wrapper.contains(e.target)) {
                         dropdown.style.display = 'none';
                     }
@@ -15976,12 +16632,12 @@ class IntegramTable{
 
             modal._overlayElement = overlay;
 
-            const typeName = this.getMetadataName(metadata);
+            const typeName = this.escapeHtml(this.getMetadataName(metadata));
             const title = `Создание: ${typeName}`;
             const decodedInitialValue = this.decodeHtmlEntities(initialValue);
 
             const reqs = metadata.reqs || [];
-            const regularFields = reqs.filter(req => !req.arr_id);
+            const regularFields = reqs.filter(req => !req.arr_id && this.normalizeNumericId(req.id));
 
             // Get current date/datetime for default values
             const now = new Date();
@@ -16030,7 +16686,7 @@ class IntegramTable{
 
             regularFields.forEach(req => {
                 const attrs = this.parseAttrs(req.attrs);
-                const fieldName = attrs.alias || req.val;
+                const fieldName = this.escapeHtml(attrs.alias || req.val || '');
                 const isRequired = attrs.required;
 
                 attributesHtml += `<div class="form-group">`;
@@ -16040,7 +16696,7 @@ class IntegramTable{
                 if (req.ref_id) {
                     // Render as reference dropdown (same as in edit form)
                     attributesHtml += `
-                        <div class="form-reference-editor" data-ref-id="${req.id}" data-required="${isRequired}" data-ref-type-id="${req.orig || req.ref_id}" data-ref-base-type="${req.type}">
+                        <div class="form-reference-editor" data-ref-id="${req.id}" data-required="${isRequired}" data-ref-type-id="${this.normalizeNumericId(req.orig || req.ref_id)}" data-ref-base-type="${this.escapeHtml(req.type)}">
                             <div class="inline-editor-reference form-ref-editor-box">
                                 <div class="inline-editor-reference-header">
                                     <input type="text"
@@ -16126,19 +16782,8 @@ class IntegramTable{
 
             overlay.addEventListener('click', closeModal);
 
-            // Close on Escape key (issue #595)
-            const handleEscape = (e) => {
-                if (e.key === 'Escape') {
-                    // Only close if this modal is the topmost one
-                    const currentDepth = parseInt(modal.dataset.modalDepth) || 0;
-                    const maxDepth = window._integramModalDepth || 0;
-                    if (currentDepth === maxDepth) {
-                        closeModal();
-                        document.removeEventListener('keydown', handleEscape);
-                    }
-                }
-            };
-            document.addEventListener('keydown', handleEscape);
+            // Shared Escape stack closes only the topmost modal and unregisters on removal.
+            itCreateModalCloseHandler(modal, closeModal, this);
 
             // Enter in input/textarea triggers Save (issue #1422)
             modal.addEventListener('keydown', (e) => {
@@ -16259,6 +16904,8 @@ class IntegramTable{
 
         // Form field visibility settings
         openFormFieldSettings(typeId, metadata) {
+            typeId = this.normalizeNumericId(typeId);
+            if (!typeId) return;
             const overlay = document.createElement('div');
             overlay.className = 'form-field-settings-overlay';
 
@@ -16296,8 +16943,9 @@ class IntegramTable{
             // Add draggable checkbox for each requisite
             sortedReqs.forEach(req => {
                 const attrs = this.parseAttrs(req.attrs);
-                const fieldName = attrs.alias || req.val;
-                const fieldId = req.id;
+                const fieldName = this.escapeHtml(attrs.alias || req.val || '');
+                const fieldId = this.normalizeNumericId(req.id);
+                if (!fieldId) return;
                 const isChecked = visibleFields[fieldId] !== false;
 
                 modalHtml += `
@@ -16380,14 +17028,8 @@ class IntegramTable{
             cancelBtn.addEventListener('click', closeModal);
             overlay.addEventListener('click', closeModal);
 
-            // Close on Escape key (issue #595)
-            const handleEscape = (e) => {
-                if (e.key === 'Escape') {
-                    closeModal();
-                    document.removeEventListener('keydown', handleEscape);
-                }
-            };
-            document.addEventListener('keydown', handleEscape);
+            // Shared Escape stack closes only the topmost modal and unregisters on removal.
+            itCreateModalCloseHandler(modal, closeModal, this);
 
             saveBtn.addEventListener('click', () => {
                 // Save visibility
@@ -17089,7 +17731,7 @@ class IntegramTable{
         showDuplicateUniqueValueModal(currentValue) {
             return new Promise((resolve) => {
                 const modalId = `duplicate-unique-${ Date.now() }`;
-                const escapedValue = String(currentValue || '').replace(/"/g, '&quot;');
+                const escapedValue = this.escapeHtml(currentValue || '');
                 const modalHtml = `
                     <div class="integram-modal-overlay" id="${ modalId }">
                         <div class="integram-modal" style="max-width: 440px;">
@@ -17129,7 +17771,10 @@ class IntegramTable{
                 // Enter key confirms
                 input.addEventListener('keydown', (e) => {
                     if (e.key === 'Enter') cleanup(input.value);
-                    if (e.key === 'Escape') cleanup(null);
+                    if (e.key === 'Escape') {
+                        e.preventDefault();
+                        cleanup(null);
+                    }
                 });
 
                 // Close on overlay click
@@ -17137,14 +17782,8 @@ class IntegramTable{
                     if (e.target === confirmModal) cleanup(null);
                 });
 
-                // Close on Escape key
-                const handleEscape = (e) => {
-                    if (e.key === 'Escape') {
-                        document.removeEventListener('keydown', handleEscape);
-                        cleanup(null);
-                    }
-                };
-                document.addEventListener('keydown', handleEscape);
+                // Shared Escape stack closes only the topmost modal and unregisters on removal.
+                itCreateModalCloseHandler(confirmModal, () => cleanup(null), this);
             });
         }
 
@@ -17190,14 +17829,8 @@ class IntegramTable{
                     }
                 });
 
-                // Close on Escape key
-                const handleEscape = (e) => {
-                    if (e.key === 'Escape') {
-                        document.removeEventListener('keydown', handleEscape);
-                        cleanup(false);
-                    }
-                };
-                document.addEventListener('keydown', handleEscape);
+                // Shared Escape stack closes only the topmost modal and unregisters on removal.
+                itCreateModalCloseHandler(confirmModal, () => cleanup(false), this);
             });
         }
 
@@ -17225,8 +17858,7 @@ class IntegramTable{
                 this.appendPageUrlParams(params);
 
                 const separator = this.options.apiUrl.includes('?') ? '&' : '?';
-                const response = await fetch(`${ this.options.apiUrl }${ separator }${ params }`);
-                const json = await response.json();
+                const json = await this.fetchJson(`${ this.options.apiUrl }${ separator }${ params }`);
 
                 let newRow = null;
 
@@ -17503,6 +18135,18 @@ class IntegramTable{
             return result.path || result.file || result.filename;
         }
 
+        normalizeNumericId(value) {
+            const id = value === null || value === undefined ? '' : String(value).trim();
+            return /^\d+$/.test(id) ? id : '';
+        }
+        sanitizeLinkUrl(value) {
+            if (value === null || value === undefined) return '';
+            const url = String(value).trim();
+            const schemeProbe = url.replace(/[\u0000-\u0020\u007f]+/g, '');
+            if (/^(?:javascript|data|vbscript):/i.test(schemeProbe)) return '';
+            if (/^[a-z][a-z0-9+.-]*:/i.test(schemeProbe) && !/^https?:/i.test(schemeProbe)) return '';
+            return url;
+        }
         escapeHtml(text) {
             if (text === null || text === undefined) return '';
             return String(text).replace(/&/g, '&amp;')
@@ -17510,6 +18154,203 @@ class IntegramTable{
                               .replace(/>/g, '&gt;')
                               .replace(/"/g, '&quot;')
                               .replace(/'/g, '&#039;');
+        }
+
+        /**
+         * Generate a password with Web Crypto and rejection sampling. Each password
+         * contains upper/lowercase letters, a digit and a symbol.
+         */
+        generateSecurePassword(length = 16) {
+            const passwordLength = Math.max(12, Number.parseInt(length, 10) || 16);
+            const cryptoApi = typeof globalThis !== 'undefined' ? globalThis.crypto : null;
+            if (!cryptoApi || typeof cryptoApi.getRandomValues !== 'function') {
+                throw new Error('Secure random number generator is unavailable');
+            }
+
+            const groups = [
+                'ABCDEFGHJKLMNPQRSTUVWXYZ',
+                'abcdefghijkmnopqrstuvwxyz',
+                '23456789',
+                '-_.!@#'
+            ];
+            const alphabet = groups.join('');
+            const randomIndex = upperBound => {
+                const range = 0x100000000;
+                const unbiasedLimit = range - (range % upperBound);
+                const random = new Uint32Array(1);
+                do {
+                    cryptoApi.getRandomValues(random);
+                } while (random[0] >= unbiasedLimit);
+                return random[0] % upperBound;
+            };
+
+            const chars = groups.map(group => group[randomIndex(group.length)]);
+            while (chars.length < passwordLength) {
+                chars.push(alphabet[randomIndex(alphabet.length)]);
+            }
+            for (let index = chars.length - 1; index > 0; index--) {
+                const swapIndex = randomIndex(index + 1);
+                [chars[index], chars[swapIndex]] = [chars[swapIndex], chars[index]];
+            }
+            return chars.join('');
+        }
+
+        /**
+         * Allow only presentation-oriented CSS declarations in STYLE companion
+         * columns. Attribute delimiters, resource loads and legacy script-capable
+         * CSS constructs are rejected.
+         */
+        sanitizeCellStyle(styleText) {
+            if (styleText === null || styleText === undefined) return '';
+
+            const allowedProperties = new Set([
+                'color', 'background', 'background-color',
+                'font-weight', 'font-style', 'font-size', 'font-family',
+                'text-align', 'text-decoration', 'text-transform',
+                'vertical-align', 'white-space', 'overflow', 'text-overflow',
+                'border', 'border-color', 'border-style', 'border-width', 'border-radius',
+                'padding', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left',
+                'margin', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left',
+                'width', 'min-width', 'max-width', 'height', 'min-height', 'max-height',
+                'opacity'
+            ]);
+            const unsafeValue = /(?:url\s*\(|expression\s*\(|javascript\s*:|data\s*:|@import|[<>"'\\])/i;
+            const safeDeclarations = [];
+
+            for (const declaration of String(styleText).split(';')) {
+                const separator = declaration.indexOf(':');
+                if (separator <= 0) continue;
+
+                const property = declaration.slice(0, separator).trim().toLowerCase();
+                const value = declaration.slice(separator + 1).trim();
+                if (!allowedProperties.has(property) || !value || unsafeValue.test(value)) continue;
+                safeDeclarations.push(property + ': ' + value);
+            }
+
+            return safeDeclarations.join('; ');
+        }
+
+        /**
+         * Sanitize rich HTML cells with a small formatting allow-list.
+         * Unknown elements are converted to text and all event/style attributes
+         * are removed. Links are restricted to ordinary web/mail/relative URLs.
+         */
+        sanitizeCellHtml(html) {
+            if (html === null || html === undefined) return '';
+            if (typeof document === 'undefined' || typeof document.createElement !== 'function') {
+                return this.escapeHtml(html);
+            }
+
+            const template = document.createElement('template');
+            template.innerHTML = String(html);
+            const allowedTags = new Set([
+                'A', 'B', 'BR', 'CODE', 'DIV', 'EM', 'I', 'LI', 'OL', 'P', 'PRE',
+                'SPAN', 'STRONG', 'TABLE', 'TBODY', 'TD', 'TH', 'THEAD', 'TR', 'U', 'UL'
+            ]);
+
+            for (const element of Array.from(template.content.querySelectorAll('*'))) {
+                const tag = element.tagName.toUpperCase();
+                if (!allowedTags.has(tag)) {
+                    const textNode = document.createTextNode(element.textContent || '');
+                    if (element.parentNode) element.parentNode.replaceChild(textNode, element);
+                    continue;
+                }
+
+                const href = tag === 'A' ? String(element.getAttribute('href') || '').trim() : '';
+                const title = String(element.getAttribute('title') || '').trim();
+                const colspan = tag === 'TD' || tag === 'TH' ? element.getAttribute('colspan') : null;
+                const rowspan = tag === 'TD' || tag === 'TH' ? element.getAttribute('rowspan') : null;
+                for (const attribute of Array.from(element.attributes)) {
+                    element.removeAttribute(attribute.name);
+                }
+
+                if (title) element.setAttribute('title', title);
+                if (tag === 'A' && /^(?:https?:\/\/|mailto:|\/|#)/i.test(href)) {
+                    element.setAttribute('href', href);
+                    element.setAttribute('target', '_blank');
+                    element.setAttribute('rel', 'noopener noreferrer');
+                }
+                if (colspan && /^\d{1,2}$/.test(colspan)) element.setAttribute('colspan', colspan);
+                if (rowspan && /^\d{1,2}$/.test(rowspan)) element.setAttribute('rowspan', rowspan);
+            }
+
+            return template.innerHTML;
+        }
+
+        /**
+         * Parse the legacy BUTTON newApi(...) form without eval or Function.
+         * Only scalar literal arguments are accepted.
+         */
+        parseButtonAction(value) {
+            const match = String(value || '').trim().match(/^newApi\s*\(([\s\S]*)\)\s*;?$/);
+            if (!match || match[1].trim().endsWith(',')) return null;
+
+            const source = match[1];
+            const args = [];
+            let index = 0;
+            const skipWhitespace = () => {
+                while (index < source.length && /\s/.test(source[index])) index++;
+            };
+
+            while (index < source.length) {
+                skipWhitespace();
+                if (index >= source.length) break;
+
+                const quote = source[index];
+                if (quote === "'" || quote === '"') {
+                    index++;
+                    let parsed = '';
+                    let closed = false;
+                    while (index < source.length) {
+                        const char = source[index++];
+                        if (char === '\\') {
+                            if (index >= source.length) return null;
+                            const escaped = source[index++];
+                            const escapeMap = { n: '\n', r: '\r', t: '\t' };
+                            parsed += Object.prototype.hasOwnProperty.call(escapeMap, escaped) ? escapeMap[escaped] : escaped;
+                        } else if (char === quote) {
+                            closed = true;
+                            break;
+                        } else {
+                            parsed += char;
+                        }
+                    }
+                    if (!closed) return null;
+                    args.push(parsed);
+                } else {
+                    const start = index;
+                    while (index < source.length && source[index] !== ',') index++;
+                    const token = source.slice(start, index).trim();
+                    if (/^-?(?:\d+|\d*\.\d+)$/.test(token)) args.push(Number(token));
+                    else if (token === 'true') args.push(true);
+                    else if (token === 'false') args.push(false);
+                    else if (token === 'null') args.push(null);
+                    else return null;
+                }
+
+                skipWhitespace();
+                if (index >= source.length) break;
+                if (source[index] !== ',') return null;
+                index++;
+            }
+
+            if (args.length < 2 || args.length > 5) return null;
+            if (typeof args[0] !== 'string' || !/^(?:GET|POST|PUT|PATCH|DELETE)$/i.test(args[0])) return null;
+            if (typeof args[1] !== 'string' || /^\s*(?:javascript|data|vbscript):/i.test(args[1])) return null;
+            return args;
+        }
+
+        runTableButtonAction(event, button) {
+            if (event) {
+                event.preventDefault();
+                event.stopImmediatePropagation();
+            }
+            const args = this.parseButtonAction(button && button.dataset ? button.dataset.buttonAction : '');
+            if (!args || typeof window.newApi !== 'function') {
+                this.showToast('Небезопасное или неподдерживаемое действие кнопки заблокировано', 'error');
+                return;
+            }
+            window.newApi.apply(window, args);
         }
 
         decodeHtmlEntities(text) {
@@ -17668,26 +18509,43 @@ class IntegramTable{
 
             const toast = document.createElement('div');
             toast.className = `integram-toast integram-toast-${ type }`;
+            toast.setAttribute('role', type === 'error' ? 'alert' : 'status');
+            toast.setAttribute('aria-live', type === 'error' ? 'assertive' : 'polite');
+            toast.setAttribute('aria-atomic', 'true');
+
+            const icon = document.createElement('span');
+            icon.className = 'integram-toast-icon';
+            icon.setAttribute('aria-hidden', 'true');
+            icon.textContent = { success: '✓', error: '!', warning: '!', info: 'i' }[type] || 'i';
+
+            const content = document.createElement('span');
+            content.className = 'integram-toast-content';
             const sanitizedMessage = this.sanitizeInlineMessageHtml(message);
             const hasSafeHtml = /<(a|br)\b/i.test(sanitizedMessage);
             if (hasSafeHtml) {
-                toast.innerHTML = sanitizedMessage;
+                content.innerHTML = sanitizedMessage;
             } else {
-                toast.textContent = message;
+                content.textContent = message;
             }
 
+            const dismissButton = document.createElement('button');
+            dismissButton.type = 'button';
+            dismissButton.className = 'integram-toast-dismiss';
+            dismissButton.setAttribute('aria-label', 'Закрыть уведомление');
+            dismissButton.textContent = '×';
+            toast.append(icon, content, dismissButton);
             document.body.appendChild(toast);
 
-            // Auto-remove after 5 seconds
-            setTimeout(() => {
+            const dismiss = () => {
+                if (!toast.isConnected || toast.classList.contains('fade-out')) return;
                 toast.classList.add('fade-out');
-                setTimeout(() => toast.remove(), 300);
-            }, 5000);
+                setTimeout(() => toast.remove(), 220);
+            };
 
-            // Click to dismiss
-            toast.addEventListener('click', () => {
-                toast.classList.add('fade-out');
-                setTimeout(() => toast.remove(), 300);
+            const autoDismissTimer = setTimeout(dismiss, 5000);
+            dismissButton.addEventListener('click', () => {
+                clearTimeout(autoDismissTimer);
+                dismiss();
             });
         }
 
@@ -17707,6 +18565,7 @@ class IntegramTable{
         }
 
         showWarningModal(message, objId = null) {
+            objId = this.normalizeNumericId(objId);
             const modalId = `warning-modal-${ Date.now() }`;
             const apiBase = this.getApiBase();
 
@@ -17715,7 +18574,7 @@ class IntegramTable{
             if (objId) {
                 const editUrl = `${ apiBase }/edit_obj/${ objId }`;
                 linkHtml = `
-                    <a href="${ editUrl }" target="_blank" class="integram-modal-link">
+                    <a href="${ editUrl }" target="_blank" rel="noopener noreferrer" class="integram-modal-link">
                         Открыть найденную запись ↗
                     </a>
                 `;
@@ -17755,14 +18614,8 @@ class IntegramTable{
                 }
             });
 
-            // Close on Escape key (issue #595)
-            const handleEscape = (e) => {
-                if (e.key === 'Escape') {
-                    overlay.remove();
-                    document.removeEventListener('keydown', handleEscape);
-                }
-            };
-            document.addEventListener('keydown', handleEscape);
+            // Shared Escape stack closes only the topmost modal and unregisters on removal.
+            itCreateModalCloseHandler(overlay, () => overlay.remove(), this);
         }
 
         /**
@@ -17809,14 +18662,8 @@ class IntegramTable{
                 }
             });
 
-            // Close on Escape key
-            const handleEscape = (e) => {
-                if (e.key === 'Escape') {
-                    overlay.remove();
-                    document.removeEventListener('keydown', handleEscape);
-                }
-            };
-            document.addEventListener('keydown', handleEscape);
+            // Shared Escape stack closes only the topmost modal and unregisters on removal.
+            itCreateModalCloseHandler(overlay, () => overlay.remove(), this);
         }
 
         /**
@@ -17909,8 +18756,7 @@ class IntegramTable{
             anchorEl.dataset.anyRefResolved = 'pending';
 
             const apiBase = this.getApiBase();
-            fetch(`${ apiBase }/get_record/${ encodeURIComponent(recordId) }`)
-                .then(res => res.json())
+            this.fetchJson(`${ apiBase }/get_record/${ encodeURIComponent(recordId) }`)
                 .then(data => {
                     const objId = data && data.obj;
                     if (!objId) {
@@ -17949,8 +18795,7 @@ class IntegramTable{
             }
             // Fetch and navigate
             const apiBase = this.getApiBase();
-            fetch(`${ apiBase }/get_record/${ encodeURIComponent(recordId) }`)
-                .then(res => res.json())
+            this.fetchJson(`${ apiBase }/get_record/${ encodeURIComponent(recordId) }`)
                 .then(data => {
                     const objId = data && data.obj;
                     if (!objId) return;
@@ -18029,14 +18874,20 @@ class IntegramTable{
          * Bulk delete selected rows
          */
         async bulkDelete() {
-            const selectedIndices = Array.from(this.selectedRows).sort((a, b) => a - b);
-            if (selectedIndices.length === 0) return;
+            const selectedIds = Array.from(this.selectedRows);
+            if (selectedIds.length === 0) return;
 
-            // Collect record info for deletion
+            // Resolve the selected stable IDs against the current result set.
+            // Never translate a saved row position after sort/filter/reload.
             const records = [];
-            for (const rowIndex of selectedIndices) {
-                const rawItem = this.rawObjectData[rowIndex];
-                if (rawItem && rawItem.i) {
+            const rawItemsById = new Map(
+                this.rawObjectData
+                    .filter(rawItem => rawItem && rawItem.i !== null && rawItem.i !== undefined && rawItem.i !== '')
+                    .map(rawItem => [String(rawItem.i), rawItem])
+            );
+            for (const selectedId of selectedIds) {
+                const rawItem = rawItemsById.get(String(selectedId));
+                if (rawItem) {
                     const firstColValue = (rawItem.r && rawItem.r[0]) || '';
                     records.push({ id: rawItem.i, value: firstColValue });
                 }
@@ -18093,20 +18944,11 @@ class IntegramTable{
                         params.append('_xsrf', xsrf);
                     }
 
-                    const response = await fetch(`${ apiBase }/_m_del/${ record.id }?JSON`, {
+                    const result = await this.fetchJson(`${ apiBase }/_m_del/${ record.id }?JSON`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                         body: params.toString()
                     });
-
-                    const text = await response.text();
-                    let result;
-                    try {
-                        result = JSON.parse(text);
-                    } catch (parseErr) {
-                        // Invalid JSON response - report as warning but don't stop
-                        warnings.push(`#${ record.id } : ${ record.value } : ${ text }`);
-                    }
 
                     // Check for error key in the response
                     if (result) {
@@ -18281,8 +19123,7 @@ class IntegramTable{
             this.appendCurrentFilters(params);
 
             const url = `${ apiBase }/object/${ this.objectTableId }/?JSON_OBJ&${ params }`;
-            const response = await fetch(url);
-            const result = await response.json();
+            const result = await this.fetchJson(url);
             return parseInt(result.count, 10);
         }
 
@@ -18361,14 +19202,11 @@ class IntegramTable{
             };
 
             try {
-                const response = await fetch(`${ apiBase }/object/${ this.objectTableId }/?JSON`, {
+                const result = await this.fetchJson(`${ apiBase }/object/${ this.objectTableId }/?JSON`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                     body: params.toString()
                 });
-                const responseText = await response.text();
-                let result = null;
-                try { result = JSON.parse(responseText); } catch (e) { result = null; }
 
                 const errMsg = result && (result.error || (Array.isArray(result) && result[0] && result[0].error));
                 if (errMsg) {
@@ -18380,7 +19218,7 @@ class IntegramTable{
                     // Non-JSON / unexpected response (e.g. permission die() text).
                     textEl.textContent = 'Удаление не выполнено';
                     errorsDiv.style.display = 'block';
-                    errorsDiv.innerHTML = `<div class="alert alert-danger">${ this.escapeHtml(responseText.slice(0, 300)) }</div>`;
+                    errorsDiv.innerHTML = '<div class="alert alert-danger">Некорректный ответ сервера</div>';
                     showClose();
                 } else {
                     const deleted = parseInt(result.deleted, 10) || 0;
@@ -18423,10 +19261,22 @@ class IntegramTable{
             if (!menu) return;
 
             const isVisible = menu.style.display !== 'none';
+            const trigger = event && event.currentTarget
+                ? event.currentTarget
+                : document.querySelector(`[aria-controls="${ menuId }"]`);
 
-            // Hide all export menus first
+            const removeOutsideHandler = targetMenu => {
+                if (!targetMenu || !targetMenu._integramExportCloseHandler) return;
+                document.removeEventListener('click', targetMenu._integramExportCloseHandler);
+                targetMenu._integramExportCloseHandler = null;
+            };
+
+            // Keep visual and assistive states in sync across every table instance.
             document.querySelectorAll('.integram-export-menu').forEach(m => {
+                removeOutsideHandler(m);
                 m.style.display = 'none';
+                const owner = document.querySelector(`[aria-controls="${ m.id }"]`);
+                if (owner) owner.setAttribute('aria-expanded', 'false');
             });
 
             if (!isVisible) {
@@ -18437,9 +19287,7 @@ class IntegramTable{
                 }
 
                 // Position the menu below the button using fixed coordinates.
-                const btn = event && event.currentTarget
-                    ? event.currentTarget
-                    : document.querySelector(`#${ menuId }`)?.previousElementSibling;
+                const btn = trigger;
                 if (btn) {
                     const rect = btn.getBoundingClientRect();
                     menu.style.position = 'fixed';
@@ -18449,17 +19297,42 @@ class IntegramTable{
                 }
 
                 menu.style.display = 'block';
+                if (trigger) trigger.setAttribute('aria-expanded', 'true');
 
-                // Close menu when clicking outside
-                setTimeout(() => {
-                    const closeHandler = (e) => {
-                        if (!menu.contains(e.target) && !e.target.closest('.integram-table-export-container')) {
-                            menu.style.display = 'none';
-                            document.removeEventListener('click', closeHandler);
+                const items = Array.from(menu.querySelectorAll('[role="menuitem"]'));
+                menu.onkeydown = (keyboardEvent) => {
+                    const currentIndex = items.indexOf(document.activeElement);
+                    if (keyboardEvent.key === 'Escape') {
+                        keyboardEvent.preventDefault();
+                        menu.style.display = 'none';
+                        removeOutsideHandler(menu);
+                        if (trigger) {
+                            trigger.setAttribute('aria-expanded', 'false');
+                            trigger.focus();
                         }
-                    };
-                    document.addEventListener('click', closeHandler);
-                }, 0);
+                    } else if (keyboardEvent.key === 'ArrowDown' || keyboardEvent.key === 'ArrowUp') {
+                        keyboardEvent.preventDefault();
+                        const direction = keyboardEvent.key === 'ArrowDown' ? 1 : -1;
+                        const nextIndex = currentIndex < 0
+                            ? (direction > 0 ? 0 : items.length - 1)
+                            : (currentIndex + direction + items.length) % items.length;
+                        if (items[nextIndex]) items[nextIndex].focus();
+                    }
+                };
+                if (event && event.detail === 0 && items[0]) items[0].focus();
+
+                // Close menu when clicking outside. The current trigger click is ignored
+                // because its target still belongs to .integram-table-export-container.
+                const closeHandler = (outsideEvent) => {
+                    if (!menu.contains(outsideEvent.target) && !outsideEvent.target.closest('.integram-table-export-container')) {
+                        menu.style.display = 'none';
+                        if (trigger) trigger.setAttribute('aria-expanded', 'false');
+                        document.removeEventListener('click', closeHandler);
+                        menu._integramExportCloseHandler = null;
+                    }
+                };
+                menu._integramExportCloseHandler = closeHandler;
+                document.addEventListener('click', closeHandler);
             }
         }
 
@@ -18474,6 +19347,12 @@ class IntegramTable{
             const menu = document.getElementById(menuId);
             if (menu) {
                 menu.style.display = 'none';
+                if (menu._integramExportCloseHandler) {
+                    document.removeEventListener('click', menu._integramExportCloseHandler);
+                    menu._integramExportCloseHandler = null;
+                }
+                const trigger = document.querySelector(`[aria-controls="${ menuId }"]`);
+                if (trigger) trigger.setAttribute('aria-expanded', 'false');
             }
 
             try {
@@ -18524,33 +19403,49 @@ class IntegramTable{
 
         /**
          * Load all data matching current filters for export
-         * Requests all data in a single request with LIMIT=1000000
+         * Requests data in bounded pages and refuses silent truncation above the safety cap
          * @returns {Promise<Array>} Array of all data rows
          */
         async loadAllDataForExport() {
-            try {
-                let json;
-                const maxLimit = 1000000; // Request up to 1 million records in single request
+            const batchSize = 5000;
+            const maximumRows = 1000000;
+            const rows = [];
+            const useTableSource = this.getDataSourceType() === 'table' ||
+                (this.objectTableId && !this.options.tableTypeId);
+            const savedTableTypeId = this.options.tableTypeId;
 
-                if (this.getDataSourceType() === 'table' || (this.objectTableId && !this.options.tableTypeId)) {
-                    // Load data from table format (issue #697)
-                    // Use objectTableId if tableTypeId is not explicitly set (auto-detected JSON_OBJ format)
-                    const savedTableTypeId = this.options.tableTypeId;
-                    if (!this.options.tableTypeId && this.objectTableId) {
-                        this.options.tableTypeId = this.objectTableId;
-                    }
-                    json = await this.loadDataFromTableForExport(0, maxLimit);
-                    this.options.tableTypeId = savedTableTypeId;
-                } else {
-                    // Load data from report format
-                    json = await this.loadDataFromReportForExport(0, maxLimit);
+            try {
+                if (useTableSource && !this.options.tableTypeId && this.objectTableId) {
+                    this.options.tableTypeId = this.objectTableId;
                 }
 
-                return json.rows || [];
+                let offset = 0;
+                while (true) {
+                    // Fetch one extra row across the whole export so hitting the cap
+                    // is reported instead of silently producing a truncated file.
+                    const remainingWithProbe = maximumRows + 1 - rows.length;
+                    const limit = Math.min(batchSize, remainingWithProbe);
+                    const page = useTableSource
+                        ? await this.loadDataFromTableForExport(offset, limit)
+                        : await this.loadDataFromReportForExport(offset, limit);
+                    const pageRows = page && Array.isArray(page.rows) ? page.rows : [];
 
+                    for (const row of pageRows) rows.push(row);
+                    if (rows.length > maximumRows) {
+                        throw new Error(`Экспорт ограничен ${ maximumRows } строками. Уточните фильтр и повторите.`);
+                    }
+                    if (pageRows.length < limit) break;
+                    offset += pageRows.length;
+                }
+
+                return rows;
             } catch (error) {
                 console.error('Error loading export data:', error);
                 throw error;
+            } finally {
+                if (useTableSource) {
+                    this.options.tableTypeId = savedTableTypeId;
+                }
             }
         }
 
@@ -18601,8 +19496,7 @@ class IntegramTable{
             }
 
             const separator = baseUrl.includes('?') ? '&' : '?';
-            const response = await fetch(`${ baseUrl }${ separator }${ params }`);
-            const json = await response.json();
+            const json = await this.fetchJson(`${ baseUrl }${ separator }${ params }`);
 
             // Check if this is object format
             if (this.isObjectFormat(json)) {
@@ -18648,6 +19542,9 @@ class IntegramTable{
             if (this.options.parentId) {
                 params.set('F_U', this.options.parentId);
             }
+            if (this.options.recordId) {
+                params.set('F_I', this.options.recordId);
+            }
 
             // Apply current filters
             const filters = this.filters || {};
@@ -18673,8 +19570,7 @@ class IntegramTable{
             const apiBase = this.getApiBase();
             const url = `${ apiBase }/object/${ this.options.tableTypeId }/?${ params }`;
 
-            const response = await fetch(url);
-            const json = await response.json();
+            const json = await this.fetchJson(url);
 
             // Parse JSON_OBJ format
             if (this.isJsonDataArrayFormat(json)) {
@@ -18698,7 +19594,7 @@ class IntegramTable{
                     // Resolve the symbolic format exactly as renderCell does so the export
                     // matches what is shown on screen (issue #3763).
                     const format = this.resolveColumnFormat(col);
-                    let value = cellValue || '';
+                    let value = cellValue ?? '';
 
                     // Issue #378, #925: For reference fields and GRANT/REPORT_COLUMN, remove "id:" prefix from "id:Value" format
                     const isRefField = col.ref_id != null || (col.ref && col.ref !== 0);
@@ -18761,7 +19657,7 @@ class IntegramTable{
                     // Resolve the symbolic format exactly as renderCell does so the export
                     // matches what is shown on screen (issue #3763).
                     const format = this.resolveColumnFormat(col);
-                    let value = cellValue || '';
+                    let value = cellValue ?? '';
 
                     // Issue #378, #925: For reference fields and GRANT/REPORT_COLUMN, remove "id:" prefix from "id:Value" format
                     const isRefField = col.ref_id != null || (col.ref && col.ref !== 0);
@@ -18811,27 +19707,30 @@ class IntegramTable{
             });
         }
 
+        /** Prefix formula-like CSV values so spreadsheet programs keep them as text. */
+        neutralizeCsvFormula(value) {
+            const cell = value === null || value === undefined ? '' : String(value);
+            return /^[\s\u0000-\u001F\u007F-\u009F\uFEFF]*[=+\-@]/u.test(cell) ? "'" + cell : cell;
+        }
+
+        escapeCsvCell(value) {
+            const cell = this.neutralizeCsvFormula(value);
+            return /[",\r\n]/.test(cell) ? '"' + cell.replace(/"/g, '""') + '"' : cell;
+        }
+
         /**
          * Export data to CSV format
          * @param {Array} data - Array of data rows
          * @param {Array} columns - Array of column definitions
          */
         exportToCSV(data, columns) {
-            // Prepare CSV content
-            const headers = columns.map(col => col.name);
+            // Prepare CSV content. Headers and values are both neutralized so a
+            // spreadsheet cannot interpret server-controlled text as a formula.
+            const headers = columns.map(col => this.escapeCsvCell(col.name));
             const csvRows = [headers];
 
-            // Add data rows
             data.forEach(row => {
-                const csvRow = row.map(cell => {
-                    // Escape quotes and wrap in quotes if contains comma, newline, or quote
-                    const cellStr = String(cell);
-                    if (cellStr.includes(',') || cellStr.includes('\n') || cellStr.includes('"')) {
-                        return '"' + cellStr.replace(/"/g, '""') + '"';
-                    }
-                    return cellStr;
-                });
-                csvRows.push(csvRow);
+                csvRows.push(row.map(cell => this.escapeCsvCell(cell)));
             });
 
             // Join rows with newlines
@@ -18955,6 +19854,12 @@ class IntegramTable{
             const menu = document.getElementById(menuId);
             if (menu) {
                 menu.style.display = 'none';
+                if (menu._integramExportCloseHandler) {
+                    document.removeEventListener('click', menu._integramExportCloseHandler);
+                    menu._integramExportCloseHandler = null;
+                }
+                const trigger = document.querySelector(`[aria-controls="${ menuId }"]`);
+                if (trigger) trigger.setAttribute('aria-expanded', 'false');
             }
 
             try {
@@ -19334,6 +20239,8 @@ if (typeof window !== 'undefined') {
  * openCreateRecordForm(3596, 1, {'t3888': 357, 't3886': 'Отказались'});
  */
 async function openCreateRecordForm(tableTypeId, parentId, fieldValues = {}) {
+    tableTypeId = /^\d+$/.test(String(tableTypeId ?? '').trim()) ? String(tableTypeId).trim() : '';
+    parentId = /^\d+$/.test(String(parentId ?? '').trim()) ? String(parentId).trim() : '';
     if (!tableTypeId) {
         console.error('openCreateRecordForm: tableTypeId is required');
         return;
@@ -19445,6 +20352,60 @@ class IntegramCreateFormHelper {
         this.reportColumnOptionsCache = null;  // Cache for REPORT_COLUMN dropdown options (issue #607)
     }
 
+    async fetchJson(url, options) {
+        const response = await fetch(url, options);
+        let text = '';
+        let parsed = null;
+
+        if (typeof response.text === 'function') {
+            text = await response.text();
+            if (text !== '') {
+                try {
+                    parsed = JSON.parse(text);
+                } catch (parseError) {
+                    const preview = text.trim()
+                        ? text.trim().slice(0, 300)
+                        : `HTTP ${ response.status } ${ response.statusText }`.trim();
+                    const error = new Error(preview);
+                    error.isNonJsonResponse = true;
+                    error.status = response.status;
+                    throw error;
+                }
+            }
+        } else if (typeof response.json === 'function') {
+            parsed = await response.json();
+        }
+
+        if (response.ok === false) {
+            let message = '';
+            if (parsed && typeof parsed === 'object') {
+                message = parsed.error || parsed.message ||
+                    (Array.isArray(parsed) && parsed[0] && (parsed[0].error || parsed[0].message)) || '';
+            }
+            if (!message) {
+                message = text.trim() || `HTTP ${ response.status } ${ response.statusText }`.trim();
+            }
+            const error = new Error(String(message).slice(0, 300));
+            error.status = response.status;
+            error.response = parsed;
+            throw error;
+        }
+
+        return parsed;
+    }
+
+    normalizeNumericId(value) {
+        const id = value === null || value === undefined ? '' : String(value).trim();
+        return /^\d+$/.test(id) ? id : '';
+    }
+    sanitizeLinkUrl(value) {
+        if (value === null || value === undefined) return '';
+        const url = String(value).trim();
+        const schemeProbe = url.replace(/[\u0000-\u0020\u007f]+/g, '');
+        if (/^(?:javascript|data|vbscript):/i.test(schemeProbe)) return '';
+        if (/^[a-z][a-z0-9+.-]*:/i.test(schemeProbe) && !/^https?:/i.test(schemeProbe)) return '';
+        return url;
+    }
     escapeHtml(text) {
         if (text === null || text === undefined) return '';
         return String(text)
@@ -19713,7 +20674,7 @@ class IntegramCreateFormHelper {
         // Store reference to overlay on modal for proper cleanup
         modal._overlayElement = overlay;
 
-        const typeName = this.getMetadataName(metadata);
+        const typeName = this.escapeHtml(this.getMetadataName(metadata));
         const title = `Создание: ${typeName}`;
 
         // Build parent info subtitle HTML if parentInfo is provided
@@ -19726,7 +20687,7 @@ class IntegramCreateFormHelper {
         // Render the form
         const reqs = metadata.reqs || [];
         const recordReqs = recordData && recordData.reqs ? recordData.reqs : {};
-        const regularFields = reqs.filter(req => !req.arr_id);
+        const regularFields = reqs.filter(req => !req.arr_id && this.normalizeNumericId(req.id));
 
         // Build attributes form HTML
         let attributesHtml = this.renderAttributesForm(metadata, recordData, regularFields, recordReqs, fieldValues);
@@ -19759,7 +20720,7 @@ class IntegramCreateFormHelper {
         document.body.appendChild(modal);
 
         // Load reference options for dropdowns
-        this.loadReferenceOptions(metadata.reqs, modal, fieldValues);
+        this.loadReferenceOptions(regularFields, modal, fieldValues);
 
         // Load GRANT and REPORT_COLUMN dropdown options (issue #577)
         this.loadGrantAndReportColumnOptions(modal);
@@ -19795,19 +20756,8 @@ class IntegramCreateFormHelper {
 
         overlay.addEventListener('click', closeModal);
 
-        // Close on Escape key (issue #595)
-        const handleEscape = (e) => {
-            if (e.key === 'Escape') {
-                // Only close if this modal is the topmost one
-                const currentDepth = parseInt(modal.dataset.modalDepth) || 0;
-                const maxDepth = window._integramModalDepth || 0;
-                if (currentDepth === maxDepth) {
-                    closeModal();
-                    document.removeEventListener('keydown', handleEscape);
-                }
-            }
-        };
-        document.addEventListener('keydown', handleEscape);
+        // Shared Escape stack closes only the topmost modal and unregisters on removal.
+        itCreateModalCloseHandler(modal, closeModal, this);
 
         // Enter in input/textarea triggers Save (issue #1422)
         modal.addEventListener('keydown', (e) => {
@@ -19833,7 +20783,7 @@ class IntegramCreateFormHelper {
         const currentDateTimeDisplay = currentDateDisplay + ' ' + now.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }); // DD.MM.YYYY HH:MM
 
         // Main value field - render according to base type
-        const typeName = this.getMetadataName(metadata);
+        const typeName = this.escapeHtml(this.getMetadataName(metadata));
         const mainValue = recordData && recordData.obj ? recordData.obj.val || '' : '';
         // For GRANT/REPORT_COLUMN fields, use term from API response for dropdown pre-selection (issue #583)
         const mainTermValue = recordData && recordData.obj && recordData.obj.term !== undefined ? recordData.obj.term : '';
@@ -19893,7 +20843,7 @@ class IntegramCreateFormHelper {
         // Render requisite fields
         regularFields.forEach(req => {
             const attrs = this.parseAttrs(req.attrs);
-            const fieldName = attrs.alias || req.val;
+            const fieldName = this.escapeHtml(attrs.alias || req.val || '');
             const reqValue = recordReqs[req.id] ? recordReqs[req.id].value || '' : '';
             const baseTypeId = recordReqs[req.id] ? recordReqs[req.id].base || req.type : req.type;
             const baseFormat = this.normalizeFormat(baseTypeId);
@@ -19908,7 +20858,7 @@ class IntegramCreateFormHelper {
             if (req.ref_id && isMulti) {
                 const currentValue = reqValue || '';
                 html += `
-                    <div class="form-reference-editor form-multi-reference-editor" data-ref-id="${req.id}" data-required="${isRequired}" data-ref-type-id="${req.orig || req.ref_id}" data-multi="1" data-current-value="${this.escapeHtml(currentValue)}">
+                    <div class="form-reference-editor form-multi-reference-editor" data-ref-id="${req.id}" data-required="${isRequired}" data-ref-type-id="${this.normalizeNumericId(req.orig || req.ref_id)}" data-multi="1" data-current-value="${this.escapeHtml(currentValue)}">
                         <div class="inline-editor-reference form-ref-editor-box inline-editor-multi-reference">
                             <div class="multi-ref-tags-container form-multi-ref-tags-container">
                                 <span class="multi-ref-tags-placeholder">Загрузка...</span>
@@ -19938,7 +20888,7 @@ class IntegramCreateFormHelper {
             else if (req.ref_id) {
                 const currentValue = reqValue || '';
                 html += `
-                    <div class="form-reference-editor" data-ref-id="${req.id}" data-required="${isRequired}" data-ref-type-id="${req.orig || req.ref_id}">
+                    <div class="form-reference-editor" data-ref-id="${req.id}" data-required="${isRequired}" data-ref-type-id="${this.normalizeNumericId(req.orig || req.ref_id)}">
                         <div class="inline-editor-reference form-ref-editor-box">
                             <div class="inline-editor-reference-header">
                                 <input type="text"
@@ -20146,8 +21096,7 @@ class IntegramCreateFormHelper {
 
             try {
                 const url = `${this.apiBase}/_ref_reqs/${req.id}?JSON&LIMIT=50`;
-                const response = await fetch(url);
-                const data = await response.json();
+                const data = await this.fetchJson(url);
 
                 // Parse options - data is an object {id: text, ...}
                 let optionsHtml = '';
@@ -20230,7 +21179,7 @@ class IntegramCreateFormHelper {
         }
 
         // Close dropdowns when clicking outside
-        document.addEventListener('click', (e) => {
+        itAddModalDocumentListener(modal, 'click', (e) => {
             if (!e.target.closest('.form-reference-editor')) {
                 modal.querySelectorAll('.form-ref-dropdown').forEach(dropdown => {
                     dropdown.style.display = 'none';
@@ -20253,8 +21202,7 @@ class IntegramCreateFormHelper {
 
         try {
             const url = `${this.apiBase}/_ref_reqs/${refReqId}?JSON&LIMIT=50`;
-            const response = await fetch(url);
-            const data = await response.json();
+            const data = await this.fetchJson(url);
 
             // Parse options into [id, text] tuples
             const options = Object.entries(data).map(([id, text]) => [id, this.decodeHtmlEntities(text)]);
@@ -20328,7 +21276,7 @@ class IntegramCreateFormHelper {
                 } else {
                     dropdown.innerHTML = filtered.map(([id, text]) => {
                         const et = self.escapeHtml(self.decodeHtmlEntities(text));
-                        return `<div class="inline-editor-reference-option" data-id="${id}" data-text="${et}" tabindex="0">${et}</div>`;
+                        return `<div class="inline-editor-reference-option" data-id="${self.escapeHtml(id)}" data-text="${et}" tabindex="0">${et}</div>`;
                     }).join('');
                 }
             };
@@ -20433,6 +21381,7 @@ class IntegramCreateFormHelper {
                     const firstOption = dropdown.querySelector('.inline-editor-reference-option');
                     if (firstOption) firstOption.click();
                 } else if (e.key === 'Escape') {
+                    e.preventDefault();
                     dropdown.style.display = 'none';
                     searchInput.blur();
                 }
@@ -20458,6 +21407,7 @@ class IntegramCreateFormHelper {
                     e.preventDefault();
                     option.click();
                 } else if (e.key === 'Escape') {
+                    e.preventDefault();
                     dropdown.style.display = 'none';
                     searchInput.focus();
                 }
@@ -20655,20 +21605,11 @@ class IntegramCreateFormHelper {
             // Create the record
             const url = `${this.apiBase}/_m_new/${this.tableTypeId}?JSON&up=${this.parentId || 1}`;
 
-            const response = await fetch(url, {
+            const result = await this.fetchJson(url, {
                 method: 'POST',
                 headers: headers,
                 body: requestBody
             });
-
-            const text = await response.text();
-            let result;
-
-            try {
-                result = JSON.parse(text);
-            } catch (e) {
-                throw new Error(`Invalid response: ${text}`);
-            }
 
             const serverError = this.getServerError(result);
             if (serverError) {
@@ -20701,6 +21642,12 @@ class IntegramCreateFormHelper {
      * Enhanced with subordinate table tabs and form settings button (issue #837).
      */
     renderEditFormModalStandalone(metadata, recordData, typeId, recordId) {
+        typeId = this.normalizeNumericId(typeId);
+        recordId = this.normalizeNumericId(recordId);
+        if (!typeId || !recordId) {
+            this.showToast('Некорректный идентификатор записи', 'error');
+            return;
+        }
         // Track modal depth for z-index stacking
         if (!window._integramModalDepth) {
             window._integramModalDepth = 0;
@@ -20727,11 +21674,11 @@ class IntegramCreateFormHelper {
         // Store reference to overlay on modal for proper cleanup
         modal._overlayElement = overlay;
 
-        const typeName = this.getMetadataName(metadata);
+        const typeName = this.escapeHtml(this.getMetadataName(metadata));
         const recordVal = recordData && recordData.obj ? recordData.obj.val : '';
         // #3774: DATETIME-главное-значение → дата-время вместо unix-штампа.
-        const title = `Редактирование: ${this.formatRecordTitleValue(recordVal) || typeName}`;
-        const parentId = recordData && recordData.obj ? recordData.obj.parent : 1;
+        const title = `Редактирование: ${this.escapeHtml(this.formatRecordTitleValue(recordVal)) || typeName}`;
+        const parentId = this.normalizeNumericId(recordData && recordData.obj ? recordData.obj.parent : 1) || '1';
 
         // Build record ID link HTML
         const pathParts = window.location.pathname.split('/');
@@ -20739,8 +21686,8 @@ class IntegramCreateFormHelper {
         const tableUrl = `/${dbName}/table/${typeId}?F_U=${parentId || 1}&F_I=${recordId}`;
 
         const recordIdHtml = `
-            <span class="edit-form-record-id" onclick="navigator.clipboard.writeText('${recordId}').then(() => { this.style.color='#28a745'; setTimeout(() => this.style.color='', 1000); })" title="Скопировать ID" style="cursor:pointer;margin-left:8px;font-size: 0.75rem;color:var(--cards-text-secondary);">#${recordId}</span>
-            <a href="${tableUrl}" class="edit-form-table-link" title="Открыть в таблице" target="_blank" style="margin-left:4px;">
+            <button type="button" class="edit-form-record-id" onclick="navigator.clipboard.writeText('${recordId}').then(() => { this.style.color='#28a745'; setTimeout(() => this.style.color='', 1000); })" title="Скопировать ID" aria-label="Скопировать ID ${recordId}" style="margin-left:8px;">#${recordId}</button>
+            <a href="${tableUrl}" class="edit-form-table-link" title="Открыть в таблице" target="_blank" rel="noopener noreferrer" style="margin-left:4px;">
                 <i class="pi pi-table"></i>
             </a>
         `;
@@ -20748,10 +21695,10 @@ class IntegramCreateFormHelper {
         // Render the form
         const reqs = metadata.reqs || [];
         const recordReqs = recordData && recordData.reqs ? recordData.reqs : {};
-        const regularFields = reqs.filter(req => !req.arr_id);
+        const regularFields = reqs.filter(req => !req.arr_id && this.normalizeNumericId(req.id));
 
         // Separate subordinate tables (issue #837)
-        const subordinateTables = reqs.filter(req => req.arr_id);
+        const subordinateTables = reqs.filter(req => this.normalizeNumericId(req.arr_id) && this.normalizeNumericId(req.id));
         const hasSubordinateTables = subordinateTables.length > 0 && recordId;
 
         // Build tabs HTML (issue #837)
@@ -20762,9 +21709,11 @@ class IntegramCreateFormHelper {
 
             subordinateTables.forEach(req => {
                 const attrs = this.parseAttrs(req.attrs);
-                const fieldName = attrs.alias || req.val;
-                const arrCount = recordReqs[req.id] ? recordReqs[req.id].arr || 0 : 0;
-                tabsHtml += `<div class="edit-form-tab" data-tab="sub-${req.id}" data-arr-id="${req.arr_id}" data-req-id="${req.id}">${fieldName} (${arrCount})</div>`;
+                const fieldName = this.escapeHtml(attrs.alias || req.val || '');
+                const arrCount = this.escapeHtml(recordReqs[req.id] ? recordReqs[req.id].arr || 0 : 0);
+                const reqId = this.normalizeNumericId(req.id);
+                const arrId = this.normalizeNumericId(req.arr_id);
+                tabsHtml += `<div class="edit-form-tab" data-tab="sub-${reqId}" data-arr-id="${arrId}" data-req-id="${reqId}">${fieldName} (${arrCount})</div>`;
             });
 
             tabsHtml += `</div>`;
@@ -20794,7 +21743,7 @@ class IntegramCreateFormHelper {
         if (hasSubordinateTables) {
             subordinateTables.forEach(req => {
                 formHtml += `
-                    <div class="edit-form-tab-content" data-tab-content="sub-${req.id}">
+                    <div class="edit-form-tab-content" data-tab-content="sub-${this.normalizeNumericId(req.id)}">
                         <div class="subordinate-table-loading">Загрузка...</div>
                     </div>
                 `;
@@ -20827,7 +21776,7 @@ class IntegramCreateFormHelper {
         }
 
         // Load reference options for dropdowns
-        this.loadReferenceOptions(metadata.reqs, modal, {});
+        this.loadReferenceOptions(regularFields, modal, {});
 
         // Load GRANT and REPORT_COLUMN dropdown options
         this.loadGrantAndReportColumnOptions(modal);
@@ -20872,18 +21821,8 @@ class IntegramCreateFormHelper {
 
         overlay.addEventListener('click', closeModal);
 
-        // Close on Escape key
-        const handleEscape = (e) => {
-            if (e.key === 'Escape') {
-                const currentDepth = parseInt(modal.dataset.modalDepth) || 0;
-                const maxDepth = window._integramModalDepth || 0;
-                if (currentDepth === maxDepth) {
-                    closeModal();
-                    document.removeEventListener('keydown', handleEscape);
-                }
-            }
-        };
-        document.addEventListener('keydown', handleEscape);
+        // Shared Escape stack closes only the topmost modal and unregisters on removal.
+        itCreateModalCloseHandler(modal, closeModal, this);
 
         // Enter in input/textarea triggers Save (issue #1422)
         modal.addEventListener('keydown', (e) => {
@@ -20921,10 +21860,10 @@ class IntegramCreateFormHelper {
                 }
 
                 // Load subordinate table if needed
-                const parentRecordId = modal.dataset.recordId;
+                const parentRecordId = self.normalizeNumericId(modal.dataset.recordId);
                 if (tabId.startsWith('sub-') && tab.dataset.arrId && parentRecordId) {
-                    const arrId = tab.dataset.arrId;
-                    const reqId = tab.dataset.reqId;
+                    const arrId = self.normalizeNumericId(tab.dataset.arrId);
+                    const reqId = self.normalizeNumericId(tab.dataset.reqId);
 
                     // Check if already loaded
                     if (!targetContent.dataset.loaded) {
@@ -20952,6 +21891,12 @@ class IntegramCreateFormHelper {
      * Load subordinate table content (issue #837).
      */
     async loadSubordinateTableStandalone(container, arrId, parentRecordId, reqId) {
+        arrId = this.normalizeNumericId(arrId);
+        parentRecordId = this.normalizeNumericId(parentRecordId);
+        if (!arrId || !parentRecordId) {
+            container.innerHTML = '<div class="subordinate-table-error">Некорректный идентификатор таблицы</div>';
+            return;
+        }
         if (!container.querySelector('.subordinate-table')) {
             container.innerHTML = '<div class="subordinate-table-loading">Загрузка...</div>';
         }
@@ -20969,14 +21914,13 @@ class IntegramCreateFormHelper {
             // Fallback: fetch and render subordinate table data manually
             const metadata = await this.fetchMetadataStandalone(arrId);
             const dataUrl = `${this.apiBase}/object/${arrId}/?JSON_OBJ&F_U=${parentRecordId}`;
-            const dataResponse = await fetch(dataUrl);
-            const data = await dataResponse.json();
+            const data = await this.fetchJson(dataUrl);
 
             this.renderSubordinateTableStandalone(container, metadata, data, arrId, parentRecordId);
 
         } catch (error) {
             console.error('Error loading subordinate table:', error);
-            container.innerHTML = `<div class="subordinate-table-error">Ошибка загрузки: ${error.message}</div>`;
+            container.innerHTML = `<div class="subordinate-table-error">Ошибка загрузки: ${this.escapeHtml(error.message)}</div>`;
         }
     }
 
@@ -20985,6 +21929,8 @@ class IntegramCreateFormHelper {
      * Uses globalMetadata from IntegramTable instances if available to avoid redundant requests (issue #1302).
      */
     async fetchMetadataStandalone(typeId) {
+        typeId = this.normalizeNumericId(typeId);
+        if (!typeId) throw new Error('Некорректный идентификатор типа');
         if (this.metadataCache[typeId]) {
             return this.metadataCache[typeId];
         }
@@ -21030,7 +21976,13 @@ class IntegramCreateFormHelper {
      * Uses the same CSS classes as the main renderSubordinateTable method.
      */
     renderSubordinateTableStandalone(container, metadata, data, arrId, parentRecordId) {
-        const typeName = this.getMetadataName(metadata);
+        arrId = this.normalizeNumericId(arrId);
+        parentRecordId = this.normalizeNumericId(parentRecordId);
+        if (!arrId || !parentRecordId) {
+            container.innerHTML = '<div class="subordinate-table-error">Некорректный идентификатор таблицы</div>';
+            return;
+        }
+        const typeName = this.escapeHtml(this.getMetadataName(metadata));
         const records = Array.isArray(data) ? data : [];
         const reqs = metadata.reqs || [];
 
@@ -21050,7 +22002,7 @@ class IntegramCreateFormHelper {
                     <a href="#" class="subordinate-paste-buffer-btn" title="Вставить из буфера" onclick="event.preventDefault(); event.stopPropagation();">
                         <i class="pi pi-clipboard"></i>
                     </a>
-                    <a href="${subordinateTableUrl}" class="subordinate-table-link" title="Открыть в таблице" target="_blank">
+                    <a href="${subordinateTableUrl}" class="subordinate-table-link" title="Открыть в таблице" target="_blank" rel="noopener noreferrer">
                         <i class="pi pi-table"></i>
                     </a>
                 </div>
@@ -21063,25 +22015,25 @@ class IntegramCreateFormHelper {
             html += `<div class="subordinate-table-wrapper"><table class="subordinate-table"><thead><tr>`;
 
             // Header: main value column + requisite columns
-            html += `<th>${this.escapeHtml(typeName)}</th>`;
+            html += `<th>${typeName}</th>`;
             reqs.forEach(req => {
                 if (!req.arr_id) {
                     const attrs = this.parseAttrs(req.attrs);
-                    const fieldName = attrs.alias || req.val;
-                    html += `<th>${this.escapeHtml(fieldName)}</th>`;
+                    const fieldName = this.escapeHtml(attrs.alias || req.val || '');
+                    html += `<th>${fieldName}</th>`;
                 }
             });
             html += `</tr></thead><tbody>`;
 
             // Data rows
             records.forEach((record, rowIndex) => {
-                const recordId = record.i;
+                const recordId = this.normalizeNumericId(record.i);
                 const values = record.r || [];
                 html += `<tr data-row-id="${recordId}" style="cursor:pointer;">`;
 
                 // Main value column (clickable)
                 const mainValue = this.formatSubordinateCellDisplay(values[0] || '', metadata.type);
-                html += `<td class="subordinate-cell-clickable subordinate-cell-with-row-number" data-row="${rowIndex}" data-record-id="${recordId}" data-type-id="${arrId}">${mainValue}<span class="subordinate-row-number">${rowIndex + 1}</span></td>`;
+                html += `<td class="subordinate-cell-with-row-number${recordId ? ' subordinate-cell-clickable' : ''}" data-row="${rowIndex}" data-record-id="${recordId}" data-type-id="${arrId}">${mainValue}<span class="subordinate-row-number">${rowIndex + 1}</span></td>`;
 
                 // Requisite columns. Вложенные (arr_id) колонки не рисуются, но слот в r[]
                 // занимают — valIdx двигается на каждом реквизите, иначе сдвиг (issue #4124)
@@ -21203,7 +22155,7 @@ class IntegramCreateFormHelper {
 
         // Значение из object/ приходит готовым тегом <a> — не экранируем, добавляем класс
         if (format === 'FILE' && typeof value === 'string' && value.trim().startsWith('<a')) {
-            return value.replace('<a', '<a class="file-link"');
+            return IntegramTable.prototype.sanitizeCellHtml.call(this, value).replace(/^<a\b/i, '<a class="file-link"');
         }
 
         const date = formatIntegramDateCellPlain(value, format);
@@ -21301,6 +22253,8 @@ class IntegramCreateFormHelper {
             window._integramModalDepth = Math.max(0, (window._integramModalDepth || 1) - 1);
         };
 
+        itCreateModalCloseHandler(modal, closeModal, this);
+
         // Close handlers
         modal.querySelector('.edit-form-close').addEventListener('click', closeModal);
         modal.querySelector('.paste-data-cancel-btn').addEventListener('click', closeModal);
@@ -21388,20 +22342,11 @@ class IntegramCreateFormHelper {
 
                 const url = `${apiBase}/_m_new/${arrId}?JSON&up=${parentRecordId}`;
 
-                const response = await fetch(url, {
+                const result = await this.fetchJson(url, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                     body: params.toString()
                 });
-
-                const text = await response.text();
-                let result;
-                try {
-                    result = JSON.parse(text);
-                } catch (e) {
-                    if (!response.ok) throw new Error(text);
-                    result = { success: true };
-                }
 
                 const serverError = this.getServerError(result);
                 if (serverError) {
@@ -21422,8 +22367,7 @@ class IntegramCreateFormHelper {
         const dataUrl = `${apiBase}/object/${arrId}/?JSON_OBJ&F_U=${parentRecordId}&LIMIT=0,${pageSize + 1}`;
 
         try {
-            const dataResponse = await fetch(dataUrl);
-            const data = await dataResponse.json();
+            const data = await this.fetchJson(dataUrl);
             const rows = Array.isArray(data) ? data : [];
             const hasMore = rows.length > pageSize;
             const firstPageRows = hasMore ? rows.slice(0, pageSize) : rows;
@@ -21445,6 +22389,8 @@ class IntegramCreateFormHelper {
      * Open form field settings modal (issue #837).
      */
     openFormFieldSettingsStandalone(typeId, metadata) {
+        typeId = this.normalizeNumericId(typeId);
+        if (!typeId) return;
         const overlay = document.createElement('div');
         overlay.className = 'form-field-settings-overlay';
 
@@ -21481,8 +22427,9 @@ class IntegramCreateFormHelper {
         sortedReqs.forEach(req => {
             if (req.arr_id) return; // Skip subordinate tables
             const attrs = this.parseAttrs(req.attrs);
-            const fieldName = attrs.alias || req.val;
-            const fieldId = req.id;
+            const fieldName = this.escapeHtml(attrs.alias || req.val || '');
+            const fieldId = this.normalizeNumericId(req.id);
+            if (!fieldId) return;
             const isChecked = visibleFields[fieldId] !== false;
 
             modalHtml += `
@@ -21493,7 +22440,7 @@ class IntegramCreateFormHelper {
                                class="form-field-visibility-checkbox"
                                data-field-id="${fieldId}"
                                ${isChecked ? 'checked' : ''}>
-                        <span>${this.escapeHtml(fieldName)}</span>
+                        <span>${fieldName}</span>
                     </label>
                 </div>
             `;
@@ -21558,14 +22505,8 @@ class IntegramCreateFormHelper {
         cancelBtn.addEventListener('click', closeModal);
         overlay.addEventListener('click', closeModal);
 
-        // Close on Escape key
-        const handleEscape = (e) => {
-            if (e.key === 'Escape') {
-                closeModal();
-                document.removeEventListener('keydown', handleEscape);
-            }
-        };
-        document.addEventListener('keydown', handleEscape);
+        // Shared Escape stack closes only the topmost modal and unregisters on removal.
+        itCreateModalCloseHandler(modal, closeModal, this);
 
         saveBtn.addEventListener('click', () => {
             // Save visibility
@@ -21696,7 +22637,7 @@ class IntegramCreateFormHelper {
         let html = '';
 
         // Main value field
-        const typeName = this.getMetadataName(metadata);
+        const typeName = this.escapeHtml(this.getMetadataName(metadata));
         const mainValue = recordData && recordData.obj ? recordData.obj.val || '' : '';
         // Issue #3572: подчинённый объект «Объекты» может прийти меткой без term-префикса
         // «id:» — тогда отдаём метку (опции грантов матчатся по id ИЛИ по метке).
@@ -21734,7 +22675,7 @@ class IntegramCreateFormHelper {
 
         html += `
             <div class="form-field">
-                <label for="field-main">${this.escapeHtml(typeName)}</label>
+                <label for="field-main">${typeName}</label>
                 ${mainFieldHtml}
             </div>
         `;
@@ -21743,7 +22684,7 @@ class IntegramCreateFormHelper {
         for (const req of regularFields) {
             const fieldId = req.id;
             const attrs = this.parseAttrs(req.attrs);
-            const fieldName = attrs.alias || req.val;
+            const fieldName = this.escapeHtml(attrs.alias || req.val || '');
             const isRequired = attrs.required;
             const isMulti = attrs.multi;
             const fieldType = this.normalizeFormat(req.type);
@@ -21757,7 +22698,7 @@ class IntegramCreateFormHelper {
                 // Multi-select reference field (issue #1136)
                 const currentValue = fieldValue || '';
                 fieldHtml = `
-                    <div class="form-reference-editor form-multi-reference-editor" data-ref-id="${fieldId}" data-required="${isRequired}" data-ref-type-id="${req.orig || req.ref_id}" data-multi="1" data-current-value="${this.escapeHtml(currentValue)}">
+                    <div class="form-reference-editor form-multi-reference-editor" data-ref-id="${fieldId}" data-required="${isRequired}" data-ref-type-id="${this.normalizeNumericId(req.orig || req.ref_id)}" data-multi="1" data-current-value="${this.escapeHtml(currentValue)}">
                         <div class="inline-editor-reference form-ref-editor-box inline-editor-multi-reference">
                             <div class="multi-ref-tags-container form-multi-ref-tags-container">
                                 <span class="multi-ref-tags-placeholder">Загрузка...</span>
@@ -21786,7 +22727,7 @@ class IntegramCreateFormHelper {
                 // Single-select reference field (searchable dropdown) (issue #1136)
                 const currentValue = fieldValue || '';
                 fieldHtml = `
-                    <div class="form-reference-editor" data-ref-id="${fieldId}" data-required="${isRequired}" data-ref-type-id="${req.orig || req.ref_id}">
+                    <div class="form-reference-editor" data-ref-id="${fieldId}" data-required="${isRequired}" data-ref-type-id="${this.normalizeNumericId(req.orig || req.ref_id)}">
                         <div class="inline-editor-reference form-ref-editor-box">
                             <div class="inline-editor-reference-header">
                                 <input type="text"
@@ -21843,6 +22784,7 @@ class IntegramCreateFormHelper {
                     }
                 }
 
+                const safeFileHref = this.sanitizeLinkUrl(fileHref);
                 fieldHtml = `
                     <div class="form-file-upload" data-req-id="${fieldId}" data-original-value="${this.escapeHtml(fieldValue)}">
                         <input type="file" class="file-input" id="field-${fieldId}-file" style="display: none;">
@@ -21851,7 +22793,7 @@ class IntegramCreateFormHelper {
                             <button type="button" class="file-select-btn">Выбрать файл</button>
                         </div>
                         <div class="file-preview" style="${hasFile ? 'display: flex;' : 'display: none;'}">
-                            ${fileHref ? `<a href="${this.escapeHtml(fileHref)}" target="_blank" class="file-name file-link">${this.escapeHtml(fileDisplayName)}</a>` : `<span class="file-name">${this.escapeHtml(fileDisplayName)}</span>`}
+                            ${safeFileHref ? `<a href="${this.escapeHtml(safeFileHref)}" target="_blank" rel="noopener noreferrer" class="file-name file-link">${this.escapeHtml(fileDisplayName)}</a>` : `<span class="file-name">${this.escapeHtml(fileDisplayName)}</span>`}
                             <button type="button" class="file-remove-btn" title="Удалить файл"><i class="pi pi-times"></i></button>
                         </div>
                         <input type="hidden" id="field-${fieldId}" name="t${fieldId}" value="${this.escapeHtml(fieldValue)}" ${isRequired ? 'required' : ''} data-file-deleted="false">
@@ -21880,7 +22822,7 @@ class IntegramCreateFormHelper {
 
             html += `
                 <div class="form-field">
-                    <label for="field-${fieldId}">${this.escapeHtml(fieldName)} ${requiredMark}</label>
+                    <label for="field-${fieldId}">${fieldName} ${requiredMark}</label>
                     ${fieldHtml}
                 </div>
             `;
@@ -21988,20 +22930,11 @@ class IntegramCreateFormHelper {
             // Update the record using _m_save (issue #839)
             const url = `${this.apiBase}/_m_save/${recordId}?JSON`;
 
-            const response = await fetch(url, {
+            const result = await this.fetchJson(url, {
                 method: 'POST',
                 headers: headers,
                 body: requestBody
             });
-
-            const text = await response.text();
-            let result;
-
-            try {
-                result = JSON.parse(text);
-            } catch (e) {
-                throw new Error(`Invalid response: ${text}`);
-            }
 
             const serverError = this.getServerError(result);
             if (serverError) {
@@ -22045,6 +22978,8 @@ class IntegramCreateFormHelper {
  * openEditRecordForm(12345, 3596);
  */
 async function openEditRecordForm(recordId, typeId) {
+    recordId = /^\d+$/.test(String(recordId ?? '').trim()) ? String(recordId).trim() : '';
+    typeId = /^\d+$/.test(String(typeId ?? '').trim()) ? String(typeId).trim() : '';
     if (!recordId) {
         console.error('openEditRecordForm: recordId is required');
         return;
@@ -22152,25 +23087,58 @@ if (typeof window !== 'undefined') {
 }
 
 // Auto-initialize tables from data attributes
+function getAvailableAutoInstanceName(requestedName) {
+    const requested = String(requestedName || 'table');
+    const normalized = requested.replace(/[^A-Za-z0-9_$]/g, '_');
+    const baseName = (/^[A-Za-z_$]/.test(normalized) ? normalized : `table_${normalized}`) || 'table';
+    let candidate = baseName;
+    let suffix = 2;
+
+    // Inline handlers require an identifier stored on window. Never replace an
+    // application global or another table instance; choose a stable free alias.
+    while (candidate in window) {
+        candidate = `${baseName}_${suffix}`;
+        suffix += 1;
+    }
+    return candidate;
+}
+
+function registerAutoInstanceAlias(instance, alias) {
+    if (!alias || (alias in window && window[alias] !== instance)) return;
+    window[alias] = instance;
+    instance._globalAliases = instance._globalAliases || [];
+    if (!instance._globalAliases.includes(alias)) {
+        instance._globalAliases.push(alias);
+    }
+}
+
 function autoInitTables() {
     const tables = document.querySelectorAll('[data-integram-table]');
     tables.forEach(element => {
+        // The bundle may be evaluated more than once on pages that replace
+        // partial content. Keep auto-initialization idempotent so the same
+        // element does not accumulate duplicate requests and global listeners.
+        if (element._integramTableInstance) return;
+
+        const requestedInstanceName = element.dataset.instanceName || element.id;
         const options = {
             apiUrl: element.dataset.apiUrl || '',
             pageSize: parseInt(element.dataset.pageSize) || 20,
             cookiePrefix: element.dataset.cookiePrefix || 'integram-table',
             title: element.dataset.title || '',
-            instanceName: element.dataset.instanceName || element.id,
+            instanceName: getAvailableAutoInstanceName(requestedInstanceName),
             dataSource: element.dataset.dataSource || 'report',
             tableTypeId: element.dataset.tableTypeId || null,
             parentId: element.dataset.parentId || null
         };
 
-        // Create instance and store in window if instanceName is provided
         const instance = new IntegramTable(element.id, options);
-        if (options.instanceName) {
-            window[options.instanceName] = instance;
-        }
+        element._integramTableInstance = instance;
+
+        // Preserve a free legacy bracket-notation alias, but never overwrite an
+        // existing global. Inline handlers always use the unique safe alias.
+        registerAutoInstanceAlias(instance, requestedInstanceName);
+        registerAutoInstanceAlias(instance, instance.options.instanceName);
 
         // Register instance in global registry
         if (typeof window !== 'undefined' && window._integramTableInstances) {

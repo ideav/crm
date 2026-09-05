@@ -1,93 +1,148 @@
 /**
- * Test for issue #595: Esc key should work for exiting on all modal forms
+ * Regression test for issue #595 and modal keydown-listener cleanup.
  *
- * This test verifies that the Esc key handler:
- * 1. Only closes the topmost modal when multiple modals are stacked
- * 2. Properly removes the event listener when modal is closed
+ * Verifies that the shared modal stack:
+ * 1. Installs only one document-level Escape listener.
+ * 2. Closes only the most recently opened (topmost) modal.
+ * 3. Unregisters after button/programmatic close and external DOM removal.
+ * 4. Covers every modal creation site in the modular source.
  */
 
-// Mock DOM environment simulation
-const assert = (condition, message) => {
-    if (!condition) {
-        throw new Error(`Assertion failed: ${message}`);
+const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
+const vm = require('vm');
+
+const sourceDir = path.join(__dirname, '..', 'js', 'integram-table');
+const bootstrapPath = path.join(sourceDir, '00-class-open.js');
+const bootstrap = fs.readFileSync(bootstrapPath, 'utf8').split('class IntegramTable{')[0];
+
+const listeners = new Map();
+let addCount = 0;
+let removeCount = 0;
+const observers = [];
+
+const document = {
+    documentElement: {
+        contains(modal) {
+            return modal.isConnected !== false;
+        }
+    },
+    addEventListener(type, listener) {
+        addCount++;
+        if (!listeners.has(type)) listeners.set(type, new Set());
+        listeners.get(type).add(listener);
+    },
+    removeEventListener(type, listener) {
+        removeCount++;
+        if (listeners.has(type)) listeners.get(type).delete(listener);
     }
-    console.log(`✓ ${message}`);
 };
 
-// Test 1: Modal depth tracking logic
-console.log('\n--- Test 1: Modal depth tracking ---');
-{
-    // Simulate modal depth tracking
-    let modalDepth = 0;
+class MutationObserver {
+    constructor(callback) {
+        this.callback = callback;
+        this.disconnected = false;
+        observers.push(this);
+    }
 
-    // Open first modal
-    modalDepth++;
-    assert(modalDepth === 1, 'First modal opens, depth = 1');
+    observe() {}
 
-    // Open second (nested) modal
-    modalDepth++;
-    assert(modalDepth === 2, 'Second modal opens, depth = 2');
-
-    // Close second modal (topmost)
-    modalDepth = Math.max(0, modalDepth - 1);
-    assert(modalDepth === 1, 'Second modal closes, depth back to 1');
-
-    // Close first modal
-    modalDepth = Math.max(0, modalDepth - 1);
-    assert(modalDepth === 0, 'First modal closes, depth = 0');
+    disconnect() {
+        this.disconnected = true;
+    }
 }
 
-// Test 2: Esc key should only close topmost modal
-console.log('\n--- Test 2: Esc key closes only topmost modal ---');
-{
-    // Simulate the condition check in the handleEscape function
-    const shouldCloseModal = (currentModalDepth, maxGlobalDepth) => {
-        return currentModalDepth === maxGlobalDepth;
-    };
+const context = vm.createContext({ document, MutationObserver });
+vm.runInContext(bootstrap, context);
 
-    // With two modals open (depth 1 and 2), only modal with depth 2 should close
-    assert(shouldCloseModal(2, 2) === true, 'Modal at depth 2 should close when max depth is 2');
-    assert(shouldCloseModal(1, 2) === false, 'Modal at depth 1 should NOT close when max depth is 2');
+context.parentModal = { isConnected: true };
+context.childModal = { isConnected: true };
+context.closed = [];
+vm.runInContext(`
+    const closeParent = itCreateModalCloseHandler(parentModal, () => {
+        closed.push('parent');
+        parentModal.isConnected = false;
+    });
+    const closeChild = itCreateModalCloseHandler(childModal, () => {
+        closed.push('child');
+        childModal.isConnected = false;
+    });
+`, context);
 
-    // After closing top modal, the modal at depth 1 becomes topmost
-    assert(shouldCloseModal(1, 1) === true, 'Modal at depth 1 should close when max depth is 1');
+assert.strictEqual(addCount, 1, 'two open modals share one document keydown listener');
+assert.strictEqual(listeners.get('keydown').size, 1, 'only one keydown listener is active');
+
+const dispatchKey = (key, defaultPrevented = false) => {
+    for (const listener of [...(listeners.get('keydown') || [])]) listener({ key, defaultPrevented });
+};
+
+dispatchKey('Enter');
+assert.deepStrictEqual(context.closed, [], 'non-Escape keys do not close modals');
+dispatchKey('Escape', true);
+assert.deepStrictEqual(context.closed, [], 'an inner control can consume Escape without closing its modal');
+
+dispatchKey('Escape');
+assert.deepStrictEqual(context.closed, ['child'], 'first Escape closes only the topmost modal');
+assert.strictEqual(listeners.get('keydown').size, 1, 'listener remains while the parent modal is open');
+
+dispatchKey('Escape');
+assert.deepStrictEqual(context.closed, ['child', 'parent'], 'second Escape closes the parent modal');
+assert.strictEqual(listeners.get('keydown').size, 0, 'listener is removed when the stack becomes empty');
+assert.strictEqual(removeCount, 1, 'shared listener is removed exactly once for the first stack');
+
+context.buttonModal = { isConnected: true };
+context.buttonCloseCount = 0;
+context.outsideClickCount = 0;
+vm.runInContext(`
+    const closeFromButton = itCreateModalCloseHandler(buttonModal, () => {
+        buttonCloseCount++;
+        buttonModal.isConnected = false;
+    });
+    itAddModalDocumentListener(buttonModal, 'click', () => outsideClickCount++);
+`, context);
+assert.strictEqual(listeners.get('click').size, 1, 'modal-scoped document listener is registered');
+for (const listener of [...listeners.get('click')]) listener({});
+assert.strictEqual(context.outsideClickCount, 1, 'modal-scoped document listener remains functional');
+vm.runInContext('closeFromButton(); closeFromButton();', context);
+assert.strictEqual(context.buttonCloseCount, 1, 'managed close callback is idempotent');
+assert.strictEqual(listeners.get('keydown').size, 0, 'button close unregisters Escape immediately');
+assert.strictEqual(listeners.get('click').size, 0, 'button close removes modal-scoped document listeners');
+
+context.externallyRemovedModal = { isConnected: true };
+vm.runInContext(`
+    itCreateModalCloseHandler(externallyRemovedModal, () => {
+        throw new Error('detached modal must not be closed again');
+    });
+    externallyRemovedModal.isConnected = false;
+`, context);
+for (const observer of observers) {
+    if (!observer.disconnected) observer.callback();
 }
+assert.strictEqual(listeners.get('keydown').size, 0, 'external DOM removal unregisters the modal');
+vm.runInContext("itAddModalDocumentListener(externallyRemovedModal, 'click', () => {});", context);
+assert.strictEqual(listeners.get('click').size, 0,
+    'async work finishing after modal removal cannot register a stale document listener');
 
-// Test 3: Escape key event handling
-console.log('\n--- Test 3: Escape key event properties ---');
-{
-    // Simulate keyboard event
-    const escapeEvent = { key: 'Escape' };
-    const enterEvent = { key: 'Enter' };
-    const tabEvent = { key: 'Tab' };
+const moduleFiles = fs.readdirSync(sourceDir)
+    .filter(name => name.endsWith('.js'))
+    .sort();
+const modularSource = moduleFiles
+    .map(name => fs.readFileSync(path.join(sourceDir, name), 'utf8'))
+    .join('\n');
+const creationCount = (modularSource.match(/appendChild\((?:modal|\w*Modal)\)|insertAdjacentHTML\('beforeend', modalHtml\)/g) || []).length;
+const registrationCount = (modularSource.match(/itCreateModalCloseHandler\(/g) || []).length - 1;
 
-    assert(escapeEvent.key === 'Escape', 'Escape key is detected');
-    assert(enterEvent.key !== 'Escape', 'Enter key is not Escape');
-    assert(tabEvent.key !== 'Escape', 'Tab key is not Escape');
-}
+assert.strictEqual(creationCount, 23, 'known modal creation sites are accounted for');
+assert.strictEqual(registrationCount, creationCount, 'every modal creation site joins the shared Escape stack');
+assert.ok(!modularSource.includes('const handleEscape ='), 'legacy per-modal Escape handlers are gone');
+assert.ok(!modularSource.includes("document.addEventListener('click', (e) =>"),
+    'modal-owned document click handlers must use lifecycle cleanup');
+assert.ok(!modularSource.includes("window.addEventListener('resize', () => this.updateContainerHeight())"),
+    'rendering must not accumulate anonymous fallback resize handlers');
+assert.ok(modularSource.includes("this.container.removeEventListener('click', this._cellClickHandler)"),
+    're-rendering must remove the previous delegated cell-click handler');
+assert.strictEqual((modularSource.match(/addEventListener\('click', this\._cellClickHandler\)/g) || []).length, 1,
+    'the table has one controlled cell-click delegation site');
 
-// Test 4: Verify all modals have Esc handlers
-console.log('\n--- Test 4: Modal Esc handler coverage ---');
-{
-    const fs = require('fs');
-    const path = require('path');
-
-    const filePath = path.join(__dirname, '..', 'js', 'integram-table.js');
-    const content = fs.readFileSync(filePath, 'utf8');
-
-    // Count Esc key handlers
-    const escHandlers = (content.match(/Close on Escape key \(issue #595\)/g) || []).length;
-    assert(escHandlers >= 12, `Found ${escHandlers} Esc key handlers (expected >= 12)`);
-
-    // Verify the pattern used
-    const correctPattern = content.includes("if (e.key === 'Escape')");
-    assert(correctPattern, 'Uses correct e.key === "Escape" pattern');
-
-    // Verify depth checking for nested modals
-    const depthCheck = content.includes('currentDepth === maxDepth');
-    assert(depthCheck, 'Contains depth check for nested modal closing');
-
-    console.log(`\nTotal Esc handlers added: ${escHandlers}`);
-}
-
-console.log('\n✓ All tests passed!\n');
+console.log('✓ Modal and table lifecycles clean up global and delegated listeners');

@@ -240,7 +240,8 @@
 
                 // Check for FR_ prefix
                 if (key.startsWith('FR_')) {
-                    const colId = key.substring(3);  // Remove 'FR_' prefix
+                    const colId = this.normalizeNumericId(key.substring(3));  // Remove 'FR_' prefix
+                    if (!colId) continue;
                     const parsed = this.parseFilterValue(value);
                     urlFilters[colId] = {
                         type: parsed.type,
@@ -256,7 +257,8 @@
                 // Check for F_ prefix (alternative filter format) - issue #549
                 // Note: F_U is excluded above as it's used for parentId
                 else if (key.startsWith('F_')) {
-                    const colId = key.substring(2);  // Remove 'F_' prefix
+                    const colId = this.normalizeNumericId(key.substring(2));  // Remove 'F_' prefix
+                    if (!colId) continue;
                     const parsed = this.parseFilterValue(value);
                     urlFilters[colId] = {
                         type: parsed.type,
@@ -271,7 +273,8 @@
                 }
                 // Check for TO_ prefix (range filter second part)
                 else if (key.startsWith('TO_')) {
-                    const colId = key.substring(3);  // Remove 'TO_' prefix
+                    const colId = this.normalizeNumericId(key.substring(3));  // Remove 'TO_' prefix
+                    if (!colId) continue;
                     // If we already have a FR_ or F_ for this column, combine into range
                     if (urlFilters[colId]) {
                         urlFilters[colId].type = '...';
@@ -591,6 +594,8 @@
 
             const instanceName = this.options.instanceName;
             const badges = hiddenFilters.map(hf => {
+                const colId = String(hf.colId || '');
+                if (!/^\d+$/.test(colId)) return '';
                 const filterTypeSymbol = hf.filter.type || '^';
                 // Use resolved text label for @id-based filters when available (issue #551)
                 const activeFilter = this.filters[hf.colId];
@@ -600,10 +605,10 @@
                 const displayValue = resolvedLabel ? `${filterTypeSymbol} ${resolvedLabel}` : filterTypeSymbol;
 
                 return `
-                    <span class="hidden-filter-badge" data-col-id="${hf.colId}">
-                        <span class="hidden-filter-badge-name">${hf.colName}</span>
-                        <span class="hidden-filter-badge-value">${displayValue}</span>
-                        <span class="hidden-filter-badge-remove" onclick="window.${instanceName}.removeUrlFilter('${hf.colId}')" title="Удалить фильтр"><i class="pi pi-times"></i></span>
+                    <span class="hidden-filter-badge" data-col-id="${colId}">
+                        <span class="hidden-filter-badge-name">${this.escapeHtml(hf.colName)}</span>
+                        <span class="hidden-filter-badge-value">${this.escapeHtml(displayValue)}</span>
+                        <button type="button" class="hidden-filter-badge-remove" onclick="window.${instanceName}.removeUrlFilter('${colId}')" title="Удалить фильтр" aria-label="Удалить фильтр ${this.escapeHtml(hf.colName)}"><i class="pi pi-times" aria-hidden="true"></i></button>
                     </span>
                 `;
             }).join('');

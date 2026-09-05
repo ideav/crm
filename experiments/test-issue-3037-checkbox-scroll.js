@@ -14,6 +14,10 @@ const moduleSource = fs.readFileSync(
     path.join(__dirname, '..', 'js', 'integram-table', '07-inline-edit.js'),
     'utf8'
 );
+const bulkExportSource = fs.readFileSync(
+    path.join(__dirname, '..', 'js', 'integram-table', '23-bulk-export.js'),
+    'utf8'
+);
 
 function extractMethod(name) {
     const re = new RegExp(`(?:^|\\n)        ${name}\\s*\\([^)]*\\)\\s*\\{`);
@@ -97,6 +101,7 @@ function makeTable() {
         checkboxMode: true,
         selectedRows: new Set(),
         data: Array.from({ length: 12 }, (_, i) => [`row-${i}`]),
+        rawObjectData: Array.from({ length: 12 }, (_, i) => ({ i: 'record-' + i, r: ['row-' + i] })),
         columns: [{ id: 'name' }],
         columnOrder: ['name'],
         visibleColumns: ['name'],
@@ -104,6 +109,13 @@ function makeTable() {
         filters: {},
         currentEditingCell: null,
         options: {},
+        getRowSelectionKey(rowIndex) {
+            const rawItem = this.rawObjectData[rowIndex];
+            return rawItem ? String(rawItem.i) : null;
+        },
+        getSelectableRowKeys() {
+            return this.rawObjectData.map(rawItem => String(rawItem.i));
+        },
         renderCalls: 0,
         preservingRenderCalls: 0,
         getScrollContainer() {
@@ -143,7 +155,14 @@ function testRowCheckboxPreservesScroll() {
 
     rowCheckbox.change(true);
 
-    assert(table.selectedRows.has(3), 'row checkbox should select the clicked row');
+    assert(table.selectedRows.has('record-3'), 'row checkbox should select the clicked record ID');
+
+    // A sort may move the selected record to another position. Selection must
+    // follow the record ID and never transfer to whatever now occupies index 3.
+    [table.rawObjectData[3], table.rawObjectData[4]] = [table.rawObjectData[4], table.rawObjectData[3]];
+    assert(!table.selectedRows.has(table.getRowSelectionKey(3)), 'selection must not transfer to the new row at the old index');
+    assert(table.selectedRows.has(table.getRowSelectionKey(4)), 'selection must follow the same record after reorder');
+
     assert.strictEqual(tableContainer.scrollTop, 380, 'row checkbox must preserve vertical scroll');
     assert.strictEqual(tableContainer.scrollLeft, 42, 'row checkbox must preserve horizontal scroll');
     assert.strictEqual(table.preservingRenderCalls, 1, 'row checkbox render should preserve scroll');
@@ -163,4 +182,9 @@ function testSelectAllPreservesScroll() {
 testRowCheckboxPreservesScroll();
 testSelectAllPreservesScroll();
 
-console.log('PASS issue-3037 checkbox selection preserves table scroll');
+assert(!bulkExportSource.includes('selectedIndices'),
+    'bulk delete must not translate selected row positions into record IDs');
+assert(bulkExportSource.includes('rawItemsById.get(String(selectedId))'),
+    'bulk delete must resolve the selected stable record IDs');
+
+console.log('PASS issue-3037 checkbox selection preserves table scroll and record identity');

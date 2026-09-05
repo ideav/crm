@@ -25,13 +25,16 @@ global.document = {
         removeChild: () => {}
     }
 };
-global.navigator = {
-    clipboard: {
-        writeText: (text) => {
-            clipboardText = text;
+Object.defineProperty(global, 'navigator', {
+    configurable: true,
+    value: {
+        clipboard: {
+            writeText: (text) => {
+                clipboardText = text;
+            }
         }
     }
-};
+});
 
 const IntegramTable = require('../js/integram-table.js');
 
@@ -108,5 +111,18 @@ assert.strictEqual(
     false,
     'empty create form should not show the old save-before-copying message'
 );
+
+const passwordSamples = new Set();
+const passwordTable = Object.create(IntegramTable.prototype);
+for (let index = 0; index < 64; index++) {
+    const password = passwordTable.generateSecurePassword();
+    assert.strictEqual(password.length, 16, 'secure passwords use the new 16-character default');
+    assert.match(password, /[A-Z]/, 'password contains an uppercase letter');
+    assert.match(password, /[a-z]/, 'password contains a lowercase letter');
+    assert.match(password, /[0-9]/, 'password contains a digit');
+    assert.match(password, /[-_.!@#]/, 'password contains a symbol');
+    passwordSamples.add(password);
+}
+assert.strictEqual(passwordSamples.size, 64, 'generated password samples should be unique');
 
 console.log('issue #2823 create invitation password flow checks passed');

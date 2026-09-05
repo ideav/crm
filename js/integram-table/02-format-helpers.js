@@ -105,10 +105,11 @@
             const apiBase = this.getApiBase();
             const tableId = metadata.id;
             this.objectTableId = tableId;  // Store table ID for _count=1 queries
-            // In grouping mode, use LIMIT=1000 and disable scrolling (issue #502)
+            // Grouping uses bounded 1,000-row pages with one look-ahead row.
             const isGroupingMode = this.groupingEnabled && this.groupingColumns.length > 0;
-            const requestSize = isGroupingMode ? 1000 : (this.options.pageSize + 1);
-            const offset = (append && !isGroupingMode) ? this.loadedRecords : 0;
+            const pageSize = isGroupingMode ? 1000 : this.options.pageSize;
+            const requestSize = pageSize + 1;
+            const offset = append ? this.loadedRecords : 0;
             let dataUrl = `${ apiBase }/object/${ tableId }/?JSON_OBJ&LIMIT=${ offset },${ requestSize }`;
 
             // Add parent ID filter if present (issue #563)
@@ -152,9 +153,8 @@
                 dataUrl += `&${ pageParams.toString() }`;
             }
 
-            // Fetch data
-            const dataResponse = await fetch(dataUrl);
-            const dataArray = await dataResponse.json();
+            // Fetch data through the shared status/JSON validator.
+            const dataArray = await this.fetchJson(dataUrl);
 
             // Detect metadata drift: the metadata response and the data response
             // were fetched separately, so they may disagree if the schema
@@ -401,8 +401,7 @@
                     countUrl = `${ this.options.apiUrl }${ separator }${ params }`;
                 }
 
-                const response = await fetch(countUrl);
-                const result = await response.json();
+                const result = await this.fetchJson(countUrl);
                 this.totalRows = parseInt(result.count, 10);
             } catch (error) {
                 console.error('Error fetching total count:', error);

@@ -167,11 +167,11 @@ function makeTable(server, options = {}) {
 
     // ── 5. Статически: во ВСЕХ трёх шаблонах <th> исходника есть title ID ─────
     // (одиночный ряд, smart-заголовки, renderGroupedHeaders — правились одинаково)
-    const thTemplates = source.match(/<th data-column-id="\$\{ col\.id \}" draggable="true"[^\n]*/g) || [];
+    const thTemplates = source.match(/<th data-column-id="\$\{ this\.escapeHtml\(col\.id\) \}"[^\n]*/g) || [];
     assert(thTemplates.length >= 3,
         '#4385-2: в исходнике найдены все шаблоны колоночных <th> (>=3)');
-    assert(thTemplates.every(t => t.includes('title="${ col.id }"')),
-        '#4385-2: каждый шаблон <th> несёт title="${ col.id }" (в т.ч. одиночный ряд заголовков)');
+    assert(thTemplates.every(t => t.includes('title="${ this.escapeHtml(col.id) }"')),
+        '#4385-2: каждый шаблон <th> экранирует ID в title (в т.ч. одиночный ряд заголовков)');
 
     console.log(`\n${ passed }/${ total } tests passed`);
 })().catch(e => { console.error(e); process.exit(1); });

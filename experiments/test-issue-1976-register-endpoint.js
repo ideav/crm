@@ -2,7 +2,7 @@ const assert = require('assert');
 const fs = require('fs');
 const vm = require('vm');
 
-const source = fs.readFileSync('js/app.js', 'utf8');
+const source = fs.readFileSync('js/app.js', 'utf8').replace(/\r\n/g, '\n');
 const classStart = source.indexOf('class AuthManager');
 const classEnd = source.indexOf('// ============================================================\n// App initialization');
 const authSource = source.slice(classStart, classEnd);

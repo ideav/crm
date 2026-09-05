@@ -5,20 +5,29 @@
             const urlParams = new URLSearchParams(window.location.search);
             const urlParentId = urlParams.get('parentId') || urlParams.get('F_U') || urlParams.get('up');
             const urlRecordId = urlParams.get('F_I');  // Record ID filter from URL (issue #563)
+            const normalizeNumericId = candidate => {
+                const value = candidate === null || candidate === undefined ? '' : String(candidate).trim();
+                return /^\d+$/.test(value) ? value : null;
+            };
+            const requestedInstanceName = String(options.instanceName || 'table');
+            const normalizedInstanceName = requestedInstanceName.replace(/[^A-Za-z0-9_$]/g, '_');
+            const safeInstanceName = /^[A-Za-z_$]/.test(normalizedInstanceName)
+                ? normalizedInstanceName
+                : 'table_' + normalizedInstanceName;
 
             this.options = {
                 apiUrl: options.apiUrl || '',
                 pageSize: options.pageSize || 20,
                 cookiePrefix: options.cookiePrefix || 'integram-table',
                 title: options.title || '',
-                instanceName: options.instanceName || 'table',
+                instanceName: safeInstanceName || 'table',
                 onCellClick: options.onCellClick || null,
                 onDataLoad: options.onDataLoad || null,
                 // New options for dual data source support
                 dataSource: options.dataSource || 'report',  // 'report' or 'table'
                 tableTypeId: options.tableTypeId || null,   // Required for dataSource='table'
-                parentId: options.parentId || urlParentId || null,  // Parent ID for table data source
-                recordId: options.recordId || urlRecordId || null,  // Record ID filter for table data source (issue #563)
+                parentId: normalizeNumericId(options.parentId || urlParentId),  // Parent ID for table data source
+                recordId: normalizeNumericId(options.recordId || urlRecordId),  // Record ID filter for table data source (issue #563)
                 debug: options.debug || false  // Enable debug tracing
             };
 
@@ -34,6 +43,10 @@
             this.isFetchingTotalCount = false;  // True while re-requesting the total count (issue #2795)
             this.hasMore = true;  // Whether there are more records to load
             this.isLoading = false;  // Prevent multiple simultaneous loads
+            this._loadDataPromise = null;  // Promise for the full active load queue
+            this._loadRequestVersion = 0;  // Invalidates responses superseded by a refresh
+            this._destroyed = false;  // Prevents late async work after teardown
+            this._reloadQueued = false;  // Coalesces refreshes requested during an active load
             this.pendingRequests = 0;  // In-flight server requests; drives the toolbar AJAX spinner
             this.filters = {};
             this.columnOrder = [];
@@ -56,7 +69,7 @@
             this.refFetchCache = {};  // Cache for fetchReferenceOptions results by composite key (issue #1571)
             this.editableColumns = new Map();  // Map of column IDs to their corresponding ID column IDs
             this.checkboxMode = false;  // Whether checkbox selection column is visible
-            this.selectedRows = new Set();  // Set of selected row indices
+            this.selectedRows = new Set();  // Set of selected record IDs (normalized to strings)
             this.globalMetadata = null;  // Global metadata for determining parent relationships
             this.globalMetadataPromise = null;  // Promise for in-progress globalMetadata fetch (issue #789)
             this.currentEditingCell = null;  // Track currently editing cell
@@ -162,6 +175,49 @@
             this.refTextFilterTypes = new Set(['~', '^', '!', '@', '!@']);
 
             this.init();
+        }
+
+        /**
+         * Return the stable selection key for a rendered row.
+         * Row positions change after sorting/filtering, so they must never be used
+         * as destructive-action identifiers.
+         */
+        getRowSelectionKey(rowIndex) {
+            const rawItem = this.rawObjectData && this.rawObjectData[rowIndex];
+            if (!rawItem || rawItem.i === null || rawItem.i === undefined || rawItem.i === '') {
+                return null;
+            }
+            return String(rawItem.i);
+        }
+
+        isRowSelected(rowIndex) {
+            const key = this.getRowSelectionKey(rowIndex);
+            return key !== null && this.selectedRows.has(key);
+        }
+
+        getSelectableRowKeys() {
+            const keys = [];
+            for (let rowIndex = 0; rowIndex < this.data.length; rowIndex++) {
+                const key = this.getRowSelectionKey(rowIndex);
+                if (key !== null) keys.push(key);
+            }
+            return keys;
+        }
+
+        areAllSelectableRowsSelected() {
+            const keys = this.getSelectableRowKeys();
+            return keys.length > 0 && keys.every(key => this.selectedRows.has(key));
+        }
+
+        pruneSelectedRows() {
+            if (!(this.selectedRows instanceof Set)) {
+                this.selectedRows = new Set();
+                return;
+            }
+            const visibleKeys = new Set(this.getSelectableRowKeys());
+            for (const key of this.selectedRows) {
+                if (!visibleKeys.has(key)) this.selectedRows.delete(key);
+            }
         }
 
         /**
@@ -393,6 +449,8 @@
         }
 
         init() {
+            if (this._destroyed) return;
+
             // Remove padding from the parent container so the table fills full width (issue #887)
             if (this.container && this.container.parentElement) {
                 this.container.parentElement.parentElement.style.padding = '0';
@@ -406,7 +464,125 @@
             this.loadData();
         }
 
+        /**
+         * Release global resources owned by this table instance. This is safe to
+         * call more than once and invalidates any in-flight load before detaching
+         * listeners, observers, timers, registry entries, and automatic aliases.
+         */
+        destroy(options = {}) {
+            if (this._destroyed) return;
+            this._destroyed = true;
+            this._loadRequestVersion = (this._loadRequestVersion || 0) + 1;
+            this._reloadQueued = false;
+            this.hasMore = false;
+            this.isLoading = false;
+
+            const removeListener = (target, type, handler, listenerOptions) => {
+                if (target && handler && typeof target.removeEventListener === 'function') {
+                    target.removeEventListener(type, handler, listenerOptions);
+                }
+            };
+
+            removeListener(this.container, 'click', this._fullValueClickHandler);
+            removeListener(this.container, 'click', this._tableButtonClickHandler);
+            removeListener(this.container, 'click', this._cellClickHandler);
+            removeListener(this._scrollListenerContainer || window, 'scroll', this.scrollListener);
+            removeListener(document, 'keydown', this.plusKeyListener);
+            removeListener(window, 'resize', this._containerHeightResizeListener);
+            removeListener(this._tableScrollElement, 'scroll', this.tableScrollListener);
+            removeListener(this._stickyScrollbarElement, 'scroll', this.stickyScrollListener);
+            removeListener(this._stickyScrollContainer || window, 'scroll', this.stickyVisibilityListener);
+            removeListener(window, 'resize', this.stickyVisibilityListener);
+            removeListener(window, 'resize', this.scrollCounterResizeListener);
+            removeListener(window, 'scroll', this.scrollCounterScrollListener, true);
+
+            if (this._modalCloseHandlers instanceof Set) {
+                const closeHandlers = Array.from(this._modalCloseHandlers);
+                this._modalCloseHandlers.clear();
+                closeHandlers.reverse().forEach(close => {
+                    try {
+                        close();
+                    } catch (error) {
+                        console.error('Failed to close table modal during destroy:', error);
+                    }
+                });
+            }
+
+            if (typeof this.closeRefFilterDropdown === 'function') {
+                this.closeRefFilterDropdown();
+            }
+            removeListener(document, 'click', this.handleRefFilterDropdownOutsideClick);
+
+            ['filterTimeout', '_checkAndLoadMoreTimer', '_navigateTimer', '_refFilterOutsideClickTimer']
+                .forEach(field => {
+                    if (this[field] !== null && this[field] !== undefined) clearTimeout(this[field]);
+                    this[field] = null;
+                });
+
+            if (this._containerHeightObserver) this._containerHeightObserver.disconnect();
+            if (this.scrollCounterResizeObserver) this.scrollCounterResizeObserver.disconnect();
+            if (this._columnResizeCleanup) this._columnResizeCleanup();
+
+            [
+                '_fullValueClickHandler', '_tableButtonClickHandler', '_cellClickHandler',
+                'scrollListener', '_scrollListenerContainer', 'plusKeyListener',
+                '_containerHeightResizeListener', '_containerHeightObserver',
+                'tableScrollListener', '_tableScrollElement', 'stickyScrollListener',
+                '_stickyScrollbarElement', 'stickyVisibilityListener', '_stickyScrollContainer',
+                'scrollCounterResizeListener', 'scrollCounterScrollListener',
+                'scrollCounterResizeObserver', '_columnResizeCleanup', '_modalCloseHandlers'
+            ].forEach(field => { this[field] = null; });
+
+            const registry = typeof window !== 'undefined' && window._integramTableInstances;
+            if (Array.isArray(registry)) {
+                for (let index = registry.length - 1; index >= 0; index -= 1) {
+                    if (registry[index] === this) registry.splice(index, 1);
+                }
+            }
+
+            const aliases = new Set(Array.isArray(this._globalAliases) ? this._globalAliases : []);
+            if (this.options && this.options.instanceName) aliases.add(this.options.instanceName);
+            aliases.forEach(alias => {
+                if (window[alias] === this) {
+                    try {
+                        delete window[alias];
+                    } catch (error) {
+                        window[alias] = undefined;
+                    }
+                }
+            });
+            this._globalAliases = [];
+
+            const container = this.container;
+            if (container && container._integramTableInstance === this) {
+                delete container._integramTableInstance;
+            }
+            if (options.clearContainer !== false && container) {
+                container.innerHTML = '';
+            }
+
+            this.currentEditingCell = null;
+            this.pendingCellClick = null;
+            this.pendingNewRow = null;
+            this.columns = [];
+            this.data = [];
+            this.rawObjectData = [];
+            this.groupedData = [];
+            if (this.selectedRows && typeof this.selectedRows.clear === 'function') this.selectedRows.clear();
+            this.metadataCache = {};
+            this.metadataFetchPromises = {};
+            this.globalMetadata = null;
+            this.globalMetadataPromise = null;
+            if (this.options) {
+                this.options.onCellClick = null;
+                this.options.onDataLoad = null;
+            }
+            this.container = null;
+        }
+
         async loadGlobalMetadata() {
+            if (this._destroyed) return;
+
             // If already loaded on this instance, return immediately (issue #1455)
             if (this.globalMetadata) {
                 return;
@@ -460,7 +636,7 @@
             }
 
             const metadata = await fetchPromise;
-            if (metadata) {
+            if (metadata && !this._destroyed) {
                 this.applyGlobalMetadata(metadata);
             }
         }
@@ -472,6 +648,7 @@
          * asynchronously and may fire after the user has scrolled (issue #2744).
          */
         applyGlobalMetadata(metadata) {
+            if (this._destroyed) return;
             this.globalMetadata = metadata;
             if (this.columns.length > 0) {
                 this.renderPreservingScroll(() => this.render());
@@ -501,6 +678,8 @@
          * Used to display breadcrumb-like title: "{parent table name} {record value}: {current table name}"
          */
         async loadParentInfo() {
+            if (this._destroyed) return;
+
             try {
                 // Only fetch parent info if parentId is numeric and > 1
                 const parentId = parseInt(this.options.parentId, 10);
@@ -515,6 +694,7 @@
                     return;
                 }
                 const data = await response.json();
+                if (this._destroyed) return;
                 if (data && data.id) {
                     this.parentInfo = {
                         id: data.id,
@@ -561,7 +741,8 @@
                 const parentTypeName = this.escapeHtml(this.parentInfo.type || '');
                 // #3247: первая колонка-DATETIME родителя приходит unix-штампом — форматируем.
                 const parentVal = this.escapeHtml(this.formatRecordTitleValue(this.parentInfo.val || ''));
-                const parentObjId = this.parentInfo.obj || '';
+                const parentObjValue = String(this.parentInfo.obj || '');
+                const parentObjId = /^\d+$/.test(parentObjValue) ? parentObjValue : '';
                 const parentUp = parseInt(this.parentInfo.up, 10) || 0;
                 const parentRecordId = this.options.parentId || '';
                 const currentTitle = this.escapeHtml(this.options.title || '');
@@ -588,9 +769,9 @@
          */
         renderCheckboxToggleHtml() {
             const instanceName = this.options.instanceName;
-            return `<div class="integram-table-checkbox-toggle${ this.checkboxMode ? ' active' : '' }" onclick="window.${ instanceName }.toggleCheckboxMode()" title="Выбор строк в таблице">
+            return `<button type="button" class="integram-table-checkbox-toggle${ this.checkboxMode ? ' active' : '' }" onclick="window.${ instanceName }.toggleCheckboxMode()" title="Выбор строк в таблице" aria-label="Режим выбора строк" aria-pressed="${ this.checkboxMode ? 'true' : 'false' }">
                 <i class="pi pi-check-square"></i>
-            </div>`;
+            </button>`;
         }
 
         /**
@@ -626,6 +807,8 @@
         }
 
         async loadData(append = false) {
+            if (this._destroyed) return;
+
             // Block appending when there are no more records, and block scroll-triggered
             // appends while a new row is pending creation (issue #2059): re-rendering
             // would destroy the unsaved row and lose the editor focus.
@@ -641,29 +824,49 @@
                 append = false;
             }
 
-            // Dedupe concurrent loads. When a load is already running, return its
-            // in-flight promise instead of a no-op so callers that `await this.loadData(...)`
-            // wait for columns/data to be rebuilt. Returning early used to leave
-            // this.columns = [], which produced an empty "Настройки колонок таблицы" form
-            // after deleting and immediately re-creating a column: closeColumnSettings()
-            // fires an un-awaited refresh and the following `await this.loadData(...)`
-            // short-circuited before the columns were rebuilt (issue #2824).
-            // Non-append (refresh) calls are still allowed even when hasMore is false so the
-            // refresh button keeps working (issue #1516).
-            if (this.isLoading) {
-                return this._loadDataPromise || undefined;
+            // Serialize loads so infinite-scroll pages cannot overlap. A full refresh
+            // requested while another load is in flight invalidates that response and
+            // queues one latest-state reload. Multiple refreshes are coalesced.
+            if (this._loadDataPromise) {
+                if (!append) {
+                    this._loadRequestVersion = (this._loadRequestVersion || 0) + 1;
+                    this._reloadQueued = true;
+                }
+                return this._loadDataPromise;
             }
 
-            this.isLoading = true;
-            this._loadDataPromise = this._runLoadData(append);
+            const initialVersion = (this._loadRequestVersion || 0) + 1;
+            this._loadRequestVersion = initialVersion;
+
+            const runQueue = async () => {
+                let nextAppend = append;
+                let requestVersion = initialVersion;
+
+                do {
+                    this._reloadQueued = false;
+                    this.isLoading = true;
+                    await this._runLoadData(nextAppend, requestVersion);
+
+                    if (!this._reloadQueued) break;
+                    nextAppend = false;
+                    requestVersion = this._loadRequestVersion;
+                } while (true);
+            };
+
+            const loadPromise = runQueue();
+            this._loadDataPromise = loadPromise;
             try {
-                return await this._loadDataPromise;
+                return await loadPromise;
             } finally {
-                this._loadDataPromise = null;
+                if (this._loadDataPromise === loadPromise) {
+                    this._loadDataPromise = null;
+                    this.isLoading = false;
+                }
             }
         }
 
-        async _runLoadData(append = false) {
+        async _runLoadData(append = false, requestVersion = this._loadRequestVersion || 0) {
+            const isObsolete = () => this._destroyed || requestVersion !== (this._loadRequestVersion || 0);
             // Marks the window in which a pending metadataStale flag may be acted on
             // (issue #4364) — see shouldRebuildColumns().
             this._fullReload = !append;
@@ -673,18 +876,64 @@
                 let json;
                 let newRows = [];
 
-                if (this.getDataSourceType() === 'table') {
+                const dataSourceType = this.getDataSourceType();
+                if (dataSourceType === 'table') {
                     // Load data from table format (object/{typeId}/?JSON_OBJ&F_U={parentId}) (issue #697)
                     json = await this.loadDataFromTable(append);
+                    if (isObsolete()) return;
                 } else {
                     // Load data from report format (default behavior) (issue #697)
                     json = await this.loadDataFromReport(append);
+                    if (isObsolete()) return;
                     // Auto-set table title from report header if not explicitly provided (issue #537)
                     if (json && !this.options.title && json.header) {
                         this.options.title = json.header;
                     }
                 }
 
+                const isGroupingMode = this.groupingEnabled && this.groupingColumns.length > 0;
+                if (isGroupingMode && json) {
+                    const groupingPageSize = 1000;
+                    const maximumGroupedRows = 1000000;
+                    const allRows = [];
+                    const allRawData = [];
+                    let groupedColumns = json.columns || [];
+                    let page = json;
+
+                    while (page) {
+                        let pageRows = Array.isArray(page.rows) ? page.rows : [];
+                        let pageRawData = Array.isArray(page.rawData) ? page.rawData : [];
+                        const pageHasMore = pageRows.length > groupingPageSize;
+                        if (pageHasMore) {
+                            pageRows = pageRows.slice(0, groupingPageSize);
+                            pageRawData = pageRawData.slice(0, groupingPageSize);
+                        }
+
+                        allRows.push(...pageRows);
+                        allRawData.push(...pageRawData);
+                        if (!pageHasMore) break;
+                        if (allRows.length >= maximumGroupedRows) {
+                            throw new Error(`Группировка ограничена ${ maximumGroupedRows } строками. Уточните фильтр.`);
+                        }
+
+                        // The data loaders calculate their offset from loadedRecords.
+                        // No page is rendered until the complete grouped set is ready.
+                        this.loadedRecords = allRows.length;
+                        this.columns = groupedColumns;
+                        page = dataSourceType === 'table'
+                            ? await this.loadDataFromTable(true)
+                            : await this.loadDataFromReport(true);
+                        if (isObsolete()) return;
+                        groupedColumns = page && page.columns ? page.columns : groupedColumns;
+                    }
+
+                    json = {
+                        ...json,
+                        columns: groupedColumns,
+                        rows: allRows,
+                        rawData: allRawData
+                    };
+                }
                 // The reload went through: whatever the data source was, the columns now
                 // describe the rows we are about to show, so the flag has done its job.
                 // Clearing it here also keeps report-shaped sources — which build their
@@ -697,6 +946,8 @@
                 // If server returned null or empty result, treat as empty (issue #1514)
                 if (!json) {
                     this.data = [];
+                    this.rawObjectData = [];
+                    this.selectedRows.clear();
                     this.loadedRecords = 0;
                     this.hasMore = false;
                     this.totalRows = 0;
@@ -707,20 +958,10 @@
                 newRows = json.rows || [];
                 this.columns = json.columns || [];
 
-                // In grouping mode, disable infinite scroll and use all data (up to 1000)
-                const isGroupingMode = this.groupingEnabled && this.groupingColumns.length > 0;
+                // Grouped pages have already been fully accumulated above. Ordinary
+                // table pages retain the existing pageSize + 1 look-ahead behavior.
+                this.hasMore = isGroupingMode ? false : newRows.length > this.options.pageSize;
 
-                // Check if there are more records (we requested pageSize + 1)
-                // In grouping mode, we fetched up to 1000 records at once
-                if (isGroupingMode) {
-                    // Grouping mode: no pagination, show all fetched data
-                    this.hasMore = false;
-                } else {
-                    this.hasMore = newRows.length > this.options.pageSize;
-                }
-
-                // Keep only pageSize records; also trim rawData to stay aligned
-                // In grouping mode, keep all data (up to 1000)
                 let rawData = json.rawData || [];
                 if (!isGroupingMode && this.hasMore) {
                     newRows = newRows.slice(0, this.options.pageSize);
@@ -739,6 +980,10 @@
                     this.loadedRecords = 0;
                     // Replace raw object data if present
                     this.rawObjectData = rawData;
+                    // Keep only selections that still refer to records in the
+                    // replacement result set. This prevents hidden/stale rows
+                    // from being deleted after a filter or refresh.
+                    this.pruneSelectedRows();
                 }
 
                 this.loadedRecords += newRows.length;
@@ -805,6 +1050,7 @@
                     window.requestAnimationFrame(() => this.restoreScrollState(appendScrollState));
                 }
             } catch (error) {
+                if (isObsolete()) return;
                 console.error('Error loading data:', error);
                 // Stop auto-loading after a failed request (issue #2763).
                 // handleLoadDataError() re-renders the table to keep the filter
@@ -819,8 +1065,10 @@
                 this._fullReload = false;
                 this.isLoading = false;
                 this.endRequest();
-                // Check if table fits on screen and needs more data
-                this.checkAndLoadMore();
+                // Only the newest completed state may trigger pagination.
+                if (!isObsolete() && !this._reloadQueued) {
+                    this.checkAndLoadMore();
+                }
             }
         }
 
@@ -873,7 +1121,7 @@
             }
 
             if (!append) {
-                this.container.innerHTML = `<div class="alert alert-danger">Ошибка загрузки данных: ${ message }</div>`;
+                this.container.innerHTML = `<div class="alert alert-danger">Ошибка загрузки данных: ${ this.escapeHtml(message) }</div>`;
             } else {
                 this.showToast(`Ошибка загрузки данных: ${ message }`, 'error');
             }
@@ -886,30 +1134,56 @@
          * server message instead of a cryptic "Unexpected token ..." parse error
          * (issue #2758).
          */
-        async fetchJson(url) {
-            const response = await fetch(url);
-            const text = await response.text();
+        async fetchJson(url, options) {
+            const response = await fetch(url, options);
+            let text = '';
+            let parsed = null;
 
-            try {
-                return text === '' ? null : JSON.parse(text);
-            } catch (parseError) {
-                const trimmed = (text || '').trim();
-                const preview = trimmed
-                    ? trimmed.slice(0, 300)
-                    : `HTTP ${ response.status } ${ response.statusText }`.trim();
-                const error = new Error(preview);
-                error.isNonJsonResponse = true;
+            if (typeof response.text === 'function') {
+                text = await response.text();
+                if (text !== '') {
+                    try {
+                        parsed = JSON.parse(text);
+                    } catch (parseError) {
+                        const preview = text.trim()
+                            ? text.trim().slice(0, 300)
+                            : `HTTP ${ response.status } ${ response.statusText }`.trim();
+                        const error = new Error(preview);
+                        error.isNonJsonResponse = true;
+                        error.status = response.status;
+                        throw error;
+                    }
+                }
+            } else if (typeof response.json === 'function') {
+                // Compatibility for lightweight Response mocks used by embedders/tests.
+                parsed = await response.json();
+            }
+
+            if (response.ok === false) {
+                let message = '';
+                if (parsed && typeof parsed === 'object') {
+                    message = parsed.error || parsed.message ||
+                        (Array.isArray(parsed) && parsed[0] && (parsed[0].error || parsed[0].message)) || '';
+                }
+                if (!message) {
+                    message = text.trim() || `HTTP ${ response.status } ${ response.statusText }`.trim();
+                }
+                const error = new Error(String(message).slice(0, 300));
                 error.status = response.status;
+                error.response = parsed;
                 throw error;
             }
+
+            return parsed;
         }
 
         async loadDataFromReport(append = false) {
             // Original report-based data loading logic
-            // In grouping mode, use LIMIT=1000 and disable scrolling (issue #502)
+            // Grouping uses bounded 1,000-row pages with one look-ahead row.
             const isGroupingMode = this.groupingEnabled && this.groupingColumns.length > 0;
-            const requestSize = isGroupingMode ? 1000 : (this.options.pageSize + 1);
-            const offset = (append && !isGroupingMode) ? this.loadedRecords : 0;
+            const pageSize = isGroupingMode ? 1000 : this.options.pageSize;
+            const requestSize = pageSize + 1;
+            const offset = append ? this.loadedRecords : 0;
 
             const params = new URLSearchParams();
 
@@ -1142,10 +1416,11 @@
 
             this.objectTableId = this.options.tableTypeId;  // Store table ID for _count=1 queries
 
-            // In grouping mode, use LIMIT=1000 and disable scrolling (issue #502)
+            // Grouping uses bounded 1,000-row pages with one look-ahead row.
             const isGroupingMode = this.groupingEnabled && this.groupingColumns.length > 0;
-            const requestSize = isGroupingMode ? 1000 : (this.options.pageSize + 1);
-            const offset = (append && !isGroupingMode) ? this.loadedRecords : 0;
+            const pageSize = isGroupingMode ? 1000 : this.options.pageSize;
+            const requestSize = pageSize + 1;
+            const offset = append ? this.loadedRecords : 0;
 
             // First load, fetch metadata to get column information
             if (this.columns.length === 0) {

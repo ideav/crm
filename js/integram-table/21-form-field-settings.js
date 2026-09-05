@@ -1,4 +1,6 @@
         openFormFieldSettings(typeId, metadata) {
+            typeId = this.normalizeNumericId(typeId);
+            if (!typeId) return;
             const overlay = document.createElement('div');
             overlay.className = 'form-field-settings-overlay';
 
@@ -36,8 +38,9 @@
             // Add draggable checkbox for each requisite
             sortedReqs.forEach(req => {
                 const attrs = this.parseAttrs(req.attrs);
-                const fieldName = attrs.alias || req.val;
-                const fieldId = req.id;
+                const fieldName = this.escapeHtml(attrs.alias || req.val || '');
+                const fieldId = this.normalizeNumericId(req.id);
+                if (!fieldId) return;
                 const isChecked = visibleFields[fieldId] !== false;
 
                 modalHtml += `
@@ -120,14 +123,8 @@
             cancelBtn.addEventListener('click', closeModal);
             overlay.addEventListener('click', closeModal);
 
-            // Close on Escape key (issue #595)
-            const handleEscape = (e) => {
-                if (e.key === 'Escape') {
-                    closeModal();
-                    document.removeEventListener('keydown', handleEscape);
-                }
-            };
-            document.addEventListener('keydown', handleEscape);
+            // Shared Escape stack closes only the topmost modal and unregisters on removal.
+            itCreateModalCloseHandler(modal, closeModal, this);
 
             saveBtn.addEventListener('click', () => {
                 // Save visibility
@@ -829,7 +826,7 @@
         showDuplicateUniqueValueModal(currentValue) {
             return new Promise((resolve) => {
                 const modalId = `duplicate-unique-${ Date.now() }`;
-                const escapedValue = String(currentValue || '').replace(/"/g, '&quot;');
+                const escapedValue = this.escapeHtml(currentValue || '');
                 const modalHtml = `
                     <div class="integram-modal-overlay" id="${ modalId }">
                         <div class="integram-modal" style="max-width: 440px;">
@@ -869,7 +866,10 @@
                 // Enter key confirms
                 input.addEventListener('keydown', (e) => {
                     if (e.key === 'Enter') cleanup(input.value);
-                    if (e.key === 'Escape') cleanup(null);
+                    if (e.key === 'Escape') {
+                        e.preventDefault();
+                        cleanup(null);
+                    }
                 });
 
                 // Close on overlay click
@@ -877,14 +877,8 @@
                     if (e.target === confirmModal) cleanup(null);
                 });
 
-                // Close on Escape key
-                const handleEscape = (e) => {
-                    if (e.key === 'Escape') {
-                        document.removeEventListener('keydown', handleEscape);
-                        cleanup(null);
-                    }
-                };
-                document.addEventListener('keydown', handleEscape);
+                // Shared Escape stack closes only the topmost modal and unregisters on removal.
+                itCreateModalCloseHandler(confirmModal, () => cleanup(null), this);
             });
         }
 
@@ -930,14 +924,8 @@
                     }
                 });
 
-                // Close on Escape key
-                const handleEscape = (e) => {
-                    if (e.key === 'Escape') {
-                        document.removeEventListener('keydown', handleEscape);
-                        cleanup(false);
-                    }
-                };
-                document.addEventListener('keydown', handleEscape);
+                // Shared Escape stack closes only the topmost modal and unregisters on removal.
+                itCreateModalCloseHandler(confirmModal, () => cleanup(false), this);
             });
         }
 
@@ -965,8 +953,7 @@
                 this.appendPageUrlParams(params);
 
                 const separator = this.options.apiUrl.includes('?') ? '&' : '?';
-                const response = await fetch(`${ this.options.apiUrl }${ separator }${ params }`);
-                const json = await response.json();
+                const json = await this.fetchJson(`${ this.options.apiUrl }${ separator }${ params }`);
 
                 let newRow = null;
 

@@ -224,6 +224,18 @@
             return result.path || result.file || result.filename;
         }
 
+        normalizeNumericId(value) {
+            const id = value === null || value === undefined ? '' : String(value).trim();
+            return /^\d+$/.test(id) ? id : '';
+        }
+        sanitizeLinkUrl(value) {
+            if (value === null || value === undefined) return '';
+            const url = String(value).trim();
+            const schemeProbe = url.replace(/[\u0000-\u0020\u007f]+/g, '');
+            if (/^(?:javascript|data|vbscript):/i.test(schemeProbe)) return '';
+            if (/^[a-z][a-z0-9+.-]*:/i.test(schemeProbe) && !/^https?:/i.test(schemeProbe)) return '';
+            return url;
+        }
         escapeHtml(text) {
             if (text === null || text === undefined) return '';
             return String(text).replace(/&/g, '&amp;')
@@ -231,6 +243,203 @@
                               .replace(/>/g, '&gt;')
                               .replace(/"/g, '&quot;')
                               .replace(/'/g, '&#039;');
+        }
+
+        /**
+         * Generate a password with Web Crypto and rejection sampling. Each password
+         * contains upper/lowercase letters, a digit and a symbol.
+         */
+        generateSecurePassword(length = 16) {
+            const passwordLength = Math.max(12, Number.parseInt(length, 10) || 16);
+            const cryptoApi = typeof globalThis !== 'undefined' ? globalThis.crypto : null;
+            if (!cryptoApi || typeof cryptoApi.getRandomValues !== 'function') {
+                throw new Error('Secure random number generator is unavailable');
+            }
+
+            const groups = [
+                'ABCDEFGHJKLMNPQRSTUVWXYZ',
+                'abcdefghijkmnopqrstuvwxyz',
+                '23456789',
+                '-_.!@#'
+            ];
+            const alphabet = groups.join('');
+            const randomIndex = upperBound => {
+                const range = 0x100000000;
+                const unbiasedLimit = range - (range % upperBound);
+                const random = new Uint32Array(1);
+                do {
+                    cryptoApi.getRandomValues(random);
+                } while (random[0] >= unbiasedLimit);
+                return random[0] % upperBound;
+            };
+
+            const chars = groups.map(group => group[randomIndex(group.length)]);
+            while (chars.length < passwordLength) {
+                chars.push(alphabet[randomIndex(alphabet.length)]);
+            }
+            for (let index = chars.length - 1; index > 0; index--) {
+                const swapIndex = randomIndex(index + 1);
+                [chars[index], chars[swapIndex]] = [chars[swapIndex], chars[index]];
+            }
+            return chars.join('');
+        }
+
+        /**
+         * Allow only presentation-oriented CSS declarations in STYLE companion
+         * columns. Attribute delimiters, resource loads and legacy script-capable
+         * CSS constructs are rejected.
+         */
+        sanitizeCellStyle(styleText) {
+            if (styleText === null || styleText === undefined) return '';
+
+            const allowedProperties = new Set([
+                'color', 'background', 'background-color',
+                'font-weight', 'font-style', 'font-size', 'font-family',
+                'text-align', 'text-decoration', 'text-transform',
+                'vertical-align', 'white-space', 'overflow', 'text-overflow',
+                'border', 'border-color', 'border-style', 'border-width', 'border-radius',
+                'padding', 'padding-top', 'padding-right', 'padding-bottom', 'padding-left',
+                'margin', 'margin-top', 'margin-right', 'margin-bottom', 'margin-left',
+                'width', 'min-width', 'max-width', 'height', 'min-height', 'max-height',
+                'opacity'
+            ]);
+            const unsafeValue = /(?:url\s*\(|expression\s*\(|javascript\s*:|data\s*:|@import|[<>"'\\])/i;
+            const safeDeclarations = [];
+
+            for (const declaration of String(styleText).split(';')) {
+                const separator = declaration.indexOf(':');
+                if (separator <= 0) continue;
+
+                const property = declaration.slice(0, separator).trim().toLowerCase();
+                const value = declaration.slice(separator + 1).trim();
+                if (!allowedProperties.has(property) || !value || unsafeValue.test(value)) continue;
+                safeDeclarations.push(property + ': ' + value);
+            }
+
+            return safeDeclarations.join('; ');
+        }
+
+        /**
+         * Sanitize rich HTML cells with a small formatting allow-list.
+         * Unknown elements are converted to text and all event/style attributes
+         * are removed. Links are restricted to ordinary web/mail/relative URLs.
+         */
+        sanitizeCellHtml(html) {
+            if (html === null || html === undefined) return '';
+            if (typeof document === 'undefined' || typeof document.createElement !== 'function') {
+                return this.escapeHtml(html);
+            }
+
+            const template = document.createElement('template');
+            template.innerHTML = String(html);
+            const allowedTags = new Set([
+                'A', 'B', 'BR', 'CODE', 'DIV', 'EM', 'I', 'LI', 'OL', 'P', 'PRE',
+                'SPAN', 'STRONG', 'TABLE', 'TBODY', 'TD', 'TH', 'THEAD', 'TR', 'U', 'UL'
+            ]);
+
+            for (const element of Array.from(template.content.querySelectorAll('*'))) {
+                const tag = element.tagName.toUpperCase();
+                if (!allowedTags.has(tag)) {
+                    const textNode = document.createTextNode(element.textContent || '');
+                    if (element.parentNode) element.parentNode.replaceChild(textNode, element);
+                    continue;
+                }
+
+                const href = tag === 'A' ? String(element.getAttribute('href') || '').trim() : '';
+                const title = String(element.getAttribute('title') || '').trim();
+                const colspan = tag === 'TD' || tag === 'TH' ? element.getAttribute('colspan') : null;
+                const rowspan = tag === 'TD' || tag === 'TH' ? element.getAttribute('rowspan') : null;
+                for (const attribute of Array.from(element.attributes)) {
+                    element.removeAttribute(attribute.name);
+                }
+
+                if (title) element.setAttribute('title', title);
+                if (tag === 'A' && /^(?:https?:\/\/|mailto:|\/|#)/i.test(href)) {
+                    element.setAttribute('href', href);
+                    element.setAttribute('target', '_blank');
+                    element.setAttribute('rel', 'noopener noreferrer');
+                }
+                if (colspan && /^\d{1,2}$/.test(colspan)) element.setAttribute('colspan', colspan);
+                if (rowspan && /^\d{1,2}$/.test(rowspan)) element.setAttribute('rowspan', rowspan);
+            }
+
+            return template.innerHTML;
+        }
+
+        /**
+         * Parse the legacy BUTTON newApi(...) form without eval or Function.
+         * Only scalar literal arguments are accepted.
+         */
+        parseButtonAction(value) {
+            const match = String(value || '').trim().match(/^newApi\s*\(([\s\S]*)\)\s*;?$/);
+            if (!match || match[1].trim().endsWith(',')) return null;
+
+            const source = match[1];
+            const args = [];
+            let index = 0;
+            const skipWhitespace = () => {
+                while (index < source.length && /\s/.test(source[index])) index++;
+            };
+
+            while (index < source.length) {
+                skipWhitespace();
+                if (index >= source.length) break;
+
+                const quote = source[index];
+                if (quote === "'" || quote === '"') {
+                    index++;
+                    let parsed = '';
+                    let closed = false;
+                    while (index < source.length) {
+                        const char = source[index++];
+                        if (char === '\\') {
+                            if (index >= source.length) return null;
+                            const escaped = source[index++];
+                            const escapeMap = { n: '\n', r: '\r', t: '\t' };
+                            parsed += Object.prototype.hasOwnProperty.call(escapeMap, escaped) ? escapeMap[escaped] : escaped;
+                        } else if (char === quote) {
+                            closed = true;
+                            break;
+                        } else {
+                            parsed += char;
+                        }
+                    }
+                    if (!closed) return null;
+                    args.push(parsed);
+                } else {
+                    const start = index;
+                    while (index < source.length && source[index] !== ',') index++;
+                    const token = source.slice(start, index).trim();
+                    if (/^-?(?:\d+|\d*\.\d+)$/.test(token)) args.push(Number(token));
+                    else if (token === 'true') args.push(true);
+                    else if (token === 'false') args.push(false);
+                    else if (token === 'null') args.push(null);
+                    else return null;
+                }
+
+                skipWhitespace();
+                if (index >= source.length) break;
+                if (source[index] !== ',') return null;
+                index++;
+            }
+
+            if (args.length < 2 || args.length > 5) return null;
+            if (typeof args[0] !== 'string' || !/^(?:GET|POST|PUT|PATCH|DELETE)$/i.test(args[0])) return null;
+            if (typeof args[1] !== 'string' || /^\s*(?:javascript|data|vbscript):/i.test(args[1])) return null;
+            return args;
+        }
+
+        runTableButtonAction(event, button) {
+            if (event) {
+                event.preventDefault();
+                event.stopImmediatePropagation();
+            }
+            const args = this.parseButtonAction(button && button.dataset ? button.dataset.buttonAction : '');
+            if (!args || typeof window.newApi !== 'function') {
+                this.showToast('Небезопасное или неподдерживаемое действие кнопки заблокировано', 'error');
+                return;
+            }
+            window.newApi.apply(window, args);
         }
 
         decodeHtmlEntities(text) {
@@ -389,26 +598,43 @@
 
             const toast = document.createElement('div');
             toast.className = `integram-toast integram-toast-${ type }`;
+            toast.setAttribute('role', type === 'error' ? 'alert' : 'status');
+            toast.setAttribute('aria-live', type === 'error' ? 'assertive' : 'polite');
+            toast.setAttribute('aria-atomic', 'true');
+
+            const icon = document.createElement('span');
+            icon.className = 'integram-toast-icon';
+            icon.setAttribute('aria-hidden', 'true');
+            icon.textContent = { success: '✓', error: '!', warning: '!', info: 'i' }[type] || 'i';
+
+            const content = document.createElement('span');
+            content.className = 'integram-toast-content';
             const sanitizedMessage = this.sanitizeInlineMessageHtml(message);
             const hasSafeHtml = /<(a|br)\b/i.test(sanitizedMessage);
             if (hasSafeHtml) {
-                toast.innerHTML = sanitizedMessage;
+                content.innerHTML = sanitizedMessage;
             } else {
-                toast.textContent = message;
+                content.textContent = message;
             }
 
+            const dismissButton = document.createElement('button');
+            dismissButton.type = 'button';
+            dismissButton.className = 'integram-toast-dismiss';
+            dismissButton.setAttribute('aria-label', 'Закрыть уведомление');
+            dismissButton.textContent = '×';
+            toast.append(icon, content, dismissButton);
             document.body.appendChild(toast);
 
-            // Auto-remove after 5 seconds
-            setTimeout(() => {
+            const dismiss = () => {
+                if (!toast.isConnected || toast.classList.contains('fade-out')) return;
                 toast.classList.add('fade-out');
-                setTimeout(() => toast.remove(), 300);
-            }, 5000);
+                setTimeout(() => toast.remove(), 220);
+            };
 
-            // Click to dismiss
-            toast.addEventListener('click', () => {
-                toast.classList.add('fade-out');
-                setTimeout(() => toast.remove(), 300);
+            const autoDismissTimer = setTimeout(dismiss, 5000);
+            dismissButton.addEventListener('click', () => {
+                clearTimeout(autoDismissTimer);
+                dismiss();
             });
         }
 
@@ -428,6 +654,7 @@
         }
 
         showWarningModal(message, objId = null) {
+            objId = this.normalizeNumericId(objId);
             const modalId = `warning-modal-${ Date.now() }`;
             const apiBase = this.getApiBase();
 
@@ -436,7 +663,7 @@
             if (objId) {
                 const editUrl = `${ apiBase }/edit_obj/${ objId }`;
                 linkHtml = `
-                    <a href="${ editUrl }" target="_blank" class="integram-modal-link">
+                    <a href="${ editUrl }" target="_blank" rel="noopener noreferrer" class="integram-modal-link">
                         Открыть найденную запись ↗
                     </a>
                 `;
@@ -476,14 +703,8 @@
                 }
             });
 
-            // Close on Escape key (issue #595)
-            const handleEscape = (e) => {
-                if (e.key === 'Escape') {
-                    overlay.remove();
-                    document.removeEventListener('keydown', handleEscape);
-                }
-            };
-            document.addEventListener('keydown', handleEscape);
+            // Shared Escape stack closes only the topmost modal and unregisters on removal.
+            itCreateModalCloseHandler(overlay, () => overlay.remove(), this);
         }
 
         /**
@@ -530,14 +751,8 @@
                 }
             });
 
-            // Close on Escape key
-            const handleEscape = (e) => {
-                if (e.key === 'Escape') {
-                    overlay.remove();
-                    document.removeEventListener('keydown', handleEscape);
-                }
-            };
-            document.addEventListener('keydown', handleEscape);
+            // Shared Escape stack closes only the topmost modal and unregisters on removal.
+            itCreateModalCloseHandler(overlay, () => overlay.remove(), this);
         }
 
         /**
@@ -630,8 +845,7 @@
             anchorEl.dataset.anyRefResolved = 'pending';
 
             const apiBase = this.getApiBase();
-            fetch(`${ apiBase }/get_record/${ encodeURIComponent(recordId) }`)
-                .then(res => res.json())
+            this.fetchJson(`${ apiBase }/get_record/${ encodeURIComponent(recordId) }`)
                 .then(data => {
                     const objId = data && data.obj;
                     if (!objId) {
@@ -670,8 +884,7 @@
             }
             // Fetch and navigate
             const apiBase = this.getApiBase();
-            fetch(`${ apiBase }/get_record/${ encodeURIComponent(recordId) }`)
-                .then(res => res.json())
+            this.fetchJson(`${ apiBase }/get_record/${ encodeURIComponent(recordId) }`)
                 .then(data => {
                     const objId = data && data.obj;
                     if (!objId) return;

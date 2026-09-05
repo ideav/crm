@@ -336,6 +336,8 @@ if (typeof window !== 'undefined') {
  * openCreateRecordForm(3596, 1, {'t3888': 357, 't3886': 'Отказались'});
  */
 async function openCreateRecordForm(tableTypeId, parentId, fieldValues = {}) {
+    tableTypeId = /^\d+$/.test(String(tableTypeId ?? '').trim()) ? String(tableTypeId).trim() : '';
+    parentId = /^\d+$/.test(String(parentId ?? '').trim()) ? String(parentId).trim() : '';
     if (!tableTypeId) {
         console.error('openCreateRecordForm: tableTypeId is required');
         return;

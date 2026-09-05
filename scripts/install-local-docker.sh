@@ -61,7 +61,7 @@ ENV
 
 mkdir -p docker/certs
 if [[ ! -s docker/certs/local.crt || ! -s docker/certs/local.key ]]; then
-    openssl req -x509 -nodes -newkey rsa:2048 -days 825 \
+    MSYS2_ARG_CONV_EXCL='*' openssl req -x509 -nodes -newkey rsa:2048 -days 825 \
         -subj "/CN=localhost" \
         -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
         -keyout docker/certs/local.key \

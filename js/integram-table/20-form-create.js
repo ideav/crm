@@ -22,12 +22,12 @@
             const cascadeOffset = (modalDepth - 1) * 6;
             modal.style.transform = `translate(calc(-50% + ${cascadeOffset}px), calc(-50% + ${cascadeOffset}px))`;
 
-            const typeName = this.getMetadataName(metadata);
+            const typeName = this.escapeHtml(this.getMetadataName(metadata));
             const title = `Создание: ${ typeName }`;
 
             // Build form for regular fields only (no nested subordinate tables in create mode)
             const reqs = metadata.reqs || [];
-            const regularFields = reqs.filter(req => !req.arr_id);
+            const regularFields = reqs.filter(req => !req.arr_id && this.normalizeNumericId(req.id));
 
             // Determine the type of the main (first column) field
             const mainFieldType = this.normalizeFormat(metadata.type);
@@ -89,7 +89,7 @@
 
             regularFields.forEach(req => {
                 const attrs = this.parseAttrs(req.attrs);
-                const fieldName = attrs.alias || req.val;
+                const fieldName = this.escapeHtml(attrs.alias || req.val || '');
                 const baseFormat = this.normalizeFormat(req.type);
                 const isRequired = attrs.required;
                 const isMulti = attrs.multi;
@@ -100,7 +100,7 @@
                 // Multi-select reference field (issue #1772)
                 if (req.ref_id && isMulti) {
                     formHtml += `
-                        <div class="form-reference-editor form-multi-reference-editor" data-ref-id="${ req.id }" data-required="${ isRequired }" data-ref-type-id="${ req.orig || req.ref_id }" data-ref-base-type="${ req.type }" data-multi="1" data-current-value="">
+                        <div class="form-reference-editor form-multi-reference-editor" data-ref-id="${ req.id }" data-required="${ isRequired }" data-ref-type-id="${ this.normalizeNumericId(req.orig || req.ref_id) }" data-ref-base-type="${ this.escapeHtml(req.type) }" data-multi="1" data-current-value="">
                             <div class="inline-editor-reference form-ref-editor-box inline-editor-multi-reference">
                                 <div class="multi-ref-tags-container form-multi-ref-tags-container">
                                     <span class="multi-ref-tags-placeholder">Загрузка...</span>
@@ -129,7 +129,7 @@
                 // Single-select reference field
                 else if (req.ref_id) {
                     formHtml += `
-                        <div class="form-reference-editor" data-ref-id="${ req.id }" data-required="${ isRequired }" data-ref-type-id="${ req.orig || req.ref_id }" data-ref-base-type="${ req.type }">
+                        <div class="form-reference-editor" data-ref-id="${ req.id }" data-required="${ isRequired }" data-ref-type-id="${ this.normalizeNumericId(req.orig || req.ref_id) }" data-ref-base-type="${ this.escapeHtml(req.type) }">
                             <div class="inline-editor-reference form-ref-editor-box">
                                 <div class="inline-editor-reference-header">
                                     <input type="text"
@@ -236,19 +236,8 @@
             modal.querySelector('.subordinate-cancel-btn').addEventListener('click', closeModal);
             overlay.addEventListener('click', closeModal);
 
-            // Close on Escape key (issue #595)
-            const handleEscape = (e) => {
-                if (e.key === 'Escape') {
-                    // Only close if this modal is the topmost one
-                    const currentDepth = parseInt(modal.dataset.modalDepth) || 0;
-                    const maxDepth = window._integramModalDepth || 0;
-                    if (currentDepth === maxDepth) {
-                        closeModal();
-                        document.removeEventListener('keydown', handleEscape);
-                    }
-                }
-            };
-            document.addEventListener('keydown', handleEscape);
+            // Shared Escape stack closes only the topmost modal and unregisters on removal.
+            itCreateModalCloseHandler(modal, closeModal, this);
 
             // Enter in input/textarea triggers Save (issue #1467)
             const saveBtn = modal.querySelector('#subordinate-save-btn');
@@ -298,21 +287,11 @@
                 const url = `${ apiBase }/_m_new/${ arrId }?JSON&up=${ parentRecordId }`;
 
                 try {
-                    const response = await fetch(url, {
+                    const result = await this.fetchJson(url, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                         body: params.toString()
                     });
-
-                    let result;
-                    const responseText = await response.text();
-
-                    try {
-                        result = JSON.parse(responseText);
-                    } catch (jsonError) {
-                        // Invalid JSON response
-                        throw new Error(`Невалидный JSON ответ: ${responseText}`);
-                    }
 
                     const serverError = this.getServerError(result);
                     if (serverError) {
@@ -361,7 +340,15 @@
             const resetBtns = modal.querySelectorAll('.pwd-reset-btn');
             const resetMailBtns = modal.querySelectorAll('.pwd-reset-mail-btn');
 
-            const generatePassword = () => (Math.random().toString(36) + Math.random().toString(36)).replace(/\./g, '').substr(1, 8);
+            const generatePassword = () => {
+                try {
+                    return this.generateSecurePassword();
+                } catch (error) {
+                    console.error('Secure password generation failed:', error);
+                    this.showCopyNotification('Не удалось безопасно сгенерировать пароль', true, 5000);
+                    return null;
+                }
+            };
 
             const copyToClipboard = (text) => {
                 if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -390,6 +377,7 @@
                     const pwdInput = modal.querySelector(`#field-${ fieldId }`);
                     if (!pwdInput) return;
                     const pwd = generatePassword();
+                    if (!pwd) return;
                     pwdInput.value = pwd;
                     copyToClipboard(pwd);
                     showCopied(fieldId);
@@ -411,6 +399,7 @@
                         return;
                     }
                     const pwd = generatePassword();
+                    if (!pwd) return;
                     pwdInput.value = pwd;
                     const db = window.location.pathname.split('/')[1] || '';
                     // Build login link without prepending username as a separate line (issue #1591)
@@ -701,7 +690,7 @@
 
                 // Issue #853: Handle multi-select reference editors separately
                 if (wrapper.dataset.multi === '1') {
-                    this.initFormMultiReferenceEditor(wrapper, refReqId, recordId, refAttrs);
+                    this.initFormMultiReferenceEditor(wrapper, refReqId, recordId, refAttrs, modalElement);
                     continue;
                 }
 
@@ -842,7 +831,7 @@
                     }
 
                     // Hide dropdown when clicking outside the reference editor wrapper
-                    document.addEventListener('click', (e) => {
+                    itAddModalDocumentListener(modalElement, 'click', (e) => {
                         if (!wrapper.contains(e.target)) {
                             dropdown.style.display = 'none';
                         }
@@ -943,7 +932,7 @@
                         const id = String(rec.i);
                         const text = (rec.r && rec.r[0] != null) ? String(rec.r[0]) : `#${ id }`;
                         const escaped = this.escapeHtml(text);
-                        return `<div class="inline-editor-reference-option" data-id="${ id }" data-text="${ escaped }" tabindex="0">${ escaped }</div>`;
+                        return `<div class="inline-editor-reference-option" data-id="${ this.escapeHtml(id) }" data-text="${ escaped }" tabindex="0">${ escaped }</div>`;
                     }).join('');
                 };
 
@@ -962,7 +951,7 @@
                         }
                         dropdown.innerHTML = entries.map(([tId, tName]) => {
                             const escaped = this.escapeHtml(String(tName));
-                            return `<div class="inline-editor-reference-option form-any-ref-table-option" data-table-id="${ tId }" data-text="${ escaped }" tabindex="0">${ escaped }</div>`;
+                            return `<div class="inline-editor-reference-option form-any-ref-table-option" data-table-id="${ this.escapeHtml(tId) }" data-text="${ escaped }" tabindex="0">${ escaped }</div>`;
                         }).join('');
                         // Table selected: load its records (issue #1807)
                         dropdown.querySelectorAll('.form-any-ref-table-option').forEach(opt => {
@@ -1126,7 +1115,7 @@
                 }
 
                 // Close dropdown when clicking outside
-                document.addEventListener('click', (e) => {
+                itAddModalDocumentListener(container, 'click', (e) => {
                     if (!wrapper.contains(e.target)) {
                         dropdown.style.display = 'none';
                     }
@@ -1139,7 +1128,7 @@
          * Shows selected values as removable tags and a search input to add more.
          * Updates the hidden input with comma-separated selected IDs.
          */
-        async initFormMultiReferenceEditor(wrapper, refReqId, recordId, attrs = '') {
+        async initFormMultiReferenceEditor(wrapper, refReqId, recordId, attrs = '', modalElement = null) {
             const searchInput = wrapper.querySelector('.form-ref-search');
             const dropdown = wrapper.querySelector('.form-ref-dropdown');
             const hiddenInput = wrapper.querySelector('.form-multi-ref-value');
@@ -1221,7 +1210,7 @@
                     } else {
                         dropdown.innerHTML = filtered.map(([id, text]) => {
                             const et = this.escapeHtml(this.decodeHtmlEntities(text));
-                            return `<div class="inline-editor-reference-option" data-id="${id}" data-text="${et}" tabindex="0">${et}</div>`;
+                            return `<div class="inline-editor-reference-option" data-id="${this.escapeHtml(id)}" data-text="${et}" tabindex="0">${et}</div>`;
                         }).join('');
                     }
                 };
@@ -1356,7 +1345,7 @@
                 });
 
                 // Hide dropdown when clicking outside
-                document.addEventListener('click', (e) => {
+                itAddModalDocumentListener(modalElement || wrapper, 'click', (e) => {
                     if (!wrapper.contains(e.target)) {
                         dropdown.style.display = 'none';
                     }
@@ -1604,12 +1593,12 @@
 
             modal._overlayElement = overlay;
 
-            const typeName = this.getMetadataName(metadata);
+            const typeName = this.escapeHtml(this.getMetadataName(metadata));
             const title = `Создание: ${typeName}`;
             const decodedInitialValue = this.decodeHtmlEntities(initialValue);
 
             const reqs = metadata.reqs || [];
-            const regularFields = reqs.filter(req => !req.arr_id);
+            const regularFields = reqs.filter(req => !req.arr_id && this.normalizeNumericId(req.id));
 
             // Get current date/datetime for default values
             const now = new Date();
@@ -1658,7 +1647,7 @@
 
             regularFields.forEach(req => {
                 const attrs = this.parseAttrs(req.attrs);
-                const fieldName = attrs.alias || req.val;
+                const fieldName = this.escapeHtml(attrs.alias || req.val || '');
                 const isRequired = attrs.required;
 
                 attributesHtml += `<div class="form-group">`;
@@ -1668,7 +1657,7 @@
                 if (req.ref_id) {
                     // Render as reference dropdown (same as in edit form)
                     attributesHtml += `
-                        <div class="form-reference-editor" data-ref-id="${req.id}" data-required="${isRequired}" data-ref-type-id="${req.orig || req.ref_id}" data-ref-base-type="${req.type}">
+                        <div class="form-reference-editor" data-ref-id="${req.id}" data-required="${isRequired}" data-ref-type-id="${this.normalizeNumericId(req.orig || req.ref_id)}" data-ref-base-type="${this.escapeHtml(req.type)}">
                             <div class="inline-editor-reference form-ref-editor-box">
                                 <div class="inline-editor-reference-header">
                                     <input type="text"
@@ -1754,19 +1743,8 @@
 
             overlay.addEventListener('click', closeModal);
 
-            // Close on Escape key (issue #595)
-            const handleEscape = (e) => {
-                if (e.key === 'Escape') {
-                    // Only close if this modal is the topmost one
-                    const currentDepth = parseInt(modal.dataset.modalDepth) || 0;
-                    const maxDepth = window._integramModalDepth || 0;
-                    if (currentDepth === maxDepth) {
-                        closeModal();
-                        document.removeEventListener('keydown', handleEscape);
-                    }
-                }
-            };
-            document.addEventListener('keydown', handleEscape);
+            // Shared Escape stack closes only the topmost modal and unregisters on removal.
+            itCreateModalCloseHandler(modal, closeModal, this);
 
             // Enter in input/textarea triggers Save (issue #1422)
             modal.addEventListener('keydown', (e) => {

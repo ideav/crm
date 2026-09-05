@@ -68,6 +68,9 @@
                 }
             }
 
+            if (refValueId && !isArrayField) {
+                refValueId = this.normalizeNumericId(refValueId) || null;
+            }
             // Check if this column has a style column
             if (this.styleColumns[column.id]) {
                 const styleColId = this.styleColumns[column.id];
@@ -75,7 +78,10 @@
                 if (styleColIndex !== -1 && this.data[rowIndex]) {
                     const styleValue = this.data[rowIndex][styleColIndex];
                     if (styleValue) {
-                        customStyle = ` style="${ styleValue }"`;
+                        const safeStyle = this.sanitizeCellStyle(styleValue);
+                        if (safeStyle) {
+                            customStyle = ` style="${ this.escapeHtml(safeStyle) }"`;
+                        }
                     }
                 }
             }
@@ -86,26 +92,27 @@
             }
 
             // Handle table requisites (subordinate tables) - display as link with table icon
-            if (column.arr_id) {
+            const subordinateTypeId = this.normalizeNumericId(column.arr_id);
+            if (subordinateTypeId) {
                 cellClass = 'subordinate-link-cell';
-                const count = value !== null && value !== undefined && value !== '' ? value : 0;
+                const count = this.escapeHtml(value !== null && value !== undefined && value !== '' ? value : 0);
                 const instanceName = this.options.instanceName;
                 // Get the record ID from rawObjectData for this row
                 let recordId = null;
                 if (this.rawObjectData && this.rawObjectData[rowIndex]) {
-                    recordId = this.rawObjectData[rowIndex].i;
+                    recordId = this.normalizeNumericId(this.rawObjectData[rowIndex].i);
                 }
                 if (recordId) {
                     // Build URL for "Open in new window" link (issue #729, #733)
                     const pathParts = window.location.pathname.split('/');
                     const dbName = pathParts.length >= 2 ? pathParts[1] : '';
-                    const subordinateTableUrl = `/${dbName}/table/${column.arr_id}?F_U=${recordId}`;
+                    const subordinateTableUrl = `/${dbName}/table/${subordinateTypeId}?F_U=${recordId}`;
                     // Issue #733: Split into two links - table icon opens new window, count opens modal
-                    displayValue = `<a href="${subordinateTableUrl}" class="subordinate-table-icon-link" target="${column.arr_id}" title="Открыть в новом окне" onclick="event.stopPropagation();"><i class="pi pi-table"></i></a><a href="#" class="subordinate-count-link" onclick="window.${ instanceName }.openSubordinateTableFromCell(event, ${ column.arr_id }, ${ recordId }); return false;" title="Посмотреть подчиненную таблицу">(${ count })</a>`;
+                    displayValue = `<a href="${subordinateTableUrl}" class="subordinate-table-icon-link" target="${subordinateTypeId}" rel="noopener noreferrer" title="Открыть в новом окне" onclick="event.stopPropagation();"><i class="pi pi-table"></i></a><a href="#" class="subordinate-count-link" onclick="window.${ instanceName }.openSubordinateTableFromCell(event, ${ subordinateTypeId }, ${ recordId }); return false;" title="Посмотреть подчиненную таблицу">(${ count })</a>`;
                 } else {
                     displayValue = `<span class="table-icon"><i class="pi pi-table"></i></span><span class="subordinate-count">(${ count })</span>`;
                 }
-                return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }" data-arr-id="${ column.arr_id }"${ dataTypeAttrs }${ customStyle }>${ displayValue }</td>`;
+                return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }" data-arr-id="${ subordinateTypeId }"${ dataTypeAttrs }${ customStyle }>${ displayValue }</td>`;
             }
 
             switch (format) {
@@ -157,51 +164,63 @@
                     if (value && value !== '') {
                         // Check if value is already an HTML anchor tag (from object/ endpoint)
                         if (typeof value === 'string' && value.trim().startsWith('<a')) {
-                            // Value is already HTML link - add file-link class and render as-is
-                            displayValue = value.replace('<a', '<a class="file-link"');
+                            // Preserve the server-provided link semantics after allow-list sanitization.
+                            const safeFileLink = this.sanitizeCellHtml(value);
+                            displayValue = safeFileLink.replace(/^<a\b/i, '<a class="file-link"');
                             return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }"${ dataTypeAttrs }${ customStyle }>${ displayValue }</td>`;
                         }
                         // Display as a download link if value is a path
                         const apiBase = this.getApiBase();
                         const fileName = value.split('/').pop() || value;
-                        displayValue = `<a href="${ apiBase }/file/${ value }" target="_blank" class="file-link" title="Скачать файл">${ this.escapeHtml(fileName) }</a>`;
+                        const encodedPath = String(value).split('/').map(segment => encodeURIComponent(segment)).join('/');
+                        const safeHref = this.escapeHtml(apiBase + '/file/' + encodedPath);
+                        displayValue = `<a href="${ safeHref }" target="_blank" rel="noopener noreferrer" class="file-link" title="Скачать файл">${ this.escapeHtml(fileName) }</a>`;
                         return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }"${ dataTypeAttrs }${ customStyle }>${ displayValue }</td>`;
                     }
                     break;
                 case 'HTML':
-                    return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }"${ dataTypeAttrs }${ customStyle }>${ displayValue }</td>`;
+                    return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }"${ dataTypeAttrs }${ customStyle }>${ this.sanitizeCellHtml(displayValue) }</td>`;
                 case 'BUTTON': {
                     const pathParts = window.location.pathname.split('/');
                     const dbName = pathParts.length >= 2 ? pathParts[1] : '';
-                    let recordId = null;
-                    if (this.rawObjectData && this.rawObjectData[rowIndex]) {
-                        recordId = this.rawObjectData[rowIndex].i;
-                    }
-                    const btnValue = value !== null && value !== undefined ? String(value) : '';
-                    let btnHref, btnTarget, btnOnclick;
-                    if (btnValue.match(/^https?:\/\//i)) {
-                        btnHref = btnValue;
-                        btnTarget = recordId !== null ? String(recordId) : '_blank';
-                    } else if (btnValue.match(/^\w[\w.]*\s*\([\s\S]*\)\s*;?\s*$/)) {
-                        // Value is a JS function call (e.g. newApi('POST','...','','reloadAllIntegramTables'))
-                        btnOnclick = btnValue.replace(/;?\s*$/, '') + '; event.stopPropagation();';
+                    const btnValue = value !== null && value !== undefined ? String(value).trim() : '';
+                    const parsedAction = this.parseButtonAction(btnValue);
+                    let buttonHtml = '';
+
+                    if (parsedAction) {
+                        const actionAttr = this.escapeHtml(btnValue);
+                        buttonHtml = `<button type="button" class="btn btn-sm btn-primary integram-action-button" data-button-action="${ actionAttr }" title="Выполнить действие"><i class="pi pi-play"></i></button>`;
                     } else if (btnValue) {
-                        btnHref = `/${dbName}/${btnValue.replace(/^\//, '')}`;
-                        btnTarget = '_blank';
+                        const candidate = /^https?:\/\//i.test(btnValue)
+                            ? btnValue
+                            : '/' + encodeURIComponent(dbName) + '/' + btnValue.replace(/^\/+/, '');
+                        try {
+                            const url = new URL(candidate, window.location.origin);
+                            if (url.protocol === 'http:' || url.protocol === 'https:') {
+                                const href = url.origin === window.location.origin
+                                    ? url.pathname + url.search + url.hash
+                                    : url.href;
+                                const safeHref = this.escapeHtml(href);
+                                buttonHtml = `<a href="${ safeHref }" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-primary" title="Открыть"><i class="pi pi-play"></i></a>`;
+                            }
+                        } catch (error) {
+                            console.warn('[integram-table] Invalid BUTTON URL blocked', error);
+                        }
                     }
-                    if (btnOnclick) {
-                        displayValue = `<button class="btn btn-sm btn-primary" onclick="${ btnOnclick.replace(/"/g, '&quot;') }"><i class="pi pi-play"></i></button>`;
-                    } else if (btnHref) {
-                        displayValue = `<a href="${ btnHref }" target="${ btnTarget }" onclick="event.stopPropagation();"><button class="btn btn-sm btn-primary"><i class="pi pi-play"></i></button></a>`;
-                    } else {
-                        displayValue = `<button class="btn btn-sm btn-primary"><i class="pi pi-play"></i></button>`;
+
+                    if (!buttonHtml) {
+                        buttonHtml = '<button type="button" class="btn btn-sm btn-primary" disabled title="Небезопасное действие заблокировано"><i class="pi pi-play"></i></button>';
                     }
-                    return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }"${ dataTypeAttrs }${ customStyle } style="text-align: center;">${ displayValue }</td>`;
+                    return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }"${ dataTypeAttrs }${ customStyle } style="text-align: center;">${ buttonHtml }</td>`;
                 }
             }
 
             let escapedValue;
             let fullValueForEditing;
+            // Issue #4385: record/reference ID for the cell, mirrored onto the
+            // parent <td> title so it stays readable even when the .edit-icon
+            // (or a link) fully covers the inner .cell-content-wrapper.
+            let cellTitleId = '';
 
             // BOOLEAN cells use HTML icons, so skip HTML escaping for them
             if (format === 'BOOLEAN') {
@@ -228,14 +247,8 @@
                     // then linkify both the truncated display portion and the full value for the modal.
                     if (this.settings.truncateLongValues && escapedValue.length > 127) {
                         const truncatedEscaped = escapedValue.substring(0, 127);
-                        const fullLinkified = this.linkifyText(escapedValue);
-                        const fullValueEscaped = fullLinkified
-                            .replace(/\\/g, '\\\\')
-                            .replace(/\n/g, '\\n')
-                            .replace(/\r/g, '\\r')
-                            .replace(/'/g, '\\\'');
-                        const instanceName = this.options.instanceName;
-                        escapedValue = `${ this.linkifyText(truncatedEscaped) }<a href="#" class="show-full-value" onclick="window.${ instanceName }.showFullValue(event, '${ fullValueEscaped }'); return false;">...</a>`;
+                        const fullValueAttr = this.escapeHtml(String(displayValue));
+                        escapedValue = `${ this.linkifyText(truncatedEscaped) }<a href="#" class="show-full-value" data-full-value="${ fullValueAttr }">...</a>`;
                     } else {
                         escapedValue = this.linkifyText(escapedValue);
                     }
@@ -245,14 +258,8 @@
             // Truncate long values if setting is enabled (for non-linkified formats)
             if (this.settings.truncateLongValues && escapedValue.length > 127 && format !== 'SHORT' && format !== 'CHARS' && format !== 'MEMO') {
                 const truncated = escapedValue.substring(0, 127);
-                // Properly escape all JavaScript special characters for use in onclick string literal
-                const fullValueEscaped = escapedValue
-                    .replace(/\\/g, '\\\\')   // Escape backslashes first
-                    .replace(/\n/g, '\\n')    // Escape newlines
-                    .replace(/\r/g, '\\r')    // Escape carriage returns
-                    .replace(/'/g, '\\\'');   // Escape single quotes
-                const instanceName = this.options.instanceName;
-                escapedValue = `${ truncated }<a href="#" class="show-full-value" onclick="window.${ instanceName }.showFullValue(event, '${ fullValueEscaped }'); return false;">...</a>`;
+                const fullValueAttr = this.escapeHtml(String(displayValue));
+                escapedValue = `${ truncated }<a href="#" class="show-full-value" data-full-value="${ fullValueAttr }">...</a>`;
             }
 
             // Track typeId computed in the edit icon block for use in editableAttrs
@@ -328,6 +335,8 @@
                     typeId = fallbackTypeId;
                 }
 
+                recordId = this.normalizeNumericId(recordId);
+                typeId = this.normalizeNumericId(typeId);
                 const instanceName = this.options.instanceName;
                 // Only show edit icon if recordId exists (disable creating new records)
                 // In object format: show edit icon ONLY for first column or reference fields
@@ -400,7 +409,7 @@
                     // Issue #1794: For "any record" link type, also wrap in lazy-resolved hyperlink
                     let displayContent = escapedValue;
                     if (isRefField && refValueId && !isArrayField) {
-                        const refTypeId = column.orig || column.ref_id || typeId;
+                        const refTypeId = this.normalizeNumericId(column.orig || column.ref_id || typeId);
                         if (refTypeId) {
                             const pathParts = window.location.pathname.split('/');
                             const dbName = pathParts.length >= 2 ? pathParts[1] : '';
@@ -414,20 +423,22 @@
                     const editIconOnclick = isAnyRecordLink
                         ? `window.${ instanceName }.openAnyRefEditForm('${ recordId }', ${ rowIndex }); event.stopPropagation();`
                         : `window.${ instanceName }.openEditForm('${ recordId }', '${ typeId }', ${ rowIndex }); event.stopPropagation();`;
-                    const editIcon = `<span class="edit-icon" onclick="${ editIconOnclick }" title="Редактировать"><i class="pi pi-pencil" style="font-size: 0.875rem;"></i></span>`;
+                    const editIcon = `<button type="button" class="edit-icon" onclick="${ editIconOnclick }" title="Редактировать" aria-label="Редактировать значение"><i class="pi pi-pencil" style="font-size: 0.875rem;"></i></button>`;
                     escapedValue = `<div class="cell-content-wrapper"><span title="${ recordId }">${ displayContent }</span>${ editIcon }</div>`;
+                    cellTitleId = recordId; // Issue #4385: expose ID on the parent <td>
                 }
             }
 
             // Issue #1404: For reference fields without edit icon, still wrap value in a hyperlink
             // inside a cell-content-wrapper when the referenced record ID is available
             if (isRefField && refValueId && !isArrayField && !escapedValue.includes('cell-content-wrapper')) {
-                const refTypeId = column.orig || column.ref_id;
+                const refTypeId = this.normalizeNumericId(column.orig || column.ref_id);
                 if (refTypeId) {
                     const pathParts = window.location.pathname.split('/');
                     const dbName = pathParts.length >= 2 ? pathParts[1] : '';
                     const refUrl = `/${ dbName }/table/${ refTypeId }?F_I=${ refValueId }`;
                     escapedValue = `<div class="cell-content-wrapper"><span title="${ refValueId }"><a href="${ refUrl }" class="ref-value-link" onclick="event.stopPropagation();">${ escapedValue }</a></span></div>`;
+                    cellTitleId = refValueId; // Issue #4385: expose ID on the parent <td>
                 }
             }
 
@@ -436,6 +447,7 @@
             if (isAnyRecordLink && refValueId && !escapedValue.includes('cell-content-wrapper')) {
                 const instanceName = this.options.instanceName;
                 escapedValue = `<div class="cell-content-wrapper"><span title="${ refValueId }"><a href="#" class="any-record-link" data-record-id="${ refValueId }" onmouseover="window.${ instanceName }.resolveAnyRecordLink(this, '${ refValueId }');" onclick="window.${ instanceName }.navigateAnyRecordLink(event, this, '${ refValueId }'); return false;">${ escapedValue }</a></span></div>`;
+                cellTitleId = refValueId; // Issue #4385: expose ID on the parent <td>
             }
 
             // Add inline editing data attributes for editable cells (only when not already showing edit icon)
@@ -494,6 +506,10 @@
                     }
                 }
 
+                if (recordId !== 'new') {
+                    recordId = this.normalizeNumericId(recordId);
+                }
+
                 // For reference fields, we allow editing even with empty values as long as we can determine parent record
                 // For non-reference fields, we still require a valid recordId
                 // In object format, check for ref_id existence; in report format, check ref === 1
@@ -509,11 +525,11 @@
                     // Add ref attribute if this is a reference field
                     const refAttr = isRefField ? ` data-col-ref="1"` : '';
                     // Store parsed reference value ID from "id:Value" format
-                    const refValueIdAttr = refValueId ? ` data-ref-value-id="${ refValueId }"` : '';
+                    const refValueIdAttr = refValueId ? ` data-ref-value-id="${ this.escapeHtml(refValueId) }"` : '';
                     // Store full value for editing (escape for HTML attribute)
-                    const fullValueAttr = fullValueForEditing ? ` data-full-value="${ fullValueForEditing.replace(/"/g, '&quot;') }"` : '';
+                    const fullValueAttr = fullValueForEditing ? ` data-full-value="${ this.escapeHtml(fullValueForEditing) }"` : '';
                     // Issue #863: For multi-select fields, store raw "ids:values" string so editor can resolve IDs directly
-                    const rawValueAttr = multiRawValue ? ` data-raw-value="${ multiRawValue.replace(/"/g, '&quot;') }"` : '';
+                    const rawValueAttr = multiRawValue ? ` data-raw-value="${ this.escapeHtml(multiRawValue) }"` : '';
                     // Use 'dynamic' as placeholder for recordId if it's empty (will be determined at edit time)
                     const recordIdAttr = recordId && recordId !== '' && recordId !== '0' ? recordId : 'dynamic';
                     // Use paramId for object format (metadata ID), otherwise fall back to type (data type)
@@ -521,7 +537,7 @@
                     // Issue #915: Store typeId for edit icon so updateCellDisplay can add it
                     // when an empty cell gets its first value filled in
                     const editTypeIdAttr = editIconTypeId ? ` data-edit-type-id="${ editIconTypeId }"` : '';
-                    editableAttrs = ` data-editable="true" data-record-id="${ recordIdAttr }" data-col-id="${ column.id }" data-col-type="${ colTypeForParam }" data-col-format="${ format }" data-row-index="${ rowIndex }"${ refAttr }${ refValueIdAttr }${ fullValueAttr }${ rawValueAttr }${ editTypeIdAttr }`;
+                    editableAttrs = ` data-editable="true" data-record-id="${ this.escapeHtml(recordIdAttr) }" data-col-id="${ this.escapeHtml(column.id) }" data-col-type="${ this.escapeHtml(colTypeForParam) }" data-col-format="${ format }" data-row-index="${ rowIndex }"${ refAttr }${ refValueIdAttr }${ fullValueAttr }${ rawValueAttr }${ editTypeIdAttr }`;
                     cellClass += ' inline-editable';
                     if (window.INTEGRAM_DEBUG) {
                         console.log(`  ✓ Cell will be editable with recordId=${recordIdAttr}`);
@@ -539,7 +555,10 @@
                 rowNumberHtml = this.renderSubordinateRowNumber(rowIndex, withEditIcon);
             }
 
-            return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }"${ dataTypeAttrs }${ customStyle }${ editableAttrs }>${ escapedValue }${ rowNumberHtml }</td>`;
+            // Issue #4385: mirror the record/reference ID onto the parent <td> title so the
+            // ID stays discoverable even when the .edit-icon covers the inner wrapper entirely.
+            const cellTitleAttr = cellTitleId ? ` title="${ this.escapeHtml(cellTitleId) }"` : '';
+            return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }"${ dataTypeAttrs }${ customStyle }${ editableAttrs }${ cellTitleAttr }>${ escapedValue }${ rowNumberHtml }</td>`;
         }
 
         /**
@@ -566,13 +585,13 @@
 
             this.groupedData.forEach((rowInfo, rowIndex) => {
                 const row = rowInfo.data;
-                const selectedClass = this.selectedRows.has(rowInfo.originalIndex) ? 'row-selected' : '';
+                const selectedClass = this.isRowSelected(rowInfo.originalIndex) ? 'row-selected' : '';
 
                 rowsHtml += `<tr class="${ selectedClass }">`;
 
                 // Add checkbox column if enabled
                 if (this.checkboxMode) {
-                    rowsHtml += `<td class="checkbox-column-cell"><input type="checkbox" class="row-select-checkbox" data-row-index="${ rowInfo.originalIndex }" ${ this.selectedRows.has(rowInfo.originalIndex) ? 'checked' : '' }></td>`;
+                    rowsHtml += `<td class="checkbox-column-cell"><input type="checkbox" class="row-select-checkbox" data-row-index="${ rowInfo.originalIndex }" ${ this.isRowSelected(rowInfo.originalIndex) ? 'checked' : '' }></td>`;
                 }
 
                 // Render group cells (with rowspan if this row starts a new group)
@@ -595,7 +614,7 @@
                             : '';
 
                         // Render the group cell with special styling
-                        rowsHtml += `<td class="group-cell"${ rowspan } data-group-column="${ groupCell.colId }">`;
+                        rowsHtml += `<td class="group-cell"${ rowspan } data-group-column="${ this.escapeHtml(groupCell.colId) }">`;
                         rowsHtml += `<span class="group-cell-content">${ this.escapeHtml(String(cellValue || '')) }</span>`;
                         rowsHtml += addButtonHtml;
                         rowsHtml += `</td>`;
@@ -762,8 +781,9 @@
                         const rowspan = totalDepth - depth;
                         const width = this.columnWidths[col.id];
                         const widthStyle = width ? ` style="width: ${ width }px; min-width: ${ width }px;"` : '';
-                        const addButtonHtml = this.shouldShowAddButton(col) ?
-                            `<button class="column-add-btn" onclick="window.${ instanceName }.openColumnCreateForm('${ col.id }')" title="Создать запись"><i class="pi pi-plus"></i></button>` : '';
+                        const actionColumnId = this.normalizeNumericId(col.id);
+                        const addButtonHtml = this.shouldShowAddButton(col) && actionColumnId ?
+                            `<button class="column-add-btn" onclick="window.${ instanceName }.openColumnCreateForm('${ actionColumnId }')" title="Создать запись"><i class="pi pi-plus"></i></button>` : '';
                         let sortIndicator = '';
                         if (this.sortColumn === col.id) {
                             sortIndicator = this.sortDirection === 'asc'
@@ -777,24 +797,25 @@
                         const groupingClass = isGroupingCol ? ' group-header' : '';
                         const groupingOrder = isGroupingCol ? this.groupingColumns.indexOf(col.id) + 1 : '';
                         const groupingBadge = isGroupingCol ? `<span class="grouping-header-badge">${ groupingOrder }</span>` : '';
-                        const refTypeId = col.ref_id;
+                        const refTypeId = this.normalizeNumericId(col.ref_id);
                         const refIconHtml = refTypeId ? (() => {
                             const dbName = window.db || window.location.pathname.split('/')[1];
-                            return `<a class="column-ref-link" href="/${dbName}/table/${refTypeId}" target="_blank" title="Открыть справочник в новой вкладке" onclick="event.stopPropagation()"><i class="pi pi-external-link"></i></a>`;
+                            return `<a class="column-ref-link" href="/${dbName}/table/${refTypeId}" target="_blank" rel="noopener noreferrer" title="Открыть справочник в новой вкладке" onclick="event.stopPropagation()"><i class="pi pi-external-link"></i></a>`;
                         })() : '';
                         rows[depth].push(`
-                            <th data-column-id="${ col.id }" draggable="true"${ widthStyle }${ rowspan > 1 ? ` rowspan="${ rowspan }"` : '' } class="${ groupingClass }">
-                                <span class="column-header-content" data-column-id="${ col.id }" title="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ groupingBadge }${ sortIndicator }${ displayName }</span>
+                            <th data-column-id="${ this.escapeHtml(col.id) }" title="${ this.escapeHtml(col.id) }"${ widthStyle }${ rowspan > 1 ? ` rowspan="${ rowspan }"` : '' } class="${ groupingClass }">
+                                <button type="button" class="column-drag-handle" draggable="true" data-column-id="${ this.escapeHtml(col.id) }" title="Перетащите для изменения порядка" aria-label="Переместить столбец ${ this.escapeHtml(displayName) }. Используйте стрелки влево и вправо"><i class="pi pi-bars" aria-hidden="true"></i></button>
+                                <button type="button" class="column-header-content" data-column-id="${ this.escapeHtml(col.id) }" title="${ this.escapeHtml(col.id) }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }" aria-label="Сортировать по столбцу ${ this.escapeHtml(displayName) }">${ groupingBadge }${ sortIndicator }${ this.escapeHtml(displayName) }</button>
                                 ${ refIconHtml }
                                 ${ addButtonHtml }
-                                <div class="column-resize-handle" data-column-id="${ col.id }"></div>
+                                <div class="column-resize-handle" data-column-id="${ this.escapeHtml(col.id) }"></div>
                             </th>
                         `);
                     } else {
                         // Display prefix with dots replaced by spaces (issue #1565)
                         const displayPrefix = node.prefix.replace(/\./g, ' ');
                         rows[depth].push(`
-                            <th class="smart-header-group" colspan="${ node.span }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ displayPrefix }</th>
+                            <th class="smart-header-group" colspan="${ node.span }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ this.escapeHtml(displayPrefix) }</th>
                         `);
                         visit(node.children, depth + 1);
                     }
@@ -826,8 +847,9 @@
             return allCols.map(col => {
                 const width = this.columnWidths[col.id];
                 const widthStyle = width ? ` style="width: ${ width }px; min-width: ${ width }px;"` : '';
-                const addButtonHtml = this.shouldShowAddButton(col) ?
-                    `<button class="column-add-btn" onclick="window.${ instanceName }.openColumnCreateForm('${ col.id }')" title="Создать запись"><i class="pi pi-plus"></i></button>` : '';
+                const actionColumnId = this.normalizeNumericId(col.id);
+                const addButtonHtml = this.shouldShowAddButton(col) && actionColumnId ?
+                    `<button class="column-add-btn" onclick="window.${ instanceName }.openColumnCreateForm('${ actionColumnId }')" title="Создать запись"><i class="pi pi-plus"></i></button>` : '';
 
                 // Add sort indicator if this column is sorted
                 let sortIndicator = '';
@@ -841,18 +863,19 @@
                 const groupingOrder = isGroupingCol ? this.groupingColumns.indexOf(col.id) + 1 : '';
                 const groupingBadge = isGroupingCol ? `<span class="grouping-header-badge">${ groupingOrder }</span>` : '';
 
-                const refTypeId = col.ref_id;
+                const refTypeId = this.normalizeNumericId(col.ref_id);
                 const refIconHtml = refTypeId ? (() => {
                     const dbName = window.db || window.location.pathname.split('/')[1];
-                    return `<a class="column-ref-link" href="/${dbName}/table/${refTypeId}" target="_blank" title="Открыть справочник в новой вкладке" onclick="event.stopPropagation()"><i class="pi pi-external-link"></i></a>`;
+                    return `<a class="column-ref-link" href="/${dbName}/table/${refTypeId}" target="_blank" rel="noopener noreferrer" title="Открыть справочник в новой вкладке" onclick="event.stopPropagation()"><i class="pi pi-external-link"></i></a>`;
                 })() : '';
 
                 return `
-                    <th data-column-id="${ col.id }" draggable="true"${ widthStyle } class="${ groupingClass }">
-                        <span class="column-header-content" data-column-id="${ col.id }" title="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ groupingBadge }${ sortIndicator }${ col.name }</span>
+                    <th data-column-id="${ this.escapeHtml(col.id) }" title="${ this.escapeHtml(col.id) }"${ widthStyle } class="${ groupingClass }">
+                        <button type="button" class="column-drag-handle" draggable="true" data-column-id="${ this.escapeHtml(col.id) }" title="Перетащите для изменения порядка" aria-label="Переместить столбец ${ this.escapeHtml(col.name) }. Используйте стрелки влево и вправо"><i class="pi pi-bars" aria-hidden="true"></i></button>
+                        <button type="button" class="column-header-content" data-column-id="${ this.escapeHtml(col.id) }" title="${ this.escapeHtml(col.id) }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }" aria-label="Сортировать по столбцу ${ this.escapeHtml(col.name) }">${ groupingBadge }${ sortIndicator }${ this.escapeHtml(col.name) }</button>
                         ${ refIconHtml }
                         ${ addButtonHtml }
-                        <div class="column-resize-handle" data-column-id="${ col.id }"></div>
+                        <div class="column-resize-handle" data-column-id="${ this.escapeHtml(col.id) }"></div>
                     </th>
                 `;
             }).join('');
@@ -893,9 +916,9 @@
                 return `<span class="total-count-loading" title="Подсчёт..."><i class="pi pi-spin pi-spinner"></i></span>`;
             }
             if (this.totalRows === null) {
-                return `<span class="total-count-unknown" onclick="window.${ instanceName }.fetchTotalCount()" title="Нажмите, чтобы узнать общее количество">?</span>`;
+                return `<button type="button" class="total-count-unknown" onclick="window.${ instanceName }.fetchTotalCount()" title="Узнать общее количество" aria-label="Узнать общее количество записей">?</button>`;
             }
-            return `<span class="total-count-known" onclick="window.${ instanceName }.fetchTotalCount()" title="Нажмите, чтобы пересчитать общее количество">${ this.totalRows }</span>`;
+            return `<button type="button" class="total-count-known" onclick="window.${ instanceName }.fetchTotalCount()" title="Пересчитать общее количество" aria-label="Пересчитать общее количество записей: ${ this.totalRows }">${ this.totalRows }</button>`;
         }
 
         /**
@@ -988,6 +1011,7 @@
                 window._integramModalDepth = Math.max(0, (window._integramModalDepth || 1) - 1);
             };
 
+            itCreateModalCloseHandler(modal, closeModal, this);
             modal.querySelector('.edit-form-close').addEventListener('click', closeModal);
             modal.querySelector('#paste-data-cancel-btn').addEventListener('click', closeModal);
             overlay.addEventListener('click', closeModal);
@@ -1084,11 +1108,11 @@
             previewModal._overlayElement = previewOverlay;
 
             // Build table HTML with editable cells
-            const theadCols = colHeaders.map(h => `<th>${h}</th>`).join('');
+            const theadCols = colHeaders.map(h => `<th>${ this.escapeHtml(String(h)) }</th>`).join('');
             const tbodyRows = parsedRows.map((row, rowIdx) => {
                 const cells = orderedColIds.map((colId, colIdx) => {
                     const val = row[colIdx] !== undefined ? row[colIdx] : '';
-                    return `<td><input class="paste-preview-cell" data-row="${rowIdx}" data-col="${colIdx}" value="${val.replace(/"/g, '&quot;')}"></td>`;
+                    return `<td><input class="paste-preview-cell" data-row="${rowIdx}" data-col="${colIdx}" value="${ this.escapeHtml(String(val)) }"></td>`;
                 });
                 return `<tr>${cells.join('')}</tr>`;
             }).join('');
@@ -1124,6 +1148,7 @@
                 window._integramModalDepth = Math.max(0, (window._integramModalDepth || 1) - 1);
             };
 
+            itCreateModalCloseHandler(previewModal, closePreview, this);
             previewModal.querySelector('.edit-form-close').addEventListener('click', closePreview);
             previewModal.querySelector('#paste-preview-cancel-btn').addEventListener('click', closePreview);
             previewOverlay.addEventListener('click', closePreview);

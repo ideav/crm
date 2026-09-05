@@ -92,7 +92,7 @@
                     const isSelected = selSet.has(String(id));
                     const escapedText = String(this.formatReferenceOptionLabel(text, refColumn)).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
                     return `
-                        <label class="filter-ref-option" data-id="${id}">
+                        <label class="filter-ref-option" data-id="${this.escapeHtml(id)}">
                             <input type="checkbox" value="${id}" ${isSelected ? 'checked' : ''}>
                             <span class="filter-ref-option-text">${escapedText}</span>
                         </label>
@@ -229,8 +229,14 @@
             });
 
             // Close dropdown when clicking outside
-            setTimeout(() => {
-                document.addEventListener('click', this.handleRefFilterDropdownOutsideClick);
+            if (this._refFilterOutsideClickTimer !== null && this._refFilterOutsideClickTimer !== undefined) {
+                clearTimeout(this._refFilterOutsideClickTimer);
+            }
+            this._refFilterOutsideClickTimer = setTimeout(() => {
+                this._refFilterOutsideClickTimer = null;
+                if (!this._destroyed && this.currentRefFilterDropdown) {
+                    document.addEventListener('click', this.handleRefFilterDropdownOutsideClick);
+                }
             }, 0);
         }
 
@@ -301,11 +307,15 @@
          * Close the reference filter dropdown (issue #797).
          */
         closeRefFilterDropdown() {
+            if (this._refFilterOutsideClickTimer !== null && this._refFilterOutsideClickTimer !== undefined) {
+                clearTimeout(this._refFilterOutsideClickTimer);
+                this._refFilterOutsideClickTimer = null;
+            }
             if (this.currentRefFilterDropdown) {
                 this.currentRefFilterDropdown.element.remove();
                 this.currentRefFilterDropdown = null;
-                document.removeEventListener('click', this.handleRefFilterDropdownOutsideClick);
             }
+            document.removeEventListener('click', this.handleRefFilterDropdownOutsideClick);
         }
 
         /**

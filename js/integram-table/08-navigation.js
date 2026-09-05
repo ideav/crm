@@ -86,8 +86,10 @@
             if (!targetCell) return;
 
             // Small delay to ensure DOM is updated after save
-            setTimeout(() => {
-                this.startInlineEdit(targetCell);
+            if (this._navigateTimer !== null && this._navigateTimer !== undefined) clearTimeout(this._navigateTimer);
+            this._navigateTimer = setTimeout(() => {
+                this._navigateTimer = null;
+                if (!this._destroyed) this.startInlineEdit(targetCell);
             }, 50);
         }
 

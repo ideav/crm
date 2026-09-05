@@ -118,7 +118,13 @@ function makeTable(server, options = {}) {
     t.render = () => {};                       // рендер проверяем отдельно, через columns/data
     t.checkAndLoadMore = () => {};             // без DOM нечего домеривать
     t.saveColumnState = () => {};              // без cookie
-    t.fetchJson = async () => server.rows(t.rowCount);
+    t.fetchJson = async (url, init) => {
+        if (String(url).includes('/_d_ord/')) {
+            const response = await sandbox.fetch(url, init);
+            return response.json();
+        }
+        return server.rows(t.rowCount);
+    };
     // fetchMetadata/refetchTableMetadata и saveColumnOrderToServer ходят через глобальный fetch
     sandbox.fetch = async (url, init) => {
         const href = String(url);

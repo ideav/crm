@@ -703,8 +703,11 @@ $GLOBALS["GLOBAL_VARS"]["version"] = VERSION;
 $GLOBALS["GLOBAL_VARS"]["newapi"] = [];
 
 # ################# FUNCTIONS #################
+function isCaptchaRequired() {
+    return SMARTCAPTCHA_SERVER_KEY !== 'ysc2_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX';
+}
 function verifyCaptcha($token) {
-    if (SMARTCAPTCHA_SERVER_KEY === 'ysc2_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX') return true;
+    if (!isCaptchaRequired()) return true;
     if (empty($token)) return false;
     $url = 'https://smartcaptcha.yandexcloud.net/validate';
     $params = http_build_query([
@@ -10912,6 +10915,18 @@ Exec_sql("SET SESSION sort_buffer_size = 33554432", "Sort_buffer_size");
 
 switch($a)  # Check actions, which don't require authentication
 {
+	case "captcha-config":
+		if($_SERVER["REQUEST_METHOD"] !== "GET"){
+			header("HTTP/1.0 405 Method Not Allowed");
+			api_dump(json_encode(["error" => "Method not allowed"], JSON_UNESCAPED_UNICODE));
+		}
+		$captchaRequired = isCaptchaRequired();
+		api_dump(json_encode([
+			"required" => $captchaRequired,
+			"siteKey" => $captchaRequired ? SMARTCAPTCHA_CLIENT_KEY : ""
+		], JSON_UNESCAPED_UNICODE));
+		break;
+
 	case "jwt":
         $params = verifyJWT($_POST["jwt"], JWT_PUBLIC_KEY);
         if($params){
@@ -10937,7 +10952,7 @@ switch($a)  # Check actions, which don't require authentication
 			$GLOBALS["tzone"] = round(((int)$_POST["tzone"] - time() - date("Z"))/1800)*1800; # Round the time zone shift to 30 min
 			setcookie("tzone", $GLOBALS["tzone"], time() + COOKIES_EXPIRE, "/"); # 30 days
 		}
-		if(isset($_POST["smart-token"]) && !hasValidTokenCookie() && !verifyCaptcha($_POST["smart-token"])){
+		if(!hasValidTokenCookie() && !verifyCaptcha(isset($_POST["smart-token"]) ? $_POST["smart-token"] : "")){
 			$captchaMsg = t9n("[RU]Проверка капчи не пройдена. Пожалуйста, попробуйте снова.[EN]Captcha verification failed. Please try again.");
 			if(isApi()){
 				header("HTTP/1.0 403 Forbidden");

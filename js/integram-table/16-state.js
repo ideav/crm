@@ -349,6 +349,8 @@
         }
 
         async fetchMetadata(typeId) {
+            typeId = this.normalizeNumericId(typeId);
+            if (!typeId) throw new Error('Некорректный идентификатор типа');
             // Use globalMetadata if available - it already contains metadata for all tables (issue #779)
             if (this.globalMetadata) {
                 const cachedItem = this.globalMetadata.find(item => item.id === typeId || item.id === Number(typeId));
@@ -504,6 +506,10 @@
         }
 
         async fetchReferenceOptions(requisiteId, recordId = 0, searchQuery = '', extraParams = {}, attrs = '') {
+            requisiteId = this.normalizeNumericId(requisiteId);
+            if (!requisiteId) return [];
+            const normalizedRecordId = this.normalizeNumericId(recordId);
+            recordId = normalizedRecordId && normalizedRecordId !== '0' ? normalizedRecordId : 0;
             const apiBase = this.getApiBase();
             // Determine whether to include id parameter: only when attrs contains a query (square bracket expression)
             const hasQuery = /\[.+\]/.test(attrs || '');

@@ -27,25 +27,30 @@ const moduleSource = fs.readFileSync(
     path.join(__dirname, '..', 'js', 'integram-table', '23-bulk-export.js'),
     'utf8'
 );
+const coreSource = fs.readFileSync(
+    path.join(__dirname, '..', 'js', 'integram-table', '01-core.js'),
+    'utf8'
+);
 
-function extractMethod(name) {
+function extractMethod(name, source = moduleSource) {
     const re = new RegExp(`(?:^|\\n)        (async\\s+)?${name}\\s*\\([^)]*\\)\\s*\\{`);
-    const match = moduleSource.match(re);
+    const match = source.match(re);
     if (!match) throw new Error(`Could not find method ${name} in module source`);
     const start = match.index + match[0].length - 1;
     let depth = 0;
-    for (let i = start; i < moduleSource.length; i++) {
-        const ch = moduleSource[i];
+    for (let i = start; i < source.length; i++) {
+        const ch = source[i];
         if (ch === '{') depth++;
         else if (ch === '}') {
             depth--;
-            if (depth === 0) return moduleSource.slice(match.index + 1, i + 1);
+            if (depth === 0) return source.slice(match.index + 1, i + 1);
         }
     }
     throw new Error(`Could not find matching closing brace for ${name}`);
 }
 
 const methodSources = [
+    extractMethod('fetchJson', coreSource),
     extractMethod('bulkDeleteByFilter'),
     extractMethod('fetchFilterMatchCount'),
     extractMethod('appendCurrentFilters'),

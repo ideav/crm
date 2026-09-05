@@ -28,41 +28,44 @@
             // Store reference to overlay on modal for proper cleanup
             modal._overlayElement = overlay;
 
-            const typeName = this.getMetadataName(metadata);
+            const rawTypeName = this.getMetadataName(metadata);
+            const typeName = this.escapeHtml(rawTypeName);
             const firstColumnValue = !isCreate && recordData && recordData.obj ? recordData.obj.val : null;
             // #3774: если главное значение таблицы — DATETIME, API отдаёт его unix-штампом —
             // в заголовке показываем дату-время (как в .integram-title-link, #3247), а не штамп.
             // Сырое firstColumnValue не меняем: оно идёт в dataset (имя для пароль-приглашения
             // #1481) и сравнения; форматируем только видимый текст заголовка/вкладки браузера.
             const firstColumnDisplay = firstColumnValue != null ? this.formatRecordTitleValue(firstColumnValue) : null;
-            const title = isCreate ? `Создание: ${ typeName }` : `Редактирование: ${ firstColumnDisplay || typeName }`;
+            const title = isCreate ? `Создание: ${ typeName }` : `Редактирование: ${ this.escapeHtml(firstColumnDisplay || rawTypeName) }`;
+            const safeTypeId = this.normalizeNumericId(typeId);
             const instanceName = this.options.instanceName;
 
             // Save and update navbar-workspace + document.title with object value
             const navbarWorkspace = document.querySelector('.navbar-workspace');
             const prevWorkspaceText = navbarWorkspace ? navbarWorkspace.textContent : null;
             const prevDocTitle = document.title;
-            const objectValue = firstColumnDisplay || typeName;
+            const objectValue = firstColumnDisplay || rawTypeName;
             const truncatedValue = objectValue && objectValue.length > 32 ? objectValue.slice(0, 32) + '...' : objectValue;
             if (navbarWorkspace) navbarWorkspace.textContent = truncatedValue;
             document.title = truncatedValue;
-            const recordId = recordData && recordData.obj ? recordData.obj.id : null;
+            const recordId = this.normalizeNumericId(recordData && recordData.obj ? recordData.obj.id : null);
             // Issue #616: For create mode, use F_U from URL as parent when F_U > 1
-            const defaultParentId = (this.options.parentId && parseInt(this.options.parentId) > 1) ? this.options.parentId : 1;
-            const parentId = recordData && recordData.obj && recordData.obj.parent ? recordData.obj.parent : defaultParentId;
+            const configuredParentId = this.normalizeNumericId(this.options.parentId);
+            const defaultParentId = configuredParentId && Number(configuredParentId) > 1 ? configuredParentId : '1';
+            const parentId = this.normalizeNumericId(recordData && recordData.obj && recordData.obj.parent ? recordData.obj.parent : defaultParentId) || defaultParentId;
 
             // Build record ID and table link HTML for edit mode (issue #563)
             let recordIdHtml = '';
-            if (!isCreate && recordId) {
+            if (!isCreate && recordId && safeTypeId) {
                 // Extract database name from URL path
                 const pathParts = window.location.pathname.split('/');
                 const dbName = pathParts.length >= 2 ? pathParts[1] : '';
                 // Build table URL with filters: /{dbName}/table/{typeId}?F_U={parentId}&F_I={recordId}
-                const tableUrl = `/${dbName}/table/${typeId}?F_U=${parentId || 1}&F_I=${recordId}`;
+                const tableUrl = `/${dbName}/table/${safeTypeId}?F_U=${parentId}&F_I=${recordId}`;
 
                 recordIdHtml = `
-                    <span class="edit-form-record-id" onclick="window.${instanceName}.copyRecordIdToClipboard('${recordId}')" title="Скопировать ID">#${recordId}</span>
-                    <a href="${tableUrl}" class="edit-form-table-link" title="Открыть в таблице" target="_blank">
+                    <button type="button" class="edit-form-record-id" onclick="window.${instanceName}.copyRecordIdToClipboard('${recordId}')" title="Скопировать ID" aria-label="Скопировать ID ${recordId}">#${recordId}</button>
+                    <a href="${tableUrl}" class="edit-form-table-link" title="Открыть в таблице" target="_blank" rel="noopener noreferrer">
                         <i class="pi pi-table"></i>
                     </a>
                 `;
@@ -79,8 +82,8 @@
                 return orderA - orderB;
             });
 
-            const regularFields = sortedReqs.filter(req => !req.arr_id);
-            const subordinateTables = sortedReqs.filter(req => req.arr_id);
+            const regularFields = sortedReqs.filter(req => !req.arr_id && this.normalizeNumericId(req.id));
+            const subordinateTables = sortedReqs.filter(req => this.normalizeNumericId(req.arr_id) && this.normalizeNumericId(req.id));
 
             // Build tabs HTML
             let tabsHtml = '';
@@ -92,9 +95,11 @@
 
                 subordinateTables.forEach(req => {
                     const attrs = this.parseAttrs(req.attrs);
-                    const fieldName = attrs.alias || req.val;
-                    const arrCount = recordReqs[req.id] ? recordReqs[req.id].arr || 0 : 0;
-                    tabsHtml += `<div class="edit-form-tab" data-tab="sub-${ req.id }" data-arr-id="${ req.arr_id }" data-req-id="${ req.id }">${ fieldName } (${ arrCount })</div>`;
+                    const fieldName = this.escapeHtml(attrs.alias || req.val || '');
+                    const arrCount = this.escapeHtml(recordReqs[req.id] ? recordReqs[req.id].arr || 0 : 0);
+                    const reqId = this.normalizeNumericId(req.id);
+                    const arrId = this.normalizeNumericId(req.arr_id);
+                    tabsHtml += `<div class="edit-form-tab" data-tab="sub-${ reqId }" data-arr-id="${ arrId }" data-req-id="${ reqId }">${ fieldName } (${ arrCount })</div>`;
                 });
 
                 tabsHtml += `</div>`;
@@ -136,7 +141,7 @@
             if (hasSubordinateTables) {
                 subordinateTables.forEach(req => {
                     formHtml += `
-                        <div class="edit-form-tab-content" data-tab-content="sub-${ req.id }">
+                        <div class="edit-form-tab-content" data-tab-content="sub-${ this.normalizeNumericId(req.id) }">
                             <div class="subordinate-table-loading">Загрузка...</div>
                         </div>
                     `;
@@ -197,7 +202,7 @@
             }
 
             // Load reference options for dropdowns (scoped to this modal)
-            this.loadReferenceOptions(metadata.reqs, recordId || 0, modal);
+            this.loadReferenceOptions(regularFields, recordId || 0, modal);
 
             // Load GRANT and REPORT_COLUMN dropdown options (issue #577)
             this.loadGrantAndReportColumnOptions(modal);
@@ -284,19 +289,8 @@
 
             overlay.addEventListener('click', closeModal);
 
-            // Close on Escape key (issue #595)
-            const handleEscape = (e) => {
-                if (e.key === 'Escape') {
-                    // Only close if this modal is the topmost one
-                    const currentDepth = parseInt(modal.dataset.modalDepth) || 0;
-                    const maxDepth = window._integramModalDepth || 0;
-                    if (currentDepth === maxDepth) {
-                        closeModal();
-                        document.removeEventListener('keydown', handleEscape);
-                    }
-                }
-            };
-            document.addEventListener('keydown', handleEscape);
+            // Shared Escape stack closes only the topmost modal and unregisters on removal.
+            itCreateModalCloseHandler(modal, closeModal, this);
 
             // Enter in input/textarea triggers Save (issue #1422)
             if (saveBtn) {
@@ -341,7 +335,7 @@
             const mainFieldReadOnly = formIsReadOnly;
 
             // Main value field - render according to base type
-            const typeName = this.getMetadataName(metadata);
+            const typeName = this.escapeHtml(this.getMetadataName(metadata));
             const mainValue = recordData && recordData.obj ? recordData.obj.val : '';
             // For GRANT/REPORT_COLUMN fields, use term from API response for dropdown pre-selection (issue #583)
             // Issue #3572: для подчинённой таблицы значение «Объекты» может прийти меткой
@@ -451,7 +445,7 @@
 
             sortedFields.forEach(req => {
                 const attrs = this.parseAttrs(req.attrs);
-                const fieldName = attrs.alias || req.val;
+                const fieldName = this.escapeHtml(attrs.alias || req.val || '');
                 const storedValue = recordReqs[req.id] ? recordReqs[req.id].value : '';
                 const baseTypeId = recordReqs[req.id] ? recordReqs[req.id].base : req.type;
                 const baseFormat = this.normalizeFormat(baseTypeId);
@@ -517,7 +511,7 @@
                 else if (req.ref_id && isMulti) {
                     const currentValue = reqValue || '';
                     html += `
-                        <div class="form-reference-editor form-multi-reference-editor" data-ref-id="${ req.id }" data-required="${ isRequired }" data-ref-type-id="${ req.orig || req.ref_id }" data-ref-base-type="${ req.type }" data-multi="1" data-current-value="${ this.escapeHtml(currentValue) }">
+                        <div class="form-reference-editor form-multi-reference-editor" data-ref-id="${ req.id }" data-required="${ isRequired }" data-ref-type-id="${ this.normalizeNumericId(req.orig || req.ref_id) }" data-ref-base-type="${ this.escapeHtml(req.type) }" data-multi="1" data-current-value="${ this.escapeHtml(currentValue) }">
                             <div class="inline-editor-reference form-ref-editor-box inline-editor-multi-reference">
                                 <div class="multi-ref-tags-container form-multi-ref-tags-container">
                                     <span class="multi-ref-tags-placeholder">Загрузка...</span>
@@ -547,7 +541,7 @@
                 else if (req.ref_id) {
                     const currentValue = reqValue || '';
                     html += `
-                        <div class="form-reference-editor" data-ref-id="${ req.id }" data-required="${ isRequired }" data-ref-type-id="${ req.orig || req.ref_id }" data-ref-base-type="${ req.type }">
+                        <div class="form-reference-editor" data-ref-id="${ req.id }" data-required="${ isRequired }" data-ref-type-id="${ this.normalizeNumericId(req.orig || req.ref_id) }" data-ref-base-type="${ this.escapeHtml(req.type) }">
                             <div class="inline-editor-reference form-ref-editor-box">
                                 <div class="inline-editor-reference-header">
                                     <input type="text"
@@ -606,7 +600,7 @@
                     let hasFile = false;
 
                     if (reqValue && reqValue !== '') {
-                        // Check if value contains HTML link: <a target="_blank" href="/path/to/file">filename.ext</a>
+                        // Check if value contains HTML link: <a target="_blank" rel="noopener noreferrer" href="/path/to/file">filename.ext</a>
                         const linkMatch = reqValue.match(/<a[^>]*href=["']([^"']+)["'][^>]*>([^<]+)<\/a>/i);
                         if (linkMatch) {
                             fileHref = linkMatch[1];
@@ -620,6 +614,7 @@
                         }
                     }
 
+                    const safeFileHref = this.sanitizeLinkUrl(fileHref);
                     html += `
                         <div class="form-file-upload" data-req-id="${ req.id }" data-original-value="${ this.escapeHtml(reqValue) }">
                             <input type="file" class="file-input" id="field-${ req.id }-file" style="display: none;">
@@ -628,7 +623,7 @@
                                 <button type="button" class="file-select-btn">Выбрать файл</button>
                             </div>
                             <div class="file-preview" style="${ hasFile ? 'display: flex;' : 'display: none;' }">
-                                ${ fileHref ? `<a href="${ this.escapeHtml(fileHref) }" target="_blank" class="file-name file-link">${ this.escapeHtml(fileName) }</a>` : `<span class="file-name">${ this.escapeHtml(fileName) }</span>` }
+                                ${ safeFileHref ? `<a href="${ this.escapeHtml(safeFileHref) }" target="_blank" rel="noopener noreferrer" class="file-name file-link">${ this.escapeHtml(fileName) }</a>` : `<span class="file-name">${ this.escapeHtml(fileName) }</span>` }
                                 <button type="button" class="file-remove-btn" title="Удалить файл"><i class="pi pi-times"></i></button>
                             </div>
                             <input type="hidden" id="field-${ req.id }" name="t${ req.id }" value="${ this.escapeHtml(reqValue) }" ${ isRequired ? 'required' : '' } data-file-deleted="false">
@@ -695,10 +690,10 @@
 
                     // Load subordinate table if needed
                     // Use modal.dataset.recordId to support nested modals (issue #741)
-                    const parentRecordId = modal.dataset.recordId;
+                    const parentRecordId = this.normalizeNumericId(modal.dataset.recordId);
                     if (tabId.startsWith('sub-') && tab.dataset.arrId && parentRecordId) {
-                        const arrId = tab.dataset.arrId;
-                        const reqId = tab.dataset.reqId;
+                        const arrId = this.normalizeNumericId(tab.dataset.arrId);
+                        const reqId = this.normalizeNumericId(tab.dataset.reqId);
 
                         // Check if already loaded
                         if (!targetContent.dataset.loaded) {
@@ -725,6 +720,12 @@
         }
 
         async loadSubordinateTable(container, arrId, parentRecordId, reqId) {
+            arrId = this.normalizeNumericId(arrId);
+            parentRecordId = this.normalizeNumericId(parentRecordId);
+            if (!arrId || !parentRecordId) {
+                container.innerHTML = '<div class="subordinate-table-error">Некорректный идентификатор таблицы</div>';
+                return;
+            }
             const hasContent = !!container.querySelector('.subordinate-table');
             if (hasContent) {
                 // Keep existing content visible but dimmed, show spinner overlay (issue #2580)
@@ -749,8 +750,7 @@
                 const pageSize = this.options.pageSize || 20;
                 const apiBase = this.getApiBase();
                 const dataUrl = `${ apiBase }/object/${ arrId }/?JSON_OBJ&F_U=${ parentRecordId }&LIMIT=0,${ pageSize + 1 }`;
-                const dataResponse = await fetch(dataUrl);
-                const data = await dataResponse.json();
+                const data = await this.fetchJson(dataUrl);
 
                 // Determine if there are more records (issue #1640)
                 const rows = Array.isArray(data) ? data : [];
@@ -772,7 +772,7 @@
 
             } catch (error) {
                 console.error('Error loading subordinate table:', error);
-                container.innerHTML = `<div class="subordinate-table-error">Ошибка загрузки: ${ error.message }</div>`;
+                container.innerHTML = `<div class="subordinate-table-error">Ошибка загрузки: ${ this.escapeHtml(error.message) }</div>`;
             }
         }
 
@@ -861,8 +861,7 @@
                 const apiBase = this.getApiBase();
                 const dataUrl = `${ apiBase }/object/${ arrId }/?JSON_OBJ&F_U=${ parentRecordId }&LIMIT=${ offset },${ pageSize + 1 }`;
 
-                const dataResponse = await fetch(dataUrl);
-                const data = await dataResponse.json();
+                const data = await this.fetchJson(dataUrl);
                 const newRows = Array.isArray(data) ? data : [];
                 const hasMore = newRows.length > pageSize;
                 const pageRows = hasMore ? newRows.slice(0, pageSize) : newRows;
@@ -886,7 +885,7 @@
 
                     pageRows.forEach((row, rowOffset) => {
                         const rowIndex = startRowIndex + rowOffset;
-                        const rowId = row.i;
+                        const rowId = this.normalizeNumericId(row.i);
                         const values = row.r || [];
                         const tr = document.createElement('tr');
                         tr.dataset.rowId = rowId;
@@ -907,7 +906,7 @@
                             displayMainValue = this.highlightSearchTerm(displayMainValue, searchTerm);
                         }
                         const mainTd = document.createElement('td');
-                        mainTd.className = 'subordinate-cell-clickable';
+                        mainTd.className = rowId ? 'subordinate-cell-clickable' : '';
                         mainTd.dataset.rowId = rowId;
                         mainTd.dataset.typeId = arrId;
                         mainTd.innerHTML = displayMainValue;
@@ -921,10 +920,11 @@
                             const cellValue = values[idx + 1] !== undefined ? values[idx + 1] : '';
                             const td = document.createElement('td');
                             if (req.arr_id) {
-                                const count = typeof cellValue === 'number' ? cellValue : (cellValue || 0);
-                                const nestedTableUrl = `/${dbName}/table/${req.arr_id}?F_U=${rowId}`;
+                                const count = this.escapeHtml(typeof cellValue === 'number' ? cellValue : (cellValue || 0));
+                                const nestedTypeId = this.normalizeNumericId(req.arr_id);
+                                const nestedTableUrl = nestedTypeId && rowId ? `/${dbName}/table/${nestedTypeId}?F_U=${rowId}` : '';
                                 td.className = 'subordinate-nested-count';
-                                td.innerHTML = `<a href="${nestedTableUrl}" class="subordinate-table-icon-link" target="${req.arr_id}" title="Открыть в новом окне" onclick="event.stopPropagation();"><i class="pi pi-table"></i></a><a href="#" class="subordinate-count-link" onclick="window.${instanceName}.openSubordinateTableFromCell(event, ${req.arr_id}, ${rowId}); return false;" title="Посмотреть подчиненную таблицу">(${count})</a>`;
+                                td.innerHTML = nestedTableUrl ? `<a href="${nestedTableUrl}" class="subordinate-table-icon-link" target="${nestedTypeId}" rel="noopener noreferrer" title="Открыть в новом окне" onclick="event.stopPropagation();"><i class="pi pi-table"></i></a><a href="#" class="subordinate-count-link" onclick="window.${instanceName}.openSubordinateTableFromCell(event, ${nestedTypeId}, ${rowId}); return false;" title="Посмотреть подчиненную таблицу">(${count})</a>` : `<span class="subordinate-count">(${count})</span>`;
                             } else {
                                 let displayValue = this.formatSubordinateCellValue(cellValue, req);
                                 if (searchTerm) {
@@ -972,8 +972,15 @@
          * @param {number} parentRecordId - Parent record ID
          */
         async openSubordinateTableFromCell(event, arrId, parentRecordId) {
+            arrId = this.normalizeNumericId(arrId);
+            parentRecordId = this.normalizeNumericId(parentRecordId);
             event.preventDefault();
             event.stopPropagation();
+
+            if (!arrId || !parentRecordId) {
+                this.showToast('Некорректный идентификатор таблицы', 'error');
+                return;
+            }
 
             // Remember the clicked cell so we can update its count on close (issue #1839)
             const clickedCountCell = event.target.closest('td');
@@ -1025,7 +1032,7 @@
                 modal.style.zIndex = baseZIndex + 1;
                 modal.dataset.modalDepth = modalDepth;
 
-                const typeName = this.getMetadataName(metadata);
+                const typeName = this.escapeHtml(this.getMetadataName(metadata));
                 const headerTitle = parentRecordValue ? `${ this.escapeHtml(parentRecordValue) } / ${ typeName }` : typeName;
 
                 modal.innerHTML = `
@@ -1089,19 +1096,8 @@
                 modal.querySelector('.subordinate-modal-close').addEventListener('click', closeModal);
                 overlay.addEventListener('click', closeModal);
 
-                // Close on Escape key (issue #595)
-                const handleEscape = (e) => {
-                    if (e.key === 'Escape') {
-                        // Only close if this modal is the topmost one
-                        const currentDepth = parseInt(modal.dataset.modalDepth) || 0;
-                        const maxDepth = window._integramModalDepth || 0;
-                        if (currentDepth === maxDepth) {
-                            closeModal();
-                            document.removeEventListener('keydown', handleEscape);
-                        }
-                    }
-                };
-                document.addEventListener('keydown', handleEscape);
+                // Shared Escape stack closes only the topmost modal and unregisters on removal.
+                itCreateModalCloseHandler(modal, closeModal, this);
 
             } catch (error) {
                 console.error('Error opening subordinate table:', error);
@@ -1110,6 +1106,12 @@
         }
 
         renderSubordinateTable(container, metadata, data, arrId, parentRecordId, sortState = null, searchTerm = '') {
+            arrId = this.normalizeNumericId(arrId);
+            parentRecordId = this.normalizeNumericId(parentRecordId);
+            if (!arrId || !parentRecordId) {
+                container.innerHTML = '<div class="subordinate-table-error">Некорректный идентификатор таблицы</div>';
+                return;
+            }
             const instanceName = this.options.instanceName;
             let rows = Array.isArray(data) ? [...data] : [];
             const reqs = metadata.reqs || [];
@@ -1172,7 +1174,7 @@
                         <a href="#" class="subordinate-paste-buffer-btn" title="Вставить из буфера" onclick="event.preventDefault(); event.stopPropagation();">
                             <i class="pi pi-clipboard"></i>
                         </a>
-                        <a href="${subordinateTableUrl}" class="subordinate-table-link" title="Открыть в таблице" target="_blank">
+                        <a href="${subordinateTableUrl}" class="subordinate-table-link" title="Открыть в таблице" target="_blank" rel="noopener noreferrer">
                             <i class="pi pi-table"></i>
                         </a>
                     </div>
@@ -1196,14 +1198,14 @@
                     const sortPriority = sortInfo ? sortState.indexOf(sortInfo) + 1 : '';
                     const priorityBadge = sortState.length > 1 && sortPriority ? `<span class="subordinate-sort-priority">${ sortPriority }</span>` : '';
 
-                    html += `<th class="subordinate-sortable-header" data-col-index="${ colIdx }">${ col.name }${ sortIndicator }${ priorityBadge }</th>`;
+                    html += `<th class="subordinate-sortable-header" data-col-index="${ colIdx }">${ this.escapeHtml(col.name) }${ sortIndicator }${ priorityBadge }</th>`;
                 });
 
                 html += `</tr></thead><tbody>`;
 
                 // Data rows
                 rows.forEach((row, rowIndex) => {
-                    const rowId = row.i;
+                    const rowId = this.normalizeNumericId(row.i);
                     const values = row.r || [];
 
                     html += `<tr data-row-id="${ rowId }" draggable="false">`;
@@ -1218,17 +1220,18 @@
                     if (searchTerm) {
                         displayMainValue = this.highlightSearchTerm(displayMainValue, searchTerm);
                     }
-                    html += `<td class="subordinate-cell-clickable" data-row-id="${ rowId }" data-type-id="${ arrId }">${ displayMainValue }</td>`;
+                    html += `<td${ rowId ? ' class="subordinate-cell-clickable"' : '' } data-row-id="${ rowId }" data-type-id="${ arrId }">${ displayMainValue }</td>`;
 
                     // Other columns
                     reqs.forEach((req, idx) => {
                         const cellValue = values[idx + 1] !== undefined ? values[idx + 1] : '';
 
                         if (req.arr_id) {
-                            const count = typeof cellValue === 'number' ? cellValue : (cellValue || 0);
+                            const count = this.escapeHtml(typeof cellValue === 'number' ? cellValue : (cellValue || 0));
+                            const nestedTypeId = this.normalizeNumericId(req.arr_id);
                             // Issue #737: Use the same icon styling as .subordinate-link-cell in main table
-                            const nestedTableUrl = `/${dbName}/table/${req.arr_id}?F_U=${rowId}`;
-                            html += `<td class="subordinate-nested-count"><a href="${nestedTableUrl}" class="subordinate-table-icon-link" target="${req.arr_id}" title="Открыть в новом окне" onclick="event.stopPropagation();"><i class="pi pi-table"></i></a><a href="#" class="subordinate-count-link" onclick="window.${instanceName}.openSubordinateTableFromCell(event, ${req.arr_id}, ${rowId}); return false;" title="Посмотреть подчиненную таблицу">(${count})</a></td>`;
+                            const nestedTableUrl = nestedTypeId && rowId ? `/${dbName}/table/${nestedTypeId}?F_U=${rowId}` : '';
+                            html += `<td class="subordinate-nested-count">${ nestedTableUrl ? `<a href="${nestedTableUrl}" class="subordinate-table-icon-link" target="${nestedTypeId}" rel="noopener noreferrer" title="Открыть в новом окне" onclick="event.stopPropagation();"><i class="pi pi-table"></i></a><a href="#" class="subordinate-count-link" onclick="window.${instanceName}.openSubordinateTableFromCell(event, ${nestedTypeId}, ${rowId}); return false;" title="Посмотреть подчиненную таблицу">(${count})</a>` : `<span class="subordinate-count">(${count})</span>` }</td>`;
                         } else {
                             let displayValue = this.formatSubordinateCellValue(cellValue, req);
                             if (searchTerm) {
@@ -1498,6 +1501,8 @@
                 window._integramModalDepth = Math.max(0, (window._integramModalDepth || 1) - 1);
             };
 
+            itCreateModalCloseHandler(modal, closeModal, this);
+
             // Close handlers
             modal.querySelector('.edit-form-close').addEventListener('click', closeModal);
             modal.querySelector('.paste-data-cancel-btn').addEventListener('click', closeModal);
@@ -1620,8 +1625,7 @@
             const dataUrl = `${apiBase}/object/${arrId}/?JSON_OBJ&F_U=${parentRecordId}&LIMIT=0,${pageSize + 1}`;
 
             try {
-                const dataResponse = await fetch(dataUrl);
-                const data = await dataResponse.json();
+                const data = await this.fetchJson(dataUrl);
                 const rows = Array.isArray(data) ? data : [];
                 const hasMore = rows.length > pageSize;
                 const firstPageRows = hasMore ? rows.slice(0, pageSize) : rows;
@@ -1808,19 +1812,11 @@
             }
 
             try {
-                const response = await fetch(`${apiBase}/_m_ord/${movedRecordId}?JSON`, {
+                const result = await this.fetchJson(`${apiBase}/_m_ord/${movedRecordId}?JSON`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                     body: params.toString()
                 });
-
-                const responseText = await response.text();
-                let result;
-                try {
-                    result = JSON.parse(responseText);
-                } catch (jsonError) {
-                    throw new Error(`Невалидный JSON ответ: ${responseText}`);
-                }
 
                 const serverError = this.getServerError(result);
                 if (serverError) {
@@ -1996,8 +1992,8 @@
                     case 'FILE':
                         // Check if value is already an HTML anchor tag (from object/ endpoint)
                         if (typeof value === 'string' && value.trim().startsWith('<a')) {
-                            // Value is already HTML link - add file-link class and return as-is
-                            return value.replace('<a', '<a class="file-link"');
+                            // Preserve the link after allow-list sanitization.
+                            return this.sanitizeCellHtml(value).replace(/^<a\b/i, '<a class="file-link"');
                         }
                         break;
                 }

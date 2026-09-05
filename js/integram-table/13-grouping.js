@@ -21,13 +21,13 @@
                         const isSelected = this.groupingColumns.includes(col.id);
                         const order = isSelected ? this.groupingColumns.indexOf(col.id) + 1 : '';
                         return `
-                            <div class="column-settings-item grouping-column-item" data-column-id="${ col.id }">
+                            <div class="column-settings-item grouping-column-item" data-column-id="${ this.escapeHtml(col.id) }">
                                 <label>
                                     <input type="checkbox"
-                                           data-column-id="${ col.id }"
+                                           data-column-id="${ this.escapeHtml(col.id) }"
                                            ${ isSelected ? 'checked' : '' }>
                                     <span class="grouping-order-badge" style="${ isSelected ? '' : 'display: none;' }">${ order }</span>
-                                    ${ col.name }
+                                    ${ this.escapeHtml(col.name) }
                                 </label>
                             </div>
                         `;
@@ -83,7 +83,7 @@
                 this.groupingColumns = [...selectedOrder];
                 this.groupingEnabled = this.groupingColumns.length > 0;
 
-                // If grouping is enabled, reload data with LIMIT=1000
+                // If grouping is enabled, reload all matching data in bounded pages
                 if (this.groupingEnabled) {
                     this.data = [];
                     this.loadedRecords = 0;
@@ -108,14 +108,8 @@
             modal.querySelector('#close-grouping-btn').addEventListener('click', closeModal);
             overlay.addEventListener('click', closeModal);
 
-            // Close on Escape key (issue #595)
-            const handleEscape = (e) => {
-                if (e.key === 'Escape') {
-                    closeModal();
-                    document.removeEventListener('keydown', handleEscape);
-                }
-            };
-            document.addEventListener('keydown', handleEscape);
+            // Shared Escape stack closes only the topmost modal and unregisters on removal.
+            itCreateModalCloseHandler(modal, closeModal, this);
         }
 
         /**
@@ -235,11 +229,18 @@
                 return String(displayA).toLowerCase().localeCompare(String(displayB).toLowerCase(), 'ru');
             };
 
-            // Sort data by grouping columns (using display values for reference fields)
-            const sortedData = [...this.data].sort((a, b) => {
+            // Sort row data together with raw record metadata. Keeping both arrays
+            // aligned is essential for editing, selection and bulk actions after the
+            // grouped view changes row order.
+            const hasAlignedRawData = Array.isArray(this.rawObjectData) &&
+                this.rawObjectData.length === this.data.length;
+            const sortedEntries = this.data.map((row, index) => ({
+                row,
+                raw: hasAlignedRawData ? this.rawObjectData[index] : null
+            })).sort((entryA, entryB) => {
                 for (const info of groupColInfo) {
-                    const valA = a[info.index];
-                    const valB = b[info.index];
+                    const valA = entryA.row[info.index];
+                    const valB = entryB.row[info.index];
 
                     // Issue #529: Use type-aware comparison
                     const comparison = compareGroupingValues(valA, valB, info.column);
@@ -247,6 +248,7 @@
                 }
                 return 0;
             });
+            const sortedData = sortedEntries.map(entry => entry.row);
 
             // Create grouped structure
             // Each row gets info about which group cells should be displayed (rowspan)
@@ -322,8 +324,11 @@
                 prevGroupDisplayValues = groupDisplayValues;
             });
 
-            // Replace data with sorted data for rendering
+            // Replace data with sorted data for rendering and keep record IDs aligned.
             this.data = sortedData;
+            if (hasAlignedRawData) {
+                this.rawObjectData = sortedEntries.map(entry => entry.raw);
+            }
         }
 
         hasActiveFilters() {

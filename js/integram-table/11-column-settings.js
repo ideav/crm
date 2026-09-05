@@ -88,26 +88,24 @@
                         const displayName = alias
                             ? `${ this.escapeHtml(alias) } <span class="col-original-name">(${this.escapeHtml(originalName)})</span>`
                             : this.escapeHtml(col.name);
-                        // First column: not draggable, no drag handle, shows lock icon (issue #962)
-                        // Other columns: draggable, show 1-based position number among requisites (issue #962)
-                        const draggableAttr = isFirst ? 'draggable="false"' : 'draggable="true"';
+                        // First column is fixed. Every other row exposes a dedicated drag handle.
                         const handleOrLock = isFirst
                             ? `<span class="col-settings-drag-handle col-settings-fixed" title="Первая колонка зафиксирована">&#128274;</span>`
-                            : `<span class="col-settings-drag-handle" title="Перетащите для изменения порядка">&#9776;</span><span class="col-settings-order-num">${ idx }</span>`;
+                            : `<button type="button" class="col-settings-drag-handle" draggable="true" data-column-id="${ this.escapeHtml(col.id) }" title="Перетащите для изменения порядка" aria-label="Переместить столбец ${ this.escapeHtml(col.name) }. Используйте стрелки вверх и вниз"><i class="pi pi-bars" aria-hidden="true"></i></button><span class="col-settings-order-num">${ idx }</span>`;
                         return `
-                        <div class="column-settings-item ${ isFirst ? 'column-settings-item--fixed' : '' }" ${ draggableAttr } data-column-id="${ col.id }">
+                        <div class="column-settings-item ${ isFirst ? 'column-settings-item--fixed' : '' }" data-column-id="${ this.escapeHtml(col.id) }">
                             ${ handleOrLock }
                             ${ this.getColTypeIcon(col) }
                             <label style="flex: 1; margin: 0;">
                                 <input type="checkbox"
-                                       data-column-id="${ col.id }"
+                                       data-column-id="${ this.escapeHtml(col.id) }"
                                        ${ this.visibleColumns.includes(col.id) ? 'checked' : '' }>
                                 ${ displayName }
                                 ${ isRequired ? '<span class="col-required-badge" title="Обязательно к заполнению">*</span>' : '' }
                                 ${ isMulti ? '<span class="col-multi-badge" title="Выбор нескольких значений">&#9641;</span>' : '' }
                                 ${ isKey ? '<span class="col-key-badge" title="Поле входит в проверку уникальности"><i class="pi pi-key" aria-hidden="true"></i></span>' : '' }
                             </label>
-                            <button class="btn-col-edit" data-col-id="${ col.id }" title="Редактировать колонку">
+                            <button class="btn-col-edit" data-col-id="${ this.escapeHtml(col.id) }" title="Редактировать колонку">
                                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12.146 0.146009C12.2408 0.0522494 12.3679 0 12.5005 0C12.6331 0 12.7602 0.0522494 12.854 0.146009L15.854 3.14601C15.9006 3.19245 15.9375 3.24763 15.9627 3.30838C15.9879 3.36912 16.0009 3.43424 16.0009 3.50001C16.0009 3.56578 15.9879 3.6309 15.9627 3.69164C15.9375 3.75239 15.9006 3.80756 15.854 3.85401L5.85399 13.854C5.806 13.9017 5.74885 13.9391 5.68599 13.964L0.685989 15.964C0.595125 16.0004 0.495585 16.0093 0.399709 15.9896C0.303832 15.9699 0.215836 15.9226 0.14663 15.8534C0.0774234 15.7842 0.0300499 15.6962 0.0103825 15.6003C-0.00928499 15.5044 -0.000381488 15.4049 0.0359892 15.314L2.03599 10.314C2.06092 10.2511 2.09834 10.194 2.14599 10.146L12.146 0.146009ZM11.207 2.50001L13.5 4.79301L14.793 3.50001L12.5 1.20701L11.207 2.50001ZM12.793 5.50001L10.5 3.20701L3.99999 9.70701V10H4.49999C4.6326 10 4.75977 10.0527 4.85354 10.1465C4.94731 10.2402 4.99999 10.3674 4.99999 10.5V11H5.49999C5.6326 11 5.75977 11.0527 5.85354 11.1465C5.94731 11.2402 5.99999 11.3674 5.99999 11.5V12H6.29299L12.793 5.50001ZM3.03199 10.675L2.92599 10.781L1.39799 14.602L5.21899 13.074L5.32499 12.968C5.22961 12.9324 5.14738 12.8685 5.0893 12.7848C5.03123 12.7012 5.00007 12.6018 4.99999 12.5V12H4.49999C4.36738 12 4.2402 11.9473 4.14644 11.8536C4.05267 11.7598 3.99999 11.6326 3.99999 11.5V11H3.49999C3.39817 10.9999 3.2988 10.9688 3.21517 10.9107C3.13153 10.8526 3.06763 10.7704 3.03199 10.675Z" fill="currentColor"/></svg>
                             </button>
                         </div>`;
@@ -130,7 +128,7 @@
                 if (helpBtnNoAccess) helpBtnNoAccess.style.display = 'none';
                 const addColBtnNoAccess = modal.querySelector(`#add-column-btn-${instanceName}`);
                 if (addColBtnNoAccess) addColBtnNoAccess.style.display = 'none';
-                modal.querySelectorAll('.column-settings-item').forEach(item => { item.setAttribute('draggable', 'false'); });
+                modal.querySelectorAll('.col-settings-drag-handle').forEach(handle => { handle.setAttribute('draggable', 'false'); });
             }
 
             // Attach help button handler (issue #968)
@@ -179,86 +177,109 @@
             overlay.addEventListener('click', () => this.closeColumnSettings());
 
             // Drag-and-drop reordering of columns in the settings list (issue #953)
-            const columnList = modal.querySelector(`#column-settings-list-${instanceName}`);
+            const columnList = modal.querySelector('#column-settings-list-' + instanceName);
             let dragItem = null;
+            const clearSettingsDropIndicators = () => {
+                columnList.querySelectorAll('.drag-over-before, .drag-over-after').forEach(el => {
+                    el.classList.remove('drag-over-before', 'drag-over-after');
+                });
+            };
+            const getSettingsDropPosition = (event, target) => {
+                const rect = target.getBoundingClientRect();
+                const preferredPosition = event.clientY >= rect.top + rect.height / 2 ? 'after' : 'before';
+                return this.resolveColumnDropPosition(
+                    dragItem && dragItem.dataset.columnId,
+                    target.dataset.columnId,
+                    preferredPosition,
+                    this.columnOrder
+                );
+            };
+            const placeSettingsItem = (item, target, position) => {
+                if (position === 'after') columnList.insertBefore(item, target.nextSibling);
+                else columnList.insertBefore(item, target);
+            };
 
-            columnList.addEventListener('dragstart', (e) => {
-                const item = e.target.closest('.column-settings-item');
-                // Prevent dragging the first (fixed) column (issue #962)
-                if (item && item.dataset.columnId === firstColId) {
-                    e.preventDefault();
+            columnList.addEventListener('dragstart', (event) => {
+                const handle = event.target.closest('.col-settings-drag-handle[draggable="true"]');
+                const item = handle && handle.closest('.column-settings-item');
+                if (!item || item.dataset.columnId === firstColId) {
+                    event.preventDefault();
                     return;
                 }
                 dragItem = item;
-                if (dragItem) dragItem.classList.add('dragging');
+                dragItem.classList.add('dragging');
+                columnList.classList.add('column-settings-list--dragging');
+                if (event.dataTransfer) {
+                    event.dataTransfer.effectAllowed = 'move';
+                    event.dataTransfer.setData('text/plain', item.dataset.columnId);
+                }
             });
 
             columnList.addEventListener('dragend', () => {
                 if (dragItem) dragItem.classList.remove('dragging');
-                columnList.querySelectorAll('.column-settings-item').forEach(el => el.classList.remove('drag-over'));
+                columnList.classList.remove('column-settings-list--dragging');
+                clearSettingsDropIndicators();
                 dragItem = null;
             });
 
-            columnList.addEventListener('dragover', (e) => {
-                e.preventDefault();
-                const target = e.target.closest('.column-settings-item');
-                if (target && target !== dragItem) {
-                    columnList.querySelectorAll('.column-settings-item').forEach(el => el.classList.remove('drag-over'));
-                    target.classList.add('drag-over');
+            const updateSettingsDropTarget = (event) => {
+                if (!dragItem) return false;
+                const target = event.target.closest('.column-settings-item');
+                if (!target || target === dragItem || target.classList.contains('column-settings-item--fixed')) {
+                    clearSettingsDropIndicators();
+                    return false;
                 }
+                event.preventDefault();
+                if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+                const position = getSettingsDropPosition(event, target);
+                clearSettingsDropIndicators();
+                target.classList.add(position === 'after' ? 'drag-over-after' : 'drag-over-before');
+                return true;
+            };
+
+            columnList.addEventListener('dragenter', updateSettingsDropTarget);
+            columnList.addEventListener('dragover', updateSettingsDropTarget);
+
+            columnList.addEventListener('dragleave', (event) => {
+                const target = event.target.closest('.column-settings-item');
+                if (!target || (event.relatedTarget && target.contains(event.relatedTarget))) return;
+                target.classList.remove('drag-over-before', 'drag-over-after');
             });
 
-            columnList.addEventListener('drop', (e) => {
-                e.preventDefault();
-                const target = e.target.closest('.column-settings-item');
-                if (target && target !== dragItem && dragItem) {
-                    const draggedId = dragItem.dataset.columnId;
-                    const targetId = target.dataset.columnId;
-                    // Prevent moving the first column or dropping onto the first column (issue #958)
-                    const firstColumnId = this.columnOrder[0];
-                    if (draggedId === firstColumnId || targetId === firstColumnId) {
-                        columnList.querySelectorAll('.column-settings-item').forEach(el => el.classList.remove('drag-over'));
-                        return;
-                    }
-                    // Determine insert position based on mouse Y relative to target midpoint (issue #958)
-                    // This allows moving a column to the last position (insert after target)
-                    const targetRect = target.getBoundingClientRect();
-                    const midY = targetRect.top + targetRect.height / 2;
-                    if (e.clientY > midY) {
-                        // Insert after target
-                        columnList.insertBefore(dragItem, target.nextSibling);
-                        // For reorderColumns, use the element after the dragged item as the target
-                        // If there's nothing after, append to end — reorderColumns handles index-based placement
-                        const nextSibling = target.nextSibling === dragItem ? target.nextSibling && target.nextSibling.nextSibling : target.nextSibling;
-                        if (nextSibling && nextSibling.dataset && nextSibling.dataset.columnId) {
-                            this._columnSettingsChanged = true;
-                            this.reorderColumns(draggedId, nextSibling.dataset.columnId);
-                        } else {
-                            // Move to the last position: splice to end
-                            const draggedIdx = this.columnOrder.indexOf(draggedId);
-                            // Skip if already at the last position (issue #966)
-                            if (draggedIdx > 0 && draggedIdx < this.columnOrder.length - 1) {
-                                this._columnSettingsChanged = true;
-                                this.columnOrder.splice(draggedIdx, 1);
-                                this.columnOrder.push(draggedId);
-                                this.saveColumnState();
-                                const newOrderIndex = this.columnOrder.indexOf(draggedId);
-                                if (newOrderIndex >= 0) {
-                                    this.saveColumnOrderToServer(draggedId, newOrderIndex);
-                                }
-                                this.render();
-                            }
-                        }
-                    } else {
-                        // Insert before target
-                        columnList.insertBefore(dragItem, target);
-                        this._columnSettingsChanged = true;
-                        this.reorderColumns(draggedId, targetId);
-                    }
-                }
-                columnList.querySelectorAll('.column-settings-item').forEach(el => el.classList.remove('drag-over'));
-                // Refresh order number badges after drop (issue #962)
+            columnList.addEventListener('drop', (event) => {
+                const target = event.target.closest('.column-settings-item');
+                if (!target || !dragItem || target === dragItem || target.classList.contains('column-settings-item--fixed')) return;
+                event.preventDefault();
+                event.stopPropagation();
+                const draggedId = dragItem.dataset.columnId;
+                const targetId = target.dataset.columnId;
+                const position = getSettingsDropPosition(event, target);
+                placeSettingsItem(dragItem, target, position);
+                this._columnSettingsChanged = true;
+                this.reorderColumns(draggedId, targetId, position);
+                clearSettingsDropIndicators();
                 refreshOrderBadges();
+            });
+
+            columnList.addEventListener('keydown', (event) => {
+                if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+                const handle = event.target.closest('.col-settings-drag-handle[draggable="true"]');
+                const item = handle && handle.closest('.column-settings-item');
+                if (!item) return;
+                const movableItems = [...columnList.querySelectorAll('.column-settings-item:not(.column-settings-item--fixed)')];
+                const currentIndex = movableItems.indexOf(item);
+                const movingUp = event.key === 'ArrowUp';
+                const target = movableItems[currentIndex + (movingUp ? -1 : 1)];
+                if (!target) return;
+                event.preventDefault();
+                const position = movingUp ? 'before' : 'after';
+                placeSettingsItem(item, target, position);
+                const moved = this.reorderColumns(item.dataset.columnId, target.dataset.columnId, position);
+                if (moved) {
+                    this._columnSettingsChanged = true;
+                    refreshOrderBadges();
+                    handle.focus({ preventScroll: true });
+                }
             });
 
             // Update the 1-based order number badges to reflect current DOM order (issue #962)
@@ -270,14 +291,8 @@
                 });
             };
 
-            // Close on Escape key (issue #595)
-            const handleEscape = (e) => {
-                if (e.key === 'Escape') {
-                    this.closeColumnSettings();
-                    document.removeEventListener('keydown', handleEscape);
-                }
-            };
-            document.addEventListener('keydown', handleEscape);
+            // Shared Escape stack closes only the topmost modal and unregisters on removal.
+            itCreateModalCloseHandler(modal, () => this.closeColumnSettings(), this);
         }
 
         /**
@@ -287,10 +302,15 @@
          * Logic taken from templates/object.html.
          */
         showColumnEditForm(col) {
+            if (!col || !this.normalizeNumericId(col.id)) {
+                this.showToast('Некорректный идентификатор колонки', 'error');
+                return;
+            }
             const instanceName = this.options.instanceName;
             const apiBase = this.getApiBase();
             const parsedAttrs = this.parseAttrs(col.attrs);
-            const isRef = col.ref_id != null || (col.ref && col.ref !== 0);
+            const refTypeId = this.normalizeNumericId(col.ref || col.orig || col.ref_id);
+            const isRef = !!refTypeId && (col.ref_id != null || (col.ref && col.ref !== 0));
             const isFreeLink = String(col.type) === '1';
             const isMulti = parsedAttrs.multi;
             const isRequired = parsedAttrs.required;
@@ -329,8 +349,9 @@
             const availableTypes = isFirstColumn ? firstColumnTypes : baseTypes;
 
             // If the column's current type is not in the list, add it so the select shows the correct value
-            if (!isRef && col.type && !availableTypes.find(t => String(t.id) === String(col.type))) {
-                availableTypes.push({ id: parseInt(col.type), name: `Тип #${ col.type }` });
+            const numericColType = this.normalizeNumericId(col.type);
+            if (!isRef && numericColType && !availableTypes.find(t => String(t.id) === numericColType)) {
+                availableTypes.push({ id: numericColType, name: `Тип #${ numericColType }` });
             }
 
             const colEditOverlay = document.createElement('div');
@@ -350,11 +371,10 @@
             const currentName = col.val || col.name;
 
             // For reference columns, build a grey hyperlink to table/{ref} instead of an editable name input (issue #1435)
-            const refTypeId = col.ref || col.orig || col.ref_id;
-            const dbName = window.location.pathname.split('/')[1];
+            const dbName = encodeURIComponent(window.location.pathname.split('/')[1] || '');
             const refTableUrl = refTypeId ? `/${ dbName }/table/${ refTypeId }` : '#';
             const nameFieldHtml = isRef
-                ? `<a href="${ this.escapeHtml(refTableUrl) }" target="${ refTypeId }" style="color: grey;">${ this.escapeHtml(currentName) }</a>`
+                ? `<a href="${ this.escapeHtml(refTableUrl) }" target="${ refTypeId }" rel="noopener noreferrer" style="color: grey;">${ this.escapeHtml(currentName) }</a>`
                 : `<input type="text" id="col-edit-name-${instanceName}" class="form-control form-control-sm col-edit-input" value="${ this.escapeHtml(currentName) }" placeholder="Введите название колонки" autocomplete="off">`;
             const uniqueKeyTitle = 'Система контролирует уникальность комбинации первой колонки и всех ключей';
 
@@ -369,7 +389,7 @@
                         <label class="col-edit-label">Базовый тип:</label>
                         ${ isFreeLink ? `<span class="col-edit-value">Свободная ссылка</span>`
                             : !isRef ? `<select id="col-edit-type-${instanceName}" class="form-control form-control-sm col-edit-select">
-                            ${ availableTypes.map(t => `<option value="${t.id}" ${ String(col.type) === String(t.id) ? 'selected' : '' }>${t.name}</option>`).join('') }
+                            ${ availableTypes.map(t => `<option value="${ this.escapeHtml(t.id) }" ${ String(col.type) === String(t.id) ? 'selected' : '' }>${ this.escapeHtml(t.name) }</option>`).join('') }
                         </select>` : `<span class="col-edit-value">Ссылочный тип (справочник)</span>` }
                     </div>
                     ${ isFirstColumn ? `<div class="col-edit-row">
@@ -447,6 +467,8 @@
                 colEditOverlay.remove();
                 colEditModal.remove();
             };
+
+            itCreateModalCloseHandler(colEditModal, closeColEdit, this);
 
             const refreshCurrentTableAfterDelete = async () => {
                 this.metadataCache = {};
@@ -617,7 +639,7 @@
                     const refTypeId = col.orig || col.ref_id;
                     if (refTypeId) {
                         const dbName = window.location.pathname.split('/')[1];
-                        window.open(`/${dbName}/object/${refTypeId}`, '_blank');
+                        window.open(`/${dbName}/object/${refTypeId}`, '_blank', 'noopener,noreferrer');
                     }
                 });
             }
@@ -1333,7 +1355,7 @@
             ensureGlobalMetadataForSuggestions();
 
             // Hide suggestions when clicking outside
-            document.addEventListener('click', (e) => {
+            itAddModalDocumentListener(modal, 'click', (e) => {
                 if (!nameInput.contains(e.target) && !suggestionsDiv.contains(e.target)) {
                     suggestionsDiv.style.display = 'none';
                 }
@@ -1380,7 +1402,8 @@
 
                     if (result.success) {
                         // Add column to the table's internal state first so getColTypeIcon can use it
-                        const newColumnId = String(result.columnId);
+                        const newColumnId = this.normalizeNumericId(result.columnId);
+                        if (!newColumnId) throw new Error('Сервер вернул некорректный ID колонки');
                         const isFreeLink = Number(baseTypeId) === 1;
                         let newCol = null;
                         try {
@@ -1419,13 +1442,12 @@
                         if (columnList) {
                             const newItem = document.createElement('div');
                             newItem.className = 'column-settings-item';
-                            newItem.setAttribute('draggable', 'true');
                             newItem.dataset.columnId = newColumnId;
                             // Determine 1-based position number among non-fixed columns (issue #970)
                             const nonFixedCount = columnList.querySelectorAll('.column-settings-item:not(.column-settings-item--fixed)').length;
                             const orderNum = nonFixedCount + 1;
                             newItem.innerHTML = `
-                                <span class="col-settings-drag-handle" title="Перетащите для изменения порядка">&#9776;</span><span class="col-settings-order-num">${orderNum}</span>
+                                <button type="button" class="col-settings-drag-handle" draggable="true" data-column-id="${newColumnId}" title="Перетащите для изменения порядка" aria-label="Переместить столбец ${this.escapeHtml(columnName)}. Используйте стрелки вверх и вниз"><i class="pi pi-bars" aria-hidden="true"></i></button><span class="col-settings-order-num">${orderNum}</span>
                                 ${this.getColTypeIcon(newCol)}
                                 <label style="flex: 1; margin: 0;">
                                     <input type="checkbox" data-column-id="${newColumnId}" checked>
@@ -1505,14 +1527,8 @@
             // Focus on the name input
             modal.querySelector(`#new-column-name-${instanceName}`).focus();
 
-            // Close on Escape key
-            const handleEscape = (e) => {
-                if (e.key === 'Escape') {
-                    closeAddColumnModal();
-                    document.removeEventListener('keydown', handleEscape);
-                }
-            };
-            document.addEventListener('keydown', handleEscape);
+            // Shared Escape stack closes only the topmost modal and unregisters on removal.
+            itCreateModalCloseHandler(modal, closeAddColumnModal, this);
         }
 
         /**

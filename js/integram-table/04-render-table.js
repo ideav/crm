@@ -1,4 +1,6 @@
         render() {
+            if (this._destroyed) return;
+
             // Guard against missing container
             if (!this.container) {
                 console.error('Cannot render: container element not found');
@@ -38,79 +40,79 @@
                                 <i class="pi pi-spin pi-spinner"></i>
                                 <span class="integram-table-ajax-spinner-counter">${ (this.pendingRequests || 0) > 1 ? `(${ this.pendingRequests })` : '' }</span>
                             </div>
-                            <div class="integram-table-settings integram-table-settings-refresh" onclick="window.${ instanceName }.refreshData()" title="Обновить">
+                            <button type="button" class="integram-table-settings integram-table-settings-refresh" onclick="window.${ instanceName }.refreshData()" title="Обновить" aria-label="Обновить">
                                 <i class="pi pi-refresh"></i>
-                            </div>
+                            </button>
                             ${ this.groupingEnabled ? `
-                            <div class="integram-table-settings" onclick="window.${ instanceName }.clearGrouping()" title="Очистить группировку">
+                            <button type="button" class="integram-table-settings" onclick="window.${ instanceName }.clearGrouping()" title="Очистить группировку" aria-label="Очистить группировку">
                                 <i class="pi pi-undo"></i>
                                 ${ !this.settings.hideMenuButtonLabels ? '<span class="btn-label">очистить</span>' : '' }
-                            </div>
+                            </button>
                             ` : '' }
-                            <div class="integram-table-settings${ this.groupingEnabled ? ' active' : '' }" onclick="window.${ instanceName }.openGroupingSettings()" title="Группы">
+                            <button type="button" class="integram-table-settings${ this.groupingEnabled ? ' active' : '' }" onclick="window.${ instanceName }.openGroupingSettings()" title="Группы" aria-label="Настроить группировку" aria-pressed="${ this.groupingEnabled ? 'true' : 'false' }">
                                 <i class="pi pi-objects-column"></i>
                                 ${ !this.settings.hideMenuButtonLabels ? '<span class="btn-label">группы</span>' : '' }
-                            </div>
+                            </button>
                             ${ this.hasActiveFilters() ? `
-                            <div class="integram-table-settings" onclick="window.${ instanceName }.clearAllFilters()" title="Очистить фильтры">
+                            <button type="button" class="integram-table-settings" onclick="window.${ instanceName }.clearAllFilters()" title="Очистить фильтры" aria-label="Очистить фильтры">
                                 <i class="pi pi-filter-slash"></i>
                                 ${ !this.settings.hideMenuButtonLabels ? '<span class="btn-label">очистить</span>' : '' }
-                            </div>
+                            </button>
                             ` : '' }
-                            <div class="integram-table-settings${ this.filtersEnabled ? ' active' : '' }" onclick="window.${ instanceName }.toggleFilters()" title="Фильтры">
+                            <button type="button" class="integram-table-settings${ this.filtersEnabled ? ' active' : '' }" onclick="window.${ instanceName }.toggleFilters()" title="Фильтры" aria-label="Показать фильтры" aria-pressed="${ this.filtersEnabled ? 'true' : 'false' }">
                                 <i class="pi pi-filter"></i>
                                 ${ !this.settings.hideMenuButtonLabels ? '<span class="btn-label">фильтры</span>' : '' }
-                            </div>
+                            </button>
                             ${ this.isExportAllowed() ? `
                             <div class="integram-table-export-container">
-                                <div class="integram-table-settings" onclick="window.${ instanceName }.toggleExportMenu(event)" title="Экспорт">
+                                <button type="button" class="integram-table-settings" onclick="window.${ instanceName }.toggleExportMenu(event)" title="Экспорт" aria-label="Экспортировать данные" aria-haspopup="menu" aria-expanded="false" aria-controls="${ instanceName }-export-menu">
                                     <i class="pi pi-download"></i>
                                     ${ !this.settings.hideMenuButtonLabels ? '<span class="btn-label">экспорт</span>' : '' }
-                                </div>
-                                <div class="integram-export-menu" id="${ instanceName }-export-menu" style="display: none;">
-                                    <div class="export-menu-item" onclick="window.${ instanceName }.exportTable('xlsx')">
+                                </button>
+                                <div class="integram-export-menu" id="${ instanceName }-export-menu" role="menu" aria-label="Варианты экспорта" style="display: none;">
+                                    <button type="button" class="export-menu-item" role="menuitem" onclick="window.${ instanceName }.exportTable('xlsx')">
                                         <span class="export-icon"><i class="pi pi-file-excel"></i></span> XLSX (Excel)
-                                    </div>
-                                    <div class="export-menu-item" onclick="window.${ instanceName }.exportTable('xls')">
+                                    </button>
+                                    <button type="button" class="export-menu-item" role="menuitem" onclick="window.${ instanceName }.exportTable('xls')">
                                         <span class="export-icon"><i class="pi pi-file-excel"></i></span> XLS (Excel 97-2003)
-                                    </div>
-                                    <div class="export-menu-item" onclick="window.${ instanceName }.exportTable('csv')">
+                                    </button>
+                                    <button type="button" class="export-menu-item" role="menuitem" onclick="window.${ instanceName }.exportTable('csv')">
                                         <span class="export-icon"><i class="pi pi-file"></i></span> CSV
-                                    </div>
-                                    <div class="export-menu-item" onclick="window.${ instanceName }.copyToBuffer()">
+                                    </button>
+                                    <button type="button" class="export-menu-item" role="menuitem" onclick="window.${ instanceName }.copyToBuffer()">
                                         <span class="export-icon"><i class="pi pi-copy"></i></span> В буфер
-                                    </div>
+                                    </button>
                                 </div>
                             </div>
                             ` : '' }
                             ${ this.checkboxMode && this.selectedRows.size > 0 && this.isTableWritable() ? `
-                            <button class="btn btn-sm btn-danger integram-bulk-delete-btn" id="${ instanceName }-bulk-delete-btn" onclick="window.${ instanceName }.showBulkDeleteConfirm(event)">
+                            <button type="button" class="btn btn-sm btn-danger integram-bulk-delete-btn" id="${ instanceName }-bulk-delete-btn" onclick="window.${ instanceName }.showBulkDeleteConfirm(event)">
                                 Удалить (${ this.selectedRows.size })
                             </button>
                             ` : '' }
                             ${ this.isTableDeletable() && this.isTableWritable() ? `
-                            <div class="integram-table-settings integram-table-settings-filter-delete" onclick="window.${ instanceName }.showFilterDeleteConfirm(event)" title="Удалить записи, удовлетворяющие заданному фильтру">
+                            <button type="button" class="integram-table-settings integram-table-settings-filter-delete" onclick="window.${ instanceName }.showFilterDeleteConfirm(event)" title="Удалить записи, удовлетворяющие заданному фильтру" aria-label="Удалить записи, удовлетворяющие заданному фильтру">
                                 <i class="pi pi-trash"></i>
                                 ${ !this.settings.hideMenuButtonLabels ? '<span class="btn-label">Удалить</span>' : '' }
-                            </div>
+                            </button>
                             ` : '' }
-                            <div class="integram-table-settings" onclick="window.${ instanceName }.copyConfigUrl()" title="Скопировать ссылку с текущими фильтрами и группами">
+                            <button type="button" class="integram-table-settings" onclick="window.${ instanceName }.copyConfigUrl()" title="Скопировать ссылку с текущими фильтрами и группами" aria-label="Скопировать ссылку с текущими фильтрами и группами">
                                 <i class="pi pi-copy"></i>
                                 ${ !this.settings.hideMenuButtonLabels ? '<span class="btn-label">ссылка</span>' : '' }
-                            </div>
-                            <div class="integram-table-settings" onclick="window.${ instanceName }.openTableSettings()" title="Настройка таблицы">
+                            </button>
+                            <button type="button" class="integram-table-settings" onclick="window.${ instanceName }.openTableSettings()" title="Настройка таблицы" aria-label="Настройка таблицы">
                                 <i class="pi pi-cog"></i>
                                 ${ !this.settings.hideMenuButtonLabels ? '<span class="btn-label">вид</span>' : '' }
-                            </div>
-                            <div class="integram-table-settings" onclick="window.${ instanceName }.openColumnSettings()" title="Настройка колонок">
+                            </button>
+                            <button type="button" class="integram-table-settings" onclick="window.${ instanceName }.openColumnSettings()" title="Настройка колонок" aria-label="Настройка колонок">
                                 <i class="pi pi-th-large"></i>
                                 ${ !this.settings.hideMenuButtonLabels ? '<span class="btn-label">колонки</span>' : '' }
-                            </div>
+                            </button>
                         </div>
                     </div>
                     ${ this.renderHiddenFilterBadges() }
                     <div class="integram-table-container">
-                        <table class="integram-table${ this.settings.compact ? ' compact' : '' }">
+                        <table class="integram-table${ this.settings.compact ? ' compact' : '' }" aria-label="${ this.escapeHtml(this.options.title || 'Данные') }">
                         <thead>
                             ${ (() => {
                                 // Smart header grouping (issue #1540, #1624)
@@ -137,10 +139,10 @@
                                     // Multi-row smart header
                                     const rowsOfCells = this.renderSmartHeaderRows(smartTree, smartDepth, 0, instanceName, groupingColumnSet);
                                     const checkboxHtml = this.checkboxMode
-                                        ? `<th class="checkbox-column-header" rowspan="${ smartDepth }"><input type="checkbox" class="row-select-all" title="Выбрать все" ${ this.data.length > 0 && this.selectedRows.size === this.data.length ? 'checked' : '' }></th>`
+                                        ? `<th class="checkbox-column-header" rowspan="${ smartDepth }"><input type="checkbox" class="row-select-all" title="Выбрать все" ${ this.areAllSelectableRowsSelected() ? 'checked' : '' }></th>`
                                         : '';
                                     const addColHtml = this.isStructureWritable()
-                                        ? `<th class="add-column-header-cell" rowspan="${ smartDepth }" style="width: 36px; min-width: 36px;" title="Добавить колонку" onclick="window.${ instanceName }.quickAddColumn()"><i class="pi pi-plus"></i></th>`
+                                        ? `<th class="add-column-header-cell" rowspan="${ smartDepth }" style="width: 36px; min-width: 36px;"><button type="button" class="add-column-header-button" title="Добавить колонку" aria-label="Добавить колонку" onclick="window.${ instanceName }.quickAddColumn()"><i class="pi pi-plus" aria-hidden="true"></i></button></th>`
                                         : '';
                                     return rowsOfCells.map((cells, rowIdx) => `
                                         <tr>
@@ -165,33 +167,35 @@
                                     : headerColumns.map(col => {
                                         const width = this.columnWidths[col.id];
                                         const widthStyle = width ? ` style="width: ${ width }px; min-width: ${ width }px;"` : '';
-                                        const addButtonHtml = this.shouldShowAddButton(col) ?
-                                            `<button class="column-add-btn" onclick="window.${ instanceName }.openColumnCreateForm('${ col.id }')" title="Создать запись"><i class="pi pi-plus"></i></button>` : '';
+                                        const actionColumnId = this.normalizeNumericId(col.id);
+                                        const addButtonHtml = this.shouldShowAddButton(col) && actionColumnId ?
+                                            `<button class="column-add-btn" onclick="window.${ instanceName }.openColumnCreateForm('${ actionColumnId }')" title="Создать запись"><i class="pi pi-plus"></i></button>` : '';
                                         let sortIndicator = '';
                                         if (this.sortColumn === col.id) {
                                             sortIndicator = this.sortDirection === 'asc' ? '<i class="pi pi-sort-amount-up-alt" style="font-size:0.75em;"></i> ' : '<i class="pi pi-sort-amount-down" style="font-size:0.75em;"></i> ';
                                         }
-                                        const refTypeId = col.ref;
+                                        const refTypeId = this.normalizeNumericId(col.ref);
                                         const refIconHtml = refTypeId ? (() => {
                                             const dbName = window.db || window.location.pathname.split('/')[1];
-                                            return `<a class="column-ref-link" href="/${dbName}/table/${refTypeId}" target="_blank" title="Открыть справочник в новой вкладке" onclick="event.stopPropagation()"><i class="pi pi-external-link"></i></a>`;
+                                            return `<a class="column-ref-link" href="/${dbName}/table/${refTypeId}" target="_blank" rel="noopener noreferrer" title="Открыть справочник в новой вкладке" onclick="event.stopPropagation()"><i class="pi pi-external-link"></i></a>`;
                                         })() : '';
                                         return `
-                                            <th data-column-id="${ col.id }" draggable="true"${ widthStyle }>
-                                                <span class="column-header-content" data-column-id="${ col.id }" title="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ sortIndicator }${ col.name }</span>
+                                            <th data-column-id="${ this.escapeHtml(col.id) }" title="${ this.escapeHtml(col.id) }"${ widthStyle }>
+                                                <button type="button" class="column-drag-handle" draggable="true" data-column-id="${ this.escapeHtml(col.id) }" title="Перетащите для изменения порядка" aria-label="Переместить столбец ${ this.escapeHtml(col.name) }. Используйте стрелки влево и вправо"><i class="pi pi-bars" aria-hidden="true"></i></button>
+                                                <button type="button" class="column-header-content" data-column-id="${ this.escapeHtml(col.id) }" title="${ this.escapeHtml(col.id) }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }" aria-label="Сортировать по столбцу ${ this.escapeHtml(col.name) }">${ sortIndicator }${ this.escapeHtml(col.name) }</button>
                                                 ${ refIconHtml }
                                                 ${ addButtonHtml }
-                                                <div class="column-resize-handle" data-column-id="${ col.id }"></div>
+                                                <div class="column-resize-handle" data-column-id="${ this.escapeHtml(col.id) }"></div>
                                             </th>
                                         `;
                                     }).join('');
 
                                 return `
                                     <tr>
-                                        ${ this.checkboxMode ? `<th class="checkbox-column-header"><input type="checkbox" class="row-select-all" title="Выбрать все" ${ this.data.length > 0 && this.selectedRows.size === this.data.length ? 'checked' : '' }></th>` : '' }
+                                        ${ this.checkboxMode ? `<th class="checkbox-column-header"><input type="checkbox" class="row-select-all" title="Выбрать все" ${ this.areAllSelectableRowsSelected() ? 'checked' : '' }></th>` : '' }
                                         ${ singleRowCells }
                                         ${ this.settings.showReferences && (this.objectTableId || this.options.tableTypeId) ? `<th class="references-column-header" title="Таблицы, где эта таблица используется как справочник">Связи</th>` : '' }
-                                        ${ this.isStructureWritable() ? `<th class="add-column-header-cell" style="width: 36px; min-width: 36px;" title="Добавить колонку" onclick="window.${ instanceName }.quickAddColumn()"><i class="pi pi-plus"></i></th>` : '' }
+                                        ${ this.isStructureWritable() ? `<th class="add-column-header-cell" style="width: 36px; min-width: 36px;"><button type="button" class="add-column-header-button" title="Добавить колонку" aria-label="Добавить колонку" onclick="window.${ instanceName }.quickAddColumn()"><i class="pi pi-plus" aria-hidden="true"></i></button></th>` : '' }
                                     </tr>
                                     ${ this.filtersEnabled ? `
                                     <tr class="filter-row">
@@ -210,16 +214,26 @@
                         <tbody>
                             ${ this.groupingEnabled && this.groupedData.length > 0 ?
                                 this.renderGroupedRows(orderedColumns, instanceName) :
-                                this.data.map((row, rowIndex) => `
-                                    <tr class="${ this.selectedRows.has(rowIndex) ? 'row-selected' : '' }">
-                                        ${ this.checkboxMode ? `<td class="checkbox-column-cell"><input type="checkbox" class="row-select-checkbox" data-row-index="${ rowIndex }" ${ this.selectedRows.has(rowIndex) ? 'checked' : '' }></td>` : '' }
+                                this.data.length > 0 ? this.data.map((row, rowIndex) => `
+                                    <tr class="${ this.isRowSelected(rowIndex) ? 'row-selected' : '' }">
+                                        ${ this.checkboxMode ? `<td class="checkbox-column-cell"><input type="checkbox" class="row-select-checkbox" data-row-index="${ rowIndex }" ${ this.isRowSelected(rowIndex) ? 'checked' : '' }></td>` : '' }
                                         ${ orderedColumns.map((col, colIndex) => {
                                             const cellValue = row[this.columns.indexOf(col)];
                                             return this.renderCell(col, cellValue, rowIndex, colIndex);
                                         }).join('') }
                                         ${ this.settings.showReferences && (this.objectTableId || this.options.tableTypeId) ? this.renderReferencesCell(rowIndex) : '' }
                                     </tr>
-                                `).join('')
+                                `).join('') : `
+                                    <tr class="integram-table-empty-row">
+                                        <td colspan="${ Math.max(1, orderedColumns.length + (this.checkboxMode ? 1 : 0) + (this.settings.showReferences && (this.objectTableId || this.options.tableTypeId) ? 1 : 0) + (this.isStructureWritable() ? 1 : 0)) }">
+                                            <div class="integram-table-empty-state" role="status">
+                                                <i class="pi ${ (this.pendingRequests || 0) > 0 ? 'pi-spin pi-spinner' : 'pi-inbox' }" aria-hidden="true"></i>
+                                                <span>${ (this.pendingRequests || 0) > 0 ? 'Загружаем данные…' : 'Записей пока нет' }</span>
+                                                <small>${ (this.pendingRequests || 0) > 0 ? 'Это займёт несколько секунд' : (this.hasActiveFilters() ? 'Попробуйте изменить или очистить фильтры' : 'Новые записи появятся здесь') }</small>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                `
                             }
                         </tbody>
                         </table>
@@ -299,13 +313,13 @@
                     return `
                         <td>
                             <div class="filter-cell-wrapper">
-                                <span class="filter-icon-inside" data-column-id="${ column.id }">
+                                <button type="button" class="filter-icon-inside" data-column-id="${ this.escapeHtml(column.id) }" title="Изменить условие фильтра" aria-label="Условие фильтра: ${ currentFilter.type }. Изменить">
                                     ${ currentFilter.type }
-                                </span>
+                                </button>
                                 <input type="text"
                                        class="filter-input-with-icon filter-ref-text-input"
-                                       data-column-id="${ column.id }"
-                                       value="${ displayValue }"
+                                       data-column-id="${ this.escapeHtml(column.id) }"
+                                       value="${ this.escapeHtml(displayValue) }"
                                        placeholder="${ placeholder }"
                                        autocomplete="off">
                             </div>
@@ -352,13 +366,13 @@
                 return `
                     <td>
                         <div class="filter-cell-wrapper">
-                            <span class="filter-icon-inside" data-column-id="${ column.id }">
-                                ${ currentFilter.type }
-                            </span>
+                            <button type="button" class="filter-icon-inside" data-column-id="${ this.escapeHtml(column.id) }" title="Изменить условие фильтра" aria-label="Условие фильтра: ${ currentFilter.type }. Изменить">
+                                    ${ currentFilter.type }
+                                </button>
                             <button type="button"
                                     class="filter-ref-trigger"
-                                    data-column-id="${ column.id }"
-                                    data-selected-ids="${ Array.from(selectedIds).join(',') }"
+                                    data-column-id="${ this.escapeHtml(column.id) }"
+                                    data-selected-ids="${ this.escapeHtml(Array.from(selectedIds).join(',')) }"
                                     title="${ escapedDisplayText || 'Выбрать значение...' }">
                                 <span class="filter-ref-trigger-text${ escapedDisplayText ? '' : ' filter-ref-trigger-text--placeholder' }">${ escapedDisplayText || 'Выбрать...' }</span>
                                 <span class="filter-ref-trigger-arrow">▼</span>
@@ -379,12 +393,12 @@
                 return `
                     <td>
                         <div class="filter-cell-wrapper">
-                            <span class="filter-icon-inside" data-column-id="${ column.id }">
-                                ${ currentFilter.type }
-                            </span>
+                            <button type="button" class="filter-icon-inside" data-column-id="${ this.escapeHtml(column.id) }" title="Изменить условие фильтра" aria-label="Условие фильтра: ${ currentFilter.type }. Изменить">
+                                    ${ currentFilter.type }
+                                </button>
                             <input type="${ inputType }"
                                    class="filter-input-with-icon filter-date-picker"
-                                   data-column-id="${ column.id }"
+                                   data-column-id="${ this.escapeHtml(column.id) }"
                                    data-is-datetime="${ isDateTime ? '1' : '0' }"
                                    value="${ html5Value }">
                         </div>
@@ -412,12 +426,12 @@
                 return `
                     <td>
                         <div class="filter-cell-wrapper filter-range-wrapper">
-                            <span class="filter-icon-inside" data-column-id="${ column.id }">
-                                ${ currentFilter.type }
-                            </span>
+                            <button type="button" class="filter-icon-inside" data-column-id="${ this.escapeHtml(column.id) }" title="Изменить условие фильтра" aria-label="Условие фильтра: ${ currentFilter.type }. Изменить">
+                                    ${ currentFilter.type }
+                                </button>
                             <input type="${ inputType }"
                                    class="filter-input-with-icon filter-range-input"
-                                   data-column-id="${ column.id }"
+                                   data-column-id="${ this.escapeHtml(column.id) }"
                                    data-range-part="from"${ dtAttr }
                                    value="${ escAttr(fromVal) }"
                                    placeholder="от"
@@ -425,7 +439,7 @@
                             <span class="filter-range-sep">—</span>
                             <input type="${ inputType }"
                                    class="filter-input-with-icon filter-range-input"
-                                   data-column-id="${ column.id }"
+                                   data-column-id="${ this.escapeHtml(column.id) }"
                                    data-range-part="to"${ dtAttr }
                                    value="${ escAttr(toVal) }"
                                    placeholder="до"
@@ -438,13 +452,13 @@
             return `
                 <td>
                     <div class="filter-cell-wrapper">
-                        <span class="filter-icon-inside" data-column-id="${ column.id }">
-                            ${ currentFilter.type }
-                        </span>
+                        <button type="button" class="filter-icon-inside" data-column-id="${ this.escapeHtml(column.id) }" title="Изменить условие фильтра" aria-label="Условие фильтра: ${ currentFilter.type }. Изменить">
+                                    ${ currentFilter.type }
+                                </button>
                         <input type="text"
                                class="filter-input-with-icon"
-                               data-column-id="${ column.id }"
-                               value="${ displayValue }"
+                               data-column-id="${ this.escapeHtml(column.id) }"
+                               value="${ this.escapeHtml(displayValue) }"
                                placeholder="${ placeholder }"
                                autocomplete="off">
                     </div>
