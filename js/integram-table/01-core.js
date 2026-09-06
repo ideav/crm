@@ -216,17 +216,20 @@
          * Only an explicit granted "WRITE" allows modifying controls. Missing key
          * means READ: справочники, доступные на чтение через ссылки родительской
          * таблицы, не должны предлагать правку (issue #4851).
+         * #4892: супер-пользователь (uid='0', пользователь admin) правит всё — сервер
+         * не строит ему карту грантов, поэтому в метаданных granted может не быть вовсе.
          */
         isTableWritable() {
-            return this.tableGranted === 'WRITE';
+            return this.tableGranted === 'WRITE' || (typeof uid !== 'undefined' && String(uid) === '0');
         }
 
         /**
          * Check if the user has permission to modify table structure (issue #1536)
-         * Returns true when window.grants["1"] equals "WRITE"
+         * Returns true when window.grants["1"] equals "WRITE".
+         * #4892: супер-пользователь (uid='0') может менять структуру при пустом window.grants.
          */
         isStructureWritable() {
-            return window.grants && window.grants['1'] === 'WRITE';
+            return (typeof uid !== 'undefined' && String(uid) === '0') || !!(window.grants && window.grants['1'] === 'WRITE');
         }
 
         /**

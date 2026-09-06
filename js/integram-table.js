@@ -233,17 +233,20 @@ class IntegramTable{
          * Only an explicit granted "WRITE" allows modifying controls. Missing key
          * means READ: справочники, доступные на чтение через ссылки родительской
          * таблицы, не должны предлагать правку (issue #4851).
+         * #4892: супер-пользователь (uid='0', пользователь admin) правит всё — сервер
+         * не строит ему карту грантов, поэтому в метаданных granted может не быть вовсе.
          */
         isTableWritable() {
-            return this.tableGranted === 'WRITE';
+            return this.tableGranted === 'WRITE' || (typeof uid !== 'undefined' && String(uid) === '0');
         }
 
         /**
          * Check if the user has permission to modify table structure (issue #1536)
-         * Returns true when window.grants["1"] equals "WRITE"
+         * Returns true when window.grants["1"] equals "WRITE".
+         * #4892: супер-пользователь (uid='0') может менять структуру при пустом window.grants.
          */
         isStructureWritable() {
-            return window.grants && window.grants['1'] === 'WRITE';
+            return (typeof uid !== 'undefined' && String(uid) === '0') || !!(window.grants && window.grants['1'] === 'WRITE');
         }
 
         /**
@@ -2081,7 +2084,7 @@ class IntegramTable{
                                             return `<a class="column-ref-link" href="/${dbName}/table/${refTypeId}" target="_blank" title="Открыть справочник в новой вкладке" onclick="event.stopPropagation()"><i class="pi pi-external-link"></i></a>`;
                                         })() : '';
                                         return `
-                                            <th data-column-id="${ col.id }" draggable="true" title="${ col.id }"${ widthStyle }>
+                                            <th data-column-id="${ col.id }" draggable="true"${ widthStyle }>
                                                 <span class="column-header-content" data-column-id="${ col.id }" title="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ sortIndicator }${ col.name }</span>
                                                 ${ refIconHtml }
                                                 ${ addButtonHtml }
@@ -2713,10 +2716,6 @@ class IntegramTable{
 
             let escapedValue;
             let fullValueForEditing;
-            // Issue #4385: record/reference ID for the cell, mirrored onto the
-            // parent <td> title so it stays readable even when the .edit-icon
-            // (or a link) fully covers the inner .cell-content-wrapper.
-            let cellTitleId = '';
 
             // BOOLEAN cells use HTML icons, so skip HTML escaping for them
             if (format === 'BOOLEAN') {
@@ -2931,7 +2930,6 @@ class IntegramTable{
                         : `window.${ instanceName }.openEditForm('${ recordId }', '${ typeId }', ${ rowIndex }); event.stopPropagation();`;
                     const editIcon = `<span class="edit-icon" onclick="${ editIconOnclick }" title="Редактировать"><i class="pi pi-pencil" style="font-size: 0.875rem;"></i></span>`;
                     escapedValue = `<div class="cell-content-wrapper"><span title="${ recordId }">${ displayContent }</span>${ editIcon }</div>`;
-                    cellTitleId = recordId; // Issue #4385: expose ID on the parent <td>
                 }
             }
 
@@ -2944,7 +2942,6 @@ class IntegramTable{
                     const dbName = pathParts.length >= 2 ? pathParts[1] : '';
                     const refUrl = `/${ dbName }/table/${ refTypeId }?F_I=${ refValueId }`;
                     escapedValue = `<div class="cell-content-wrapper"><span title="${ refValueId }"><a href="${ refUrl }" class="ref-value-link" onclick="event.stopPropagation();">${ escapedValue }</a></span></div>`;
-                    cellTitleId = refValueId; // Issue #4385: expose ID on the parent <td>
                 }
             }
 
@@ -2953,7 +2950,6 @@ class IntegramTable{
             if (isAnyRecordLink && refValueId && !escapedValue.includes('cell-content-wrapper')) {
                 const instanceName = this.options.instanceName;
                 escapedValue = `<div class="cell-content-wrapper"><span title="${ refValueId }"><a href="#" class="any-record-link" data-record-id="${ refValueId }" onmouseover="window.${ instanceName }.resolveAnyRecordLink(this, '${ refValueId }');" onclick="window.${ instanceName }.navigateAnyRecordLink(event, this, '${ refValueId }'); return false;">${ escapedValue }</a></span></div>`;
-                cellTitleId = refValueId; // Issue #4385: expose ID on the parent <td>
             }
 
             // Add inline editing data attributes for editable cells (only when not already showing edit icon)
@@ -3057,10 +3053,7 @@ class IntegramTable{
                 rowNumberHtml = this.renderSubordinateRowNumber(rowIndex, withEditIcon);
             }
 
-            // Issue #4385: mirror the record/reference ID onto the parent <td> title so the
-            // ID stays discoverable even when the .edit-icon covers the inner wrapper entirely.
-            const cellTitleAttr = cellTitleId ? ` title="${ cellTitleId }"` : '';
-            return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }"${ dataTypeAttrs }${ customStyle }${ editableAttrs }${ cellTitleAttr }>${ escapedValue }${ rowNumberHtml }</td>`;
+            return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }"${ dataTypeAttrs }${ customStyle }${ editableAttrs }>${ escapedValue }${ rowNumberHtml }</td>`;
         }
 
         /**
@@ -3304,7 +3297,7 @@ class IntegramTable{
                             return `<a class="column-ref-link" href="/${dbName}/table/${refTypeId}" target="_blank" title="Открыть справочник в новой вкладке" onclick="event.stopPropagation()"><i class="pi pi-external-link"></i></a>`;
                         })() : '';
                         rows[depth].push(`
-                            <th data-column-id="${ col.id }" draggable="true" title="${ col.id }"${ widthStyle }${ rowspan > 1 ? ` rowspan="${ rowspan }"` : '' } class="${ groupingClass }">
+                            <th data-column-id="${ col.id }" draggable="true"${ widthStyle }${ rowspan > 1 ? ` rowspan="${ rowspan }"` : '' } class="${ groupingClass }">
                                 <span class="column-header-content" data-column-id="${ col.id }" title="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ groupingBadge }${ sortIndicator }${ displayName }</span>
                                 ${ refIconHtml }
                                 ${ addButtonHtml }
@@ -3369,7 +3362,7 @@ class IntegramTable{
                 })() : '';
 
                 return `
-                    <th data-column-id="${ col.id }" draggable="true" title="${ col.id }"${ widthStyle } class="${ groupingClass }">
+                    <th data-column-id="${ col.id }" draggable="true"${ widthStyle } class="${ groupingClass }">
                         <span class="column-header-content" data-column-id="${ col.id }" title="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ groupingBadge }${ sortIndicator }${ col.name }</span>
                         ${ refIconHtml }
                         ${ addButtonHtml }
@@ -6995,8 +6988,6 @@ class IntegramTable{
                 const editIconHtml = hasEditIcon.outerHTML;
                 const cellRecordId = cell.dataset.refValueId || cell.dataset.recordId || '';
                 cell.innerHTML = `<div class="cell-content-wrapper"><span title="${ cellRecordId }">${ escapedValue }</span>${ editIconHtml }</div>`;
-                // Issue #4385: keep the ID readable on the parent cell when the edit icon covers the wrapper
-                if (cellRecordId) { cell.setAttribute('title', cellRecordId); }
             } else {
                 // Issue #915: If the cell was empty (no edit icon) and now has a value,
                 // add the edit icon using the stored data-edit-type-id attribute
@@ -7016,8 +7007,6 @@ class IntegramTable{
                         : `window.${ instanceName }.openEditForm('${ editRecordId }', '${ editTypeId }', ${ editRowIndex }); event.stopPropagation();`;
                     const editIcon = `<span class="edit-icon" onclick="${ editIconOnclick }" title="Редактировать"><i class="pi pi-pencil" style="font-size: 0.875rem;"></i></span>`;
                     cell.innerHTML = `<div class="cell-content-wrapper"><span title="${ editRecordId }">${ escapedValue }</span>${ editIcon }</div>`;
-                    // Issue #4385: keep the ID readable on the parent cell when the edit icon covers the wrapper
-                    if (editRecordId) { cell.setAttribute('title', editRecordId); }
                 } else {
                     cell.innerHTML = escapedValue;
                 }
@@ -12439,8 +12428,8 @@ class IntegramTable{
 
             // Determine edit form write access (issue #1508)
             // Use the metadata's granted field for this specific form (may differ from table-level for nested forms)
-            // #4851: granted отсутствует → форма read-only (как READ).
-            const metadataGranted = metadata.granted !== undefined ? metadata.granted : 'READ';
+            // #4851: granted отсутствует → форма read-only (как READ); #4892: супер-пользователь — всегда WRITE.
+            const metadataGranted = (typeof uid !== 'undefined' && String(uid) === '0') ? 'WRITE' : (metadata.granted !== undefined ? metadata.granted : 'READ');
             const formIsReadOnly = metadataGranted !== 'WRITE';
             const formHasSomeWritable = formIsReadOnly
                 ? (reqs.some(req => req.granted === 'WRITE'))
