@@ -102,8 +102,8 @@
 
             // Determine edit form write access (issue #1508)
             // Use the metadata's granted field for this specific form (may differ from table-level for nested forms)
-            // #4851: granted отсутствует → форма read-only (как READ).
-            const metadataGranted = metadata.granted !== undefined ? metadata.granted : 'READ';
+            // #4851: granted отсутствует → форма read-only (как READ); #4892: супер-пользователь — всегда WRITE.
+            const metadataGranted = (typeof uid !== 'undefined' && String(uid) === '0') ? 'WRITE' : (metadata.granted !== undefined ? metadata.granted : 'READ');
             const formIsReadOnly = metadataGranted !== 'WRITE';
             const formHasSomeWritable = formIsReadOnly
                 ? (reqs.some(req => req.granted === 'WRITE'))
