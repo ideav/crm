@@ -203,6 +203,19 @@ function getCaptchaToken(containerId) {
     return input ? (input.value || null) : null;
 }
 
+// Issue #564 (backlogram): отличаем «капча не решена» от «капча не появилась вовсе».
+// Если скрипт капчи не загрузился (домен заблокирован, Яндекс недоступен), в контейнере
+// нет ни виджета, ни его скрытого input — требовать токен бессмысленно, это запирает
+// форму входа. Сервер (index.php, case "auth") проверяет капчу только тогда, когда
+// smart-token реально прислан.
+function isCaptchaRendered(containerId) {
+    const container = document.getElementById(containerId);
+    if (!container) return false;
+    if (window.smartCaptcha && container.dataset.widgetId !== undefined) return true;
+    if (!container.querySelector) return false;
+    return !!container.querySelector('input[name="smart-token"]');
+}
+
 function resetCaptcha(containerId) {
     const container = document.getElementById(containerId);
     if (!container || !window.smartCaptcha) return;
@@ -849,7 +862,10 @@ class App {
                 const captchaToken = getCaptchaToken('login-captcha-container');
                 // Issue #2947: resolve the captcha bypass lazily, right before the check.
                 await this._ensureCaptchaBypass();
-                if (!this._captchaBypass && captchaToken === null) {
+                // Issue #564: блокируем только когда капча реально отрисована, но не решена;
+                // негрузящаяся капча (заблокированный домен, сбой Яндекса) не должна запирать
+                // вход — запрос уходит без токена, сервер его капчей не проверяет.
+                if (this._loginBlockedByCaptcha(captchaToken)) {
                     showToast('Пожалуйста, пройдите проверку капчи', 'error');
                     loginInProgress = false;
                     return;
@@ -1401,6 +1417,14 @@ class App {
             const widgetId = window.smartCaptcha.render(el, { sitekey, robustness });
             el.dataset.widgetId = widgetId;
         });
+    }
+
+    // Issue #564: вход блокируем только когда капча на экране, но не решена.
+    // Если капча не отрисовалась вовсе (скрипт заблокирован/недоступен), запрос
+    // уходит без токена — сервер такие запросы капчей не проверяет.
+    _loginBlockedByCaptcha(captchaToken) {
+        if (this._captchaBypass) return false;
+        return captchaToken === null && isCaptchaRendered('login-captcha-container');
     }
 
     // Issue #2906: hide the captcha containers when a valid token bypasses the captcha.
