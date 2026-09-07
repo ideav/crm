@@ -40,7 +40,7 @@ function makeInst(actualRuns) {
     inst.notes = [];
     inst.post = function(path, params) { this.posts.push({ path: path, params: params }); return Promise.resolve({}); };
     inst.createEvent = function() { return Promise.resolve({}); };
-    inst.applyBatchConsumption = function() { return Promise.resolve(null); };
+    inst.syncBatchRemainder = function() { return Promise.resolve(null); };
     inst.loadEvents = function() { return Promise.resolve(); };
     inst.loadCuts = function() { return Promise.resolve(); };
     inst.applyEventStatuses = function() {};
@@ -63,12 +63,15 @@ assert(inst.posts[0].params['t1105'] === 1,
     '#4564: отметка пишет «Кол-во резок факт» = 1 — источник числа проходов');
 
 // ── частично выполненное: сделано 8 из 60 → следующая отметка пишет 9 (вход #4564) ──
+// (#4902: погонаж накапливается от прежнего значения; после 8 отметок пульт пишет
+// 8×300 = 2400 — сетап приведён к состоянию, которое пишет новый пульт)
 var inst3 = makeInst('8');
+inst3.currentCut.meterage = '2400';
 inst3.markPassDone(false);
 assert(inst3.posts.length > 0 && inst3.posts[0].params['t1105'] === 9,
     '#4564: сделано 8 → отмечается проход 9');
 assert(inst3.posts[0].params['t1104'] === 2700,
-    '#4564: «Погонаж факт» = 9 × 300 (погонаж считается ОТ числа проходов, а не наоборот)');
+    '#4564/#4902: «Погонаж факт» = прежние 2400 (8×300) + 300 за девятую резку');
 
 // ── когда все 60 проходов реально отмечены — тогда блок законен ──
 var inst2 = makeInst('60');

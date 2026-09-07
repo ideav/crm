@@ -44,7 +44,8 @@ function makeInst(batchAfterReload) {
     inst.busy = false;
     inst.meta = { cut: CUT_META, batch: BATCH_META };
     inst.currentCut = { id: '90', batchId: '77', status: 'В работе',
-        counterStart: '109890', counterEnd: '109610', runLength: '280', plannedRuns: '16' };
+        counterStart: '109890', counterEnd: '109610', meterage: '280', jumboNo: 'J-1',
+        runLength: '280', plannedRuns: '16' };
     inst.currentCutId = '90';
     inst.cuts = [];
     inst.batches = [];
@@ -107,15 +108,15 @@ setTimeout(function() {
             var keep = makeInst(null);
             var batch = { id: '77', materialId: 'm', remainderM: 109890, remainder: 0, widthMm: 500, active: 'X' };
             keep.findBatch = function(id) { return String(id) === '77' ? batch : null; };
-            keep.applyBatchConsumption({ batchId: '77' }, 280, true);
+            keep.syncBatchRemainder({ batchId: '77' }, 109610, true);
             var f = keep.posts[0].params;
             assert(f['t8456'] === 109610 && !('t16427' in f),
-                '#4374: расход списан, но партия с остатком остаётся «В работе» (рулон нужен дальше)');
+                '#4374: остаток сведён со счётчиком, партия с остатком остаётся «В работе» (рулон нужен дальше)');
 
             var used = makeInst(null);
             var last = { id: '77', materialId: 'm', remainderM: 280, remainder: 0, widthMm: 500, active: 'X' };
             used.findBatch = function(id) { return String(id) === '77' ? last : null; };
-            used.applyBatchConsumption({ batchId: '77' }, 280, true);
+            used.syncBatchRemainder({ batchId: '77' }, 0, true);
             var g = used.posts[0].params;
             assert(g['t8456'] === 0 && g['t16427'] === '0',
                 '#3861/#4374: партия исчерпана → «В работе» снят нулём (#4366)');
@@ -123,7 +124,7 @@ setTimeout(function() {
             var mid = makeInst(null);
             var half = { id: '77', materialId: 'm', remainderM: 1000, remainder: 0, widthMm: 500, active: 'X' };
             mid.findBatch = function(id) { return String(id) === '77' ? half : null; };
-            mid.applyBatchConsumption({ batchId: '77' }, 200, false);
+            mid.syncBatchRemainder({ batchId: '77' }, 200, false);
             assert(!('t16427' in mid.posts[0].params),
                 '#3861: без finishMode «В работе» не трогаем');
 

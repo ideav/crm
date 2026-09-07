@@ -276,23 +276,24 @@ function makeInst(opts) {
     assertEqual(labels, ['Фото брака'], '#4783 п.10: кнопки «Сохранить показания» в секции нет');
 
     var inputs = section.querySelectorAll('.atex-sl-grid')[0].querySelectorAll('.atex-sl-input');
-    var counterEnd = inputs[1];
-    counterEnd.value = '820';
-    counterEnd.dispatch('input');
-    counterEnd.dispatch('blur');
+    // (#4902: «Счётчик кон.» стал вычисляемым (readonly) — правим вводимый «Счётчик нач.»)
+    var cstart = inputs[0];
+    cstart.value = '820';
+    cstart.dispatch('input');
+    cstart.dispatch('blur');
     assert(inst.posts.length === 1 && inst.posts[0].path.indexOf('_m_set/90') === 0,
         '#4783 п.10: выход из ячейки сохраняет показания (одна запись)');
     assertEqual(inst.readingsStatusEl.textContent, 'сохраняем…',
         '#4783 п.10: у заголовка секции видно, что показания записываются');
 
-    counterEnd.dispatch('blur');
-    counterEnd.dispatch('change');
+    cstart.dispatch('blur');
+    cstart.dispatch('change');
     assert(inst.posts.length === 1, '#4783 п.10: выход из НЕТРОНУТОЙ ячейки записи не делает');
 
     // правка, сделанная ПОКА идёт запись, не теряется — сохранение повторяется следом
-    counterEnd.value = '810';
-    counterEnd.dispatch('input');
-    counterEnd.dispatch('change');
+    cstart.value = '810';
+    cstart.dispatch('input');
+    cstart.dispatch('change');
     assert(inst.posts.length === 1 && inst.readingsRetry === true,
         '#4783 п.10: правка во время записи ждёт своей очереди, а не теряется');
     pending.push(flush().then(function() {
