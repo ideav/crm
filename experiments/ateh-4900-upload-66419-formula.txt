@@ -1,0 +1,1 @@
+(s => /фольга/i.test(s) ? 'MB' : s.trim().split(/\s+/)[0].match(/^[A-Z0-9]{3,}/)?.[0] || s.trim().split(/\s+/)[0])('[Вид сырья]'.replace(/^Образец\s*/i, '').replace(/MCHR ZNAK 2 Extra/i, 'MR194').replace(/MCHR ZNAK 1 Special/i, 'MW411').replace(/MCHR ZNAK 3 Special/i, 'MWR113L').replace(/MCHR ZNAK 4 Extra/i, 'MWR400L').replace(/MCHR ZNAK 5 Premium/i, 'MR314L'))
