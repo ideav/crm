@@ -94,8 +94,10 @@ function makeInst(opts) {
     var inst = Object.create(Controller.prototype);
     inst.busy = false;
     // сценарий тикета: план 100 проходов по 450 м, оператор сделал 99
+    // (#4902: «№ джамбо» обязателен для готовой резки — сценарии «весь план» задаём с ним)
     inst.currentCut = { id: '90', batchId: '77', status: 'В работе', actualRuns: o.actualRuns || '',
         meterage: '', counterStart: '60000', counterEnd: '', runLength: '450',
+        jumboNo: 'J-1',
         plannedRuns: String(o.plannedRuns == null ? 100 : o.plannedRuns) };
     inst.currentCutId = '90';
     inst.shiftEvents = [];
@@ -116,7 +118,8 @@ function makeInst(opts) {
     inst.finished = 0;
     inst.post = function(path, params) { this.posts.push({ path: path, params: params }); return Promise.resolve({}); };
     inst.createEvent = function(ev) { this.events.push(ev); return Promise.resolve({}); };
-    inst.applyBatchConsumption = function(cut, m, finishMode) { this.consumed.push({ m: m, finishMode: finishMode }); return Promise.resolve(null); };
+    // #4902: партия сводится к «Счётчику кон.» (было: applyBatchConsumption списывал метры)
+    inst.syncBatchRemainder = function(cut, counterEnd, finishMode) { this.consumed.push({ counterEnd: counterEnd, finishMode: finishMode }); return Promise.resolve(null); };
     inst.loadEvents = function() { return Promise.resolve(); };
     inst.loadCuts = function() { return Promise.resolve(); };
     inst.applyEventStatuses = function() {};
@@ -144,8 +147,8 @@ async function markBatchScenarios() {
     assert(p['t1102'] === 15450, '#4604: «Счётчик кон.» = 60000 − 44550 (счётчик мотает назад, #4321)');
     assert(p['t1110'] === 44550, '#3861: расход сырья — накопленный погонаж резки');
     await flush();
-    assert(inst.consumed.length === 1 && inst.consumed[0].m === 44550,
-        '#3861: с партии списаны метры всех 99 проходов разом');
+    assert(inst.consumed.length === 1 && inst.consumed[0].counterEnd === 15450,
+        '#4902: «Остаток, м» партии сведён со «Счётчиком кон.» (60000 − 44550) после всех 99 проходов разом');
     assert(inst.consumed[0].finishMode === false, '#4604: 99 из 100 — задание НЕ завершается');
     assert(inst.finished === 0, '#4604: недоделанный план не завершает задание (остаётся в работе)');
     assert(inst.events.length === 1 && inst.events[0].value === '99',
@@ -154,12 +157,14 @@ async function markBatchScenarios() {
         '#4604: оператору сказано, сколько отмечено: «+99 → 99 из 100»');
 
     // ── уже отмеченные проходы не теряются и не пересчитываются заново ────────────────────────
+    // (#4902: каждая отметка пишет и «Погонаж факт» — после 8 отметок он 8×450)
     var partial = makeInst({ actualRuns: '8' });
+    partial.currentCut.meterage = String(8 * 450);
     partial.markPassDone(false, 99);
     assert(partial.posts[0].params['t1105'] === 99, '#4604: было 8 → стало 99 (ввод — «сколько сделано всего»)');
     await flush();
-    assert(partial.consumed[0].m === core.round3(91 * 450),
-        '#4604: с партии списаны только НОВЫЕ 91 проход, а не все 99');
+    assert(partial.consumed[0].counterEnd === 60000 - core.round3(8 * 450 + 91 * 450),
+        '#4604/#4902: в остатке партии видны только НОВЫЕ 91 проход (8 уже были в погонаже)');
 
     // ── ввод, равный плану, завершает задание — как «✓✓ Готовы все» ───────────────────────────
     var full = makeInst();

@@ -546,7 +546,8 @@ assertEqual(core.metersFromArea(350, 0), 0, '#3861 metersFromArea: ширина 
     assertEqual(inst.allCutsDone(), false, '#3861 allCutsDone: смена закрыта → false');
 })();
 
-// applyBatchConsumption: списать расход (м), пересчитать м² по ширине, finishMode → снять «В работе»
+// syncBatchRemainder (#4902): «Остаток, м» партии = «Счётчик кон.» резки; м² — по ширине,
+// finishMode снимает «В работе» только у исчерпанной (счётчик в нуле) партии
 (function() {
     var Controller = require('../download/atex/js/slitter.js').Controller;
     var inst = Object.create(Controller.prototype);
@@ -560,19 +561,19 @@ assertEqual(core.metersFromArea(350, 0), 0, '#3861 metersFromArea: ширина 
     ] } };
     var captured = null;
     inst.post = function(path, params) { captured = { path: path, params: params }; return Promise.resolve({}); };
-    inst.applyBatchConsumption({ batchId: '77' }, 200, false);
-    assertEqual(captured.path, '_m_set/77?JSON', '#3861 applyBatchConsumption: пишет в «Партия сырья»');
-    assertEqual(captured.params['t1148'], 800, '#3861 applyBatchConsumption: Остаток,м = 1000−200 (расход)');
-    assertEqual(captured.params['t1050'], 400, '#3861 applyBatchConsumption: Остаток,м² = 800×500/1000 (по ширине)');
-    assertEqual('t1160' in captured.params, false, '#3861 applyBatchConsumption: без finishMode «В работе» не трогаем');
+    inst.syncBatchRemainder({ batchId: '77' }, 800, false);
+    assertEqual(captured.path, '_m_set/77?JSON', '#4902 syncBatchRemainder: пишет в «Партия сырья»');
+    assertEqual(captured.params['t1148'], 800, '#4902 syncBatchRemainder: Остаток,м = «Счётчик кон.»');
+    assertEqual(captured.params['t1050'], 400, '#4902 syncBatchRemainder: Остаток,м² = 800×500/1000 (по ширине)');
+    assertEqual('t1160' in captured.params, false, '#4902 syncBatchRemainder: без finishMode «В работе» не трогаем');
     // #4374: завершение резки САМО ПО СЕБЕ партию из оборота не выводит — на рулоне остались метры.
-    inst.applyBatchConsumption({ batchId: '77' }, 0, true);
+    inst.syncBatchRemainder({ batchId: '77' }, 200, true);
     assertEqual('t1160' in captured.params, false,
-        '#4374 applyBatchConsumption: finishMode с остатком → «В работе» не трогаем');
+        '#4374 syncBatchRemainder: finishMode с остатком → «В работе» не трогаем');
     // #4366: булев реквизит снимаем нулём (как «Зафиксировано» в планировании, #3508).
-    inst.applyBatchConsumption({ batchId: '77' }, 1000, true);
+    inst.syncBatchRemainder({ batchId: '77' }, 0, true);
     assertEqual(captured.params['t1160'], '0',
-        '#3861/#4374 applyBatchConsumption: партия ИСЧЕРПАНА → «В работе» снят нулём');
+        '#3861/#4374 syncBatchRemainder: партия ИСЧЕРПАНА (счётчик в нуле) → «В работе» снят нулём');
 })();
 
 // markPassDone: ✓ Готово пишет «Погонаж факт» и «Расход сырья» (погонные метры) в резку
@@ -594,7 +595,7 @@ assertEqual(core.metersFromArea(350, 0), 0, '#3861 metersFromArea: ширина 
     var posts = [];
     inst.post = function(path, params) { posts.push({ path: path, params: params }); return Promise.resolve({}); };
     inst.createEvent = function() { return Promise.resolve({}); };
-    inst.applyBatchConsumption = function() { return Promise.resolve(null); };
+    inst.syncBatchRemainder = function() { return Promise.resolve(null); };
     inst.loadEvents = function() { return Promise.resolve(); };
     inst.loadCuts = function() { return Promise.resolve(); };
     inst.applyEventStatuses = function() {};

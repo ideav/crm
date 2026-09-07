@@ -100,7 +100,9 @@ function fieldsOf(inst, idx) { return (inst.posts[idx || 0] || {}).params || {};
 
 // ── 2. finishCut: «Закончено»=now И «В работе»=0 в одном _m_set ────────────────────────────────
 (function() {
+    // (#4902: завершение требует «№ джамбо» и накопленный погонаж)
     var inst = makeInst({ id: '90', status: 'В работе', counterStart: '1200', counterEnd: '750',
+        meterage: '450', jumboNo: 'J-1',
         runLength: '450', plannedRuns: '1', inWork: '1' });
     inst.finishCut();
     var f = fieldsOf(inst);
@@ -133,13 +135,14 @@ function fieldsOf(inst, idx) { return (inst.posts[idx || 0] || {}).params || {};
     var batch = { id: '77', materialId: 'm', remainderM: 1000, remainder: 500, widthMm: 500, active: '1' };
     inst.findBatch = function(id) { return String(id) === '77' ? batch : null; };
     inst.materialWidths = {};
-    inst.applyBatchConsumption(inst.currentCut, 300, true);
+    // #4902: партия сводится к «Счётчику кон.» (аргумент counterEnd), а не вычитанием расхода
+    inst.syncBatchRemainder(inst.currentCut, 700, true);
     var f = fieldsOf(inst);
-    assert(f.t8456 === 700, '#4366: остаток партии списан (1000 − 300)');
+    assert(f.t8456 === 700, '#4366/#4902: остаток партии = «Счётчик кон.» (700)');
     // #4374: партию из оборота выводит только ИСЧЕРПАНИЕ, а не сам факт завершения резки.
     assert(!('t16427' in f), '#4374: партия с остатком остаётся «В работе»');
     inst.posts = [];
-    inst.applyBatchConsumption(inst.currentCut, 1000, true);
+    inst.syncBatchRemainder(inst.currentCut, 0, true);
     assert(fieldsOf(inst).t16427 === '0', '#4366: исчерпанная партия — «В работе» снимается нулём');
 })();
 
@@ -149,7 +152,9 @@ function fieldsOf(inst, idx) { return (inst.posts[idx || 0] || {}).params || {};
         defectM: '', notes: '' });
     inst.saveReadings();
     var f = fieldsOf(inst);
-    assert(f.t1166 === '', '#4366: очищенный «Счётчик кон.» уходит пустым значением (сохранится)');
+    // #4902 п.3: «Счётчик кон.» — вычисляемое показание, автосохранением по ячейке
+    // не пишется (его записывает отметка резки), поэтому в теле его нет вовсе.
+    assert(!('t1166' in f), '#4902: вычисляемый «Счётчик кон.» автосохранением не пишется');
     assert(f.t8458 === '' && f.t1171 === '', '#4366: очищенные «Брак, м» и «Примечания» уходят пустыми');
 })();
 

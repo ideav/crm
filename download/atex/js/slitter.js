@@ -83,6 +83,12 @@
         defectM: 'Брак, м',
         defectQty: 'Брак, шт',   // #4896: количество бракованных рулонов (785730)
         defectPhoto: 'Фото брака',
+        // #4902: расход джамбо и «№ джамбо» — реквизиты САМОЙ резки (787042/787043/787045):
+        // оператор вводит их к отметке резки, отметка включает их в погонаж и очищает
+        // (0); «№ джамбо» остаётся. До #4902 расход жил в записи «Номера джамбо» (82374).
+        jumboWork: 'Рабочий расход, м',
+        jumboOff: 'К списанию, м',
+        jumboNo: '№ джамбо',
         plannedRuns: 'Кол-во план',
         // #4564: СКОЛЬКО ПРОХОДОВ УЖЕ СДЕЛАНО — хранится в самом задании (657315, таблица 1078).
         // Единственный источник этого числа: заголовок «Резка N из M», отметка прохода и
@@ -182,6 +188,30 @@
     // даёт 0, и завершение резки его не пропустит. Записи с прежней формулой заказчик чистит.
     function meterageFromCounters(start, end) {
         return round3(Math.max(0, toNumber(start) - toNumber(end)));
+    }
+
+    // #4902: погонаж НАКАПЛИВАЕТСЯ с каждой отмеченной резкой: прежнее значение +
+    // «Метраж, м» × число отмеченных резок («Готовы несколько» умножает) + «Рабочий
+    // расход, м» (протяжка джамбо) + «К списанию, м» + «Брак, м». Плановый метраж
+    // берётся из задания, остальное вводит оператор.
+    function meterageAccumulate(prevMeterage, newRuns, runLength, workSpent, writeOff, defectM) {
+        return round3(toNumber(prevMeterage)
+            + Math.max(0, toNumber(newRuns)) * toNumber(runLength)
+            + toNumber(workSpent) + toNumber(writeOff) + toNumber(defectM));
+    }
+
+    // #4902 п.3: «Счётчик кон.» = «Счётчик нач.» − «Погонаж факт, м» — вычисляемое
+    // показание (в карточке ввода нет). Может уйти в минус: сырья на план не хватило
+    // (#4321 — прятать это нулём нельзя, оператор поставит новый рулон).
+    function counterEndFromMeterage(start, meterage) {
+        return round3(toNumber(start) - toNumber(meterage));
+    }
+
+    // #4902: ограничение РМ — «Брак, м» должен быть заполнен, если заполнен «Брак, шт»:
+    // бракованные рулоны без метража теряют расход сырья (он не войдёт в погонаж).
+    // Ноль метража при ненулевом количестве — то же незаполненное.
+    function defectMRequired(defectQty, defectM) {
+        return toNumber(defectQty) > 0 && !(toNumber(defectM) > 0);
     }
 
     // #4860: финальный «Счётчик кон.» с вычетом расхода джамбо. Рабочий расход
@@ -1185,6 +1215,9 @@
         nextStatus: nextStatus,
         isDone: isDone,
         meterageFromCounters: meterageFromCounters,
+        meterageAccumulate: meterageAccumulate,     // #4902: накопление погонажа по отметкам
+        counterEndFromMeterage: counterEndFromMeterage, // #4902: счётчик кон. = нач. − погонаж
+        defectMRequired: defectMRequired,           // #4902: «Брак, м» обязателен при «Брак, шт»
         jumboFinalCounter: jumboFinalCounter,       // #4860: счётчик кон. за вычетом расхода джамбо
         hasJumboData: hasJumboData,                 // #4860: есть ли что учитывать в «Номере джамбо»
         jumboSaveAction: jumboSaveAction,           // #4860: new/set/null для записи «Номера джамбо»
@@ -1758,6 +1791,11 @@
                 defectM: val(CUT_REQ.defectM),
                 defectQty: val(CUT_REQ.defectQty),  // #4896: брак, шт
                 defectPhoto: val(CUT_REQ.defectPhoto),
+                // #4902: расход джамбо и «№ джамбо» — реквизиты самой резки (787042/787043/787045).
+                // «№ джамбо» — ссылка: показываем лейбл цели (номер), не id.
+                jumboWorkSpent: val(CUT_REQ.jumboWork),
+                jumboWriteOff: val(CUT_REQ.jumboOff),
+                jumboNo: parseRef(val(CUT_REQ.jumboNo)).label,
                 plannedRuns: valAny(CUT_PLANNED_RUNS_NAMES),
                 // #4579: СДЕЛАННЫЕ ПРОХОДЫ обязаны быть и здесь. Этот загрузчик даёт `currentCut` —
                 // именно ту запись, на которой оператор жмёт «✓ Готово». Без поля donePassCount
@@ -2783,9 +2821,9 @@
         return wrap;
     };
 
-    // #3459: Показания счётчика, погонаж (read-only, вычисляемый), брак, примечания.
-    // #4321: счётчик мотает НАЗАД (остаток сырья в рулоне): «Счётчик нач.» = остаток партии перед
-    // резкой, «Счётчик кон.» = остаток после неё, погонаж факт = счётчик нач. − счётчик кон.
+    // #3459: Показания счётчика, расход джамбо, брак, примечания. «Погонаж факт» и
+    // «Счётчик кон.» — вычисляемые (#4902): погонаж копится отметками резки, кон. =
+    // нач. − погонаж; счётчик мотает НАЗАД (остаток сырья в рулоне, #4321).
     AtexSlitter.prototype.renderReadings = function() {
         var self = this;
         var cut = this.currentCut;
@@ -2806,7 +2844,8 @@
             input.addEventListener('blur', function() { self.saveReadingsIfChanged(); });
         }
 
-        // Счётчик нач. — заполняется из остатка партии (batch.remainderM) при открытии резки
+        // Счётчик нач. — заполняется из остатка партии (batch.remainderM) при открытии резки;
+        // #4902 п.1: при отметке резки пишется в задание ТОЛЬКО если был пустой.
         var cStart = numInput(cut.counterStart, '0');
         cStart.addEventListener('input', function() { cut.counterStart = cStart.value; refreshMeterage(); });
         autosave(cStart);
@@ -2814,51 +2853,49 @@
         // виден строкой партии внизу; значение поля по-прежнему подставляется из неё.
         grid.appendChild(field('Счётчик нач.', cStart));
 
-        var cEnd = numInput(cut.counterEnd, '0');
-        cEnd.addEventListener('input', function() { cut.counterEnd = cEnd.value; refreshMeterage(); });
-        autosave(cEnd);
+        // #4902 п.3: «Счётчик кон.» = «Счётчик нач.» − «Погонаж факт» — вычисляемое
+        // показание, ввода нет (как и погонажа ниже). Пересчитывается на лету от
+        // «Счётчика нач.»; в задание его пишет отметка резки.
+        var cEnd = el('input', {
+            class: 'atex-sl-input', type: 'text', readonly: 'readonly',
+            placeholder: 'счётчик нач. − погонаж',
+            style: 'background:#f0f0f0;cursor:default'
+        });
         grid.appendChild(field('Счётчик кон.', cEnd));
 
-        // #4860: расход джамбо. Номер джамбо увидит упаковщик; рабочий расход —
-        // протяжка перед резкой, «К списанию» — остаток джамбо под утиль. Обе величины
-        // прибавляются к разнице счётчиков при завершении (конечная длина джамбо —
-        // за их вычетом) и живут в записи «Номера джамбо» (table 82374, up = задание).
-        // Карта инпутов пересоздаётся КАЖДЫЙ рендер: иначе здесь остались бы узлы,
-        // отвязанные от DOM, и предзаполнение из loadJumboRecord писало бы в мёртвые.
-        this.jumboInputs = {};
-        function jumboAutosave(input) {
-            input.addEventListener('change', function() { self.saveJumboIfChanged(); });
-            input.addEventListener('blur', function() { self.saveJumboIfChanged(); });
-        }
+        // #4860/#4902: расход джамбо — реквизиты самой резки (787042/787043/787045).
+        // Рабочий расход — протяжка перед резкой, «К списанию» — остаток джамбо под
+        // утиль; отметка резки включает обе величины (и «Брак, м») в погонаж и очищает
+        // поля (0), «№ джамбо» остаётся. Автосохранение — общее с показаниями (выход
+        // из ячейки); запись «Номера джамбо» (82374, up = задание) доводит те же данные
+        // до упаковщика при завершении (saveJumbo).
         var jumboNo = el('input', {
             class: 'atex-sl-input', type: 'text', placeholder: 'номер джамбо',
             value: cut.jumboNo || ''
         });
         jumboNo.addEventListener('input', function() { cut.jumboNo = jumboNo.value; });
-        jumboAutosave(jumboNo);
+        autosave(jumboNo);
         grid.appendChild(field('Номер джамбо', jumboNo));
-        this.jumboInputs.no = jumboNo;
 
         var jumboWork = numInput(cut.jumboWorkSpent, '0');
         jumboWork.addEventListener('input', function() { cut.jumboWorkSpent = jumboWork.value; });
-        jumboAutosave(jumboWork);
+        autosave(jumboWork);
         grid.appendChild(field('Рабочий расход, м', jumboWork));
-        this.jumboInputs.work = jumboWork;
 
         var jumboOff = numInput(cut.jumboWriteOff, '0');
         jumboOff.addEventListener('input', function() { cut.jumboWriteOff = jumboOff.value; });
-        jumboAutosave(jumboOff);
+        autosave(jumboOff);
         grid.appendChild(field('К списанию, м', jumboOff));
-        this.jumboInputs.off = jumboOff;
 
-        // Предзаполнение из существующей записи «Номера джамбо» этого задания —
-        // асинхронно: inputs обновятся, когда запись доедет (пульт не ждёт).
+        // Резолв существующей записи «Номера джамбо» этого задания — асинхронно,
+        // пульт не ждёт: к завершению резки id уже известен (new или set).
         this.loadJumboRecord(cut);
 
-        // #3459: Погонаж факт — вычисляемый (read-only), не сохраняется в БД отдельно
+        // #3459/#4902 п.2: Погонаж факт — накопленное значение (вычисляемое, read-only):
+        // отметка резки прибавляет к нему метраж × резок и расход джамбо с браком.
         var meterageDisplay = el('input', {
             class: 'atex-sl-input', type: 'text', readonly: 'readonly',
-            placeholder: 'вычисляется из счётчиков',
+            placeholder: 'копится отметками резки',
             style: 'background:#f0f0f0;cursor:default'
         });
         var meterField = field('Погонаж факт, м', meterageDisplay);   // #4321: без « (расчёт)» — подпись ломала вёрстку
@@ -2912,11 +2949,12 @@
         refreshMeterage();
         return section;
 
-        // Погонаж факт = «Счётчик нач.» − «Счётчик кон.» (#4321: счётчик мотает назад).
+        // #4902 п.2/п.3: оба вычисляемых поля выводят накопленное состояние резки;
+        // «Счётчик кон.» пересчитывается на лету от правимого «Счётчика нач.».
+        // Режут эти числа отметки резки, а не ввод оператора.
         function refreshMeterage() {
-            var suggested = core.meterageFromCounters(cut.counterStart, cut.counterEnd);
-            cut.meterage = String(suggested);
-            meterageDisplay.value = suggested;
+            meterageDisplay.value = cut.meterage == null ? '' : cut.meterage;
+            cEnd.value = core.counterEndFromMeterage(cut.counterStart, cut.meterage);
         }
     };
 
@@ -2952,6 +2990,9 @@
     // ── Действия / сохранение ──
 
     // Реквизиты резки в форме _m_set (t{reqId} по именам из метаданных).
+    // #4902: «Счётчик кон.» и «Погонаж факт» вычисляемые (кон. = нач. − погонаж,
+    // погонаж копится отметками резки) — здесь не пишутся; расход джамбо и «№ джамбо» —
+    // реквизиты самой резки, автосохранение по ячейке везёт их наравне с показаниями.
     AtexSlitter.prototype.cutFields = function(cut) {
         var meta = this.meta.cut;
         var fields = {};
@@ -2962,12 +3003,13 @@
         function num(v) { return (v === '' || v == null) ? '' : core.toNumber(v); }
         // #3557: статус резки не хранится отдельным реквизитом — выводится из событий.
         set(CUT_REQ.counterStart, num(cut.counterStart));
-        set(CUT_REQ.counterEnd, num(cut.counterEnd));
-        // #3459: погонаж вычисляемый, в БД не пишется
         set(CUT_REQ.defectM, num(cut.defectM));
         set(CUT_REQ.defectQty, num(cut.defectQty));   // #4896: брак, шт
         var defM2 = core.defectM2(cut.defectM, cut.materialWidthMm);
         if (defM2 > 0) set(CUT_REQ.defect, defM2);
+        set(CUT_REQ.jumboWork, num(cut.jumboWorkSpent));   // #4902
+        set(CUT_REQ.jumboOff, num(cut.jumboWriteOff));     // #4902
+        set(CUT_REQ.jumboNo, String(cut.jumboNo == null ? '' : cut.jumboNo).trim()); // #4902
         set(CUT_REQ.notes, cut.notes || '');
         return fields;
     };
@@ -3079,22 +3121,24 @@
         return this.cutAction(EV.skip, { setFinished: true, setInWork: false, message: 'Задание пропущено' });
     };
 
-    // #3861: списать расход (погонные метры) с остатка партии сырья резки. Основной
-    // остаток — «Остаток, м» = max(0, прежний − расход); «Остаток, м²» пересчитываем
-    // из метров по номинальной ширине (взаимовычисляемые) — пишем оба. finishMode —
-    // резка завершена: дополнительно снимаем у партии флаг «В работе».
-    AtexSlitter.prototype.applyBatchConsumption = function(cut, consumedM, finishMode) {
+    // #4902: остаток партии сырья синхронизируется со счётчиком резки: «Остаток, м» =
+    // «Счётчик кон.» (тот же рулон: счётчик мотает назад от остатка партии, #4321).
+    // «Остаток, м²» пересчитываем из метров по номинальной ширине (взаимовычисляемые).
+    // counterEnd может быть отрицательным (сырья на план не хватило) — переносим как есть,
+    // нулём не прячем. finishMode — резка завершена: дополнительно снимаем у партии
+    // флаг «В работе», когда остаток ушёл в ноль/минус.
+    AtexSlitter.prototype.syncBatchRemainder = function(cut, counterEnd, finishMode) {
         var batch = cut && cut.batchId ? this.findBatch(cut.batchId) : null;
         var batchMeta = this.meta.batch;
-        // #4580: списывать НЕКУДА — это не «нечего делать», а потерянный расход. Молча выходить
-        // нельзя (ТЗ §14): отметка прохода к этому моменту уже не пускает задание без партии,
-        // поэтому сюда попадаем только при рассинхроне справочника — о нём и говорим.
+        // #4580: писать остаток НЕКУДА — это не «нечего делать», а потерянная синхронизация.
+        // Молча выходить нельзя (ТЗ §14): отметка прохода к этому моменту уже не пускает
+        // задание без партии, поэтому сюда попадаем только при рассинхроне справочника.
         if (!batch || !batchMeta) {
             if (cut && cut.batchId) {
                 console.error('[slitter] #4580: партия ' + cut.batchId + ' не найдена в справочнике — '
-                    + 'расход ' + consumedM + ' м НЕ списан');
+                    + '«Остаток, м» не сведён со «Счётчиком кон.» (' + counterEnd + ' м)');
                 if (typeof this.notify === 'function') {
-                    this.notify('Партия сырья задания не найдена — расход не списан (' + consumedM + ' м)', 'error');
+                    this.notify('Партия сырья задания не найдена — остаток не сведён со счётчиком', 'error');
                 }
             }
             return Promise.resolve(null);
@@ -3102,7 +3146,7 @@
         var remMReq = reqIdByName(batchMeta, BATCH_REQ.remainderM);
         var remAreaReq = reqIdByName(batchMeta, BATCH_REQ.remainder);
         var width = core.toNumber(batch.widthMm) || core.toNumber((this.materialWidths || {})[String(batch.materialId)]);
-        var newRemM = core.applyConsumption(batch.remainderM, consumedM);
+        var newRemM = core.round3(core.toNumber(counterEnd));
         var newRemArea = width > 0 ? core.areaFromMeters(newRemM, width) : core.toNumber(batch.remainder);
         var bf = {};
         if (remMReq) bf['t' + remMReq] = newRemM;
@@ -3129,43 +3173,39 @@
     // #3557: Завершить резку — проверки счётчиков, «Закончено»=now, «В работе»=0,
     // событие «Завершить», фиксация факта рулонов в «Партиях ГП» (#3433). #3861:
     // остаток партии списывается расходом в markPassDone (applyBatchConsumption).
-    AtexSlitter.prototype.finishCut = function() {
+    // #3557/#4902: Завершить резку. Приходят ТОЛЬКО из отметки последней резки (markPassDone,
+    // там уже всё посчитано и записано) либо напрямую из старых сценариев. Проверки:
+    // «№ джамбо» обязательно (#4902), «Счётчик нач.» положительный, накопленный погонаж > 0.
+    // Пишет «Закончено»=now, снимает «В работе», остаток партии сведён со «Счётчиком кон.»
+    // в markPassDone (syncBatchRemainder), запись «Номера джамбо» доводит расход до упаковщика.
+    // extras — расход джамбо/брак ПОСЛЕДНЕЙ отметки: отметка очищает поля резки, а запись
+    // «Номера джамбо» хранит последнее введённое значение (накопленный расход виден в погонаже).
+    AtexSlitter.prototype.finishCut = function(extras) {
         var self = this;
         var cut = this.currentCut;
         if (this.busy || !cut) return;
         if (this.isCutLocked(cut)) { this.notify('Резка заблокирована очередью', 'error'); return; }
 
-        // Проверки заполнения
-        var cStart = core.toNumber(cut.counterStart);
-        // #4321: счётчик мотает назад, поэтому «Счётчик кон.» = 0 — законное показание (рулон
-        // домотали в ноль). Пустоту от нуля отличаем по самой строке, а не по числу.
-        var cEndFilled = String(cut.counterEnd == null ? '' : cut.counterEnd).trim() !== '';
-        // #4860: расход джамбо помимо резки — протяжка перед ней («Рабочий расход»)
-        // и списание остатка («К списанию»). Обе величины ПРИБАВЛЯЮТСЯ к разнице
-        // значений счётчика: «Счётчик кон.» и погонаж убывают... точнее, погонаж
-        // (расход сырья) растёт на них, а конечная длина джамбо — за их вычетом.
-        var jumboWork = core.toNumber(cut.jumboWorkSpent);
-        var jumboOff = core.toNumber(cut.jumboWriteOff);
-        var jumboExtra = core.round3(jumboWork + jumboOff);
-        if (jumboWork < 0 || jumboOff < 0) { this.notify('Рабочий расход и К списанию — неотрицательные метры', 'error'); return; }
-        if (jumboExtra > 0 && String(cut.jumboNo == null ? '' : cut.jumboNo).trim() === '') {
-            this.notify('Укажите «Номер джамбо»: без него нельзя списать рабочий расход/списание', 'error');
+        // #4902: «№ джамбо» — обязательное поле, без него нельзя отметить резку готовой.
+        if (String(cut.jumboNo == null ? '' : cut.jumboNo).trim() === '') {
+            this.notify('Укажите «№ джамбо» — без него нельзя отметить резку готовой', 'error');
             return;
         }
-        var meterage = core.meterageFromCounters(cut.counterStart, cut.counterEnd);
+        var cStart = core.toNumber(cut.counterStart);
         if (!(cStart > 0)) { this.notify('Заполните «Счётчик нач.» перед завершением', 'error'); return; }
-        if (!cEndFilled) { this.notify('Заполните «Счётчик кон.» перед завершением', 'error'); return; }
-        if (meterage <= 0) { this.notify('Погонаж факт не может быть нулевым (счётчик кон. < счётчик нач. — счётчик мотает назад)', 'error'); return; }
-        // #4860: вычет делаем ПОСЛЕ проверок — при отказе поле не показывает несохранённое.
-        if (jumboExtra > 0) {
-            cut.counterEnd = String(core.jumboFinalCounter(cut.counterEnd, jumboWork, jumboOff));
-            meterage = core.meterageFromCounters(cut.counterStart, cut.counterEnd);
-        }
+        // #4902 п.2: погонаж накоплен отметками резки; нулевой — резки не было.
+        var meterage = core.round3(core.toNumber(cut.meterage));
+        if (!(meterage > 0)) { this.notify('Погонаж факт не может быть нулевым — отметьте резки перед завершением', 'error'); return; }
+        // #4902 п.3: показание выводится из накопленного погонажа.
+        var counterEnd = core.counterEndFromMeterage(cut.counterStart, meterage);
+        var lastWork = extras && extras.workSpent != null ? extras.workSpent : core.toNumber(cut.jumboWorkSpent);
+        var lastOff = extras && extras.writeOff != null ? extras.writeOff : core.toNumber(cut.jumboWriteOff);
 
         this.setBusy(true);
 
-        // 1. Погонаж (резка + расход джамбо, #4860) + «Закончено»=now + снять галку «В работе»
-        //    (#4366: нулём, и пустые значения теперь доезжают до сервера — см. post)
+        // «Закончено»=now + снять галку «В работе» (#4366: нулём, и пустые значения
+        // теперь доезжают до сервера — см. post). Погонаж/счётчик/расход уже записаны
+        // отметкой — повторяем идемпотентно: прямой вызов завершения тоже всё доведёт.
         var meta = this.meta.cut;
         var meterageRid = reqIdByName(meta, CUT_REQ.meterage);
         var rashodRid = reqIdByName(meta, CUT_REQ.rashod);
@@ -3176,17 +3216,16 @@
         var fields = {};
         if (meterageRid) fields['t' + meterageRid] = meterage;
         if (rashodRid) fields['t' + rashodRid] = meterage; // #3861: расход сырья, погонные метры
-        // #4860: счётчик кон. с вычетом расхода джамбо — иначе партия спишет меньше,
-        // чем ушло джамбо (расход на протяжку и списание остались бы в остатке).
-        if (jumboExtra > 0 && counterEndRid) fields['t' + counterEndRid] = core.toNumber(cut.counterEnd);
+        if (counterEndRid) fields['t' + counterEndRid] = counterEnd;   // #4902 п.3
         if (finishedRid) { cut.finishedAt = this.eventDateTime(); fields['t' + finishedRid] = cut.finishedAt; }
         if (inWorkRid) { cut.inWork = ''; fields['t' + inWorkRid] = '0'; }
 
         this.post('_m_set/' + cut.id + '?JSON', fields).then(function() {
             cut.meterage = String(meterage);
+            cut.counterEnd = String(counterEnd);
             cut.status = 'Завершена';
-            // #3861: остаток партии (Остаток,м + Остаток,м²) уже списан расходом в
-            // markPassDone (applyBatchConsumption) перед вызовом finishCut — здесь не трогаем.
+            // Остаток партии сведён со «Счётчиком кон.» в markPassDone
+            // (syncBatchRemainder) перед вызовом finishCut — здесь не трогаем.
         }).then(function() {
             // 3. Событие «Завершить»
             return self.createEvent({ type: EV.finish, value: String(meterage) }, cut.id);
@@ -3196,15 +3235,18 @@
             // #3433: зафиксировать факт рулонов в «Партиях ГП»
             return self.recordActualRolls(cut);
         }).then(function() {
-            // #4860: рабочий расход и «К списанию» расходуют джамбо помимо резки —
-            // списываем их с остатка партии, иначе остаток окажется завышен ровно на них.
-            if (jumboExtra > 0) return self.applyBatchConsumption(cut, jumboExtra, true);
-            return null;
-        }).then(function() {
-            // #4860: запись «Номера джамбо» (up = задание) со всеми полями —
-            // в т.ч. Конечная длина за вычетом расхода и списания. Финальная запись —
-            // всегда, не по подписи: за резку счётчики и резки уехали вперёд.
-            return self.saveJumbo(cut, { quiet: true });
+            // #4860/#4902: запись «Номера джамбо» (up = задание) — номер, счётчики, резки
+            // и расход последней отметки (поля резки уже очищены). У записи своя формула
+            // «Конечная длина = показание − расход − списание» (#4860), поэтому показание
+            // восстанавливаем ДО вычета последнего расхода: конечная сойдётся с фактом.
+            // Финальная запись — всегда, не по подписи: за резку счётчики и резки уехали.
+            var jumboView = {
+                jumboNo: cut.jumboNo, counterStart: cut.counterStart,
+                counterEnd: core.round3(core.toNumber(counterEnd) + core.toNumber(lastWork) + core.toNumber(lastOff)),
+                actualRuns: cut.actualRuns,
+                jumboWorkSpent: lastWork, jumboWriteOff: lastOff, defectM: cut.defectM
+            };
+            return self.saveJumbo(cut, { quiet: true, jumboView: jumboView });
         }).then(function() {
             return self.loadBatches();
         }).then(function() {
@@ -3217,7 +3259,6 @@
             // а форма оставалась со старым статусом и показывала «Ошибка завершения».
             var batch = cut.batchId ? self.findBatch(cut.batchId) : null;
             self.notify('Резка завершена. Погонаж: ' + meterage + ' м'
-                + (jumboExtra > 0 ? ' (вкл. расход джамбо: ' + jumboExtra + ' м)' : '')
                 + (batch ? '. Остаток партии: ' + core.round3(batch.remainderM || 0) + ' м' : ''), 'success');
             self.advanceToNextCut(); // #3583: переключить на следующее задание
         }).catch(function(err) {
@@ -3227,14 +3268,17 @@
         });
     };
 
-    // #3583: отметить выполненные проходы. «Готово» (markAll=false) — один проход,
-    // «Готовы все» (markAll=true) — все (с подтверждением). Увеличивает номер прохода,
-    // пересчитывает «Счётчик кон.» = «Счётчик нач.» − проходы×метраж (#4321: счётчик мотает назад) и «Погонаж факт»,
-    // пишет событие «Резка» (значение = номер прохода). Когда отмечены все проходы —
-    // завершает задание (finishCut) и переключает на следующее.
+    // #3583/#4902: отметить выполненные проходы. «Готово» (markAll=false) — один проход,
+    // «Готовы все» (markAll=true) — все (с подтверждением). Одна отметка записывает:
+    // «Погонаж факт» += «Метраж, м» × отмеченных резок + «Рабочий расход, м» + «К списанию, м»
+    // + «Брак, м» (накопление, #4902 п.2); «Счётчик кон.» = «Счётчик нач.» − погонаж (п.3);
+    // «Счётчик нач.» — из «Остатка, м» партии, только если был пуст (п.1); расходные поля
+    // оператора идут в расчёт и очищаются (0), «№ джамбо» остаётся (п.4); «Остаток, м»
+    // партии = «Счётчик кон.». Пишет событие «Резка» (значение = номер прохода). Когда
+    // отмечены все проходы — завершает задание (finishCut) и переключает на следующее.
     // #4604: requestedTarget — сколько проходов выполнено ВСЕГО (кнопка «✓N Готовы несколько»,
-    // askPassCount). Одна отметка на любое число проходов: та же арифметика (погонаж, счётчик,
-    // расход партии), только шаг не единичный — 99 проходов это одна запись, а не 99 нажатий.
+    // askPassCount). Одна отметка на любое число проходов: та же арифметика, только шаг не
+    // единичный — 99 проходов это одна запись, а не 99 нажатий.
     AtexSlitter.prototype.markPassDone = function(markAll, requestedTarget) {
         var self = this;
         var cut = this.currentCut;
@@ -3261,44 +3305,75 @@
 
         var run = function() {
             // #4580: БЕЗ «Партии сырья» ПРОХОД НЕ ОТМЕЧАЕТСЯ. Партия — не формальность: из её
-            // остатка пульт подставляет «Счётчик нач.» (без него «Счётчик кон.» уходит в минус),
-            // и в неё же списывается расход (applyBatchConsumption). Задание без партии оператор
-            // отработал, а система молча не записала ни счётчик, ни расход — боевое #4580
-            // (Станок 3, «Резка 5 из 45»: счётчик пуст, «Счётчик кон.» −1800). Правило
-            // «у задания есть Партия сырья» есть в планировании (#4452, ТЗ §15) — здесь та же мерка
-            // на входе работы. Партию выбирают тут же, в блоке «Партии сырья».
+            // остатка пульт подставляет «Счётчик нач.» (#4902 п.1) и с ней сводит остаток
+            // (syncBatchRemainder). Задание без партии оператор отработал, а система молча не
+            // записала ни счётчик, ни расход — боевое #4580 (Станок 3, «Резка 5 из 45»:
+            // счётчик пуст, «Счётчик кон.» −1800). Правило «у задания есть Партия сырья» есть
+            // в планировании (#4452, ТЗ §15) — здесь та же мерка на входе работы.
             if (!(cut.batchId && String(cut.batchId).trim() !== '')) {
                 self.notify('У задания нет «Партии сырья» — выберите партию: из её остатка берётся '
-                    + '«Счётчик нач.», в неё же списывается расход', 'error');
+                    + '«Счётчик нач.», с ней сводится остаток', 'error');
                 return;
             }
-            // #4580: «Счётчик нач.» нужен УЖЕ НА ПЕРВОМ проходе, а не только при завершении.
-            // «Счётчик кон.» считается от него назад (#4321), и при пустом начале запись уходила в
-            // минус: боевое — «Счётчик нач.» пуст, 4 прохода × 450 → «Счётчик кон.» −1800. Отрицательный
-            // остаток рулона показанием не бывает; пустое значение нулём не подменяем (ТЗ §14) —
-            // просим заполнить. Ноль ЗАПОЛНЕННЫЙ законен: рулон домотали в ноль (#4321).
+            // #4902 п.1: «Счётчик нач.» = «Остаток, м» партии — обновляется ТОЛЬКО 1 раз,
+            // если пустое. Заполненное не трогаем никогда (оператор мог поправить показание).
+            // Из взять нечего (партии нет в пуле / остаток пуст) — просим заполнить руками:
+            // пустое начало сделало «Счётчик кон.» отрицательным (боевое #4580: 4×450 → −1800).
             var startFilled = String(cut.counterStart == null ? '' : cut.counterStart).trim() !== '';
             if (!startFilled) {
-                self.notify('Заполните «Счётчик нач.» — от него считается «Счётчик кон.» (счётчик мотает назад)', 'error');
-                return;
+                var srcBatch = self.findBatch(cut.batchId);
+                var remainderM = srcBatch ? core.toNumber(srcBatch.remainderM) : 0;
+                if (!(remainderM > 0)) {
+                    self.notify('Заполните «Счётчик нач.» — из «Остатка, м» партии взять нечего '
+                        + '(счётчик мотает назад, от него считается «Счётчик кон.»)', 'error');
+                    return;
+                }
+                cut.counterStart = String(core.round3(remainderM));
             }
             // Завершение задания требует ПОЛОЖИТЕЛЬНОГО «Счётчик нач.» (как finishCut).
             if (target >= total && !(core.toNumber(cut.counterStart) > 0)) {
                 self.notify('Заполните «Счётчик нач.» перед завершением задания', 'error');
                 return;
             }
+            // #4902: «№ джамбо» обязательно для готовой резки — проверяем ДО записи,
+            // чтобы отказ не оставлял полузаписанного задания.
+            if (target >= total && String(cut.jumboNo == null ? '' : cut.jumboNo).trim() === '') {
+                self.notify('Укажите «№ джамбо» — без него нельзя отметить резку готовой', 'error');
+                return;
+            }
+            // #4902: «Брак, м» обязателен при заполненном «Брак, шт» — иначе метраж брака
+            // не войдёт в погонаж и расход сырья потеряется.
+            if (core.defectMRequired(cut.defectQty, cut.defectM)) {
+                self.notify('Заполните «Брак, м» — он обязателен при заполненном «Брак, шт»', 'error');
+                return;
+            }
             self.setBusy(true);
-            var meterage = core.round3(target * runLength);
-            // #3861: расход сырья этого нажатия (погонные метры) = новые проходы × «Метраж, м».
-            var consumedM = core.round3(Math.max(0, target - done) * runLength);
-            // #4321: счётчик мотает НАЗАД (остаток сырья в рулоне) — «Счётчик кон.» = «Счётчик нач.»
-            // МИНУС отмотанный погонаж. Совпадает с остатком партии после списания (applyBatchConsumption
-            // ниже вычитает те же метры). Уходит в минус — сырья на план не хватило: рулон кончится
-            // раньше, оператор поставит новый и поправит показание (прятать это нулём нельзя).
-            var counterEnd = core.round3(core.toNumber(cut.counterStart) - meterage);
+            // #4902 п.2: погонаж накапливается: прежний + метраж новых резок + расход
+            // джамбо + списание + брак этой отметки. «Готовы несколько» умножает метраж
+            // на число отмеченных резок. Прежнее значение честно у резки, У КОТОРОЙ
+            // ЕСТЬ отметки; у не начатой (факт 0) погонажа нет — там поле могло быть
+            // загрязнено пред-заполнением «Счётчиком нач.» (#4351: остаток партии
+            // 49429.952 в «Погонаже факт»), и в накопление такой мусор не берём —
+            // первая отметка стартует с нуля.
+            var newRuns = Math.max(0, target - done);
+            var prevMeterage = done > 0 ? core.toNumber(cut.meterage) : 0;
+            var workSpent = core.toNumber(cut.jumboWorkSpent);
+            var writeOff = core.toNumber(cut.jumboWriteOff);
+            var defectM = core.toNumber(cut.defectM);
+            var meterage = core.meterageAccumulate(prevMeterage, newRuns, runLength, workSpent, writeOff, defectM);
+            // #4321/#4902 п.3: счётчик мотает НАЗАД — «Счётчик кон.» = «Счётчик нач.» −
+            // накопленный погонаж. Совпадает с «Остатком, м» партии (syncBatchRemainder
+            // ниже записывает то же число). Уходит в минус — сырья на план не хватило.
+            var counterEnd = core.counterEndFromMeterage(cut.counterStart, meterage);
             cut.meterage = String(meterage);
             cut.counterEnd = String(counterEnd);
             cut.actualRuns = String(target);   // #4564
+            // #4902 п.4: расходные поля ушли в расчёт — очищаем (0); «№ джамбо» остаётся.
+            cut.jumboWorkSpent = '0';
+            cut.jumboWriteOff = '0';
+            cut.defectM = '0';
+            cut.defectQty = '0';
+            cut.defect = '';
             var meta = self.meta.cut;
             var fields = {};
             var actualRunsRid = reqIdByName(meta, CUT_REQ.actualRuns);   // #4564
@@ -3307,6 +3382,12 @@
             var rashodRid = reqIdByName(meta, CUT_REQ.rashod);
             var startedRid = reqIdByAnyName(meta, CUT_STARTED_NAMES);
             var inWorkRid = reqIdByName(meta, CUT_REQ.inWork);
+            var counterStartRid = reqIdByName(meta, CUT_REQ.counterStart);
+            var workRid = reqIdByName(meta, CUT_REQ.jumboWork);   // #4902
+            var offRid = reqIdByName(meta, CUT_REQ.jumboOff);     // #4902
+            var defectMRid = reqIdByName(meta, CUT_REQ.defectM);
+            var defectQtyRid = reqIdByName(meta, CUT_REQ.defectQty);
+            var defectM2Rid = reqIdByName(meta, CUT_REQ.defect);
             // #4564: сделанные проходы пишем ПЕРВЫМ делом — это теперь единственный источник
             // числа выполненных проходов. Нет реквизита в базе — молчать нельзя: пульт
             // потеряет счёт проходов, а планирование не сможет разделить частично выполненное
@@ -3317,15 +3398,30 @@
             if (meterageRid) fields['t' + meterageRid] = meterage;
             if (counterEndRid) fields['t' + counterEndRid] = counterEnd;
             if (rashodRid) fields['t' + rashodRid] = meterage; // #3861: расход сырья, погонные метры (накопл. по резке)
+            // #4902 п.1: «Счётчик нач.» пишется один раз — здесь он мог быть только что
+            // взят из остатка партии.
+            if (counterStartRid && !startFilled) fields['t' + counterStartRid] = core.toNumber(cut.counterStart);
+            // #4902 п.4: расходные поля очищаются после расчёта (пустые значения доезжают
+            // до сервера — см. post, #4366).
+            if (workRid) fields['t' + workRid] = 0;
+            if (offRid) fields['t' + offRid] = 0;
+            if (defectMRid) fields['t' + defectMRid] = 0;
+            if (defectQtyRid) fields['t' + defectQtyRid] = 0;
+            if (defectM2Rid) fields['t' + defectM2Rid] = 0;
             if (startedRid && !cut.startedAt) { cut.startedAt = self.eventDateTime(); fields['t' + startedRid] = cut.startedAt; }
             if (inWorkRid) { cut.inWork = '1'; fields['t' + inWorkRid] = '1'; }
             self.post('_m_set/' + cut.id + '?JSON', fields)
                 .then(function() { return self.createEvent({ type: EV.pass, value: String(target) }, cut.id); })
-                // #3861: списать расход с остатка партии (Остаток,м + Остаток,м²) после каждого
-                // нажатия ✓ Готово / ✓✓ Готовы все. На последнем проходе — finishMode (снять «В работе»).
-                .then(function() { return self.applyBatchConsumption(cut, consumedM, target >= total); })
+                // #4902: «Остаток, м» партии = «Счётчик кон.» после каждой отметки. На
+                // последнем проходе — finishMode (снять «В работе» у исчерпанной партии).
+                .then(function() { return self.syncBatchRemainder(cut, counterEnd, target >= total); })
                 .then(function() {
-                    if (target >= total) { self.setBusy(false); self.finishCut(); return null; }
+                    if (target >= total) {
+                        self.setBusy(false);
+                        // расход последней отметки — в запись «Номера джамбо» (finishCut)
+                        self.finishCut({ workSpent: workSpent, writeOff: writeOff, defectM: defectM });
+                        return null;
+                    }
                     return self.loadEvents(cut.id)
                         .then(function() { return self.loadCuts(); })
                         .then(function() {
@@ -3375,13 +3471,15 @@
         (this.root || document.body).appendChild(overlay);
     };
 
-    // #3459: Сохраняет показания (счётчики, брак, примечания) в резку. Погонаж вычисляемый,
-    // в БД не пишется. Остаток партии обновляется только при завершении резки (finishCut).
+    // #3459: Сохраняет показания (счётчики, брак, расход джамбо, примечания) в резку.
+    // «Счётчик кон.» и «Погонаж факт» вычисляемые (#4902) — в подпись не входят и по
+    // ячейке не пишутся. Остаток партии обновляется при отметке резки (syncBatchRemainder).
     // #4783 п.10: подпись показаний — что именно ушло бы в запись. По ней отметка
     // «уже сохранено» отличает выход из нетронутой ячейки от настоящей правки.
     AtexSlitter.prototype.readingsSignature = function(cut) {
         if (!cut) return '';
-        return [cut.counterStart, cut.counterEnd, cut.defectM, cut.defect, cut.defectQty, cut.notes]
+        return [cut.counterStart, cut.defectM, cut.defect, cut.defectQty, cut.notes,
+                cut.jumboNo, cut.jumboWorkSpent, cut.jumboWriteOff]
             .map(function(v) { return String(v == null ? '' : v); }).join('|');
     };
 
@@ -3453,7 +3551,7 @@
     };
 
     AtexSlitter.prototype.findBatch = function(batchId) {
-        return this.batches.filter(function(b) { return String(b.id) === String(batchId); })[0] || null;
+        return (this.batches || []).filter(function(b) { return String(b.id) === String(batchId); })[0] || null;
     };
 
     // ── #4860: запись «Номера джамбо» (table 82374, up = задание) ────────────────
@@ -3462,11 +3560,12 @@
     // в окружении её нет — расход джамбо не ведётся, фича выключена).
 
     // Существующая запись «Номера джамбо» этого задания (up = задание). Нет — null.
-    // Читается ОДИН РАЗ на объект резки: renderReadings перестраивается чаще, чем
-    // меняется резка, а loadCuts пересоздаёт объекты — тогда чтение повторится само.
-    // Пока запрос летел, оператор что-то ввёл — заполняем только пустые поля.
-    // r[]: [гл. значение, ...реквизиты по порядку метаданных]; индексы берём по ИМЕНИ
-    // (colIndex), а не позицией: в таблице есть и «Фото», коду не нужная.
+    // #4902: осталась роль ТОЛЬКО резолва id — значения расхода живут в реквизитах
+    // самой резки (787042/787043/787045), а запись 82374 пишется при завершении
+    // (saveJumbo из finishCut); предзаполнять из неё поля нельзя — расход уже вошёл
+    // в погонаж, возврат в поля задвоил бы его на следующей отметке. Читается ОДИН
+    // РАЗ на объект резки: renderReadings перестраивается чаще, чем меняется резка,
+    // а loadCuts пересоздаёт объекты — тогда чтение повторится само.
     AtexSlitter.prototype.loadJumboRecord = function(cut) {
         var self = this;
         if (!cut || cut.id == null || cut.id === '') return Promise.resolve(null);
@@ -3482,24 +3581,6 @@
             var list = Array.isArray(rows) ? rows : ((rows && rows.object) || []);
             var row = list[0];
             cut.jumboRecordId = row ? String(row.i) : '';
-            var r = (row && row.r) || [];
-            var workIdx = colIndex(table, JUMBO_REQ.workSpent);
-            var offIdx = colIndex(table, JUMBO_REQ.writeOff);
-            var no = String(r[0] == null ? '' : r[0]);
-            var work = workIdx >= 0 ? String(r[workIdx] == null ? '' : r[workIdx]) : '';
-            var off = offIdx >= 0 ? String(r[offIdx] == null ? '' : r[offIdx]) : '';
-            // «Уже сохранено» — ровно то, что прочитано из БД: если оператор успел ввести
-            // своё, предзаполнение его не затрёт, и выход из ячейки запишет его правку.
-            self.savedJumbo = core.jumboSignature({ jumboNo: no, jumboWorkSpent: work, jumboWriteOff: off });
-            function empty(v) { return String(v == null ? '' : v).trim() === ''; }
-            if (empty(cut.jumboNo)) cut.jumboNo = no;
-            if (empty(cut.jumboWorkSpent)) cut.jumboWorkSpent = work;
-            if (empty(cut.jumboWriteOff)) cut.jumboWriteOff = off;
-            var inputs = self.jumboInputs || {};
-            function put(input, val) { if (input && empty(input.value)) input.value = val; }
-            put(inputs.no, cut.jumboNo);
-            put(inputs.work, cut.jumboWorkSpent);
-            put(inputs.off, cut.jumboWriteOff);
             return cut.jumboRecordId || null;
         }).catch(function(err) {
             self.notify('Запись «Номера джамбо» не прочитана: ' + (err && err.message ? err.message : err), 'error');
@@ -3519,38 +3600,26 @@
         return parsed.fields;
     };
 
-    // Выход из ячейки .atex-sl-grid сохраняет расход джамбо. Ячейку не трогали — записи
-    // нет (подпись сверяется с сохранённой, как у показаний). Пульт занят предыдущей
-    // записью — правку не теряем: jumboRetry, и сохранение повторится, как только
-    // текущее доедет.
-    AtexSlitter.prototype.saveJumboIfChanged = function() {
-        var cut = this.currentCut;
-        if (!cut) return;
-        if (core.jumboSignature(cut) === this.savedJumbo) return;
-        if (this.busy) { this.jumboRetry = true; return; }
-        this.saveJumbo(cut);
-    };
-
     // Сохраняет запись «Номера джамбо»: new — записи ещё не было, set — обновление
     // существующей; учитывать нечего — null (и записи не создаём). quiet — без тоста:
     // завершение резки сообщает сводку сам. Родитель — в URL (?JSON&up=), как во всех
-    // _m_new под родителя (cut-optimizer, export.js), а не полем тела.
+    // _m_new под родителя (cut-optimizer, export.js), а не полем тела. opts.jumboView —
+    // источник полей вместо самой резки (#4902: при завершении поля резки уже очищены,
+    // запись получает расход последней отметки из finishCut).
     AtexSlitter.prototype.saveJumbo = function(cut, opts) {
         var self = this;
         opts = opts || {};
         var table = (this.meta && this.meta.jumboTable) || null;
         if (!table) return Promise.resolve(null);   // нет таблицы (старое окружение)
+        var view = opts.jumboView || cut;
         var action = core.jumboSaveAction(cut.jumboRecordId,
-            core.hasJumboData(cut.jumboNo, cut.jumboWorkSpent, cut.jumboWriteOff));
+            core.hasJumboData(view.jumboNo, view.jumboWorkSpent, view.jumboWriteOff));
         if (!action) return Promise.resolve(null);
-        var fields = this.jumboFields(cut);
+        var fields = this.jumboFields(view);
         if (!fields['t' + table.id]) {
             self.notify('Укажите «Номер джамбо» — без него запись расхода не ведётся', 'error');
             return Promise.resolve(null);
         }
-        // Подпись снимаем ДО запроса: правку, сделанную пока запрос летел, эта запись не
-        // увезла — повторит jumboRetry (та же схема, что у показаний).
-        var sent = core.jumboSignature(cut);
         var path = action === 'set'
             ? '_m_set/' + cut.jumboRecordId + '?JSON'
             : '_m_new/' + table.id + '?JSON&up=' + encodeURIComponent(cut.id);
@@ -3563,12 +3632,9 @@
                 throw new Error('сервер не вернул id новой записи «Номера джамбо»');
             }
             if (action === 'new') cut.jumboRecordId = newId;
-            self.savedJumbo = sent;
             if (!opts.quiet) self.notify('Расход джамбо сохранён', 'success');
-            if (self.jumboRetry) { self.jumboRetry = false; self.saveJumboIfChanged(); }
             return newId || cut.jumboRecordId;
         }).catch(function(err) {
-            self.jumboRetry = false;   // повтор — по следующему выходу из ячейки, а не циклом
             self.notify('Запись «Номера джамбо» не сохранена: ' + (err && err.message ? err.message : err), 'error');
             return null;
         });
