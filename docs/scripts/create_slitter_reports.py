@@ -55,6 +55,7 @@ REPORTS = {
             ('cut_sequence',     {'req': 'Очередность'},              None,   None),
             ('cut_planned_runs', {'req': 'Кол-во резок план'},        None,   None), # фолбэк «Кол-во план» (см. RESOLVE_ALT)
             ('cut_runs_fact',    {'req': 'Кол-во резок факт'},        None,   None), # #4564: СДЕЛАНО проходов (заголовок «Резка N из M», отметка ✓ Готово)
+            ('cut_defect_qty',   {'req': 'Брак, шт'},                 None,   None), # #4896: количество бракованных рулонов
             ('cut_run_length',   {'req': 'Метраж, м'},                None,   None),
             ('cut_started',      {'req': 'Начато'},                   None,   DT),
             ('cut_in_work',      {'req': 'В работе'},                 None,   None), # булев — занимает станок

@@ -81,6 +81,7 @@
         rashod: 'Расход сырья',  // #3861: расход сырья, погонные метры (накопл. по резке)
         defect: 'Брак, м²',
         defectM: 'Брак, м',
+        defectQty: 'Брак, шт',   // #4896: количество бракованных рулонов (785730)
         defectPhoto: 'Фото брака',
         plannedRuns: 'Кол-во план',
         // #4564: СКОЛЬКО ПРОХОДОВ УЖЕ СДЕЛАНО — хранится в самом задании (657315, таблица 1078).
@@ -1065,6 +1066,7 @@
                 actualRuns: firstField(row, [CUT_ACTUAL_RUNS_COLUMN]),   // #4564: сделано проходов
                 runLength: firstField(row, ['cut_run_length']),
                 startedAt: firstField(row, ['cut_started']),
+                defectQty: firstField(row, ['cut_defect_qty']),   // #4896: брак, шт
                 winding: firstField(row, ['cut_winding']),
                 materialId: firstField(row, ['cut_material_id']) || null,
                 material: firstField(row, ['cut_material']),
@@ -1690,6 +1692,7 @@
             var inWorkIdx = colIndex(meta, CUT_REQ.inWork);      // #3557
             var finishedIdx = colIndex(meta, CUT_REQ.finishedAt); // #3557
             var windingIdx = colIndex(meta, CUT_REQ.winding);    // #3646: «Тип намотки» в карточке списка
+            var defectQtyIdx = colIndex(meta, CUT_REQ.defectQty); // #4896: брак, шт — фолбэк без отчёта
             self.cuts = (rows || []).map(function(r) {
                 var row = r.r || [];
                 var slitterRef = slitterIdx >= 0 ? parseRef(row[slitterIdx]) : { id: null, label: '' };
@@ -1716,6 +1719,7 @@
                     actualRuns: actualRunsIdx >= 0 ? (row[actualRunsIdx] || '') : '',   // #4564
                     runLength: runLengthIdx >= 0 ? row[runLengthIdx] : '',
                     startedAt: startedIdx >= 0 ? (row[startedIdx] || '') : '',
+                    defectQty: defectQtyIdx >= 0 ? (row[defectQtyIdx] || '') : '', // #4896
                     winding: windingIdx >= 0 ? (row[windingIdx] || '') : '' // #3646
                 };
             });
@@ -1752,6 +1756,7 @@
                 meterage: val(CUT_REQ.meterage),
                 defect: val(CUT_REQ.defect),
                 defectM: val(CUT_REQ.defectM),
+                defectQty: val(CUT_REQ.defectQty),  // #4896: брак, шт
                 defectPhoto: val(CUT_REQ.defectPhoto),
                 plannedRuns: valAny(CUT_PLANNED_RUNS_NAMES),
                 // #4579: СДЕЛАННЫЕ ПРОХОДЫ обязаны быть и здесь. Этот загрузчик даёт `currentCut` —
@@ -2877,6 +2882,12 @@
         defectField.appendChild(defectHint);
         grid.appendChild(defectField);
 
+        // #4896: «Брак, шт» — количество бракованных рулонов, вместо (или вместе) метража.
+        var defectQty = numInput(cut.defectQty, '0');
+        defectQty.addEventListener('input', function() { cut.defectQty = defectQty.value; });
+        autosave(defectQty);
+        grid.appendChild(field('Брак, шт', defectQty));
+
         // Фото брака
         var photoInput = el('input', { type: 'file', accept: 'image/*', capture: 'environment', style: 'display:none' });
         var photoBtn = el('button', { class: 'atex-sl-btn atex-sl-btn-secondary', type: 'button', text: 'Фото брака' });
@@ -2954,6 +2965,7 @@
         set(CUT_REQ.counterEnd, num(cut.counterEnd));
         // #3459: погонаж вычисляемый, в БД не пишется
         set(CUT_REQ.defectM, num(cut.defectM));
+        set(CUT_REQ.defectQty, num(cut.defectQty));   // #4896: брак, шт
         var defM2 = core.defectM2(cut.defectM, cut.materialWidthMm);
         if (defM2 > 0) set(CUT_REQ.defect, defM2);
         set(CUT_REQ.notes, cut.notes || '');
@@ -3369,7 +3381,7 @@
     // «уже сохранено» отличает выход из нетронутой ячейки от настоящей правки.
     AtexSlitter.prototype.readingsSignature = function(cut) {
         if (!cut) return '';
-        return [cut.counterStart, cut.counterEnd, cut.defectM, cut.defect, cut.notes]
+        return [cut.counterStart, cut.counterEnd, cut.defectM, cut.defect, cut.defectQty, cut.notes]
             .map(function(v) { return String(v == null ? '' : v); }).join('|');
     };
 
