@@ -137,8 +137,9 @@
 }
 .atex-pk-card.is-packed { background: var(--pk-success-bg); border-color: var(--pk-success-border); }
 
-/* #4688: крупно — номер заказа клиента (он же на этикетке ролика), мелко — наш
-   внутренний номер. Клиентский номер — свободный текст, поэтому переносится. */
+/* #4688, #4912: крупно — НАШ внутренний номер заказа, мелко — «Заказ клиента»
+   (он же на этикетке ролика). Клиентский номер — свободный текст, поэтому
+   переносится на любой из двух строк. */
 .atex-pk-order { display: flex; flex-direction: column; min-width: 0; }
 .atex-pk-order-main {
     font-size: 24px;
@@ -152,7 +153,12 @@
 .atex-pk-order-main.is-tiny { font-size: 16px; }
 /* #4799: подпись крупнее, главный номер мельче — разрыв между ними был
    двукратным. Даже на самой мелкой ступени (is-tiny) главный остаётся больше. */
-.atex-pk-order-sub { font-size: 15px; color: var(--pk-muted); }
+.atex-pk-order-sub {
+    font-size: 15px;
+    color: var(--pk-muted);
+    word-break: break-word;
+    overflow-wrap: anywhere;
+}
 
 .atex-pk-body { min-width: 0; }
 .atex-pk-desc { font-size: 17px; font-weight: 600; word-break: break-word; }
