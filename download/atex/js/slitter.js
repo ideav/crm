@@ -2953,12 +2953,40 @@
         // #4914: Записи «Номера джамбо» этого задания — асинхронно, пульт не ждёт.
         this.loadJumboRecords(cut);
 
-        // ── Закладки джамбо: чип на каждую запись, «+» добавляет ещё ──
+        // Выход из ячейки (blur) и подтверждённый ввод (change) — одна и та же запись;
+        // повторов нет: saveReadingsIfChanged сверяет подпись показаний с сохранённой.
+        function autosave(input) {
+            input.addEventListener('change', function() { self.saveReadingsIfChanged(); });
+            input.addEventListener('blur', function() { self.saveReadingsIfChanged(); });
+        }
+
+        // Номер — единственное джамбо-поле, автосохранение которого пишет само: без него
+        // записи нет, а черновики расхода пишутся отметкой резки.
+        function autosaveJumbo(input) {
+            input.addEventListener('change', function() { self.saveJumboIfChanged(); });
+            input.addEventListener('blur', function() { self.saveJumboIfChanged(); });
+        }
+
+        // ── Строка корешков «Номера джамбо» НАД панелью показаний (#4916) ──
+        // Корешок на каждую запись; активный — редактируемый номер (записи ещё нет —
+        // черновик pendingJumbo, заводится автосохранением номера). Остальные записи
+        // открываются кликом по корешку; правее «+ Джамбо». Панель под корешками —
+        // вкладка активной записи: счётчики, расход, списание, браки, фото, примечания.
+        var active = this.activeJumbo();
+        var activeIndex = (cut.jumbos || []).indexOf(active);
+        var numberInput = el('input', {
+            class: 'atex-sl-jumbo-tab is-active atex-sl-jumbo-tab-input',
+            type: 'text', placeholder: 'номер джамбо',
+            value: active ? (active.jumboNo || '') : ''
+        });
+        numberInput.addEventListener('input', function() { jumboDraft().jumboNo = numberInput.value; });
+        autosaveJumbo(numberInput);
         var tabs = el('div', { class: 'atex-sl-jumbo-tabs' });
         (cut.jumbos || []).forEach(function(rec, i) {
+            if (i === activeIndex) { tabs.appendChild(numberInput); return; }
             var chip = el('button', {
-                class: 'atex-sl-jumbo-tab' + (i === (cut.jumboActive || 0) ? ' is-active' : ''),
-                type: 'button', text: rec.jumboNo || ('Джамбо ' + (i + 1))
+                class: 'atex-sl-jumbo-tab', type: 'button',
+                text: rec.jumboNo || ('Джамбо ' + (i + 1))
             });
             chip.addEventListener('click', function() {
                 if ((cut.jumboActive || 0) === i) return;
@@ -2968,16 +2996,13 @@
             });
             tabs.appendChild(chip);
         });
+        if (!numberInput.parentNode) tabs.appendChild(numberInput);   // записей нет — черновик
         var addJumboBtn = el('button', { class: 'atex-sl-jumbo-add', type: 'button', text: '+ Джамбо' });
         addJumboBtn.addEventListener('click', function() { self.askAddJumbo(cut); });
         tabs.appendChild(addJumboBtn);
-        section.appendChild(tabs);
-        // Выход из ячейки (blur) и подтверждённый ввод (change) — одна и та же запись;
-        // повторов нет: saveReadingsIfChanged сверяет подпись показаний с сохранённой.
-        function autosave(input) {
-            input.addEventListener('change', function() { self.saveReadingsIfChanged(); });
-            input.addEventListener('blur', function() { self.saveReadingsIfChanged(); });
-        }
+
+        // Корешки и панель — одна конструкция (#4916): панель — вкладка активного корешка.
+        var wrap = el('div', { class: 'atex-sl-readings' }, [tabs, section]);
 
         // Счётчик нач. — заполняется из остатка партии (batch.remainderM) при открытии резки;
         // #4902 п.1: при отметке резки пишется в задание ТОЛЬКО если был пустой.
@@ -3010,11 +3035,12 @@
 
         // ── Поля АКТИВНОЙ записи джамбо (#4914) ──
         // Раньше это были реквизиты самой резки (787042/787043/787045 и браки с фото) —
-        // теперь их носитель запись «Номера джамбо», на задании их несколько (закладки
-        // выше). Оператор видит НАКОПЛЕННОЕ по записи; введённое к текущей отметке
-        // копится черновиками и прибавляется отметкой резки (поля не очищаются —
-        // решение заказчика). Записей нет — ввод копится в черновик (pendingJumbo),
-        // запись заводится автосохранением номера или первой отметкой.
+        // теперь их носитель запись «Номера джамбо», на задании их несколько (корешки
+        // над панелью, #4916). Номер живёт в строке корешков — в сетке его поля нет.
+        // Оператор видит НАКОПЛЕННОЕ по записи; введённое к текущей отметке копится
+        // черновиками и прибавляется отметкой резки (поля не очищаются — решение
+        // заказчика). Записей нет — ввод копится в черновик (pendingJumbo), запись
+        // заводится автосохранением номера или первой отметкой.
         var rec = this.activeJumbo();
         function jumboDraft() {
             var cur = self.activeJumbo();
@@ -3027,20 +3053,6 @@
             };
             return cut.pendingJumbo;
         }
-
-        var jumboNo = el('input', {
-            class: 'atex-sl-input', type: 'text', placeholder: 'номер джамбо',
-            value: rec ? (rec.jumboNo || '') : ''
-        });
-        jumboNo.addEventListener('input', function() { jumboDraft().jumboNo = jumboNo.value; });
-        // Номер — единственное поле, автосохранение которого пишет само: без него записи
-        // нет, а черновики расхода пишутся отметкой резки.
-        function autosaveJumbo(input) {
-            input.addEventListener('change', function() { self.saveJumboIfChanged(); });
-            input.addEventListener('blur', function() { self.saveJumboIfChanged(); });
-        }
-        autosaveJumbo(jumboNo);
-        grid.appendChild(field('Номер джамбо', jumboNo));
 
         var jumboWork = numInput(rec ? rec.spent : '', '0');
         jumboWork.addEventListener('input', function() { jumboDraft().spentDraft = jumboWork.value; });
@@ -3084,7 +3096,7 @@
         section.appendChild(grid);
 
         refreshMeterage();
-        return section;
+        return wrap;
 
         // #4902 п.2/п.3: оба вычисляемых поля выводят накопленное состояние резки;
         // «Счётчик кон.» пересчитывается на лету от правимого «Счётчика нач.».

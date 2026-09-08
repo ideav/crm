@@ -1,7 +1,8 @@
 // #4914 — РМ слиттера: данные джамбо живут в записях «Номер джамбо» (82374, up =
-// задание), по записи на джамбо; на задании их несколько — UI показывает закладки,
-// активная редактируется. Отметка резки ПРИБАВЛЯЕТ введённое к накопленному значению
-// активной записи (поля не очищаются). Счётчики и реквизиты джамбо на самой резке
+// задание), по записи на джамбо; на задании их несколько — UI показывает строку
+// корешков над панелью показаний, активный корешок — редактируемый номер (#4916).
+// Отметка резки ПРИБАВЛЯЕТ введённое к накопленному значению активной записи (поля
+// не очищаются). Счётчики и реквизиты джамбо на самой резке
 // (787042/787043/787045/8458/785730/8460) выведены из эксплуатации — пульт больше не
 // пишет их и не чистит. «Фото брака» и «Примечания» — соседние ячейки сетки.
 //
@@ -205,7 +206,7 @@ assertEqual(core.jumboNextCounterStart(null), '', 'jumboNextCounterStart: пер
         'readingsSignature: только счётчик нач. и примечания — расход джамбо живёт в записи');
 })();
 
-// ── 6) контроллер: активная запись, закладки, фото/примечания в одной строке ──
+// ── 6) контроллер: активная запись, корешки над панелью (#4916), фото/примечания ──
 function makeController() {
     var root = new StubNode('div');
     root.attributes['data-db'] = 'testdb';
@@ -226,21 +227,25 @@ function makeController() {
     };
     c.currentCut = cut;
     c.loadJumboRecords = function() { return Promise.resolve(); };   // записи уже на резке
-    c.render = function() {};                                        // клик по закладке перерисовывает
-    var section = c.renderReadings();
-    var tabs = section.querySelector('.atex-sl-jumbo-tabs');
-    assert(!!tabs, 'закладки джамбо отрисованы');
+    c.render = function() {};                                        // клик по корешку перерисовывает
+    var readings = c.renderReadings();
+    var tabs = readings.querySelector('.atex-sl-jumbo-tabs');
+    assert(!!tabs, 'строка корешков джамбо отрисована');
     var chips = tabs.querySelectorAll('.atex-sl-jumbo-tab');
-    assertEqual(chips.length, 2, 'закладка на каждую запись джамбо');
-    assertEqual(chips[0].textContent, 'C200cp383941', 'закладка подписана номером');
-    assert(chips[0].classList.contains('is-active'), 'активная закладка подсвечена');
-    assert(!!tabs.querySelector('.atex-sl-jumbo-add'), 'кнопка добавления джамбо на месте');
+    assertEqual(chips.length, 2, 'корешок на каждую запись джамбо');
+    // Активный корешок — само поле номера активной записи; прочие — кнопки (#4916).
+    var numberInput = chips.filter(function(n) { return n.tagName === 'INPUT'; })[0];
+    assert(!!numberInput, 'активный корешок — редактируемый номер (#4916)');
+    assertEqual(numberInput && numberInput.value, 'C200cp383941', 'в корешке-поле номер активной записи');
+    assert(!!numberInput && numberInput.classList.contains('is-active'), 'активный корешок подсвечен');
+    assert(!!tabs.querySelector('.atex-sl-jumbo-add'), 'кнопка «+ Джамбо» на месте');
 
-    // Поля сетки читают АКТИВНУЮ запись.
-    var grid = section.querySelector('.atex-sl-grid');
+    // Поля сетки читают АКТИВНУЮ запись; поля «Номер джамбо» в сетке больше нет —
+    // номер живёт в строке корешков (#4916).
+    var grid = readings.querySelector('.atex-sl-grid');
     var labels = grid.querySelectorAll('.atex-sl-label').map(function(n) { return n.textContent; });
-    assert(labels.indexOf('Номер джамбо') !== -1, 'номер джамбо — в сетке');
-    var numberInput = null, spentInput = null;
+    assert(labels.indexOf('Номер джамбо') === -1, 'поля «Номер джамбо» в сетке нет — номер в корешке');
+    var spentInput = null;
     grid.querySelectorAll('.atex-sl-field').forEach(function(f) {
         var lbl = f.querySelectorAll('.atex-sl-label')[0];
         var label = lbl ? lbl.textContent : '';
@@ -248,26 +253,29 @@ function makeController() {
         f._all([]).forEach(function(n) {
             if (!ctrl && (n.tagName === 'INPUT' || n.tagName === 'TEXTAREA')) ctrl = n;
         });
-        if (label === 'Номер джамбо') numberInput = ctrl;
         if (label === 'Рабочий расход, м') spentInput = ctrl;
     });
-    assertEqual(numberInput && numberInput.value, 'C200cp383941', 'номер — из активной записи');
     assertEqual(spentInput && spentInput.value, '20', 'накопленный расход активной записи виден');
 
-    // Переключение закладки: активной становится вторая, поля перечитываются.
-    chips[1].click();
-    assertEqual(cut.jumboActive, 1, 'клик по закладке переключает активную запись');
+    // Переключение корешка: активной становится вторая, поля перечитываются.
+    var switchBtn = chips.filter(function(n) { return n.tagName === 'BUTTON'; })[0];
+    assertEqual(switchBtn && switchBtn.textContent, '123', 'кнопка-корешок подписана номером записи');
+    switchBtn.click();
+    assertEqual(cut.jumboActive, 1, 'клик по корешку переключает активную запись');
 
     // «Фото брака» и «Примечания» — соседние ячейки сетки (одна строка, п.3 тикета).
     assertEqual(labels[labels.length - 2], 'Фото брака', 'предпоследняя ячейка сетки — фото брака');
     assertEqual(labels[labels.length - 1], 'Примечания', 'последняя ячейка сетки — примечания');
 
-    // Записей нет — сетка жива, номер пуст (пустой отчёт/записи пульт переживает).
+    // Записей нет — сетка жива, корешок один и это черновик номера (пустой отчёт
+    // и записи пульт переживает).
     var cut2 = { id: '1', counterStart: '', meterage: '', notes: '', jumbos: [], jumboActive: 0 };
     c.currentCut = cut2;
     var s2 = c.renderReadings();
     assert(!!s2.querySelector('.atex-sl-grid'), 'без записей джамбо сетка показаний на месте');
-    assert(!s2.querySelector('.atex-sl-jumbo-tab'), 'без записей закладок нет');
+    var tabs2 = s2.querySelector('.atex-sl-jumbo-tabs');
+    var inputs2 = tabs2 ? tabs2.querySelectorAll('.atex-sl-jumbo-tab').filter(function(n) { return n.tagName === 'INPUT'; }) : [];
+    assertEqual(inputs2.length, 1, 'без записей корешок один — черновик номера (#4916)');
 })();
 
 // ── 7) отметка резки: дельта копится в запись, резка джамбо-реквизиты не получает ──
