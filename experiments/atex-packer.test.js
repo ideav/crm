@@ -70,16 +70,16 @@ assertEqual(core.describeItem(core.itemFromReportRow(row({ wind_direction: '', s
     'MWR113L 110 х 600',
     'describeItem: пустые поля не оставляют дыр');
 
-// ── Номера заказа в карточке (#4688): крупно клиентский, мелко внутренний ──
+// ── Номера заказа в карточке (#4688, #4912): крупно внутренний, мелко клиентский ──
 assertEqual(core.orderTitle(core.itemFromReportRow(row({ order_no: '4619', order: 'ЗК-2026/117' }))),
-    { main: 'ЗК-2026/117', sub: '4619' },
-    'orderTitle: клиентский номер крупно, внутренний — строкой ниже');
+    { main: '4619', sub: 'ЗК-2026/117' },
+    'orderTitle: внутренний номер крупно, клиентский — строкой ниже');
 assertEqual(core.orderTitle(core.itemFromReportRow(row({ order_no: '4619', order: '' }))),
     { main: '4619', sub: '' },
     'orderTitle: клиентского нет → крупно внутренний, второй строки нет');
 assertEqual(core.orderTitle(core.itemFromReportRow(row({ order_no: '', order: '  ЗК-7  ' }))),
-    { main: 'ЗК-7', sub: '' },
-    'orderTitle: пробелы срезаются, пустого внутреннего строкой не показываем');
+    { main: '—', sub: 'ЗК-7' },
+    'orderTitle: пробелы срезаются, внутреннего нет → прочерк, клиентский остаётся');
 assertEqual(core.orderTitle(core.itemFromReportRow(row({ order_no: '', order: '' }))),
     { main: '—', sub: '' },
     'orderTitle: нет ни одного номера → прочерк');
