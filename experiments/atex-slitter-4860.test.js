@@ -1,11 +1,18 @@
-// #4860 — РМ слиттера: расход джамбо (номер, рабочий расход, к списанию) и запись
+// #4860 — РМ слиттера: расход джамбо (рабочий расход, к списанию) и запись
 // в таблицу «Номер джамбо» (82374, up = задание).
 //
 // ТЗ (issue #4860): «Прибавлять Рабочий расход и К списанию к разнице значений
 // счетчика — конечное будет за их вычетом». Счётчик мотает назад (#4321):
 // потребление джамбо = разница счётчиков, и в неё входят рабочий расход (протяжка
-// перед резкой) и списание остатка. Проверяем чистую арифметику и решение
-// «создать / обновить / пропустить» запись «Номера джамбо».
+// перед резкой) и списание остатка. С #4914 (решение заказчика) данные джамбо —
+// подчинённые записи 82374: отметка резки ПРИБАВЛЯЕТ введённое к накопленному
+// записи, финальная конечная длина — за вычетом расхода и списания.
+//
+// RATCHET-OK: блоки «создать / обновить / пропустить» (hasJumboData, jumboSaveAction)
+// однозаписной модели удалены — заменены мульти-записями «Номеров джамбо»
+// (решение заказчика, #4914); их суть покрыта jumboDeltaFrom/jumboAccumulate
+// (пустая дельта = записи не трогаем) и ensure-моделью контроллера (запись есть →
+// обновляем, нет → создаём по указанию номера).
 //
 // Run with: node experiments/atex-slitter-4860.test.js
 
@@ -35,72 +42,86 @@ var finalCounter = core.jumboFinalCounter(end, work, off);
 assertEqual(core.meterageFromCounters(start, finalCounter), 1890,
     '#4860 разница счётчиков = резка + рабочий расход + к списанию (1800+30+60=1890)');
 
-// ── 3) есть ли что учитывать ──
-assertEqual(core.hasJumboData('JUMBO-1', '', ''), true, '#4860 номер заполнен — учитывать');
-assertEqual(core.hasJumboData('', 5, ''), true, '#4860 рабочий расход > 0 — учитывать');
-assertEqual(core.hasJumboData('', '', 7.5), true, '#4860 к списанию > 0 — учитывать');
-assertEqual(core.hasJumboData('', '', ''), false, '#4860 пусто — записи не создаём');
-assertEqual(core.hasJumboData('', '0', '0'), false, '#4860 явные нули — ничего не списываем');
+// ── 3) накопление: отметка прибавляет введённое к накопленному записи ──
+// Пустая дельта записи не трогает (бывшее «пропустить»); непустая — прибавляется
+// (бывшее «создать / обновить» решает контроллер: записи нет → создаёт, есть → пишет).
+assertEqual(core.jumboAccumulate({ spent: '30', writeoff: '60', defectM: '', defectQty: '2' },
+        { spent: 5, writeoff: 0.5, defectM: 1, defectQty: 1 }),
+    { spent: 35, writeoff: 60.5, defectM: 1, defectQty: 3 },
+    '#4860 введённое прибавляется к накопленному записи');
+assertEqual(core.jumboDeltaFrom({ spentDraft: '', writeoffDraft: '', defectMDraft: '', defectQtyDraft: '' }),
+    { spent: 0, writeoff: 0, defectM: 0, defectQty: 0 },
+    '#4860 пустой ввод — нулевая дельта: записывать нечего');
+assertEqual(core.jumboDeltaFrom(null), { spent: 0, writeoff: 0, defectM: 0, defectQty: 0 },
+    '#4860 записи нет — нулевая дельта, отметка без джамбо запись не пишет');
 
-// ── 4) создать / обновить / пропустить ──
-assertEqual(core.jumboSaveAction('', true), 'new', '#4860 данные есть, записи нет → создаём');
-assertEqual(core.jumboSaveAction('90771238', true), 'set', '#4860 запись есть → обновляем');
-assertEqual(core.jumboSaveAction('', false), null, '#4860 данных и записи нет → ничего не делаем');
-assertEqual(core.jumboSaveAction('90771238', false), 'set',
-    '#4860 запись есть, данные стёрли → обновляем пустым (оператор передумал)');
-
-// ── 5) поля записи — по БОЕВОЙ схеме 82374 (метаданные ateh на 03.09.2026) ──
-// Гл. значение = номер джамбо (t82374); реквизиты ищутся по имени, «Фото» коду
-// не нужна и в поля не попадает; конечная длина — за вычетом расхода и списания.
+// ── 4) поля записи — по БОЕВОЙ схеме 82374 (метаданные ateh на 03.09.2026) ──
+// Гл. значение = номер джамбо (t82374); реквизиты ищутся по имени; фото — файловый
+// реквизит, в автосейв-поля не попадает (пустое стёрло бы загруженный файл);
+// конечная длина — за вычетом расхода и списания (#4860).
 var JUMBO_82374 = {
     id: '82374',
     reqs: [
         { id: '82376', val: 'Начальная длина, м' },
+        { id: '791706', val: 'Счётчик нач.' },
         { id: '82378', val: 'Кол-во резок' },
+        { id: '791707', val: 'Счётчик кон.' },
         { id: '82380', val: 'Конечная длина, м' },
         { id: '82382', val: 'Рабочий расход, м' },
         { id: '82384', val: 'К списанию, м' },
         { id: '82386', val: 'Брак, м' },
-        { id: '82388', val: 'Фото' }   // есть в таблице, slitter её не пишет
+        { id: '791708', val: 'Брак, шт' },
+        { id: '791712', val: 'Фото брака' }
     ]
 };
 var parsed = core.jumboRecordFields(JUMBO_82374, {
-    jumboNo: ' JUMBO-7 ', counterStart: 20000, counterEnd: 18200,
-    jumboWorkSpent: '30', jumboWriteOff: '60', defectM: '12', actualRuns: '3'
+    jumboNo: ' JUMBO-7 ', lengthStart: '20000', counterStart: 20000, counterEnd: 18200,
+    cutsCount: '3', spent: '30', writeoff: '60', defectM: '12', defectQty: ''
 });
 assertEqual(parsed.missing, [], '#4860 все нужные реквизиты в боевой схеме на месте');
 assertEqual(parsed.fields, {
     't82374': 'JUMBO-7',      // гл. значение, обрезано от пробелов
-    't82376': 20000,          // начальная = счётчик нач.
-    't82378': '3',            // резки — факт
+    't82376': '20000',        // начальная длина = счётчик нач.
+    't791706': 20000,         // счётчик нач. записи
+    't82378': '3',            // резки
+    't791707': 18200,         // счётчик кон. записи
     't82380': 18110,          // конечная = 18200 − 30 − 60
-    't82382': 30,             // рабочий расход
-    't82384': 60,             // к списанию
-    't82386': '12'            // брак задания дублируется в историю джамбо
-}, '#4860 запись собирается по именам реквизитов боевой схемы 82374');
-
-// Резок факт нет — падаем на план задания.
-var parsedPlan = core.jumboRecordFields(JUMBO_82374, {
-    jumboNo: 'J', counterStart: '', counterEnd: '', jumboWorkSpent: '', jumboWriteOff: '',
-    actualRuns: '', plannedRuns: '45'
-});
-assertEqual(parsedPlan.fields['t82378'], 45, '#4860 нет факта резок — пишем план');
+    't82382': '30',           // рабочий расход
+    't82384': '60',           // к списанию
+    't82386': '12',           // брак, м
+    't791708': ''             // брак, шт (пустой доезжает — #4366)
+}, '#4860 запись собирается по именам реквизитов боевой схемы 82374, конечная за вычетом');
 
 // Схема без части реквизитов: они пропускаются, но имена докладываются вызывающему
 // (молча терять поля нельзя — #4564).
 var parsedShort = core.jumboRecordFields({ id: '1', reqs: [{ id: '9', val: 'Брак, м' }] },
-    { jumboNo: 'X', counterStart: 5, counterEnd: 4, jumboWorkSpent: '', jumboWriteOff: '' });
+    { jumboNo: 'X', counterStart: 5, counterEnd: 4, spent: '', writeoff: '' });
 assertEqual(parsedShort.fields, { 't1': 'X', 't9': '' }, '#4860 есть только знакомый реквизит — пишем его');
-assertEqual(parsedShort.missing.sort(), ['Кол-во резок', 'Начальная длина, м', 'Рабочий расход, м', 'К списанию, м', 'Конечная длина, м'].sort(),
+assertEqual(parsedShort.missing.sort(),
+    ['Кол-во резок', 'Начальная длина, м', 'Рабочий расход, м', 'К списанию, м', 'Конечная длина, м', 'Счётчик нач.', 'Счётчик кон.', 'Брак, шт'].sort(),
     '#4860 отсутствующие реквизиты названы поимённо');
 
-// ── 6) подпись расхода: след правки для автосохранения ──
-assertEqual(core.jumboSignature({ jumboNo: 'A', jumboWorkSpent: ' 5 ', jumboWriteOff: '' }), 'A|5|',
-    '#4860 подпись — три поля ввода, обрезанные по краям');
-assertEqual(core.jumboSignature({ jumboNo: 'A', jumboWorkSpent: '5', jumboWriteOff: '' }),
-    core.jumboSignature({ jumboNo: ' A ', jumboWorkSpent: ' 5', jumboWriteOff: null }),
+// ── 5) автосохранение по ячейке везёт только вводимые поля ──
+var input = core.jumboInputFields(JUMBO_82374, {
+    jumboNo: 'J-1', counterStart: '20000', counterEnd: '18200', cutsCount: '3',
+    spent: '6', writeoff: '7', defectM: '8', defectQty: '9'
+});
+assertEqual(input.fields, { 't82374': 'J-1', 't82382': '6', 't82384': '7', 't82386': '8', 't791708': '9' },
+    '#4860 автосейв везёт номер, расход, списание, браки — счётчики и длины ведёт отметка');
+
+// ── 6) подпись расхода: след правки для автосохранения (накопленное + черновики) ──
+assertEqual(core.jumboSignature({ jumboNo: 'A', spent: ' 5 ', writeoff: '', defectM: '0', defectQty: '',
+        spentDraft: '', writeoffDraft: '', defectMDraft: '', defectQtyDraft: '' }), 'A|5||0|||||',
+    '#4860 подпись — накопленное и черновики ввода, обрезанные по краям');
+assertEqual(core.jumboSignature({ jumboNo: 'A', spent: '5', writeoff: '' }),
+    core.jumboSignature({ jumboNo: ' A ', spent: ' 5', writeoff: null }),
     '#4860 пробелы и null не меняют подпись — лишней записи нет');
-assertEqual(core.jumboSignature(null), '', '#4860 без резки подпись пустая');
+assertEqual(core.jumboSignature(null), '', '#4860 без записи подпись пустая');
+
+// ── 7) цепочка джамбо одного задания ──
+assertEqual(core.jumboNextCounterStart({ counterEnd: '18110' }), '18110',
+    '#4860 «Счётчик нач.» следующего джамбо = «Счётчик кон.» предыдущего');
+assertEqual(core.jumboNextCounterStart({ counterEnd: '' }), '', '#4860 пустой кон. не подставляется');
 
 console.log('\n' + passed + '/' + total + ' passed');
 if (process.exitCode) process.exit(process.exitCode);

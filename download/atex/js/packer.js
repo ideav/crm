@@ -11,10 +11,13 @@
 //   order_no     — номер заказа, order — «Заказ клиента» (текст, может быть пуст);
 //   material, cut_width, cut_length, wind_direction, sleeve, add_sleeve, leader — что за ролик;
 //   art          — артикул (#4799), плашкой внизу карточки; бывает пустым;
-//   jumbo        — № джамбо (787045 резки, #4910), плашкой рядом с артикулом; бывает пустым;
 //   qty/qty_fact — «Кол-во рулонов» и «Кол-во факт» Партии ГП;
 //   packed/notes — «Упаковано шт» (673786) и «Примечание» (673789) Партии ГП;
 //   events       — счётчик событий смены задания.
+// Номера джамбо с #4914 живут записями «Номер джамбо» (82374, подчинена заданию) и
+// приходят отдельным отчётом `task_jumbo` (task_id → jumbo_no, по записи на каждое
+// джамбо): грузятся одним запросом, в карточку идут все номера задания через «, »
+// (плашка «Джамбо», #4910).
 // Отчёт отфильтрован по наличию события «Резка» у задания, поэтому упаковщик видит
 // задание, как только по нему сделана первая резка, и весь его объём — независимо от
 // того, сколько проходов уже отмечено. Порядок строк — как пришёл из отчёта.
@@ -101,10 +104,11 @@
         // #4665: типоразмер упаковки, проставленный планированием, и тип сырья (для фольги).
         tipo: 'tipo', tipoId: 'tipo_id', materialType: 'material_type',
         // #4799: артикул (плашка внизу карточки) и лидер (в подписи ролика).
-        art: 'art', leader: 'leader',
-        // #4910: № джамбо (787045 резки) — плашкой рядом с артикулом.
-        jumbo: 'jumbo'
+        art: 'art', leader: 'leader'
     };
+    // #4914: номера джамбо задания — отдельный отчёт по записям «Номер джамбо».
+    var JUMBO_REPORT = 'task_jumbo';
+    var JUMBO_COL = { taskId: 'task_id', jumboNo: 'jumbo_no' };
 
     var STORE_SHOW_PACKED = 'atex-pk-show-packed';
     // #4852: упаковочное место задаёт планшет (таблица «Планшет») — прежнего выбора
@@ -194,11 +198,24 @@
             // #4799: обе колонки бывают пустыми — карточка тогда просто без них.
             art: str(kvVal(r[COL.art])).trim(),
             leader: str(kvVal(r[COL.leader])).trim(),
-            // #4910: джамбо заполняется при отметке резки — бывает пустым, и колонки
-            // может не быть вовсе в старых строках; карточка тогда просто без плашки.
-            jumbo: str(kvVal(r[COL.jumbo])).trim()
+            // #4914: номера джамбо прилетают отдельным отчётом task_jumbo — их
+            // подставляет applyJumbos() после загрузки (карточка без них просто без плашки).
+            jumbo: ''
         };
         return item;
+    }
+
+    // #4914: строки отчёта task_jumbo → карта «id задания → номера джамбо» (по записи
+    // на каждое джамбо, порядок отчёта сохраняется; строки без задания пропускаем).
+    function jumbosByTask(rows) {
+        var map = {};
+        (rows || []).forEach(function(row) {
+            var taskId = str(kvVal((row || {})[JUMBO_COL.taskId])).trim();
+            var no = str(kvVal((row || {})[JUMBO_COL.jumboNo])).trim();
+            if (!taskId || !no) return;
+            (map[taskId] = map[taskId] || []).push(no);
+        });
+        return map;
     }
 
     // #4665: типоразмер позиции. Обычно он уже проставлен планированием — берём его по
@@ -440,6 +457,7 @@
         unixToLocalDate: unixToLocalDate,
         eventStamp: eventStamp,
         itemFromReportRow: itemFromReportRow,
+        jumbosByTask: jumbosByTask,
         describeItem: describeItem,
         orderTitle: orderTitle,
         packQtyFor: packQtyFor,
@@ -488,6 +506,7 @@
         this.userId = root.getAttribute('data-user-id') || (typeof window !== 'undefined' ? window.user_id : '') || '';
         this.meta = { gp: null, event: null };
         this.items = [];           // позиции к упаковке (строки отчёта, порядок отчёта)
+        this.jumbos = {};          // #4914: id задания → номера джамбо (отчёт task_jumbo)
         this.sizes = [];           // #4665: справочник «Типоразмер» (отчёт pack_sizes)
         this.place = null;         // { id, label } — упаковочное место из настройки планшета (#4852)
         this.showPacked = false;
@@ -563,6 +582,27 @@
         return this.getJson(core.itemsPath(this.place)).then(function(rows) {
             var list = Array.isArray(rows) ? rows : [];
             self.items = list.map(function(row) { return core.itemFromReportRow(row); });
+            self.applyJumbos();
+        });
+    };
+
+    // #4914: номера джамбо грузятся одним запросом (запись на каждое джамбо — на
+    // задании их бывает несколько). Не прочитались — карточки остаются без плашки.
+    AtexPacker.prototype.loadJumbos = function() {
+        var self = this;
+        return this.getJson('report/' + JUMBO_REPORT + '?JSON_KV&LIMIT=0,' + REPORT_LIMIT).then(function(rows) {
+            self.jumbos = core.jumbosByTask(rows);
+        }).catch(function(err) {
+            console.error('atex-packer: номера джамбо не прочитаны — ' + err.message);
+            self.jumbos = {};
+        });
+    };
+
+    // #4914: подставить в позиции номера джамбо их задания (все через «, », #4910).
+    AtexPacker.prototype.applyJumbos = function() {
+        var jumbos = this.jumbos || {};
+        this.items.forEach(function(item) {
+            item.jumbo = (jumbos[item.taskId] || []).join(', ');
         });
     };
 
@@ -750,8 +790,8 @@
                 el('span', { class: 'atex-pk-art-value', text: item.art })
             ]));
         }
-        // #4910: № джамбо — той же плашкой рядом с артикулом; заполняется при
-        // отметке резки, поэтому бывает пустым — тогда и плашки нет.
+        // #4910: № джамбо — той же плашкой рядом с артикулом; #4914: номера приходят
+        // из отчёта task_jumbo, на задании их бывает несколько — через «, ».
         if (item.jumbo) {
             body.push(el('div', { class: 'atex-pk-jumbo' }, [
                 el('span', { class: 'atex-pk-art-label', text: 'Джамбо' }),
@@ -914,7 +954,11 @@
     AtexPacker.prototype.refresh = function() {
         var self = this;
         this.setBusy(true);
-        return this.loadItems().then(function() {
+        // #4914: номера джамбо перечитываем вместе со списком — по заданиям могли
+        // начаться новые резки с новыми джамбо.
+        return this.loadJumbos().then(function() {
+            return self.loadItems();
+        }).then(function() {
             self.setBusy(false);
             self.render();
         }).catch(function(err) {
@@ -966,6 +1010,7 @@
 
         return this.loadMetadata()
             .then(function() { return self.loadSizes(); })
+            .then(function() { return self.loadJumbos(); })
             .then(function() {
                 // Без упаковочного места список не показываем (#4852), а отчёт без него
                 // отдал бы чужие позиции — он фильтруется по месту (#4681).

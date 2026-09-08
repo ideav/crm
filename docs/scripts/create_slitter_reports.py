@@ -10,6 +10,9 @@
 #   slitter_shift_events  — лог событий смены (взамен loadShiftEvents)
 #   slitters_list         — справочник станков (взамен loadSlitters)
 #
+# Отчёт task_jumbo (расход джамбо по заданиям, #4914) создаётся ОТДЕЛЬНЫМ скриптом —
+# docs/scripts/create_report_task_jumbo.js; здесь его нет.
+#
 # ID реквизитов НЕ хардкодятся: резолвятся по именам из живого GET metadata?JSON
 # (ID зависят от сборки базы — поэтому slitter.js и резолвит их по имени в рантайме).
 #

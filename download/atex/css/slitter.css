@@ -330,9 +330,56 @@
 }
 .atex-sl-textarea { resize: vertical; min-height: 44px; }
 /* #4785 п.3: подсказок под полями («остаток партии», «= N м²») нет — остаток виден
-   строкой партии, а м² считаются при записи. Осталось предупреждение, когда ширины
-   сырья нет и м² посчитать нечем. */
-.atex-sl-defect-warn { font-size: 12px; margin-top: 4px; }
+   строкой партии. #4914: у показаний появились закладки записей «Номера джамбо». */
+/* #4914: закладки джамбо — чип на каждую запись задания, активная подсвечена,
+   «+» добавляет ещё одно джамбо (Счётчик нач. = Счётчик кон. предыдущего). */
+.atex-sl-jumbo-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin: 2px 0 8px;
+}
+.atex-sl-jumbo-tab {
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 5px 12px;
+    border: 1px solid var(--sl-border);
+    border-radius: 999px;
+    background: var(--sl-bg);
+    cursor: pointer;
+    font: inherit;
+    font-size: 13px;
+    color: var(--sl-muted);
+}
+.atex-sl-jumbo-tab:hover { background: var(--sl-surface); }
+.atex-sl-jumbo-tab.is-active {
+    background: var(--sl-accent);
+    border-color: var(--sl-accent);
+    color: #fff;
+    font-weight: 600;
+}
+.atex-sl-jumbo-add {
+    padding: 5px 12px;
+    border: 1px dashed var(--sl-border);
+    border-radius: 999px;
+    background: transparent;
+    cursor: pointer;
+    font: inherit;
+    font-size: 13px;
+    color: var(--sl-muted);
+}
+.atex-sl-jumbo-add:hover { color: var(--sl-accent); border-color: var(--sl-accent); }
+/* #4914 п.3: «Фото брака» и «Примечания» — одна строка сетки: фото занимает первую
+   колонку ряда, примечания тянутся до его конца. На совсем узких экранах (меньше двух
+   колонок) примечания просто уходят на всю ширину. */
+.atex-sl-field-photo { grid-column: 1; }
+.atex-sl-field-notes { grid-column: 2 / -1; }
+@media (max-width: 480px) {
+    .atex-sl-field-notes { grid-column: 1 / -1; }
+}
 .atex-sl-photo-status { font-size: 12px; color: var(--sl-muted); }
 
 /* Партии сырья */

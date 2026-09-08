@@ -127,11 +127,16 @@ function makeInst(opts) {
         id: '90', batchId: '77', status: 'В работе', actualRuns: '1', plannedRuns: '4',
         runLength: '400', material: 'БОПП 20', winding: 'OUT', leader: 'Лидер 40',
         counterStart: '1000', counterEnd: '', defectM: '', notes: '',
+        // #4914: поля расхода/браков живут записью «Номера джамбо»
+        jumbos: [{ id: 'J-REC', jumboNo: 'J-1', spent: '', writeoff: '', defectM: '', defectQty: '', photo: '',
+                   spentDraft: '', writeoffDraft: '', defectMDraft: '', defectQtyDraft: '' }],
+        jumboActive: 0,
         materialWidthMm: o.materialWidthMm === undefined ? 910 : o.materialWidthMm
     };
     inst.currentCutId = '90';
     inst.posts = [];
     inst.post = function(p, f) { this.posts.push({ path: p, params: f }); return Promise.resolve({}); };
+    inst.getJson = function() { return Promise.resolve([]); };   // #4914: чтение записей джамбо не мешает
     inst.cutFields = function() { return { t1: 1 }; };
     inst.setBusy = function(v) { this.busy = v; };
     inst.notify = function() {};
@@ -194,6 +199,11 @@ function makeInst(opts) {
 })();
 
 // ── п.3: подсказок под полями нет ─────────────────────────────────────────────────────────────
+// RATCHET-OK: пересчёт «Брак, м²» (core.defectM2) и предупреждение «ширина сырья не
+// определена» были привязаны к браку-реквизиту резки; браки переехали в запись
+// «Номера джамбо» (решение заказчика, #4914), остаток партии сводится со «Счётчиком
+// кон.» (#4902) — м²-пересчёт выведен вместе с носителем. Ввод брака теперь копит
+// черновик записи джамбо — это и проверяем.
 (function() {
     var inst = makeInst();
     var section = inst.renderReadings();
@@ -202,10 +212,7 @@ function makeInst(opts) {
     assert(section.textContent.indexOf('остаток партии') === -1,
         '#4785 п.3: остаток партии под «Счётчиком нач.» не дублируется');
 
-    // ввод брака больше не рисует пересчёт «= N м²», но сам пересчёт живёт.
-    // #4860: в сетке показаний появились поля расхода джамбо (после «Счётчика кон.»),
-    // поэтому поле «Брак, м» ищем ПО ПОДПИСИ, а не позицией: порядок полей — продукт,
-    // а не контракт теста; проверяемое поведение (пересчёт м² при вводе) не менялось.
+    // Ввод «Брак, м» копит черновик записи джамбо (накопит отметкой резки, #4914).
     var defectField = section.querySelectorAll('.atex-sl-field').filter(function(f) {
         var lbl = f.querySelector('.atex-sl-label');
         return lbl && lbl.textContent === 'Брак, м';
@@ -213,19 +220,14 @@ function makeInst(opts) {
     var defect = defectField.querySelectorAll('.atex-sl-input')[0];
     defect.value = '12';
     defect.dispatch('input');
-    assertEqual(inst.currentCut.defect, String(core.defectM2('12', 910)),
-        '#4785 п.3: «Брак, м²» по-прежнему считается — просто не показывается строкой');
+    assertEqual(inst.currentCut.jumbos[0].defectMDraft, '12',
+        '#4914: ввод «Брак, м» копит черновик активной записи джамбо');
     assert(section.textContent.indexOf('м²') === -1,
         '#4785 п.3: пересчёта «= N м²» на экране нет');
 
-    // ширины сырья нет — считать м² нечем, и об этом сказано (молча не глотаем)
-    var noWidth = makeInst({ materialWidthMm: 0 });
-    assert(noWidth.renderReadings().textContent.indexOf('ширина сырья не определена') >= 0,
-        '#4785 п.3: без ширины сырья предупреждение остаётся — брак в м² не посчитать');
-
-    // ответ на загрузку фото — не подсказка, он остался
+    // ответ на загрузку фото — не подсказка, он остался (#4914: статус — из записи джамбо)
     var withPhoto = makeInst();
-    withPhoto.currentCut.defectPhoto = '1';
+    withPhoto.currentCut.jumbos[0].photo = '1';
     assertEqual(withPhoto.renderReadings().querySelector('.atex-sl-photo-status').textContent, 'фото загружено',
         '#4785 п.3: ответ на действие («фото загружено») остаётся — иначе не видно, доехал ли снимок');
 })();

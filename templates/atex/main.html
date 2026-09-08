@@ -2,7 +2,10 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- #4914: interactive-widget=resizes-content — на планшете клавиатура уменьшает
+         содержимое, а не «наползает» поверх: страница не скроллится под вводом,
+         шапка не уезжает. Планшетные пульты и так не скроллят документ (ниже). -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, interactive-widget=resizes-content">
     <!-- Рабочие места встраиваются сюда через маркер "File: a". Правила разработки
          (шаблонизатор _global_.* в фигурных скобках, API _m_*, XSRF, таблицы/отчёты, IntegramTable,
          модальные окна, подсказки) — в docs/WORKSPACE_DEVELOPMENT_GUIDE.md. -->
@@ -213,7 +216,11 @@
             var css = document.createElement('style');
             css.id = 'fullscreen-workspace-style';
             css.textContent = '.app-sidebar,#sidebar-backdrop,#mobile-sidebar-toggle{display:none!important;}'
-                + '.app-content{padding:0!important;overflow:hidden!important;}';
+                + '.app-content{padding:0!important;overflow:hidden!important;}'
+                /* #4914: документ пульта не скроллится вовсе — навбар sticky не уезжает
+                   за клавиатурой и «шапка браузера» не вылезает после ручного ввода;
+                   прокрутка живёт внутри пульта (.atex-sl-layout и т.п.). */
+                + 'html,body{overflow:hidden!important;overscroll-behavior:none;}';
             document.head.appendChild(css);
         })();
     </script>

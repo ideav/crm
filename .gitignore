@@ -19,3 +19,6 @@ experiments/*
 
 # Playwright MCP scratch output (screenshots/snapshots/console logs)
 .playwright-mcp/
+
+# Снапшоты живой базы из миграционных скриптов docs/scripts (создаются при --apply)
+docs/scripts/out/
