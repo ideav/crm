@@ -11,6 +11,7 @@
 //   order_no     — номер заказа, order — «Заказ клиента» (текст, может быть пуст);
 //   material, cut_width, cut_length, wind_direction, sleeve, add_sleeve, leader — что за ролик;
 //   art          — артикул (#4799), плашкой внизу карточки; бывает пустым;
+//   jumbo        — № джамбо (787045 резки, #4910), плашкой рядом с артикулом; бывает пустым;
 //   qty/qty_fact — «Кол-во рулонов» и «Кол-во факт» Партии ГП;
 //   packed/notes — «Упаковано шт» (673786) и «Примечание» (673789) Партии ГП;
 //   events       — счётчик событий смены задания.
@@ -100,7 +101,9 @@
         // #4665: типоразмер упаковки, проставленный планированием, и тип сырья (для фольги).
         tipo: 'tipo', tipoId: 'tipo_id', materialType: 'material_type',
         // #4799: артикул (плашка внизу карточки) и лидер (в подписи ролика).
-        art: 'art', leader: 'leader'
+        art: 'art', leader: 'leader',
+        // #4910: № джамбо (787045 резки) — плашкой рядом с артикулом.
+        jumbo: 'jumbo'
     };
 
     var STORE_SHOW_PACKED = 'atex-pk-show-packed';
@@ -190,7 +193,10 @@
             materialType: str(kvVal(r[COL.materialType])).trim(),
             // #4799: обе колонки бывают пустыми — карточка тогда просто без них.
             art: str(kvVal(r[COL.art])).trim(),
-            leader: str(kvVal(r[COL.leader])).trim()
+            leader: str(kvVal(r[COL.leader])).trim(),
+            // #4910: джамбо заполняется при отметке резки — бывает пустым, и колонки
+            // может не быть вовсе в старых строках; карточка тогда просто без плашки.
+            jumbo: str(kvVal(r[COL.jumbo])).trim()
         };
         return item;
     }
@@ -719,21 +725,37 @@
         if (item.factQty) meta.push('факт ' + item.factQty);
         var note = item.editedNote || item.notes;
         if (note) meta.push(note);
-        var body = [
-            el('div', { class: 'atex-pk-desc', text: core.describeItem(item) || '—' }),
-            el('div', { class: 'atex-pk-meta', text: meta.join(' · ') })
-        ];
         // #4665: в какой короб и по сколько штук — из справочника «Типоразмер».
         var size = core.sizeForItem(item, this.sizes);
         var packLabel = core.packingLabel(size, packed ? item.packedQty : core.packQtyFor(item));
+        // #4910: задание/план/факт и короб — одна строка, чтобы карточка не росла
+        // в высоту: короб идёт акцентным span в хвосте меты, а не отдельной строкой.
+        var metaNode = el('div', { class: 'atex-pk-meta' });
+        meta.forEach(function(part, i) {
+            if (i) metaNode.appendChild(document.createTextNode(' · '));
+            metaNode.appendChild(document.createTextNode(part));
+        });
         if (packLabel) {
-            body.push(el('div', { class: 'atex-pk-pack', title: size.name, text: packLabel }));
+            if (meta.length) metaNode.appendChild(document.createTextNode(' · '));
+            metaNode.appendChild(el('span', { class: 'atex-pk-pack', title: size.name, text: packLabel }));
         }
+        var body = [
+            el('div', { class: 'atex-pk-desc', text: core.describeItem(item) || '—' }),
+            metaNode
+        ];
         // #4799: артикул — последним в теле карточки, перед колонкой управления.
         if (item.art) {
             body.push(el('div', { class: 'atex-pk-art' }, [
                 el('span', { class: 'atex-pk-art-label', text: 'Артикул' }),
                 el('span', { class: 'atex-pk-art-value', text: item.art })
+            ]));
+        }
+        // #4910: № джамбо — той же плашкой рядом с артикулом; заполняется при
+        // отметке резки, поэтому бывает пустым — тогда и плашки нет.
+        if (item.jumbo) {
+            body.push(el('div', { class: 'atex-pk-jumbo' }, [
+                el('span', { class: 'atex-pk-art-label', text: 'Джамбо' }),
+                el('span', { class: 'atex-pk-art-value', text: item.jumbo })
             ]));
         }
         card.appendChild(el('div', { class: 'atex-pk-body' }, body));
