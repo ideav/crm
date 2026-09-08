@@ -44,7 +44,10 @@ function makeInst(batchAfterReload) {
     inst.busy = false;
     inst.meta = { cut: CUT_META, batch: BATCH_META };
     inst.currentCut = { id: '90', batchId: '77', status: 'В работе',
-        counterStart: '109890', counterEnd: '109610', meterage: '280', jumboNo: 'J-1',
+        counterStart: '109890', counterEnd: '109610', meterage: '280',
+        // #4914: номер джамбо обязателен для завершения и живёт в записи «Номера джамбо»
+        jumbos: [{ id: 'J-REC', jumboNo: 'J-1', spentDraft: '', writeoffDraft: '', defectMDraft: '', defectQtyDraft: '' }],
+        jumboActive: 0,
         runLength: '280', plannedRuns: '16' };
     inst.currentCutId = '90';
     inst.cuts = [];

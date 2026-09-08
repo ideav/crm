@@ -1,11 +1,14 @@
 // Tests for ideav/crm#4910 — номер джамбо в РМ упаковщика, задание и короб в одной строке.
 //
-// Колонка `jumbo` (787045 «Задание в производство → № джамбо») добавлена в отчёт
-// `packer` (673812); заполняется при отметке резки, поэтому бывает пустой и её может
-// не быть в старых закэшированных строках — разбор обязан это переживать.
-// Поведение карточки:
+// С #4914 (решение заказчика) номера джамбо живут записями «Номер джамбо» (82374,
+// подчинена заданию) и приходят отчётом `task_jumbo` (task_id → jumbo_no); колонка
+// `jumbo` (787045) из отчёта `packer` удалена. Поведение карточки:
 //   • «№ джамбо» — плашкой рядом с артикулом (та же форма, отдельная плашка);
+//   • на задании бывает несколько джамбо — в плашке все номера через «, »;
 //   • «задание …» и «короб …» — ОДНА строка меты, а не две (карточка не растёт в высоту).
+//
+// RATCHET-OK: источник плашки перенесён с колонки `jumbo` отчёта `packer` на отчёт
+// `task_jumbo` решением заказчика (#4914).
 //
 // Run with: node experiments/atex-packer-4910-jumbo-line.test.js
 
@@ -62,7 +65,8 @@ function assert(cond, name) {
     if (cond) passed++; else process.exitCode = 1;
 }
 
-// Строка отчёта `packer?JSON_KV` (как в atex-packer.test.js) + джамбо из резки.
+// Строка отчёта `packer?JSON_KV` (как в atex-packer.test.js); джамбо приходят
+// отдельным отчётом task_jumbo и подставляются контроллером (applyJumbos).
 function row(over) {
     var base = {
         task: '1786078800', task_id: '666355', gp_id: '666392',
@@ -71,7 +75,7 @@ function row(over) {
         wind_direction: 'IN', sleeve: 'втулка пластик серая для Videojet', add_sleeve: '',
         qty: '110', qty_fact: '110', packed: '', notes: '', events: '1',
         tipo: '62-83 Х 330/450', tipo_id: '671017',
-        art: '0011332', jumbo: '102605081738'
+        art: '0011332'
     };
     Object.keys(over || {}).forEach(function(k) { base[k] = over[k]; });
     return base;
@@ -81,21 +85,33 @@ var SIZES = packing.sizesFromReport([
     { size_id: '671017', size_name: '62-83 Х 330/450', add_sleeve: '', rows_cnt: '2', per_row: '12', per_box: '24', box: '№165', w_from: '62.00', w_to: '83.00', l_from: '321', l_to: '450', foil: '' }
 ]);
 
-function render(over) {
+function render(over, jumbos) {
     var self = Object.create(mod.Controller.prototype);
     self.sizes = SIZES;
-    return self.renderCard(core.itemFromReportRow(row(over)));
+    self.jumbos = jumbos || {};
+    var item = core.itemFromReportRow(row(over));
+    self.items = [item];
+    self.applyJumbos();
+    return self.renderCard(item);
 }
 
-// ── Разбор строки отчёта: колонка jumbo ──
-assertEqual(core.itemFromReportRow(row()).jumbo, '102605081738', 'itemFromReportRow: номер джамбо');
-assertEqual(core.itemFromReportRow(row({ jumbo: '' })).jumbo, '', 'itemFromReportRow: пустой джамбо → пустая строка');
-assertEqual(core.itemFromReportRow(row({ jumbo: undefined })).jumbo, '', 'itemFromReportRow: колонки jumbo нет в строке → пусто');
-assertEqual(core.itemFromReportRow(row({ jumbo: { val: '123', id: '666' } })).jumbo, '123', 'itemFromReportRow: {val,id} → val');
+// ── Разбор отчёта task_jumbo: карта «задание → номера» ──
+assertEqual(core.jumbosByTask([
+    { task_id: '666355', jumbo_no: '102605081738' },
+    { task_id: '666355', jumbo_no: { val: '123', id: '666' } },
+    { task_id: '666999', jumbo_no: 'J-9' }
+]), { '666355': ['102605081738', '123'], '666999': ['J-9'] },
+    '#4914: task_jumbo → карта «задание → номера», {val,id} → val, порядок отчёта');
+assertEqual(core.jumbosByTask([
+    { task_id: '666355', jumbo_no: '' },
+    { task_id: '', jumbo_no: 'J-2' },
+    {}
+]), {}, '#4914: строки без задания или без номера пропускаются');
+assertEqual(core.jumbosByTask([]), {}, '#4914: пустой отчёт — пустая карта');
 
 // ── Карточка: джамбо — плашка рядом с артикулом ──
 (function() {
-    var card = render();
+    var card = render({}, { '666355': ['102605081738'] });
 
     var jumbo = card.querySelectorAll('.atex-pk-jumbo');
     assertEqual(jumbo.length, 1, '#4910: плашка «Джамбо» на карточке одна');
@@ -109,10 +125,18 @@ assertEqual(core.itemFromReportRow(row({ jumbo: { val: '123', id: '666' } })).ju
     assertEqual(art.length, 1, '#4910: плашка «Артикул» на месте (регрессия #4799)');
 })();
 
+// Несколько джамбо на задании — в плашке все, через «, » (#4914).
+(function() {
+    var plaque = render({}, { '666355': ['J-1', 'J-2'] }).querySelectorAll('.atex-pk-jumbo')[0];
+    var value = plaque ? plaque.querySelectorAll('.atex-pk-art-value')[0] : null;
+    assertEqual(value ? value.textContent : null, 'J-1, J-2',
+        '#4914: несколько номеров джамбо — через «, »');
+})();
+
 // Пустой джамбо — плашки нет (и дырки в теле карточки тоже).
-assertEqual(render({ jumbo: '' }).querySelectorAll('.atex-pk-jumbo').length, 0,
+assertEqual(render({}).querySelectorAll('.atex-pk-jumbo').length, 0,
     '#4910: без джамбо плашки нет');
-assertEqual(render({ art: '' }).querySelectorAll('.atex-pk-jumbo').length, 1,
+assertEqual(render({ art: '' }, { '666355': ['102605081738'] }).querySelectorAll('.atex-pk-jumbo').length, 1,
     '#4910: джамбо показывается и без артикула — плашки независимы');
 
 // ── Карточка: «задание» и «короб» — одна строка меты ──

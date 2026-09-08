@@ -94,10 +94,12 @@ function makeInst(opts) {
     var inst = Object.create(Controller.prototype);
     inst.busy = false;
     // сценарий тикета: план 100 проходов по 450 м, оператор сделал 99
-    // (#4902: «№ джамбо» обязателен для готовой резки — сценарии «весь план» задаём с ним)
+    // (#4902: для готовой резки обязателен номер джамбо; #4914: номер живёт в записи
+    // «Номера джамбо» (82374), не в реквизите резки — сценарии «весь план» задаём с ней)
     inst.currentCut = { id: '90', batchId: '77', status: 'В работе', actualRuns: o.actualRuns || '',
         meterage: '', counterStart: '60000', counterEnd: '', runLength: '450',
-        jumboNo: 'J-1',
+        jumbos: [{ id: 'J-REC', jumboNo: 'J-1', spentDraft: '', writeoffDraft: '', defectMDraft: '', defectQtyDraft: '' }],
+        jumboActive: 0,
         plannedRuns: String(o.plannedRuns == null ? 100 : o.plannedRuns) };
     inst.currentCutId = '90';
     inst.shiftEvents = [];
