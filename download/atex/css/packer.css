@@ -157,11 +157,13 @@
 .atex-pk-body { min-width: 0; }
 .atex-pk-desc { font-size: 17px; font-weight: 600; word-break: break-word; }
 .atex-pk-meta { font-size: 13px; color: var(--pk-muted); margin-top: 2px; }
-/* #4665: в какой короб и по сколько штук укладывать */
-.atex-pk-pack { font-size: 13px; color: var(--pk-accent); margin-top: 2px; font-weight: 600; }
+/* #4665: в какой короб и по сколько штук укладывать. #4910: живёт В СТРОКЕ меты
+   (span в хвосте), акцентом, — отдельной строкой карточка не растёт. */
+.atex-pk-pack { font-size: 13px; color: var(--pk-accent); font-weight: 600; }
 /* #4799: артикул — плашка по ширине содержимого, а не во всю колонку.
-   inline-flex + align-self:start держат её узкой при любом гриде. */
-.atex-pk-art {
+   inline-flex + align-self:start держат её узкой при любом гриде.
+   #4910: номер джамбо — та же плашка рядом (inline-flex встаёт в ту же строку). */
+.atex-pk-art, .atex-pk-jumbo {
     display: inline-flex;
     align-items: baseline;
     align-self: start;
@@ -175,6 +177,7 @@
     line-height: 1.4;
     white-space: nowrap;
 }
+.atex-pk-jumbo { margin-left: 6px; }
 .atex-pk-art-label { color: var(--pk-muted); }
 .atex-pk-art-value { font-weight: 700; }
 
