@@ -40,6 +40,14 @@
 // требует примечания. Кнопка «Упаковано» ничего не спрашивает — фиксирует упаковку тем
 // количеством, которое видно в карточке (#4680). У неупакованной позиции правка живёт в
 // модели до отметки, у упакованной уходит в базу сразу.
+// Задания одного заказа (#4918) показываются ОДНОЙ плашкой: список группируется по
+// `order_no`, на плашке — общее количество рулонов неупакованных позиций; выполненные
+// и невыполненные позиции живут на одной плашке со статусом «частично». «Упаковано»
+// отмечает ВСЕ позиции заказа — каждая Партия ГП своим количеством, поэтому «Дэшборд
+// отклонений» РМ production-planning (Σ факт − Σ упак по заданию) остаётся согласованным.
+// Правка количества на плашке меняет ОБЩУЮ сумму: разница целиком уходит в последнюю
+// неупакованную позицию и может получиться отрицательной — поэтому ненулевая запись
+// «Упаковано шт», включая отрицательную, закрывает позицию.
 // Упаковочное место запоминается в localStorage: пока оно там есть, таблицу
 // «Упаковочное место» (669269) не запрашиваем вовсе — только по клику на само место.
 // Отчёт запрашивается с фильтром `FR_packer_no={номер места}` — упаковщик видит только
@@ -277,9 +285,11 @@
         return toNumber(it.factQty) || toNumber(it.planQty);
     }
 
-    // Позиция уже упакована? Источник истины — «Упаковано шт» Партии ГП.
+    // Позиция уже упакована? Источник истины — «Упаковано шт» Партии ГП. Любая
+    // ненулевая запись закрывает позицию, в том числе отрицательная: правка общей
+    // суммы заказа (#4918) может увести её в минус.
     function isPacked(item) {
-        return toNumber((item || {}).packedQty) > 0;
+        return toNumber((item || {}).packedQty) !== 0;
     }
 
     // От какого количества считается «поправил»: подсказка отчёта, а у упакованной
@@ -349,6 +359,77 @@
             byId[key].items.push(item);
         });
         return order.map(function(key) { return byId[key]; });
+    }
+
+    // #4918: группировка строк по ЗАКАЗУ. Заказ бывает разбит на несколько заданий
+    // (планирование разрывает цепочки намеренно — #4424), и упаковщику нужна одна
+    // плашка с общей суммой. Ключ — order_no; пустой номер чужие позиции не склеивает —
+    // каждая позиция без заказа живёт одиночной группой. Порядок групп и строк
+    // внутри — как в отчёте.
+    function groupByOrder(items) {
+        var order = [];
+        var byKey = {};
+        (items || []).forEach(function(item, idx) {
+            var no = str(item.orderNo).trim();
+            var key = no || ('#' + idx);
+            if (!byKey[key]) {
+                byKey[key] = { orderNo: no, taskUnix: item.taskUnix, items: [] };
+                order.push(key);
+            }
+            byKey[key].items.push(item);
+        });
+        return order.map(function(key) { return byKey[key]; });
+    }
+
+    // Голый item — это группа из одной позиции: прежние вызовы карточки/диалога
+    // продолжают работать, новая плашка приходит уже группой (#4918).
+    function toGroup(itemOrGroup) {
+        if (itemOrGroup && itemOrGroup.items) return itemOrGroup;
+        var it = itemOrGroup || {};
+        return { orderNo: str(it.orderNo).trim(), taskUnix: it.taskUnix, items: [it] };
+    }
+
+    // Неупакованные позиции заказа: по ним считается остаток и их пишет «Упаковано».
+    function unpackedOf(group) {
+        return (group.items || []).filter(function(item) { return !isPacked(item); });
+    }
+
+    function orderDone(group) {
+        return unpackedOf(group).length === 0;
+    }
+
+    // Выполненные и невыполненные позиции одного заказа — «как невыполненная»,
+    // статус «частично» (#4918).
+    function orderPartial(group) {
+        var list = group.items || [];
+        var packed = list.filter(isPacked).length;
+        return packed > 0 && packed < list.length;
+    }
+
+    // Сколько осталось упаковать по заказу: сумма рулонов по НЕупакованным позициям,
+    // правки позиций входят (#4918).
+    function orderTotal(group) {
+        return unpackedOf(group).reduce(function(sum, item) { return sum + currentQty(item); }, 0);
+    }
+
+    // Правка ОБЩЕГО количества заказа: разница с текущей суммой целиком уходит
+    // в последнюю неупакованную позицию — и может получиться отрицательной
+    // (решение заказчика по #4918). Остальные позиции не трогаются.
+    function applyOrderQty(group, total) {
+        var rest = unpackedOf(group);
+        if (!rest.length) return;
+        var last = rest[rest.length - 1];
+        last.editedQty = currentQty(last) + (toNumber(total) - orderTotal(group));
+    }
+
+    // Список заказов для показа: полностью упакованные скрыты до переключателя.
+    function visibleOrders(groups, showPacked) {
+        var list = groups || [];
+        return showPacked ? list.slice() : list.filter(function(group) { return !orderDone(group); });
+    }
+
+    function packedOrderCount(groups) {
+        return (groups || []).filter(orderDone).length;
     }
 
     // Сводка: сколько позиций, сколько из них упаковано, сколько рулонов всего и упаковано.
@@ -467,6 +548,14 @@
         itemsPath: itemsPath,
         validatePack: validatePack,
         groupByTask: groupByTask,
+        groupByOrder: groupByOrder,
+        toGroup: toGroup,
+        orderDone: orderDone,
+        orderPartial: orderPartial,
+        orderTotal: orderTotal,
+        applyOrderQty: applyOrderQty,
+        visibleOrders: visibleOrders,
+        packedOrderCount: packedOrderCount,
         summarize: summarize,
         visibleItems: visibleItems,
         packedCount: packedCount,
@@ -686,7 +775,10 @@
         }
 
         var s = core.summarize(this.items);
-        var hidden = core.packedCount(this.items);
+        // #4918: плашка — на ЗАКАЗ, а не на задание. Метрики сводки остаются
+        // позиционными: они про рулоны и записи, а не про плашки.
+        var groups = core.groupByOrder(this.items);
+        var hidden = core.packedOrderCount(groups);
         host.appendChild(el('div', { class: 'atex-pk-summary' }, [
             metric('Позиций', s.total),
             metric('Упаковано', s.packed + ' / ' + s.total),
@@ -694,23 +786,14 @@
             this.showPackedToggle(hidden)
         ]));
 
-        var shown = core.visibleItems(this.items, this.showPacked);
+        var shown = core.visibleOrders(groups, this.showPacked);
         if (!shown.length) {
             host.appendChild(el('div', { class: 'atex-pk-empty', text: 'Всё упаковано — включите «Показать упакованные», чтобы их увидеть.' }));
             return;
         }
 
-        core.groupByTask(shown).forEach(function(group) {
-            var block = el('div', { class: 'atex-pk-group' });
-            // Заголовок задания нужен, только когда в нём несколько позиций: иначе
-            // время и так стоит в самой карточке.
-            if (group.items.length > 1) {
-                block.appendChild(el('div', { class: 'atex-pk-group-head', text:
-                    'Задание ' + (core.unixToLocalTime(group.taskUnix) || '—') +
-                    ' · ' + group.items.length + ' поз.' }));
-            }
-            group.items.forEach(function(item) { block.appendChild(self.renderCard(item)); });
-            host.appendChild(block);
+        shown.forEach(function(group) {
+            host.appendChild(self.renderCard(group));
         });
 
         function metric(label, value) {
@@ -736,17 +819,23 @@
         ]);
     };
 
-    // Карточка позиции: слева крупно наш внутренний номер заказа, под ним «Заказ
-    // клиента» (тот, что на этикетке ролика), посередине привычная подпись
-    // ролика и время задания, справа количество и кнопка отметки. Количество —
-    // кнопка: клик по нему открывает правку, кнопка «Упаковано» ничего не спрашивает
-    // и просто фиксирует упаковку тем количеством, которое видно (#4680).
-    AtexPacker.prototype.renderCard = function(item) {
+    // Карточка ЗАКАЗА (#4918): слева крупно наш внутренний номер заказа, под ним
+    // «Заказ клиента» (тот, что на этикетке ролика), посередине привычные подписи
+    // роликов и времена заданий, справа общее количество и кнопка отметки. Количество —
+    // кнопка: клик по нему открывает правку ОБЩЕЙ суммы, кнопка «Упаковано» ничего
+    // не спрашивает и фиксирует упаковку всех позиций заказа (#4680, #4918). Голый
+    // item приходит группой из одной позиции — карточка выглядит как раньше.
+    AtexPacker.prototype.renderCard = function(itemOrGroup) {
         var self = this;
-        var packed = core.isPacked(item);
+        var group = core.toGroup(itemOrGroup);
+        var items = group.items;
+        var single = items.length === 1 ? items[0] : null;
+        var rest = items.filter(function(item) { return !core.isPacked(item); });
+        var packed = !rest.length;
+        var partial = core.orderPartial(group);
         var card = el('div', { class: 'atex-pk-card' + (packed ? ' is-packed' : '') });
 
-        var title = core.orderTitle(item);
+        var title = core.orderTitle(single || items[0]);
         // Клиентский номер — свободный текст: длинный набирается мельче, чтобы
         // уместиться в колонку целиком, а не рваться посередине.
         var mainClass = 'atex-pk-order-main' +
@@ -757,15 +846,67 @@
         if (title.sub) order.appendChild(el('span', { class: 'atex-pk-order-sub', text: title.sub }));
         card.appendChild(order);
 
-        var edited = core.isEdited(item);
-        var meta = ['задание ' + (core.unixToLocalTime(item.taskUnix) || '—')];
-        if (item.planQty) meta.push('план ' + item.planQty);
-        if (item.factQty) meta.push('факт ' + item.factQty);
-        var note = item.editedNote || item.notes;
-        if (note) meta.push(note);
-        // #4665: в какой короб и по сколько штук — из справочника «Типоразмер».
-        var size = core.sizeForItem(item, this.sizes);
-        var packLabel = core.packingLabel(size, packed ? item.packedQty : core.packQtyFor(item));
+        // Описания роликов: разные позиции — отдельными строками, повторы схлопываются.
+        var descs = [];
+        items.forEach(function(item) {
+            var d = core.describeItem(item) || '—';
+            if (descs.indexOf(d) === -1) descs.push(d);
+        });
+
+        var edited = false;
+        var meta = [];
+        var packSpans = [];
+        if (single) {
+            edited = core.isEdited(single);
+            meta.push('задание ' + (core.unixToLocalTime(single.taskUnix) || '—'));
+            if (single.planQty) meta.push('план ' + single.planQty);
+            if (single.factQty) meta.push('факт ' + single.factQty);
+            var note = single.editedNote || single.notes;
+            if (note) meta.push(note);
+            // #4665: в какой короб и по сколько штук — из справочника «Типоразмер».
+            var size = core.sizeForItem(single, this.sizes);
+            var packLabel = core.packingLabel(size, packed ? single.packedQty : core.packQtyFor(single));
+            if (packLabel) packSpans.push({ label: packLabel, name: size.name });
+        } else {
+            // #4918: мета слитой плашки — времена всех заданий заказа, Σ план/факт
+            // по неупакованным позициям, примечания позиций.
+            var times = [];
+            items.forEach(function(item) {
+                var t = core.unixToLocalTime(item.taskUnix);
+                if (t && times.indexOf(t) === -1) times.push(t);
+            });
+            meta.push(times.length > 1 ? 'задания ' + times.join(', ') : 'задание ' + (times[0] || '—'));
+            if (rest.length) {
+                var plan = 0, fact = 0;
+                rest.forEach(function(item) {
+                    plan += core.toNumber(item.planQty);
+                    fact += core.toNumber(item.factQty);
+                    if (core.isEdited(item)) edited = true;
+                });
+                if (plan) meta.push('план ' + (Math.round(plan * 1000) / 1000));
+                if (fact) meta.push('факт ' + (Math.round(fact * 1000) / 1000));
+            }
+            var notes = [];
+            items.forEach(function(item) {
+                var n = str(item.editedNote || item.notes).trim();
+                if (n && notes.indexOf(n) === -1) notes.push(n);
+            });
+            if (notes.length) meta.push(notes.join('; '));
+            // Короб — по разным типоразмерам, с суммой штук по каждому из них.
+            var buckets = [];
+            rest.forEach(function(item) {
+                var size = core.sizeForItem(item, self.sizes);
+                var key = size ? (size.id != null ? size.id : size.name) : '';
+                var bucket = null;
+                buckets.forEach(function(b) { if (b.key === key) bucket = b; });
+                if (!bucket) { bucket = { key: key, size: size, qty: 0 }; buckets.push(bucket); }
+                bucket.qty += core.currentQty(item);
+            });
+            buckets.forEach(function(b) {
+                var label = core.packingLabel(b.size, b.qty);
+                if (label) packSpans.push({ label: label, name: b.size ? b.size.name : '' });
+            });
+        }
         // #4910: задание/план/факт и короб — одна строка, чтобы карточка не росла
         // в высоту: короб идёт акцентным span в хвосте меты, а не отдельной строкой.
         var metaNode = el('div', { class: 'atex-pk-meta' });
@@ -773,42 +914,56 @@
             if (i) metaNode.appendChild(document.createTextNode(' · '));
             metaNode.appendChild(document.createTextNode(part));
         });
-        if (packLabel) {
+        if (packSpans.length) {
             if (meta.length) metaNode.appendChild(document.createTextNode(' · '));
-            metaNode.appendChild(el('span', { class: 'atex-pk-pack', title: size.name, text: packLabel }));
+            packSpans.forEach(function(p, i) {
+                if (i) metaNode.appendChild(document.createTextNode(' · '));
+                metaNode.appendChild(el('span', { class: 'atex-pk-pack', title: p.name, text: p.label }));
+            });
         }
-        var body = [
-            el('div', { class: 'atex-pk-desc', text: core.describeItem(item) || '—' }),
-            metaNode
-        ];
-        // #4799: артикул — последним в теле карточки, перед колонкой управления.
-        if (item.art) {
+        var body = descs.map(function(d) {
+            return el('div', { class: 'atex-pk-desc', text: d });
+        });
+        body.push(metaNode);
+        // #4799: артикул — последним в теле карточки, перед колонкой управления;
+        // #4918: у слитой плашки — уникальные непустые значения через «, ».
+        var arts = [], jumbos = [];
+        items.forEach(function(item) {
+            if (item.art && arts.indexOf(item.art) === -1) arts.push(item.art);
+            if (item.jumbo && jumbos.indexOf(item.jumbo) === -1) jumbos.push(item.jumbo);
+        });
+        if (arts.length) {
             body.push(el('div', { class: 'atex-pk-art' }, [
                 el('span', { class: 'atex-pk-art-label', text: 'Артикул' }),
-                el('span', { class: 'atex-pk-art-value', text: item.art })
+                el('span', { class: 'atex-pk-art-value', text: arts.join(', ') })
             ]));
         }
         // #4910: № джамбо — той же плашкой рядом с артикулом; #4914: номера приходят
         // из отчёта task_jumbo, на задании их бывает несколько — через «, ».
-        if (item.jumbo) {
+        if (jumbos.length) {
             body.push(el('div', { class: 'atex-pk-jumbo' }, [
                 el('span', { class: 'atex-pk-art-label', text: 'Джамбо' }),
-                el('span', { class: 'atex-pk-art-value', text: item.jumbo })
+                el('span', { class: 'atex-pk-art-value', text: jumbos.join(', ') })
             ]));
         }
         card.appendChild(el('div', { class: 'atex-pk-body' }, body));
 
         var side = el('div', { class: 'atex-pk-side' });
         // Количество — кнопка: по клику по самому числу открывается правка (#4680).
+        // На слитой плашке — ОБЩАЯ сумма неупакованных позиций заказа, у упакованной —
+        // записанное (#4918).
+        var qtyValue = packed
+            ? items.reduce(function(sum, item) { return sum + core.toNumber(item.packedQty); }, 0)
+            : core.orderTotal(group);
         var qty = el('button', {
             class: 'atex-pk-qty' + (edited ? ' is-edited' : ''),
             type: 'button',
             title: 'Изменить количество'
         }, [
-            el('span', { class: 'atex-pk-qty-value', text: String(core.currentQty(item)) }),
+            el('span', { class: 'atex-pk-qty-value', text: String(qtyValue) }),
             el('span', { class: 'atex-pk-qty-unit', text: 'шт' })
         ]);
-        qty.addEventListener('click', function() { self.openQtyDialog(item); });
+        qty.addEventListener('click', function() { self.openQtyDialog(group); });
         side.appendChild(qty);
         var btn = el('button', {
             class: 'atex-pk-btn ' + (packed ? 'atex-pk-btn-edit' : 'atex-pk-btn-pack'),
@@ -816,11 +971,12 @@
             text: packed ? 'Изменить' : 'Упаковано'
         });
         btn.addEventListener('click', function() {
-            if (packed) { self.openQtyDialog(item); return; }
-            self.packNow(item);
+            if (packed) { self.openQtyDialog(group); return; }
+            self.packNow(group);
         });
         side.appendChild(btn);
         if (packed) side.appendChild(el('span', { class: 'atex-pk-badge', text: 'упаковано' }));
+        if (partial) side.appendChild(el('span', { class: 'atex-pk-badge is-partial', text: 'частично' }));
         card.appendChild(side);
         return card;
     };
@@ -831,17 +987,30 @@
     // то, что в карточке и стоит; поправил — обязательно примечание. У НЕупакованной
     // позиции правка только запоминается: в базу её унесёт кнопка «Упаковано». У
     // упакованной писать некуда откладывать — отметка уже есть, правка уходит сразу.
-    AtexPacker.prototype.openQtyDialog = function(item) {
+    // На слитой плашке (#4918) правится ОБЩАЯ сумма заказа: разница целиком уходит
+    // в последнюю неупакованную позицию. Упакованная группа правится на последней
+    // позиции — туда же по правилу #4918 уходят корректировки.
+    AtexPacker.prototype.openQtyDialog = function(itemOrGroup) {
         var self = this;
+        var group = core.toGroup(itemOrGroup);
+        var items = group.items;
+        if (items.length > 1 && core.orderDone(group)) {
+            return this.openQtyDialog(items[items.length - 1]);
+        }
+        var single = items.length === 1 ? items[0] : null;
+        var unpacked = items.filter(function(item) { return !core.isPacked(item); });
+        var lastUnpacked = unpacked[unpacked.length - 1];
         if (this.busy) return;
-        if (!item.gpId) {
+        var missingGp = items.filter(function(item) { return !item.gpId; });
+        if (missingGp.length) {
             this.notify('В отчёте нет gp_id — отметить упаковку нечему', 'error');
             return;
         }
-        var packed = core.isPacked(item);
-        var suggested = core.baseQty(item);
-        var qtyInput = el('input', { class: 'atex-pk-input', type: 'number', min: '0', step: '1', inputmode: 'numeric', value: String(core.currentQty(item)) });
-        var noteInput = el('input', { class: 'atex-pk-input', type: 'text', value: item.editedNote || item.notes || '', placeholder: 'например: 10 шт в брак' });
+        var packed = !!single && core.isPacked(single);
+        var suggested = single ? core.baseQty(single) : core.orderTotal(group);
+        var qtyInput = el('input', { class: 'atex-pk-input', type: 'number', min: '0', step: '1', inputmode: 'numeric', value: String(single ? core.currentQty(single) : core.orderTotal(group)) });
+        var noteValue = single ? (single.editedNote || single.notes) : (lastUnpacked.editedNote || lastUnpacked.notes);
+        var noteInput = el('input', { class: 'atex-pk-input', type: 'text', value: noteValue || '', placeholder: 'например: 10 шт в брак' });
         var hint = el('div', { class: 'atex-pk-hint' });
         var error = el('div', { class: 'atex-pk-error' });
 
@@ -858,9 +1027,15 @@
         var cancel = el('button', { class: 'atex-pk-btn', type: 'button', text: 'Отмена' });
 
         // В заголовке — тот же номер, что крупно стоит в карточке (#4688, #4912).
-        var overlay = this.modal('Количество · заказ ' + core.orderTitle(item).main, [
-            el('div', { class: 'atex-pk-modal-desc', text: core.describeItem(item) }),
-            el('label', { class: 'atex-pk-field' }, [el('span', { text: packed ? 'Упаковано, шт' : 'Количество, шт' }), qtyInput]),
+        var head = single || items[0];
+        var descParts = [];
+        items.forEach(function(item) {
+            var d = core.describeItem(item);
+            if (d && descParts.indexOf(d) === -1) descParts.push(d);
+        });
+        var overlay = this.modal('Количество · заказ ' + core.orderTitle(head).main, [
+            el('div', { class: 'atex-pk-modal-desc', text: descParts.join(' · ') }),
+            el('label', { class: 'atex-pk-field' }, [el('span', { text: packed ? 'Упаковано, шт' : (single ? 'Количество, шт' : 'Общее количество, шт') }), qtyInput]),
             el('label', { class: 'atex-pk-field' }, [el('span', { text: 'Примечание' }), noteInput]),
             hint, error
         ], [cancel, save]);
@@ -875,9 +1050,15 @@
             overlay.close();
             var qty = core.toNumber(form.qty);
             var note = str(form.note).trim();
-            if (packed) { self.markPacked(item, qty, note); return; }
-            item.editedQty = qty;
-            item.editedNote = note;
+            if (packed) { self.markPacked(single, qty, note); return; }
+            if (single) {
+                single.editedQty = qty;
+                single.editedNote = note;
+            } else {
+                // #4918: правим общую сумму — разница целиком в последнюю неупакованную.
+                core.applyOrderQty(group, qty);
+                lastUnpacked.editedNote = note;
+            }
             self.renderList();
         });
     };
@@ -903,17 +1084,75 @@
     // ── Запись отметки ──
 
     // Кнопка «Упаковано»: ничего не спрашивает — фиксирует упаковку тем количеством,
-    // которое стоит в карточке (#4680). Количество берётся только оттуда, поэтому
-    // упаковщик пишет ровно то, что видит.
-    AtexPacker.prototype.packNow = function(item) {
-        var qty = core.currentQty(item);
-        if (!(qty > 0)) {
+    // которое стоит в карточке (#4680). На слитой плашке заказа (#4918) это общая
+    // сумма: пишется каждая неупакованная позиция своим количеством.
+    AtexPacker.prototype.packNow = function(itemOrGroup) {
+        var group = core.toGroup(itemOrGroup);
+        var total = core.orderTotal(group);
+        if (!(total > 0)) {
             // Отчёт не дал ни плана, ни факта — сказать нечего, зовём правку количества.
             this.notify('Количество неизвестно — укажите его', 'error');
-            this.openQtyDialog(item);
+            this.openQtyDialog(itemOrGroup);
             return;
         }
-        this.markPacked(item, qty, str(item.editedNote).trim());
+        this.packOrderNow(group);
+    };
+
+    // Отметка всех неупакованных позиций заказа (#4918). Одна позиция — прежний путь
+    // через markPacked. Несколько — цепочкой промисов: у записи busy-страж, N
+    // параллельных вызовов он бы отрезёк. Запись по-прежнему идёт в КАЖДУЮ Партию ГП
+    // своим количеством — «Дэшборд отклонений» (Σ факт − Σ упак по заданию) остаётся
+    // согласованным; примечание правки уезжает с той позицией, где стоит.
+    AtexPacker.prototype.packOrderNow = function(group) {
+        var self = this;
+        var rest = group.items.filter(function(item) { return !core.isPacked(item); });
+        if (!rest.length) return;
+        if (rest.length === 1) {
+            var it = rest[0];
+            return this.markPacked(it, core.currentQty(it), str(it.editedNote).trim());
+        }
+        this.setBusy(true);
+        var writes = rest.map(function(item) {
+            return { item: item, qty: core.currentQty(item), note: str(item.editedNote).trim() };
+        });
+        var chain = Promise.resolve();
+        writes.forEach(function(w) {
+            chain = chain.then(function() { return self._writePack(w.item, w.qty, w.note); });
+        });
+        return chain.then(function() {
+            var sum = 0;
+            writes.forEach(function(w) {
+                sum += w.qty;
+                w.item.packedQty = w.qty;
+                if (w.note) w.item.notes = w.note;
+                // Правка доехала до базы — дальше карточка живёт записанным значением.
+                w.item.editedQty = null;
+                w.item.editedNote = '';
+            });
+            self.setBusy(false);
+            self.notify('Упаковано: ' + sum + ' шт (' + writes.length + ' поз.)', 'success');
+            self.renderList();
+        }).catch(function(err) {
+            self.setBusy(false);
+            self.notify('Ошибка сохранения: ' + err.message, 'error');
+        });
+    };
+
+    // Ядро записи отметки одной позиции: «Упаковано шт» (+ «Примечание») в Партию ГП
+    // и событие смены «Упаковка». Возвращает промис всей цепочки; локальную модель
+    // обновляет вызывающий (markPacked — одна позиция, packOrderNow — серия).
+    AtexPacker.prototype._writePack = function(item, qty, note) {
+        var self = this;
+        var gpFields = core.gpPackFields(this.meta.gp, { qty: qty, note: note });
+        return this.post('_m_set/' + item.gpId + '?JSON', gpFields).then(function() {
+            return self.post('_m_new/' + self.meta.event.id + '?JSON&up=1', core.eventFields(self.meta.event, {
+                when: core.eventStamp(new Date()),
+                taskId: item.taskId,
+                userId: self.userId,
+                qty: qty,
+                note: note
+            }));
+        });
     };
 
     // Пишем состояние в Партию ГП («Упаковано шт» + «Примечание») и событие смены
@@ -923,16 +1162,7 @@
         var self = this;
         if (this.busy) return;
         this.setBusy(true);
-        var gpFields = core.gpPackFields(this.meta.gp, { qty: qty, note: note });
-        this.post('_m_set/' + item.gpId + '?JSON', gpFields).then(function() {
-            return self.post('_m_new/' + self.meta.event.id + '?JSON&up=1', core.eventFields(self.meta.event, {
-                when: core.eventStamp(new Date()),
-                taskId: item.taskId,
-                userId: self.userId,
-                qty: qty,
-                note: note
-            }));
-        }).then(function() {
+        self._writePack(item, qty, note).then(function() {
             item.packedQty = qty;
             if (note) item.notes = note;
             // Правка доехала до базы — дальше карточка живёт записанным значением.
