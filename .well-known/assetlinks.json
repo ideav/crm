@@ -1,0 +1,14 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.integram.mobile",
+      "sha256_cert_fingerprints": [
+        "5C:B3:2C:2E:FB:D2:03:3B:9F:64:6A:F3:93:8C:4E:16:FB:4D:65:3D:F3:BA:28:BA:44:27:3C:37:80:08:23:6C"
+      ]
+    }
+  }
+]
