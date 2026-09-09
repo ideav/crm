@@ -330,41 +330,49 @@
 }
 .atex-sl-textarea { resize: vertical; min-height: 44px; }
 /* #4785 п.3: подсказок под полями («остаток партии», «= N м²») нет — остаток виден
-   строкой партии. #4914: у показаний появились закладки записей «Номера джамбо». */
-/* #4914: закладки джамбо — чип на каждую запись задания, активная подсвечена,
-   «+» добавляет ещё одно джамбо (Счётчик нач. = Счётчик кон. предыдущего). */
+   строкой партии. #4916: показания — конструкция «корешки + панель»: корешок на каждую
+   запись «Номера джамбо», активный корешок — само поле номера, панель — вкладка
+   активной записи. */
+.atex-sl-readings { flex: none; display: flex; flex-direction: column; }
 .atex-sl-jumbo-tabs {
     display: flex;
     flex-wrap: wrap;
-    align-items: center;
-    gap: 6px;
-    margin: 2px 0 8px;
+    align-items: flex-end;
+    gap: 2px;
+    padding: 0 6px;
 }
+/* Корешок — форма закладки: прямоугольный сверху, нижняя грань растворяется в панели
+   (цвет её границы = фон панели), активный на 1px наезжает на верх панели. */
 .atex-sl-jumbo-tab {
     max-width: 220px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    padding: 5px 12px;
+    padding: 6px 14px;
     border: 1px solid var(--sl-border);
-    border-radius: 999px;
-    background: var(--sl-bg);
+    border-bottom-color: var(--sl-bg);
+    border-radius: 8px 8px 0 0;
+    background: var(--sl-surface);
     cursor: pointer;
     font: inherit;
     font-size: 13px;
     color: var(--sl-muted);
 }
-.atex-sl-jumbo-tab:hover { background: var(--sl-surface); }
+.atex-sl-jumbo-tab:hover { color: var(--sl-accent); }
 .atex-sl-jumbo-tab.is-active {
-    background: var(--sl-accent);
-    border-color: var(--sl-accent);
-    color: #fff;
+    background: var(--sl-bg);
+    color: var(--text-primary, #1f2933);
     font-weight: 600;
+    margin-bottom: -1px;
 }
+/* Активный корешок — само поле номера: ширина под номер с запасом, чтобы попасть
+   пальцем. */
+.atex-sl-jumbo-tab-input { width: 150px; }
 .atex-sl-jumbo-add {
-    padding: 5px 12px;
+    padding: 6px 12px;
     border: 1px dashed var(--sl-border);
-    border-radius: 999px;
+    border-bottom-color: var(--sl-bg);
+    border-radius: 8px 8px 0 0;
     background: transparent;
     cursor: pointer;
     font: inherit;
@@ -372,6 +380,8 @@
     color: var(--sl-muted);
 }
 .atex-sl-jumbo-add:hover { color: var(--sl-accent); border-color: var(--sl-accent); }
+/* Панель показаний — вкладка активного корешка: левый верхний угол раскрыт. */
+.atex-sl-readings .atex-sl-section { border-top-left-radius: 0; }
 /* #4914 п.3: «Фото брака» и «Примечания» — одна строка сетки: фото занимает первую
    колонку ряда, примечания тянутся до его конца. На совсем узких экранах (меньше двух
    колонок) примечания просто уходят на всю ширину. */

@@ -246,8 +246,8 @@ function makeInst(opts) {
     assertEqual(inst.mainEl.querySelectorAll('.atex-sl-section').length, 2,
         '#4783 п.1: секций две — раскладка и показания; «События смены» убраны');
     var order = inst.mainEl.childNodes.map(function(n) { return n.className.split(' ')[0]; });
-    assertEqual(order, ['atex-sl-headwrap', 'atex-sl-section', 'atex-sl-section', 'atex-sl-batch-line'],
-        '#4783 п.9: порядок — шапка задания, раскладка, показания, партия строкой');
+    assertEqual(order, ['atex-sl-headwrap', 'atex-sl-section', 'atex-sl-readings', 'atex-sl-batch-line'],
+        '#4783 п.9: порядок — шапка задания, раскладка, показания (обёртка корешков, #4916), партия строкой');
 })();
 
 // ── п.9: партия сырья строкой и без выбора ────────────────────────────────────────────────────
