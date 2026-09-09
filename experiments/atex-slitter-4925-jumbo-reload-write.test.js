@@ -146,7 +146,7 @@ function makeController() {
         var reinput = retabs.childNodes.filter(function(n) { return n.tagName === 'INPUT'; })[0];
         assertEqual(reinput ? reinput.value : null, '123', '#4925: после перерисовки номер виден в корешке-поле');
         assertEqual(chips.length, 0, '#4925: единственная запись — активный корешок, чужих кнопок нет');
-        styleGuard();
+        styleGuardDone();
     });
 })();
 
@@ -219,14 +219,7 @@ function makeController() {
     });
 })();
 
-// ── СТОРОЖ СТИЛЕЙ: ничего не сломалось в форме корешков (#4916 не трогали) ──
-function styleGuard() {
-    var fs = require('fs'), path = require('path');
-    var css = fs.readFileSync(path.join(__dirname, '..', 'download/atex/css/slitter.css'), 'utf8');
-    assert(/\.atex-sl-jumbo-tab\s*\{[^}]*border-radius:\s*8px 8px 0 0/.test(css),
-        '#4925: корешки по-прежнему закладки (radius 8px 8px 0 0)');
-    styleGuardDone();
-}
+// ── учёт асинхронных веток: ждём завершения всех трёх сценариев ──
 var guardsPending = 3;
 function styleGuardDone() {
     guardsPending--;

@@ -297,7 +297,7 @@ function flush() { return new Promise(function(resolve) { setTimeout(resolve, 0)
     assertEqual(fin['t16411'], '2026-09-07 12:00:00', '#3557: «Закончено» = момент завершения');
     assertEqual(fin['t1162'], '0', '#3557: «В работе» снят нулём');
     var jumboFin = good.posts[3].params;
-    assertEqual(jumboFin['t82374'], 'J-1', '#4860: запись джамбо при завершении ведётся (номер на месте)');
+    assertEqual(jumboFin['t82374'], undefined, '#4925: главного значения (номера) в `_m_set` нет — оно отбивало весь запрос');
     assertEqual(jumboFin['t82378'], 100, '#4914: в запись уходит факт резок (последняя отметка довела до плана)');
     assertEqual(jumboFin['t82380'], 60000 - 100 * 450, '#4860: конечная длина = счётчик кон. − расход − списание');
 })();
