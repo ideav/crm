@@ -759,6 +759,36 @@
         return s === 'начало смены' || s === 'открытие смены';
     }
 
+    // #4921: выравнивание прокрутки пульта на планшете. Шапка браузера и клавиатура
+    // сдвигают документ; при запуске и после закрытия клавиатуры прокрутку возвращаем
+    // в начало — иначе пульт остаётся «съехавшим»: шапка страницы за краем экрана,
+    // нижние поля ввода обрезаны. «Окно» передаётся снаружи, чтобы логика проверялась
+    // юнит-тестом без браузера. Порог 5px отсекает дребезг высоты адресной строки.
+    function createScrollAlign(win) {
+        var vv = win && win.visualViewport || null;
+        var lastVvHeight = vv ? vv.height : 0;
+        var align = {
+            alignTop: function() {
+                if (typeof win.scrollTo === 'function') win.scrollTo(0, 0);
+            },
+            // resize визуального вьюпорта: высота ВЫРОСЛА заметно — клавиатура
+            // закрылась, документ мог остаться сдвинутым — выравниваем.
+            onViewportResize: function() {
+                if (!vv) return;
+                var closed = vv.height > lastVvHeight + 5;
+                lastVvHeight = vv.height;
+                if (closed) align.alignTop();
+            },
+            install: function() {
+                if (vv && typeof vv.addEventListener === 'function') {
+                    vv.addEventListener('resize', align.onViewportResize);
+                }
+                return align;
+            }
+        };
+        return align;
+    }
+
     function isShiftEndType(type) {
         var s = String(type == null ? '' : type).trim().toLowerCase();
         return s === 'конец смены' || s === 'закрытие смены' || s === 'завершение смены';
@@ -1371,6 +1401,7 @@
         hasOpenShift: hasOpenShift,
         shiftEventSlitterLabel: shiftEventSlitterLabel,
         shiftEventMatchesSlitter: shiftEventMatchesSlitter,
+        createScrollAlign: createScrollAlign,   // #4921: выравнивание прокрутки пульта
         runLengthForCut: runLengthForCut,
         plannedRunsForCut: plannedRunsForCut,
         actualRunsForCut: actualRunsForCut,   // #4564: сделано проходов = «Кол-во резок факт»
@@ -4217,25 +4248,14 @@
         this.root.appendChild(layout);
         this.toastHost = this.root;
 
-        // #4914 п.4: скролл планшета после ручного ввода. Фокус в поле поднимает
+        // #4914 п.4 → #4921: скролл планшета после ручного ввода. Фокус в поле поднимает
         // клавиатуру — визуальный вьюпорт сжимается, браузер сдвигает документ и не
         // возвращает его обратно (вылезает шапка браузера, кнопки уходят под низ).
-        // Верхнеуровневую прокрутку запрещает #fullscreen-workspace-style (main.html:
-        // html/body без скролла + интерактивная клавиатура resizes-content); здесь
-        // ловим момент, когда клавиатура закрылась, и возвращаем прокрутку в начало.
-        if (typeof window !== 'undefined' && window.visualViewport
-                && typeof window.visualViewport.addEventListener === 'function') {
-            var lastVvHeight = window.visualViewport.height;
-            window.visualViewport.addEventListener('resize', function() {
-                var vv = window.visualViewport;
-                var closed = vv.height > lastVvHeight + 5;   // клавиатура закрылась
-                lastVvHeight = vv.height;
-                if (!closed) return;
-                if (typeof window.scrollTo === 'function') window.scrollTo(0, 0);
-                var layoutEl = self.root.querySelector ? self.root.querySelector('.atex-sl-layout') : null;
-                if (layoutEl) layoutEl.scrollTop = 0;
-            });
-        }
+        // Ловим момент, когда клавиатура закрылась, и возвращаем прокрутку в начало;
+        // там же берётся выравнивание при запуске (alignTop после первой отрисовки).
+        // Раньше обнулялся ещё и scrollTop у .atex-sl-layout — с #4921 на узком экране
+        // скролл у документа, контейнер сам не прокручивается.
+        this.scrollAlign = core.createScrollAlign(window).install();
         // Фокус в поле — подтянуть его в зону видимости минимальным сдвигом, а не
         // прокруткой всего документа (то, что и ломало раскладку).
         if (typeof layout.addEventListener === 'function') {
@@ -4262,6 +4282,8 @@
             })
             .then(function() {
                 self.render();
+                // #4921: при запуске пульт выровнен — прокрутка документа в начало.
+                self.scrollAlign.alignTop();
                 // #4783 п.3: поля станка в форме больше нет — на новом планшете выбирать его
                 // нечем, поэтому при пустом выборе сразу открываем список станков.
                 if (!self.selectedSlitterId && self.slitterOptions().length) self.chooseSlitter();

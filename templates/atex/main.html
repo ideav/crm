@@ -216,11 +216,23 @@
             var css = document.createElement('style');
             css.id = 'fullscreen-workspace-style';
             css.textContent = '.app-sidebar,#sidebar-backdrop,#mobile-sidebar-toggle{display:none!important;}'
-                + '.app-content{padding:0!important;overflow:hidden!important;}'
-                /* #4914: документ пульта не скроллится вовсе — навбар sticky не уезжает
-                   за клавиатурой и «шапка браузера» не вылезает после ручного ввода;
-                   прокрутка живёт внутри пульта (.atex-sl-layout и т.п.). */
-                + 'html,body{overflow:hidden!important;overscroll-behavior:none;}';
+                + '.app-content{padding:0!important;}';
+            // #4921: у слиттера на узком экране (планшет портретом) прокрутка живёт у
+            // САМОГО документа: только документный скролл прячет шапку браузера (адресную
+            // строку) и дотягивает низ карточки задания — 100vh на планшете больше
+            // видимой области, и нижняя часть пульта пропадала за адресной строкой.
+            // На широком экране — и у остальных пультов на любом экране — документ
+            // не скроллится (#4914: навбар sticky не уезжает за клавиатурой, «шапка
+            // браузера» не вылезает после ручного ввода; прокрутка внутри пульта).
+            if (String(action || '').trim().toLowerCase() === 'slitter') {
+                css.textContent += '@media (min-width: 821px){.app-content{overflow:hidden!important;}'
+                    + 'html,body{overflow:hidden!important;overscroll-behavior:none;}}'
+                    + '@media (max-width: 820px){.app-layout{height:auto!important;overflow:visible!important;}'
+                    + '.app-content{height:auto!important;overflow:visible!important;}}';
+            } else {
+                css.textContent += '.app-content{overflow:hidden!important;}'
+                    + 'html,body{overflow:hidden!important;overscroll-behavior:none;}';
+            }
             document.head.appendChild(css);
         })();
     </script>

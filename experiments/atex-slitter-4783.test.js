@@ -327,8 +327,11 @@ function makeInst(opts) {
         var m = base.match(new RegExp('\\' + sel + '\\s*\\{([^}]*)\\}'));
         return m ? m[1] : '';
     }
-    assert(/@media[^{]*820px[\s\S]*?\.atex-sl-layout\s*\{[^}]*overflow:\s*auto/.test(css),
-        '#4783: на узком экране колонки складываются, и прокрутка возвращается странице');
+    // #4921: на узком экране прокрутка — у самой страницы (только документный скролл
+    // прячет шапку браузера и дотягивает низ карточки на планшете), поэтому высоты
+    // пульта распущены, а не заперты внутренним overflow: auto.
+    assert(/@media[^{]*820px[\s\S]*?\.atex-sl\s*\{[^}]*height:\s*auto[^}]*overflow:\s*visible/.test(css),
+        '#4783/#4921: на узком экране колонки складываются, и прокрутка возвращается странице');
     assert(/overflow:\s*auto/.test(rule('.atex-sl-cuts')) && /flex:\s*1/.test(rule('.atex-sl-cuts')),
         '#4783: прокручивается список заданий — он и занимает остаток высоты сайдбара');
     assert(/overflow:\s*hidden/.test(rule('.atex-sl-main')),
