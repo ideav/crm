@@ -180,6 +180,43 @@ assertEqual(core.hasOpenShift(twoMachineEvents, '701', '2026-06-11', 'Стано
 assertEqual(core.hasOpenShift(twoMachineEvents, '701', '2026-06-11'), false,
     'hasOpenShift: без станка — глобально последнее событие «Конец смены» → закрыта (а per-станок «Станок 1» открыт)');
 
+// ── #4919: открытость смены — свойство СТАНКА, а не оператора. userId=null (или пусто) —
+// учитываются события любого оператора: смена, открытая одним, видна открытым на другом
+// устройстве; «Конец смены» любого оператора её закрывает. Та же мерка, что у планировщика
+// (production-planning shiftNotOpenSlitters, #4833) ──
+assertEqual(core.hasOpenShift([
+    { when: '2026-06-11 08:00:00', type: 'Начало смены', userId: '702', notes: 'Станок 1 · 2026-06-11' }
+], null, '2026-06-11', 'Станок 1'), true,
+    'hasOpenShift #4919: смена, открытая другим оператором, видна (userId не задан)');
+assertEqual(core.hasOpenShift([
+    { when: '2026-06-11 08:00:00', type: 'Начало смены', userId: '702', notes: 'Станок 1 · 2026-06-11' },
+    { when: '2026-06-11 16:30:00', type: 'Конец смены', userId: '701', notes: 'Станок 1 · 2026-06-11' }
+], null, '2026-06-11', 'Станок 1'), false,
+    'hasOpenShift #4919: «Конец смены» другого оператора закрывает смену станка');
+assertEqual(core.hasOpenShift(twoMachineEvents, null, '2026-06-11', 'Станок 1'), true,
+    'hasOpenShift #4919: без пользователя — per-станок «Станок 1» открыт, как с явным оператором');
+
+// #4919: РМ определяет смену по ВСЕМУ журналу (allEvents), а не только по событиям
+// текущего оператора (shiftEvents) — иначе на другом устройстве смена выглядела закрытой
+(function() {
+    var Controller = require('../download/atex/js/slitter.js').Controller;
+    var inst = Object.create(Controller.prototype);
+    inst.selectedSlitterId = 's1';
+    inst.slitterOptions = function() { return [{ id: 's1', label: 'Станок 1' }]; };
+    inst.selectedDate = '2026-06-11';
+    inst.shiftEvents = []; // события текущего оператора — их нет
+    inst.allEvents = [
+        { when: '2026-06-11 08:00:00', type: 'Начало смены', userId: '702', slitterId: 's1', notes: 'Станок 1 · 2026-06-11' }
+    ];
+    assertEqual(inst.isShiftOpen(), true,
+        '#4919 isShiftOpen: смена, открытая другим оператором на станке, открыта и на этом устройстве');
+    inst.allEvents = inst.allEvents.concat([
+        { when: '2026-06-11 16:30:00', type: 'Конец смены', userId: '701', slitterId: 's1', notes: 'Станок 1 · 2026-06-11' }
+    ]);
+    assertEqual(inst.isShiftOpen(), false,
+        '#4919 isShiftOpen: «Конец смены» любого оператора закрывает смену станка');
+})();
+
 // ── партии сырья: FIFO, только В работе, остатка хватает минимум на один проход ──
 var rawBatches = [
     { id: 'new', date: '2026-06-05', remainderM: 950, materialId: 'm1', active: '1', barcode: 'NEW' },

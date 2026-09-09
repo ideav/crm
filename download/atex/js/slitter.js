@@ -802,6 +802,8 @@
     // «Конец смены» этого станка НЕЗАВИСИМО от дня (фильтр по выбранному дню снят). Так
     // оператор под одной открытой сменой может выполнять задания будущих дней (#4332 п.4).
     // Параметр date оставлен для совместимости сигнатуры, но на выбор смены не влияет.
+    // #4919: userId=null — событие любого оператора; смена принадлежит станку, а не
+    // устройству (та же мерка, что shiftNotOpenSlitters планировщика, #4833).
     function hasOpenShift(events, userId, date, slitterLabel, slitterId) {
         var last = null, lastKey = -Infinity, lastIdx = -1;
         (events || []).forEach(function(event, i) {
@@ -2162,9 +2164,14 @@
     AtexSlitter.prototype.isShiftOpen = function() {
         // #3522: смена — на конкретный станок. Без выбранного станка смены нет.
         if (!this.selectedSlitterId) return false;
-        // #4359: станок смены — по ссылке «Слиттер» события; подпись остаётся запасным путём
-        // для событий, записанных до появления реквизита.
-        return core.hasOpenShift(this.shiftEvents, this.userId, this.selectedDate,
+        // #4919: открытость смены — свойство СТАНКА, а не устройства: смотрим весь журнал
+        // (this.allEvents, без фильтра по оператору — userId=null) и берём последнее событие
+        // «Начало/Конец смены» этого станка. Тот же принцип, что у планировщика
+        // (production-planning shiftNotOpenSlitters, #4833). Раньше состояние определялось
+        // по событиям текущего оператора (this.shiftEvents), и смена, открытая одним
+        // оператором, на другом устройстве выглядела закрытой. #4359: станок — по ссылке
+        // «Слиттер»; подпись остаётся запасным путём для старых событий.
+        return core.hasOpenShift(this.allEvents, null, this.selectedDate,
             this.selectedSlitterLabel(), this.selectedSlitterId);
     };
 
