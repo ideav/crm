@@ -5,6 +5,7 @@
 /.env
 /.env.local
 /docker/certs/
+/create_xcom_matching_log.txt*
 
 # Local research artifacts for issue #2895 — но НЕ регрессионная сеть: тесты, фикстуры и
 # карантин обязаны попадать в коммит без `git add -f`, иначе новый тест молча не доедет до PR.
