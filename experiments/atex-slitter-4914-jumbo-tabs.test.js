@@ -364,7 +364,7 @@ function cutMeta() {
         });
     });
     function done2() {
-        // ── 8) завершение: финальная запись активного джамбо + память по сырью ──
+        // ── 8) завершение: финальная запись активного джамбо ──
         var store = {};
         global.window.localStorage = {
             getItem: function(k) { return store[k] == null ? null : store[k]; },
@@ -409,20 +409,14 @@ function cutMeta() {
             assertEqual(jumboSet && jumboSet.fields['t82378'], 2, 'финал: кол-во резок факт');
             assertEqual(jumboSet && jumboSet.fields['t791707'], 1813, 'финал: счётчик кон. записи = счётчик резки (3703−1890)');
             assertEqual(jumboSet && jumboSet.fields['t82380'], 1723, 'финал: конечная длина = 1813 − 30 − 60');
-            var mem = JSON.parse(store['atex-sl-jumbo-by-material:testdb'] || '{}');
-            assertEqual(mem['2086'] && mem['2086'].no, '102605081738', 'память по сырью: номер джамбо');
-            assertEqual(mem['2086'] && mem['2086'].counterEnd, 1813, 'память по сырью: счётчик кон.');
+            // «Память по сырью» удалена (#4933 п.2): завершение резки номер не запоминает.
+            assertEqual(store['atex-sl-jumbo-by-material:testdb'] || null, null,
+                'завершение НЕ пишет память номера по сырью (#4933 п.2)');
             done3();
         });
     }
     function done3() {
-        // ── 9) prefill номера из памяти по сырью ──
-        var store = { 'atex-sl-jumbo-by-material:testdb': JSON.stringify({ '2086': { no: '102605081738', counterEnd: 1813 } }) };
-        global.window.localStorage = {
-            getItem: function(k) { return store[k] == null ? null : store[k]; },
-            setItem: function(k, v) { store[k] = String(v); },
-            removeItem: function(k) { delete store[k]; }
-        };
+        // ── 9) чтение записей отчётом task_jumbo; номер НЕ подставляется (#4933 п.2) ──
         var c3 = makeController();
         c3.db = 'testdb';
         c3.meta = { cut: cutMeta(), jumboTable: JUMBO_82374 };
@@ -434,14 +428,9 @@ function cutMeta() {
         setImmediate(function() {
             assert(requested.some(function(p) { return p.indexOf('report/task_jumbo?JSON_KV&FR_task_id=700001') === 0; }),
                 'записи читаются отчётом task_jumbo по заданию');
-            assertEqual(cut3.pendingJumbo && cut3.pendingJumbo.jumboNo, '102605081738',
-                'на резке без записей номер подставляется из памяти по сырью');
-            // Незнакомое сырьё — подставлять нечего.
-            var cut4 = { id: '700002', counterStart: '', meterage: '', notes: '', materialId: '99', material: 'ХЗ', jumbos: [], jumboActive: 0 };
-            c3.currentCut = cut4;
-            c3.loadJumboRecords(cut4);
+            assertEqual(cut3.pendingJumbo || null, null,
+                'на резке без записей номер НЕ подставляется — оператор вводит руками (#4933 п.2)');
             setImmediate(function() {
-                assertEqual(cut4.pendingJumbo || null, null, 'по незнакомому сырью номер не выдумывается');
                 // Добавление джамбо: «Счётчик кон.» предыдущего переходит в «Счётчик нач.».
                 var c4 = makeController();
                 c4.db = 'testdb';

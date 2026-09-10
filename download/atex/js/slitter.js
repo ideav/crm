@@ -232,6 +232,9 @@
         return {
             id: s(values.jumbo_id), taskId: s(values.task_id),
             jumboNo: s(values.jumbo_no).trim(),
+            // #4933 п.3: записанный в базе номер — чтобы автосохранение видело правку
+            // и везло её `_m_save` (главное значение через `_m_set` не пишется, #4906).
+            savedNo: s(values.jumbo_no).trim(),
             lengthStart: s(values.length_start),
             counterStart: s(values.counter_start),
             cutsCount: s(values.cuts_count),
@@ -2991,11 +2994,11 @@
         // #4783 п.10: кнопки «Сохранить показания» нет — запись уходит при выходе из ячейки
         // (autosave ниже). Что записано, видно по статусу над полями.
         // #4785 п.1: заголовка секции нет — поля названы своими подписями.
+        // #4933 п.1: строки .atex-sl-section-head больше нет (занимала место) —
+        // статус сохранения живёт в строке корешков джамбо, правым краем.
         this.readingsStatusEl = el('span', { class: 'atex-sl-save-status', text: '' });
         this.markReadingsSaved();
-        var section = el('section', { class: 'atex-sl-section' }, [
-            el('div', { class: 'atex-sl-section-head' }, [this.readingsStatusEl])
-        ]);
+        var section = el('section', { class: 'atex-sl-section' });
 
         var grid = el('div', { class: 'atex-sl-grid' });
 
@@ -3049,6 +3052,7 @@
         var addJumboBtn = el('button', { class: 'atex-sl-jumbo-add', type: 'button', text: '+ Джамбо' });
         addJumboBtn.addEventListener('click', function() { self.askAddJumbo(cut); });
         tabs.appendChild(addJumboBtn);
+        tabs.appendChild(this.readingsStatusEl);   // #4933 п.1: статус — в строке корешков
 
         // Корешки и панель — одна конструкция (#4916): панель — вкладка активного корешка.
         var wrap = el('div', { class: 'atex-sl-readings' }, [tabs, section]);
@@ -3443,9 +3447,6 @@
             active.counterEnd = counterEnd;
             active.cutsCount = core.actualRunsForCut(cut) || core.plannedRunsForCut(cut) || '';
             return self.post('_m_set/' + active.id + '?JSON', self.jumboFields(active)).then(function() {
-                // #4914: запомнить номер и счётчик по сырью — на следующей резке с тем
-                // же сырьём номер подставится сам (prefillJumboFromMemory).
-                self.rememberJumbo(cut, active);
                 return active.id;
             });
         }).then(function() {
@@ -3795,7 +3796,8 @@
             if (self.currentCut !== cut) return;   // пока летел запрос, переключились
             cut.jumbos = list;
             if (cut.jumboActive >= cut.jumbos.length) cut.jumboActive = 0;
-            if (!cut.jumbos.length) self.prefillJumboFromMemory(cut);
+            // #4933 п.2: номер джамбо нового задания НЕ подставляется (прежняя «память
+            // по сырью» localStorage удалена) — оператор вводит его руками.
             // #4925: панель показаний строится ДО прихода записей (чтение асинхронное),
             // и без перерисовки корешки с номерами не появлялись: у завершённого задания
             // поле «Номер джамбо» выглядело пустым, хотя запись в базе есть. Повторный
@@ -3855,7 +3857,7 @@
                     throw new Error('сервер не вернул id новой записи «Номера джамбо»');
                 }
                 var stored = {
-                    id: newId, taskId: String(cut.id), jumboNo: number,
+                    id: newId, taskId: String(cut.id), jumboNo: number, savedNo: number,
                     lengthStart: '', counterStart: counterStart, cutsCount: '',
                     counterEnd: '', lengthEnd: '', spent: 0, writeoff: 0,
                     defectM: 0, defectQty: 0, photo: '',
@@ -3910,6 +3912,24 @@
         });
     };
 
+    // #4933 п.3: правка НОМЕРА существующей записи. Номер — главное значение
+    // (первая колонка) записи «Номера джамбо»: `_m_set` его молча игнорирует —
+    // ветка поиска реквизита не срабатывает (docs/kb/crud.md, #4906), поэтому после
+    // закрытия задания (запись уже создана) номер «не редактировался». Главное
+    // значение пишется отдельным эндпоинтом `_m_save/{id}` с тем же ключом
+    // t{tableId}; не менялся (savedNo) или пуст — запроса нет.
+    AtexSlitter.prototype.saveJumboNumber = function(rec) {
+        var table = (this.meta && this.meta.jumboTable) || null;
+        var no = rec ? String(rec.jumboNo == null ? '' : rec.jumboNo).trim() : '';
+        if (!table || !rec || !(rec.id != null && String(rec.id) !== '')) return Promise.resolve();
+        if (no === '' || no === String(rec.savedNo == null ? '' : rec.savedNo)) return Promise.resolve();
+        var fields = {};
+        fields['t' + table.id] = no;
+        return this.post('_m_save/' + rec.id + '?JSON', fields).then(function() {
+            rec.savedNo = no;
+        });
+    };
+
     // #4914: след автосохранения записи джамбо — та же схема, что у показаний.
     AtexSlitter.prototype.jumboSignature = function() {
         return core.jumboSignature(this.activeJumbo());
@@ -3941,7 +3961,9 @@
         var sent = this.jumboSignature();
         this.ensureJumboRecord(cut).then(function(stored) {
             if (!stored) { self.setBusy(false); return null; }
-            return self.saveJumboRecord(stored, { quiet: true }).then(function() {
+            return self.saveJumboNumber(stored).then(function() {
+                return self.saveJumboRecord(stored, { quiet: true });
+            }).then(function() {
                 self.setBusy(false);
                 self.savedJumbo = sent;
                 if (!quiet) self.notify('Расход джамбо сохранён', 'success');
@@ -3952,53 +3974,6 @@
             self.jumboRetry = false;
             self.notify('Запись «Номера джамбо» не сохранена: ' + (err && err.message ? err.message : err), 'error');
         });
-    };
-
-    // ── #4914: память «номер джамбо по сырью» (localStorage планшета) ───────────
-
-    AtexSlitter.prototype.jumboMemoryKey = function() {
-        return 'atex-sl-jumbo-by-material:' + (this.db || '');
-    };
-
-    AtexSlitter.prototype.jumboMaterialKey = function(cut) {
-        return String((cut && (cut.materialId || cut.material)) || '').trim().toLowerCase();
-    };
-
-    AtexSlitter.prototype.jumboMemoryFor = function(materialKey) {
-        try {
-            var all = JSON.parse((typeof window !== 'undefined' && window.localStorage
-                && window.localStorage.getItem(this.jumboMemoryKey())) || '{}');
-            return all[materialKey] || null;
-        } catch (e) { return null; }
-    };
-
-    // Завершение резки запоминает номер и счётчик: на следующей резке с тем же сырьём
-    // номер подставляется сам (prefillJumboFromMemory). localStorage недоступен
-    // (приватный режим) — память просто не работает, всё остальное живёт.
-    AtexSlitter.prototype.rememberJumbo = function(cut, rec) {
-        var no = rec ? String(rec.jumboNo == null ? '' : rec.jumboNo).trim() : '';
-        if (!cut || no === '') return;
-        try {
-            var storage = (typeof window !== 'undefined' && window.localStorage) || null;
-            if (!storage) return;
-            var all = JSON.parse(storage.getItem(this.jumboMemoryKey()) || '{}');
-            all[this.jumboMaterialKey(cut)] = { no: no, counterEnd: rec.counterEnd };
-            storage.setItem(this.jumboMemoryKey(), JSON.stringify(all));
-        } catch (e) { /* память по сырью необязательна */ }
-    };
-
-    // На резке без записей джамбо подставить номер из памяти по её сырью — в черновик:
-    // оператор проверяет и правит, запись заводится только при его действии.
-    AtexSlitter.prototype.prefillJumboFromMemory = function(cut) {
-        if (!cut || (cut.jumbos || []).length || cut.pendingJumbo) return;
-        var mem = this.jumboMemoryFor(this.jumboMaterialKey(cut));
-        if (!mem || !mem.no) return;
-        cut.pendingJumbo = {
-            id: '', taskId: String(cut.id || ''), jumboNo: mem.no,
-            lengthStart: '', counterStart: '', cutsCount: '', counterEnd: '', lengthEnd: '',
-            spent: '', writeoff: '', defectM: '', defectQty: '', photo: '',
-            spentDraft: '', writeoffDraft: '', defectMDraft: '', defectQtyDraft: ''
-        };
     };
 
     // ── #4914: добавление джамбо («+» рядом с закладками) ───────────────────────

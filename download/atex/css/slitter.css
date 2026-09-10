@@ -211,8 +211,11 @@
 .atex-sl-cut-future.is-past .atex-sl-cut-num { color: var(--sl-muted); }
 
 /* Главная область */
-/* #4783: правая часть влезает в экран и НЕ скроллится — содержимое компактное,
-   лишнее (плашки-метрики, карточки партий, журнал событий) убрано. */
+/* #4783: содержимое компактное — лишнее (плашки-метрики, карточки партий, журнал
+   событий) убрано. #4933 п.4: правая часть ПРОКРУЧИВАЕТСЯ сама — в ландшафтном
+   режиме планшета содержимое выше экрана, и без своего скролла (страничный на
+   широком экране выключен, main.html #fullscreen-workspace-style) нижние поля
+   ввода были недостижимы. */
 .atex-sl-main {
     border: 1px solid var(--sl-border);
     border-radius: 8px;
@@ -222,21 +225,26 @@
     flex-direction: column;
     gap: 8px;
     min-height: 0;
-    overflow: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
 }
 /* #4783 п.9: верхняя строчка правой части — номер заказа и «Резка N из M» рядом
-   (бейджа статуса тут нет, п.8: статус виден на карточке задания слева). */
-.atex-sl-headwrap { display: flex; flex-direction: column; gap: 6px; flex: none; }
-.atex-sl-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px 16px; flex-wrap: wrap; }
+   (бейджа статуса тут нет, п.8: статус виден на карточке задания слева).
+   #4933 п.1: шапка компактная — заголовок, спецификация и кнопки управления
+   строчными блоками в ОДНОЙ строке (переносятся только когда не влезают). */
+.atex-sl-headwrap { display: flex; flex-direction: row; align-items: center; flex-wrap: wrap; gap: 6px 16px; flex: none; }
+.atex-sl-head { display: inline-flex; align-items: baseline; gap: 8px 16px; flex-wrap: wrap; }
 .atex-sl-head-main { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
 .atex-sl-head-title { margin: 0; font-size: 18px; }
 /* #4606: номер заказа — самый крупный кегль пульта (планшет стоит у станка, номер
    читается издалека), без подписи «Заказ». */
 .atex-sl-head-order-no { font-size: 28px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
 /* #4783 п.7: спецификация задания одной строкой — «Вид сырья / Метраж / Намотка / Лидер». */
-.atex-sl-spec { font-size: 15px; font-weight: 600; color: var(--sl-accent-d); }
-/* #4783 п.9: все кнопки управления заданием — одним рядом. */
-.atex-sl-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.atex-sl-spec { display: inline-flex; font-size: 15px; font-weight: 600; color: var(--sl-accent-d); }
+/* #4783 п.9: все кнопки управления заданием — одним рядом; #4933 п.1 — в строке шапки. */
+.atex-sl-actions { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* #4933 п.1: инструкция задания-«настройки» — единственный блок шапки на всю ширину. */
+.atex-sl-headwrap .atex-sl-setup-note { flex-basis: 100%; }
 .atex-sl-actions .atex-sl-life-actions { margin-top: 0; }
 
 /* #3583: кнопки отметки проходов правее .atex-sl-head-title. */
@@ -291,9 +299,10 @@
     flex: none;
 }
 /* #4785 п.1: заголовков секций в пульте нет — их место занимают сами данные.
-   #4783 п.10: строка «сохранено» у показаний осталась (кнопки сохранения нет). */
-.atex-sl-section-head { display: flex; align-items: baseline; justify-content: flex-end; gap: 10px; min-height: 14px; }
-.atex-sl-save-status { font-size: 12px; color: var(--sl-muted); }
+   #4783 п.10: след «сохранено» у показаний остался (кнопки сохранения нет);
+   #4933 п.1: своей строки у него больше нет — живёт правым краем строки
+   корешков джамбо. */
+.atex-sl-save-status { font-size: 12px; color: var(--sl-muted); margin-left: auto; align-self: center; }
 .atex-sl-section-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; }
 .atex-sl-shift-gate { max-width: 520px; }
 

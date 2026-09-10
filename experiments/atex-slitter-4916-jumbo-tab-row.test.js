@@ -142,10 +142,14 @@ function makeController() {
     assertEqual(cut.jumboActive, 1, '#4916: клик по корешку переключает активную запись');
     assert(rendered > 0, '#4916: после переключения пульт перерисовывается');
 
-    // «+ Джамбо» — правее корешков, последний узел строки.
-    var add = tabs.childNodes[tabs.childNodes.length - 1];
-    assert(!!add && add.classList.contains('atex-sl-jumbo-add') && add.textContent === '+ Джамбо',
+    // «+ Джамбо» — правее корешков; последним в строке живёт статус сохранения
+    // (#4933 п.1: своей строки .atex-sl-section-head у него больше нет).
+    var add = tabs.querySelector('.atex-sl-jumbo-add');
+    assert(!!add && add.textContent === '+ Джамбо',
         '#4916: «+ Джамбо» — правее корешков');
+    var last = tabs.childNodes[tabs.childNodes.length - 1];
+    assert(!!last && last.classList.contains('atex-sl-save-status'),
+        '#4933 п.1: статус сохранения — последним в строке корешков');
 })();
 
 // ── 2) записей нет: корешок-черновик, ввод номера заводит запись автосохранением ──
@@ -162,8 +166,9 @@ function makeController() {
     var inputs = tabs.childNodes.filter(function(n) { return n.tagName === 'INPUT'; });
     assertEqual(inputs.length, 1, '#4916: без записей корешок-поле один');
     assert(!!inputs[0] && inputs[0].classList.contains('is-active'), '#4916: корешок-черновик активен');
-    var add = tabs.childNodes[tabs.childNodes.length - 1];
-    assert(add.classList.contains('atex-sl-jumbo-add'), '#4916: «+ Джамбо» на месте и без записей');
+    // #4933 п.1: последним в строке — статус сохранения, «+ Джамбо» перед ним.
+    var add = tabs.querySelector('.atex-sl-jumbo-add');
+    assert(!!add, '#4916: «+ Джамбо» на месте и без записей');
 
     // Ввод номера копит черновик; выход из поля сам заводит запись (автосохранение номера).
     if (!inputs[0]) { styleGuard(); return; }
