@@ -3623,7 +3623,20 @@
                 .then(function() { return self.createEvent({ type: EV.pass, value: String(target) }, cut.id); })
                 // #4902: «Остаток, м» партии = «Счётчик кон.» после каждой отметки. На
                 // последнем проходе — finishMode (снять «В работе» у исчерпанной партии).
-                .then(function() { return self.syncBatchRemainder(cut, counterEnd, target >= total); })
+                // #4938: отказ записи ПАРТИИ не роняет цепочку — отметка к этому моменту
+                // уже в базе (факт, погонаж, событие), и падение здесь запирало задание:
+                // сервер отбил снятие «В работе» (не было гранта у роли), catch объявлял
+                // «Ошибку отметки прохода», finishCut не наступал, а каждое следующее
+                // «Готово» упиралось в «Все проходы уже отмечены». Отказ склада ОРЁТ
+                // отдельной ошибкой, но завершение и перерисовка идут дальше.
+                .then(function() {
+                    return self.syncBatchRemainder(cut, counterEnd, target >= total).catch(function(err) {
+                        var reason = err && err.message ? err.message : String(err);
+                        console.error('[slitter] #4938: остаток партии не сведён со счётчиком — ' + reason);
+                        self.notify('Остаток партии не сведён: ' + reason, 'error');
+                        return null;
+                    });
+                })
                 .then(function() {
                     if (target >= total) {
                         self.setBusy(false);
