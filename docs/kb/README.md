@@ -22,6 +22,7 @@
 | Дэшборд / финмодель `dash` | [dashboard.md](dashboard.md) | Дэшборд 559, Лист, Панель, RG, Строка, Значение, period, RGtype, RGcolumns, Метка, формулы, словарь периодов |
 | Компонент таблиц (data-grid) | [table-component.md](table-component.md) | integram-table, data-integram-table, data-api-url, фильтры, инлайн-правка, экспорт, вставка из буфера, paste-data-btn, build.sh |
 | Импорт батчем `import=1` | [import.md](import.md) | bki_file, DATA, plain_data, формат строк, завершающий `;`, чанки 8МБ, upsert |
+| Иерархический OLTP (разрезы) | [hierarchical-oltp.md](hierarchical-oltp.md) | разрез, частотность групп, накопитель меры, агрегаты, up-уровни |
 
 **Соседние справочники (не дублируем — ссылаемся):**
 [integram-reports.md](../integram-reports.md) (полный справочник отчётов) ·
