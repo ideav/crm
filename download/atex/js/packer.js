@@ -924,20 +924,21 @@
         var body = descs.map(function(d) {
             return el('div', { class: 'atex-pk-desc', text: d });
         });
-        body.push(metaNode);
-        // #4799: артикул — последним в теле карточки, перед колонкой управления;
-        // #4918: у слитой плашки — уникальные непустые значения через «, ».
+        // #4799: артикул; #4918: у слитой плашки — уникальные непустые значения через «, »;
+        // #4930: плашка живёт в строке описания — хвостом последней .atex-pk-desc,
+        // а не отдельной строкой внизу карточки.
         var arts = [], jumbos = [];
         items.forEach(function(item) {
             if (item.art && arts.indexOf(item.art) === -1) arts.push(item.art);
             if (item.jumbo && jumbos.indexOf(item.jumbo) === -1) jumbos.push(item.jumbo);
         });
         if (arts.length) {
-            body.push(el('div', { class: 'atex-pk-art' }, [
+            body[body.length - 1].appendChild(el('span', { class: 'atex-pk-art' }, [
                 el('span', { class: 'atex-pk-art-label', text: 'Артикул' }),
                 el('span', { class: 'atex-pk-art-value', text: arts.join(', ') })
             ]));
         }
+        body.push(metaNode);
         // #4910: № джамбо — той же плашкой рядом с артикулом; #4914: номера приходят
         // из отчёта task_jumbo, на задании их бывает несколько — через «, ».
         if (jumbos.length) {

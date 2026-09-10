@@ -173,7 +173,8 @@
 .atex-pk-pack { font-size: 13px; color: var(--pk-accent); font-weight: 600; }
 /* #4799: артикул — плашка по ширине содержимого, а не во всю колонку.
    inline-flex + align-self:start держат её узкой при любом гриде.
-   #4910: номер джамбо — та же плашка рядом (inline-flex встаёт в ту же строку). */
+   #4910: номер джамбо — та же плашка рядом (inline-flex встаёт в ту же строку).
+   #4930: артикул — в строке описания (хвостом .atex-pk-desc). */
 .atex-pk-art, .atex-pk-jumbo {
     display: inline-flex;
     align-items: baseline;
@@ -188,7 +189,10 @@
     line-height: 1.4;
     white-space: nowrap;
 }
-.atex-pk-jumbo { margin-left: 6px; }
+/* #4930: артикул уехал в строку описания — джамбо теперь открывает свою строку,
+   отступ слева не нужен; внутри .atex-pk-desc артикул отбивается от текста слева
+   и не наследует крупный жирный шрифт описания. */
+.atex-pk-desc .atex-pk-art { margin-top: 0; margin-left: 8px; font-weight: 400; vertical-align: 2px; }
 .atex-pk-art-label { color: var(--pk-muted); }
 .atex-pk-art-value { font-weight: 700; }
 
