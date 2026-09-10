@@ -334,13 +334,17 @@
 
     // Поля записи «Номера джамбо» (t{id} → значение) из метаданных таблицы — общая
     // механика для jumboRecordFields (вся запись) и jumboInputFields (автосохранение).
-    // Главное значение — сам номер (ключ = id таблицы, не t3 — см. docs/kb/crud.md);
-    // реквизиты ищутся ПО ИМЕНИ, каких нет — имена собираются в missing (вызывающий
+    // Оба потребителя пишут СУЩЕСТВУЮЩУЮ запись через `_m_set`, поэтому главного
+    // значения (самого номера, ключ = id таблицы) здесь НЕТ: `_m_set` главное значение
+    // не пишет — ветка поиска реквизита не срабатывает (docs/kb/crud.md, #4906), а на
+    // бою такой запрос отбивался ЦЕЛИКОМ ошибкой доступа в массивном ответе, и весь
+    // набор полей терялся (#4925: финальные счётчики и расход не доезжали). Номер
+    // записи ставится при создании (ensureJumboRecord → `_m_new`, там ключ разрешён).
+    // Реквизиты ищутся ПО ИМЕНИ, каких нет — имена собираются в missing (вызывающий
     // ругается в консоль: молча терять поля нельзя, как в #4564).
-    function jumboFieldsPut(tableMeta, record, fill) {
+    function jumboFieldsPut(tableMeta, fill) {
         var fields = {}, missing = [];
         if (!tableMeta) return { fields: fields, missing: missing };
-        fields['t' + tableMeta.id] = String(record.jumboNo == null ? '' : record.jumboNo).trim();
         function put(reqName, value) {
             var req = (tableMeta.reqs || []).filter(function(r) {
                 return r && String(r.val).trim().toLowerCase() === String(reqName).trim().toLowerCase();
@@ -357,7 +361,7 @@
     // реквизит, непустое значение в поля не берём (пустое стёрло бы загруженный файл).
     function jumboRecordFields(tableMeta, record) {
         var rec = record || {};
-        return jumboFieldsPut(tableMeta, rec, function(put) {
+        return jumboFieldsPut(tableMeta, function(put) {
             put(JUMBO_REQ.startLength, String(rec.lengthStart == null ? '' : rec.lengthStart));
             put(JUMBO_REQ.counterStart, rec.counterStart == null ? '' : rec.counterStart);
             put(JUMBO_REQ.runs, rec.cutsCount == null ? '' : rec.cutsCount);
@@ -374,12 +378,12 @@
         });
     }
 
-    // #4914: автосохранение по ячейке везёт ТОЛЬКО редактируемые поля: номер +
-    // накопленные расход/списание/браки. Счётчики и длины записи ведут отметка резки
+    // #4914: автосохранение по ячейке везёт ТОЛЬКО редактируемые поля: накопленные
+    // расход/списание/браки. Счётчики и длины записи ведут отметка резки
     // и завершение — их автосейв затирал бы числа цепочки.
     function jumboInputFields(tableMeta, record) {
         var rec = record || {};
-        return jumboFieldsPut(tableMeta, rec, function(put) {
+        return jumboFieldsPut(tableMeta, function(put) {
             put(JUMBO_REQ.workSpent, rec.spent == null ? '' : rec.spent);
             put(JUMBO_REQ.writeOff, rec.writeoff == null ? '' : rec.writeoff);
             put(JUMBO_REQ.defect, rec.defectM == null ? '' : rec.defectM);
@@ -1654,6 +1658,13 @@
                 var result;
                 try { result = JSON.parse(text); } catch (e) { throw new Error('Сервер вернул не JSON: ' + text.slice(0, 200)); }
                 if (result && (result.error || result.err)) throw new Error(result.error || result.err);
+                // #4925: пакетные команды отвечают МАССИВОМ элементов; ошибка внутри
+                // элемента (`[{error: …}]`) свойство `.error` самого массива не ставит —
+                // раньше такой отказ проходил за успех, и запись молча не происходила.
+                if (Array.isArray(result)) {
+                    var bad = result.filter(function(el) { return el && (el.error || el.err); })[0];
+                    if (bad) throw new Error(bad.error || bad.err);
+                }
                 return result;
             });
         });
@@ -3785,6 +3796,12 @@
             cut.jumbos = list;
             if (cut.jumboActive >= cut.jumbos.length) cut.jumboActive = 0;
             if (!cut.jumbos.length) self.prefillJumboFromMemory(cut);
+            // #4925: панель показаний строится ДО прихода записей (чтение асинхронное),
+            // и без перерисовки корешки с номерами не появлялись: у завершённого задания
+            // поле «Номер джамбо» выглядело пустым, хотя запись в базе есть. Повторный
+            // render читает только что применённые cut.jumbos; зацикливания нет —
+            // jumbosLoaded уже поднят, второй Load вернётся сразу.
+            self.render();
         };
         return this.getJson('report/task_jumbo?JSON_KV&FR_task_id='
             + encodeURIComponent(cut.id) + '&LIMIT=0,100').then(function(rows) {
@@ -3880,10 +3897,10 @@
         var self = this;
         opts = opts || {};
         if (!rec || !(rec.id != null && String(rec.id) !== '')) return Promise.resolve(null);
+        // записи без номера не бывает — см. ensureJumboRecord (#4925: номер в поля
+        // `_m_set` больше не кладётся, проверяем его на самой записи)
+        if (String(rec.jumboNo == null ? '' : rec.jumboNo).trim() === '') return Promise.resolve(null);
         var fields = this.jumboInputFieldsOf(rec);
-        if (String(fields['t' + (this.meta && this.meta.jumboTable ? this.meta.jumboTable.id : '')] || '').trim() === '') {
-            return Promise.resolve(null);   // записи без номера не бывает — см. ensureJumboRecord
-        }
         return this.post('_m_set/' + rec.id + '?JSON', fields).then(function() {
             if (!opts.quiet) self.notify('Расход джамбо сохранён', 'success');
             return rec.id;

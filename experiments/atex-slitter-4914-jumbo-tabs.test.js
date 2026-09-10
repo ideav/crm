@@ -162,8 +162,10 @@ assertEqual(core.jumboNextCounterStart(null), '', 'jumboNextCounterStart: пер
         defectM: '0', defectQty: '', photo: ''
     });
     assertEqual(full.missing, [], 'jumboRecordFields: боевая схема 82374 полна');
+    // #4925: главного значения (t82374) в полях НЕТ — _m_set его не пишет
+    // (docs/kb/crud.md #4906; на бою такой запрос отбивался целиком), номер ставится
+    // при создании в ensureJumboRecord (_m_new).
     assertEqual(full.fields, {
-        't82374': 'C200cp383941',   // гл. значение — номер
         't82376': '12510',          // начальная длина
         't791706': '12510',         // счётчик нач. записи
         't82378': '2',              // кол-во резок
@@ -194,8 +196,8 @@ assertEqual(core.jumboNextCounterStart(null), '', 'jumboNextCounterStart: пер
         counterEnd: '4', lengthEnd: '5', spent: '6', writeoff: '7', defectM: '8', defectQty: '9'
     });
     assertEqual(input.fields, {
-        't82374': 'J-1', 't82382': '6', 't82384': '7', 't82386': '8', 't791708': '9'
-    }, 'jumboInputFields: автосейв везёт номер, расход, списание, браки — и только их');
+        't82382': '6', 't82384': '7', 't82386': '8', 't791708': '9'
+    }, 'jumboInputFields: автосейв везёт расход, списание, браки — и только их (#4925: без гл. значения)');
 })();
 
 // ── 5) подпись показаний резки: джамбо-полей там больше нет (они в записи) ──
