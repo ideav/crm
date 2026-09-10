@@ -51,30 +51,37 @@ const POSITION = 'Заказанное количество';
 const ORDER = 'Заказ';
 
 // [t100, источник, опции]: table — главное значение таблицы; req — реквизит таблицы
-// of. fn=85 → abn_ID; sort=1 → сортировка ↑; hide → скрытое звено join.
+// of. fn=85 → abn_ID; sort=1 → сортировка ↑ (t109); hide → скрытое звено join;
+// from → «Значение (от)» (t102, фильтр по умолчанию).
+//
+// Порядок колонок ЗЕРКАЛИТ живой `packer` (queryId 673812) с выкинутыми колонками
+// «Тип события» и qty_fact/packed/notes: порядок задаёт join, и от него зависит,
+// через что цепляется «Обеспечение». Вариант «таблица Партия ГП раньше её
+// реквизитов» давал декартово произведение — один gp_id на все позиции задания.
+// Станок задания (slitter/slitter_id) — реквизиты мастер-таблицы, идут хвостом.
 const COLS = [
-  ['task',           { table: TASK },                        { sort: 1 }],
-  ['task_id',        { table: TASK },                        { fn: 85 }],
-  ['slitter',        { of: TASK, req: 'Слиттер' },           {}],
-  ['slitter_id',     { of: TASK, req: 'Слиттер' },           { fn: 85 }],
-  ['leader',         { of: TASK, req: 'Лидер' },             {}],
-  ['material',       { of: TASK, req: 'Вид сырья' },         {}],
-  ['material_type',  { of: MATERIAL, req: 'Тип сырья' },     {}],
-  ['gp_id',          { table: GP },                          { fn: 85 }],
+  ['task',           { table: TASK },                        { sort: 1, from: '>=[TODAY]' }],
   ['qty',            { of: GP, req: 'Кол-во рулонов' },      {}],
-  ['tipo',           { of: GP, req: 'Типоразмер' },          {}],
-  ['tipo_id',        { of: GP, req: 'Типоразмер' },          { fn: 85 }],
   [null,             { table: PROVISION },                   { hide: true }],
   [null,             { table: POSITION },                    { hide: true }],
+  ['order',          { of: POSITION, req: 'Заказ клиента' }, {}],
+  ['material',       { of: TASK, req: 'Вид сырья' },         {}],
   ['cut_width',      { of: POSITION, req: 'Ширина, мм' },    {}],
   ['cut_length',     { of: POSITION, req: 'Длина, м' },      {}],
   ['wind_direction', { of: POSITION, req: 'Тип намотки' },   {}],
   ['sleeve',         { of: POSITION, req: 'Диаметр втулки' },{}],
   ['add_sleeve',     { of: POSITION, req: 'Доп. втулка' },   {}],
-  ['art',            { of: POSITION, req: 'Артикул' },       {}],
+  ['task_id',        { table: TASK },                        { fn: 85 }],
+  ['gp_id',          { table: GP },                          { fn: 85 }],
   ['order_no',       { table: ORDER },                       {}],
-  ['order',          { of: ORDER, req: 'Заказ клиента' },    {}],
+  ['tipo',           { of: GP, req: 'Типоразмер' },          {}],
+  ['tipo_id',        { of: GP, req: 'Типоразмер' },          { fn: 85 }],
+  ['material_type',  { of: MATERIAL, req: 'Тип сырья' },     {}],
   ['packer_no',      { of: SLITTER, req: 'Упаковочное место' }, {}],
+  ['art',            { of: POSITION, req: 'Артикул' },       {}],
+  ['leader',         { of: TASK, req: 'Лидер' },             {}],
+  ['slitter',        { of: TASK, req: 'Слиттер' },           {}],
+  ['slitter_id',     { of: TASK, req: 'Слиттер' },           { fn: 85 }],
 ];
 
 async function get(path) {
@@ -124,6 +131,7 @@ async function addColumn(qid, c) {
   if (c.fn) await post(`_m_set/${cid}?JSON`, { t104: String(c.fn) });
   if (c.sort) await post(`_m_set/${cid}?JSON`, { t109: String(c.sort) });
   if (c.hide) await post(`_m_set/${cid}?JSON`, { t107: 'X' });
+  if (c.from) await post(`_m_set/${cid}?JSON`, { t102: c.from });
   return cid;
 }
 
@@ -135,7 +143,7 @@ async function main() {
     const t28 = 'table' in src
       ? String(findTable(list, src.table).id)
       : reqId(findTable(list, src.of), src.req);
-    return { t100, t28, fn: opts.fn, sort: opts.sort, hide: opts.hide };
+    return { t100, t28, fn: opts.fn, sort: opts.sort, hide: opts.hide, from: opts.from };
   });
 
   const reports = await get('object/22/?JSON_OBJ&LIMIT=0,5000');
@@ -157,7 +165,7 @@ async function main() {
     console.log(`${REPORT}: колонок=${plan.length}`);
     for (const c of plan) {
       console.log(`  - ${c.t100 || '(скрытое звено)'} t28=${c.t28}` +
-        `${c.fn ? ' t104=' + c.fn : ''}${c.sort ? ' t109=' + c.sort : ''}${c.hide ? ' t107=X' : ''}`);
+        `${c.fn ? ' t104=' + c.fn : ''}${c.sort ? ' t109=' + c.sort : ''}${c.hide ? ' t107=X' : ''}${c.from ? ' t102=' + c.from : ''}`);
     }
     if (APPLY) {
       XSRF = (await get('xsrf?JSON'))['_xsrf'];
