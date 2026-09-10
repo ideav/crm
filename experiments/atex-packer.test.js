@@ -364,4 +364,60 @@ assertEqual(core.validatePack({ qty: 110, suggested: 110, note: '' }), '',
         'describeItem: пустой лидер не оставляет лишнего пробела');
 })();
 
+// ── #4929: следующее задание станка — видно до первой резки ──
+(function() {
+    // Строка отчёта `packer_next`: та же Партия ГП, но без фильтра по событию
+    // «Резка» и со станком задания (slitter/slitter_id).
+    function nextRow(over) {
+        var base = row({ slitter: 'Станок 3', slitter_id: '1282', events: '' });
+        Object.keys(over || {}).forEach(function(k) { base[k] = over[k]; });
+        return base;
+    }
+
+    var item = core.nextItemFromReportRow(nextRow());
+    assertEqual(item.slitter, 'Станок 3', 'nextItemFromReportRow: станок');
+    assertEqual(item.slitterId, '1282', 'nextItemFromReportRow: id станка');
+    assertEqual(item.taskId, '666355', 'nextItemFromReportRow: разбор позиции — как у packer');
+    var kv = core.nextItemFromReportRow(nextRow({ slitter: { val: 'Станок 1', id: '1279' } }));
+    assertEqual(kv.slitter, 'Станок 1', 'nextItemFromReportRow: {val,id} → val');
+
+    // Адрес отчёта: своё место + плановый старт от полуночи СЕГОДНЯ — вчерашние
+    // так и не резанные задания в кандидаты не попадают, сегодняшние опоздавшие остаются.
+    var now = new Date(2026, 8, 10, 14, 30);
+    var midnight = Math.floor(new Date(2026, 8, 10).getTime() / 1000);
+    assertEqual(core.nextTasksPath({ id: '1', label: '1' }, now),
+        'report/packer_next?JSON_KV&LIMIT=0,5000&FR_packer_no=1&FR_task=' + encodeURIComponent('>' + midnight),
+        'nextTasksPath: фильтр места и полночь сегодняшнего дня');
+    assertEqual(core.nextTasksPath(null, now), '',
+        'nextTasksPath: без места отчёт не запрашивается');
+
+    // Кандидаты: у станка берётся ОДНО задание — самое раннее по плановому старту
+    // из тех, по которым ещё нет резки (задания основного списка исключаются).
+    var items = [
+        core.nextItemFromReportRow(nextRow({ task_id: '900', task: '1786100000', slitter: 'Станок 3', slitter_id: '1282' })),
+        core.nextItemFromReportRow(nextRow({ task_id: '900', task: '1786100000', slitter: 'Станок 3', slitter_id: '1282', gp_id: '777' })),
+        core.nextItemFromReportRow(nextRow({ task_id: '901', task: '1786090000', slitter: 'Станок 3', slitter_id: '1282' })),
+        core.nextItemFromReportRow(nextRow({ task_id: '902', task: '1786080000', slitter: 'Станок 1', slitter_id: '1279' })),
+        core.nextItemFromReportRow(nextRow({ task_id: '903', task: '1786070000', slitter: '', slitter_id: '' }))
+    ];
+    // Задание 901 раньше 900, но по нему уже идёт резка (оно в основном списке) —
+    // следующим для Станка 3 становится 900; строка без станка (903) выпадает.
+    var groups = core.nextTaskGroups(items, { '901': true });
+    assertEqual(groups.length, 2, 'nextTaskGroups: по одному заданию на станок');
+    assertEqual(groups[0].slitter, 'Станок 1', 'nextTaskGroups: сортировка по станку');
+    assertEqual(groups[0].taskId, '902', 'nextTaskGroups: у Станка 1 — его единственное');
+    assertEqual(groups[1].taskId, '900', 'nextTaskGroups: резанное 901 исключено, взято 900');
+    assertEqual(groups[1].items.length, 2, 'nextTaskGroups: обе Партии ГП задания в группе');
+    assertEqual(core.nextTaskGroups([], {}), [], 'nextTaskGroups: пусто → пусто');
+
+    // Подпись времени: сегодняшнее задание — временем, завтрашнее — с датой.
+    var todayNoon = new Date(2026, 8, 10, 12, 0);
+    assertEqual(core.taskWhenLabel(Math.floor(todayNoon.getTime() / 1000), now), '12:00',
+        'taskWhenLabel: сегодня — только время');
+    var tomorrow = new Date(2026, 8, 11, 8, 15);
+    assertEqual(core.taskWhenLabel(Math.floor(tomorrow.getTime() / 1000), now), '11.09, 08:15',
+        'taskWhenLabel: не сегодня — дата и время');
+    assertEqual(core.taskWhenLabel(0, now), '—', 'taskWhenLabel: нет времени — прочерк');
+})();
+
 console.log('\n' + passed + ' assertions passed');

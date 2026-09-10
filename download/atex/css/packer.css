@@ -228,6 +228,21 @@
     color: var(--pk-partial);
     border-color: var(--pk-partial-border);
 }
+/* #4929: следующее задание станка — информационная карточка до первой резки:
+   пунктирная рамка отличает «готовь тару» от «бери и отмечай». */
+.atex-pk-next-head {
+    margin: 18px 0 4px;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--pk-muted);
+    text-transform: uppercase;
+    letter-spacing: .05em;
+}
+.atex-pk-card.is-next { border-style: dashed; background: var(--pk-surface); }
+.atex-pk-badge.is-next {
+    color: var(--pk-muted);
+    border-color: var(--pk-border);
+}
 
 .atex-pk-btn {
     padding: 10px 18px;

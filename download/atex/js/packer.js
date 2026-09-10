@@ -21,6 +21,11 @@
 // Отчёт отфильтрован по наличию события «Резка» у задания, поэтому упаковщик видит
 // задание, как только по нему сделана первая резка, и весь его объём — независимо от
 // того, сколько проходов уже отмечено. Порядок строк — как пришёл из отчёта.
+// С #4929 ниже списка стоит блок «Следующие задания»: по одному на станок — самое
+// раннее задание сегодняшнего дня и позже, по которому ещё нет ни одной резки
+// (отчёт `packer_next` — те же колонки плюс slitter/slitter_id, без фильтра по
+// событию «Резка»). Карточка информационная: упаковщик заранее готовит тару и
+// наклейки; отчёта на базе нет — блока просто нет.
 //
 // Отметка упаковки пишет ДВЕ записи:
 //   1) `_m_set/{gp_id}` — «Упаковано шт» (и «Примечание», если количество поправили);
@@ -117,6 +122,11 @@
     // #4914: номера джамбо задания — отдельный отчёт по записям «Номер джамбо».
     var JUMBO_REPORT = 'task_jumbo';
     var JUMBO_COL = { taskId: 'task_id', jumboNo: 'jumbo_no' };
+    // #4929: отчёт `packer_next` — те же Партии ГП, но БЕЗ фильтра по событию
+    // «Резка» и со станком задания. Из него берётся следующее задание каждого
+    // станка: упаковщик готовит под него тару и наклейки до первой резки.
+    var NEXT_REPORT = 'packer_next';
+    var NEXT_COL = { slitter: 'slitter', slitterId: 'slitter_id' };
 
     var STORE_SHOW_PACKED = 'atex-pk-show-packed';
     // #4852: упаковочное место задаёт планшет (таблица «Планшет») — прежнего выбора
@@ -224,6 +234,79 @@
             (map[taskId] = map[taskId] || []).push(no);
         });
         return map;
+    }
+
+    // #4929: строка отчёта `packer_next` — та же Партия ГП плюс станок задания.
+    function nextItemFromReportRow(row) {
+        var item = itemFromReportRow(row);
+        var r = row || {};
+        item.slitter = str(kvVal(r[NEXT_COL.slitter])).trim();
+        item.slitterId = str(kvVal(r[NEXT_COL.slitterId])).trim();
+        return item;
+    }
+
+    // #4929: полночь сегодняшнего дня — Unix-секунды, для фильтра планового старта.
+    function startOfDayUnix(now) {
+        var d = now || new Date();
+        return Math.floor(new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() / 1000);
+    }
+
+    // #4929: адрес отчёта очереди. Место — как у основного списка; плановый старт —
+    // от полуночи СЕГОДНЯ: вчерашние так и не резанные задания кандидатами не
+    // становятся, сегодняшние опоздавшие остаются. Места нет — отчёт не запрашивается.
+    function nextTasksPath(place, now) {
+        var no = str(place && place.label).trim();
+        if (!no) return '';
+        return 'report/' + NEXT_REPORT + '?JSON_KV&LIMIT=0,' + REPORT_LIMIT +
+            '&' + REPORT_PLACE_FILTER + '=' + encodeURIComponent(no) +
+            '&FR_task=' + encodeURIComponent('>' + startOfDayUnix(now));
+    }
+
+    // #4929: следующее задание каждого станка. Кандидаты — задания, по которым ещё
+    // нет ни одной резки: задания основного списка (там резка уже была) исключаются
+    // по task_id. У станка берётся самое раннее по плановому старту; строка без
+    // станка выпадает — «следующее задание» есть только у станка. Группы — по
+    // станкам, в порядке их имён.
+    function nextTaskGroups(items, knownTaskIds) {
+        var known = knownTaskIds || {};
+        var order = [];
+        var byTask = {};
+        (items || []).forEach(function(item) {
+            if (!item.taskId || known[item.taskId]) return;
+            if (!item.slitter && !item.slitterId) return;
+            if (!byTask[item.taskId]) {
+                byTask[item.taskId] = {
+                    taskId: item.taskId, taskUnix: item.taskUnix,
+                    slitter: item.slitter, slitterId: item.slitterId || item.slitter,
+                    items: []
+                };
+                order.push(item.taskId);
+            }
+            byTask[item.taskId].items.push(item);
+        });
+        var bySlitter = {};
+        var slitters = [];
+        order.forEach(function(key) {
+            var group = byTask[key];
+            var cur = bySlitter[group.slitterId];
+            if (!cur) slitters.push(group.slitterId);
+            if (!cur || group.taskUnix < cur.taskUnix) bySlitter[group.slitterId] = group;
+        });
+        return slitters.map(function(k) { return bySlitter[k]; }).sort(function(a, b) {
+            return a.slitter < b.slitter ? -1 : (a.slitter > b.slitter ? 1 : 0);
+        });
+    }
+
+    // #4929: подпись времени задания: сегодняшнее — временем, иное — с датой без года.
+    function taskWhenLabel(unix, now) {
+        var ms = unixToMs(unix);
+        if (!ms) return '—';
+        var d = new Date(ms);
+        var n = now || new Date();
+        var sameDay = d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() &&
+            d.getDate() === n.getDate();
+        var time = pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+        return sameDay ? time : pad2(d.getDate()) + '.' + pad2(d.getMonth() + 1) + ', ' + time;
     }
 
     // #4665: типоразмер позиции. Обычно он уже проставлен планированием — берём его по
@@ -537,6 +620,10 @@
         eventStamp: eventStamp,
         itemFromReportRow: itemFromReportRow,
         jumbosByTask: jumbosByTask,
+        nextItemFromReportRow: nextItemFromReportRow,
+        nextTasksPath: nextTasksPath,
+        nextTaskGroups: nextTaskGroups,
+        taskWhenLabel: taskWhenLabel,
         describeItem: describeItem,
         orderTitle: orderTitle,
         packQtyFor: packQtyFor,
@@ -593,6 +680,7 @@
         this.userId = root.getAttribute('data-user-id') || (typeof window !== 'undefined' ? window.user_id : '') || '';
         this.meta = { gp: null, event: null };
         this.items = [];           // позиции к упаковке (строки отчёта, порядок отчёта)
+        this.nextItems = [];       // #4929: очередь без фильтра по резке (отчёт packer_next)
         this.jumbos = {};          // #4914: id задания → номера джамбо (отчёт task_jumbo)
         this.sizes = [];           // #4665: справочник «Типоразмер» (отчёт pack_sizes)
         this.place = null;         // { id, label } — упаковочное место из настройки планшета (#4852)
@@ -670,6 +758,22 @@
             var list = Array.isArray(rows) ? rows : [];
             self.items = list.map(function(row) { return core.itemFromReportRow(row); });
             self.applyJumbos();
+        });
+    };
+
+    // #4929: очередь заданий без фильтра по резке — кандидаты «следующего задания»
+    // станков. Отчёта на базе нет или он не прочитался — рабочее место живёт как
+    // раньше, просто без блока следующих заданий.
+    AtexPacker.prototype.loadNextItems = function() {
+        var self = this;
+        var path = core.nextTasksPath(this.place, new Date());
+        if (!path) { this.nextItems = []; return Promise.resolve(); }
+        return this.getJson(path).then(function(rows) {
+            var list = Array.isArray(rows) ? rows : [];
+            self.nextItems = list.map(function(row) { return core.nextItemFromReportRow(row); });
+        }).catch(function(err) {
+            console.error('atex-packer: очередь заданий не прочитана — ' + err.message);
+            self.nextItems = [];
         });
     };
 
@@ -769,8 +873,15 @@
                     + (padToken ? ' Код этого планшета — ' + padToken + ' (первая колонка таблицы «Планшет»).' : '') }));
             return;
         }
+        // #4929: следующее задание каждого станка — из очереди без фильтра по резке;
+        // задания основного списка (по ним резка уже была) из кандидатов исключаются.
+        var known = {};
+        this.items.forEach(function(item) { if (item.taskId) known[item.taskId] = true; });
+        var nextGroups = core.nextTaskGroups(this.nextItems, known);
+
         if (!this.items.length) {
             host.appendChild(el('div', { class: 'atex-pk-empty', text: 'Заданий для упаковки нет: по ним ещё не сделана первая резка.' }));
+            this.renderNext(host, nextGroups);
             return;
         }
 
@@ -789,12 +900,14 @@
         var shown = core.visibleOrders(groups, this.showPacked);
         if (!shown.length) {
             host.appendChild(el('div', { class: 'atex-pk-empty', text: 'Всё упаковано — включите «Показать упакованные», чтобы их увидеть.' }));
+            this.renderNext(host, nextGroups);
             return;
         }
 
         shown.forEach(function(group) {
             host.appendChild(self.renderCard(group));
         });
+        this.renderNext(host, nextGroups);
 
         function metric(label, value) {
             return el('div', { class: 'atex-pk-metric' }, [
@@ -978,6 +1091,97 @@
         side.appendChild(btn);
         if (packed) side.appendChild(el('span', { class: 'atex-pk-badge', text: 'упаковано' }));
         if (partial) side.appendChild(el('span', { class: 'atex-pk-badge is-partial', text: 'частично' }));
+        card.appendChild(side);
+        return card;
+    };
+
+    // #4929: блок «Следующие задания» — по одному на станок, после основного списка.
+    AtexPacker.prototype.renderNext = function(host, groups) {
+        var self = this;
+        if (!groups || !groups.length) return;
+        host.appendChild(el('div', { class: 'atex-pk-next-head', text: 'Следующие задания' }));
+        groups.forEach(function(group) {
+            host.appendChild(self.renderNextCard(group));
+        });
+    };
+
+    // Карточка следующего задания станка (#4929): по нему ещё нет ни одной резки,
+    // отмечать нечего — карточка информационная, без количества и кнопок. Упаковщику
+    // важно, ЧТО поедет и В ЧЁМ везти: заказы, подписи роликов, план и короба
+    // (типоразмеры) — чтобы заранее приготовить тару и наклейки.
+    AtexPacker.prototype.renderNextCard = function(group) {
+        var self = this;
+        var items = group.items;
+        var card = el('div', { class: 'atex-pk-card is-next' });
+
+        // Заказы задания: обычно один, но планирование объединяет совместимые позиции.
+        var order = el('div', { class: 'atex-pk-order' });
+        var seen = [];
+        items.forEach(function(item) {
+            var title = core.orderTitle(item);
+            var key = title.main + ' ' + title.sub;
+            if (seen.indexOf(key) !== -1) return;
+            seen.push(key);
+            var mainClass = 'atex-pk-order-main' +
+                (title.main.length > 12 ? ' is-tiny' : (title.main.length > 6 ? ' is-long' : ''));
+            order.appendChild(el('span', { class: mainClass, text: title.main }));
+            if (title.sub) order.appendChild(el('span', { class: 'atex-pk-order-sub', text: title.sub }));
+        });
+        card.appendChild(order);
+
+        var descs = [];
+        items.forEach(function(item) {
+            var d = core.describeItem(item) || '—';
+            if (descs.indexOf(d) === -1) descs.push(d);
+        });
+        var body = descs.map(function(d) {
+            return el('div', { class: 'atex-pk-desc', text: d });
+        });
+
+        // Артикул — как у основной карточки (#4930): хвостом последней строки описания.
+        var arts = [];
+        items.forEach(function(item) {
+            if (item.art && arts.indexOf(item.art) === -1) arts.push(item.art);
+        });
+        if (arts.length) {
+            body[body.length - 1].appendChild(el('span', { class: 'atex-pk-art' }, [
+                el('span', { class: 'atex-pk-art-label', text: 'Артикул' }),
+                el('span', { class: 'atex-pk-art-value', text: arts.join(', ') })
+            ]));
+        }
+
+        // Мета: станок, время задания, Σ план — резки ещё не было, факта нет.
+        var meta = [];
+        if (group.slitter) meta.push(group.slitter);
+        meta.push('задание ' + core.taskWhenLabel(group.taskUnix, new Date()));
+        var plan = items.reduce(function(sum, item) { return sum + core.toNumber(item.planQty); }, 0);
+        if (plan) meta.push('план ' + (Math.round(plan * 1000) / 1000));
+        var metaNode = el('div', { class: 'atex-pk-meta' });
+        meta.forEach(function(part, i) {
+            if (i) metaNode.appendChild(document.createTextNode(' · '));
+            metaNode.appendChild(document.createTextNode(part));
+        });
+        // Короба — по типоразмерам позиций, с суммой штук по каждому (как у #4918).
+        var buckets = [];
+        items.forEach(function(item) {
+            var size = core.sizeForItem(item, self.sizes);
+            var key = size ? (size.id != null ? size.id : size.name) : '';
+            var bucket = null;
+            buckets.forEach(function(b) { if (b.key === key) bucket = b; });
+            if (!bucket) { bucket = { key: key, size: size, qty: 0 }; buckets.push(bucket); }
+            bucket.qty += core.packQtyFor(item);
+        });
+        buckets.forEach(function(b) {
+            var label = core.packingLabel(b.size, b.qty);
+            if (!label) return;
+            metaNode.appendChild(document.createTextNode(' · '));
+            metaNode.appendChild(el('span', { class: 'atex-pk-pack', title: b.size ? b.size.name : '', text: label }));
+        });
+        body.push(metaNode);
+        card.appendChild(el('div', { class: 'atex-pk-body' }, body));
+
+        var side = el('div', { class: 'atex-pk-side' });
+        side.appendChild(el('span', { class: 'atex-pk-badge is-next', text: 'следующее' }));
         card.appendChild(side);
         return card;
     };
@@ -1184,9 +1388,11 @@
         var self = this;
         this.setBusy(true);
         // #4914: номера джамбо перечитываем вместе со списком — по заданиям могли
-        // начаться новые резки с новыми джамбо.
+        // начаться новые резки с новыми джамбо; #4929: очередь следующих заданий тоже.
         return this.loadJumbos().then(function() {
             return self.loadItems();
+        }).then(function() {
+            return self.loadNextItems();
         }).then(function() {
             self.setBusy(false);
             self.render();
@@ -1244,7 +1450,7 @@
                 // Без упаковочного места список не показываем (#4852), а отчёт без него
                 // отдал бы чужие позиции — он фильтруется по месту (#4681).
                 if (!self.hasPlace()) return null;
-                return self.loadItems();
+                return self.loadItems().then(function() { return self.loadNextItems(); });
             })
             .then(function() {
                 self.render();
