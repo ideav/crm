@@ -34,6 +34,11 @@
  * пишется в его запись (`setObject`), поэтому таблица заполняется сама собой; править
  * её руками тоже можно, лишь бы в записи остались токен и имя.
  *
+ * #4944: код незарегистрированного планшета уходит администратору сам — планшет
+ * пишет его в таблицу «Планшет-кандидат», открытую оператору на запись. В ней одна
+ * запись: код ложится поверх прежнего, а если записи нет — она создаётся. Диктовать
+ * 32 символа голосом больше не нужно, на экране код остаётся как запасной путь.
+ *
  * Чистая часть (разбор метаданных, строк, сборка запросов, генерация токена)
  * экспортируется через module.exports для тестов
  * (experiments/atex-pad-guard.test.js).
@@ -54,6 +59,9 @@
     // Ключ localStorage и имена в схеме заданы задачей #4666.
     var TOKEN_KEY = 'atehPad';
     var TABLE_NAME = 'Планшет';
+    // #4944: таблица, куда планшет кладёт свой код для администратора. Оператору она
+    // открыта на запись, в ней одна запись — сам код (первая колонка, реквизитов нет).
+    var CANDIDATE_TABLE = 'Планшет-кандидат';
     var NAME_REQ = 'Наименование';
     var TOKEN_BYTES = 16;   // 32 hex-символа
     // #4789: колонки настройки планшета. Имена — как в таблице «Планшет» (ateh).
@@ -82,13 +90,25 @@
         return String(value == null ? '' : value).trim();
     }
 
-    // Таблица «Планшет» из ответа `GET /{db}/metadata`.
-    function findTable(metadata) {
+    // Таблица по имени из ответа `GET /{db}/metadata`.
+    function findTableByName(metadata, name) {
         var list = Array.isArray(metadata) ? metadata : (metadata ? [metadata] : []);
+        var wanted = trimText(name).toLowerCase();
         for (var i = 0; i < list.length; i++)
-            if (list[i] && trimText(list[i].val).toLowerCase() === TABLE_NAME.toLowerCase())
+            if (list[i] && trimText(list[i].val).toLowerCase() === wanted)
                 return list[i];
         return null;
+    }
+
+    // Таблица «Планшет».
+    function findTable(metadata) {
+        return findTableByName(metadata, TABLE_NAME);
+    }
+
+    // #4944: таблица «Планшет-кандидат». Её может не быть (другая база) — тогда код
+    // остаётся только на экране.
+    function findCandidateTable(metadata) {
+        return findTableByName(metadata, CANDIDATE_TABLE);
     }
 
     // Владелец базы и админ ходят В ОБХОД грантов (index.php, Check_Grant), поэтому
@@ -274,6 +294,38 @@
             '&F_' + encodeURIComponent(tableId) + '=' + encodeURIComponent(token);
     }
 
+    // #4944: содержимое «Планшет-кандидата» целиком — записей в нём одна.
+    function candidateListPath(tableId) {
+        return 'object/' + encodeURIComponent(tableId) + '/?JSON_OBJ&LIMIT=0,2';
+    }
+
+    // #4944: запись кандидата — id и записанный в ней код (первая колонка).
+    function candidateFromRows(rows) {
+        var list = Array.isArray(rows) ? rows : ((rows && rows.object) || []);
+        for (var i = 0; i < list.length; i++) {
+            var row = list[i] || {};
+            var id = String(row.i == null ? '' : row.i);
+            if (!id) continue;
+            return { id: id, token: trimText((row.r || [])[0]) };
+        }
+        return null;
+    }
+
+    // #4944: что послать, чтобы в «Планшет-кандидате» оказался код этого планшета.
+    // Записи нет — создаём под корнем; запись есть — переписываем её ПЕРВУЮ колонку,
+    // а она правится только `_m_save`: `_m_set` главное значение молча не меняет
+    // (грабли #4906, docs/kb/crud.md). Код уже записан — плана нет, писать нечего.
+    function candidateWrite(table, record, token) {
+        if (!table || !isToken(token)) return null;
+        var params = {};
+        params['t' + table.id] = trimText(token);
+        if (record && record.id) {
+            if (trimText(record.token) === trimText(token)) return null;
+            return { path: '_m_save/' + encodeURIComponent(record.id) + '?JSON', params: params, mode: 'update' };
+        }
+        return { path: '_m_new/' + encodeURIComponent(table.id) + '?JSON&up=1', params: params, mode: 'create' };
+    }
+
     // Строки JSON_OBJ: { i: id, r: [первая колонка, реквизит1, …] }. Запись
     // засчитывается только при ТОЧНОМ совпадении токена — сервер фильтрует точно,
     // но полагаться на это вслепую нельзя.
@@ -371,11 +423,31 @@
         ]));
     }
 
+    // #4944: строка о судьбе кода — планшет передаёт его администратору сам. Таблицы
+    // кандидатов в базе нет — строки нет: код на экране, его диктуют, как раньше.
+    function showCandidate(ctx, card, token) {
+        if (!findCandidateTable(ctx.metadata) || !isToken(token)) return;
+        var status = el('div', { class: 'atex-pad-status', text: 'Передаём код администратору…' });
+        card.appendChild(status);
+        publishCandidate(ctx, ctx.metadata, token).then(function(res) {
+            status.textContent = res.saved
+                ? 'Код передан администратору: он записан в таблицу «' + CANDIDATE_TABLE
+                    + '». Дождитесь регистрации планшета и обновите страницу.'
+                : 'Код передать не удалось — продиктуйте его администратору.';
+        }).catch(function(err) {
+            status.setAttribute('class', 'atex-pad-error');
+            status.textContent = 'Код не удалось передать администратору ('
+                + (err && err.message ? err.message : err) + ') — продиктуйте его.';
+        });
+    }
+
     // Экран отказа. Тому, кому таблица открыта на запись, предлагаем тут же
-    // зарегистрировать планшет — остальным остаётся сообщение. noRegister — форма
+    // зарегистрировать планшет — остальным остаётся сообщение. opts.noRegister — форма
     // регистрации не нужна: отказ не про отсутствие записи, а про роль (#4868)
-    // или незаполненную настройку уже зарегистрированного планшета.
-    function showBlocked(ctx, title, text, noRegister) {
+    // или незаполненную настройку уже зарегистрированного планшета. opts.publishCode
+    // (#4944) — планшет неизвестен таблице «Планшет», его код нужен администратору.
+    function showBlocked(ctx, title, text, opts) {
+        var noRegister = !!(opts && opts.noRegister);
         var container = ctx.root;
         container.innerHTML = '';
         var card = el('div', { class: 'atex-pad-card' }, [
@@ -391,6 +463,7 @@
         } else {
             card.appendChild(el('div', { class: 'atex-pad-error', text: 'Код устройства не сгенерировать: браузер не умеет crypto.getRandomValues' }));
         }
+        if (opts && opts.publishCode) showCandidate(ctx, card, padToken);
         if (canRegister(ctx.table, ctx) && !noRegister) {
             var input = el('input', {
                 class: 'atex-pad-input', id: 'atex-pad-name', type: 'text',
@@ -530,6 +603,22 @@
         });
     }
 
+    // #4944: положить код этого планшета в «Планшет-кандидат». Читаем таблицу (в ней
+    // одна запись), решаем «создать / переписать / ничего» и пишем. Ошибку не глушим —
+    // её показывает экран, чтобы оператор знал, что код придётся продиктовать.
+    function publishCandidate(ctx, metadata, token) {
+        var table = findCandidateTable(metadata);
+        if (!table) return Promise.resolve({ saved: false, reason: 'no-table' });
+        if (!isToken(token)) return Promise.resolve({ saved: false, reason: 'no-token' });
+        return getJson(ctx, candidateListPath(table.id)).then(function(rows) {
+            var plan = candidateWrite(table, candidateFromRows(rows), token);
+            if (!plan) return { saved: true, reason: 'same' };
+            return post(ctx, plan.path, plan.params).then(function() {
+                return { saved: true, reason: plan.mode };
+            });
+        });
+    }
+
     // Имя планшета — в шапку рабочего места. #4783: пульт слиттера дописывает к нему дату
     // и станок, поэтому опознанный планшет кладётся и в `window.atexPad` — из шапки его уже
     // не вычитать, когда пульт перерисует её своей подписью. #4789: там же настройка
@@ -578,13 +667,14 @@
             showBlocked(ctx, 'Это операторское место',
                 'Пульт доступен только пользователю с ролью «Оператор».'
                 + (ctx.role ? ' Ваша роль: «' + ctx.role + '».' : ' Роль не определена.'),
-                true);
+                { noRegister: true });
             return;
         }
         showNote(container, 'Проверка устройства…', '');
 
         getJson(ctx, 'metadata')
             .then(function(metadata) {
+                ctx.metadata = metadata;   // #4944: в них же таблица «Планшет-кандидат»
                 ctx.table = findTable(metadata);
                 if (!ctx.table)
                     throw new Error('В базе нет таблицы «' + TABLE_NAME + '» — обратитесь к администратору');
@@ -599,7 +689,8 @@
                     showBlocked(ctx, 'Устройство не зарегистрировано',
                         canRegister(ctx.table, ctx)
                             ? 'Этот планшет не значится в таблице «' + TABLE_NAME + '». Дайте ему название и зарегистрируйте — рабочее место откроется сразу после этого.'
-                            : 'Этот планшет не значится в таблице «' + TABLE_NAME + '». Зарегистрировать его может сотрудник с правом записи в эту таблицу.');
+                            : 'Этот планшет не значится в таблице «' + TABLE_NAME + '». Зарегистрировать его может сотрудник с правом записи в эту таблицу.',
+                        { publishCode: true });   // #4944: код уходит администратору сам
                     return;
                 }
                 // #4868: планшету назначен объект ЭТОГО рабочего места? Не назначен —
@@ -607,7 +698,7 @@
                 // задаётся настройкой планшета. Код планшета на экране — по нему запись находят.
                 var missing = missingObject(pad, ctx.kind);
                 if (missing) {
-                    showBlocked(ctx, missing.title, missing.text, true);
+                    showBlocked(ctx, missing.title, missing.text, { noRegister: true });
                     return;
                 }
                 publishPad(ctx, pad);
@@ -621,9 +712,15 @@
     return {
         TOKEN_KEY: TOKEN_KEY,
         TABLE_NAME: TABLE_NAME,
+        CANDIDATE_TABLE: CANDIDATE_TABLE,   // #4944
         NAME_REQ: NAME_REQ,
         trimText: trimText,
         findTable: findTable,
+        findCandidateTable: findCandidateTable, // #4944
+        candidateListPath: candidateListPath,   // #4944
+        candidateFromRows: candidateFromRows,   // #4944
+        candidateWrite: candidateWrite,         // #4944
+        publishCandidate: publishCandidate,     // #4944: код планшета — администратору
         CONFIG_REQS: CONFIG_REQS,          // #4789
         WORKSPACE_ACTION: WORKSPACE_ACTION, // #4789
         reqByName: reqByName,               // #4789
