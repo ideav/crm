@@ -2806,6 +2806,8 @@
     //   early («выполнено досрочно», M)    — «Закончено» РАНЬШЕ планового дня;
     //   earlyRun («делается раньше плана», K) — «Начато» РАНЬШЕ планового дня, проходы уже есть,
     //                                        «Закончено» пусто;
+    //   earlySetup («наладка сделана заранее», S) — «Начато» РАНЬШЕ планового дня, проходов НЕТ
+    //                                        (факт известен и равен 0), «Закончено» пусто;
     //   shiftClosed («смена закрыта», #4596) — план на СЕГОДНЯ, «Закончено» пусто, а станок УЖЕ
     //                                        закрыл смену (`opts.shiftClosedSlitters`).
     // **ЗАКРЫТАЯ СМЕНА = ТОТ ЖЕ СЛУЧАЙ, ЧТО ПРОСРОЧКА (#4596).** Работать в этом дне станок больше
@@ -2825,11 +2827,11 @@
     // плановый день — тоже (все группы требуют расхождения). Внутри групп — по плановому времени по
     // возрастанию, чтобы порядок заданий («Порядок заданий остается прежним») и список в форме были
     // детерминированы. Чистая (DOM не трогает) — покрыта тестом.
-    // → { overdue: [cut], early: [cut], earlyRun: [cut], shiftClosed: [cut] }.
+    // → { overdue: [cut], early: [cut], earlyRun: [cut], earlySetup: [cut], shiftClosed: [cut] }.
     function deviationGroups(cuts, todayKey, opts) {
         var today = Number(todayKey);
         var closed = (opts || {}).shiftClosedSlitters || {};
-        var res = { overdue: [], early: [], earlyRun: [], shiftClosed: [] };
+        var res = { overdue: [], early: [], earlyRun: [], earlySetup: [], shiftClosed: [] };
         if (!isFinite(today)) return res;
         (cuts || []).forEach(function(c) {
             var pk = planDateDayKey(c && c.planDate);
@@ -2854,7 +2856,22 @@
                 // deviationSettlePlan: «не знаем, в каком дне это делали — не двигаем»).
                 var done = cutDoneRuns(c);
                 var fk = planDateDayKey(c && c.startDate);
-                if (done != null && done > 0 && isFinite(fk) && fk < pk) res.earlyRun.push(c);
+                if (done != null && done > 0 && isFinite(fk) && fk < pk) { res.earlyRun.push(c); return; }
+                // #4962: НАЛАДКА, ВЫПОЛНЕННАЯ РАНЬШЕ ПЛАНОВОГО ДНЯ (решение заказчика 14.09.2026).
+                // Оператор в конце смены наладил станок под задание СЛЕДУЮЩЕГО дня и нажал «Наладка»
+                // — пульт записал «Начато», проходов нет. Это тот же случай, что earlyRun, только
+                // факт пока состоит из одной наладки: работа началась раньше, чем говорит план.
+                // Разбирать её умеет deviationSettlePlan (#4884/#4885: запись с 0 резок уезжает в
+                // день наладки, резки остаются на плановом времени), но до #4962 сюда не доходило
+                // НИЧЕГО: earlyRun требует проходов > 0, просрочки нет (плановый день впереди), день
+                // станку не кончился (#4596 меряет только СЕГОДНЯШНИЙ день). Задание пропадало из
+                // формы совсем, а те же минуты наладки оставались запланированы на плановый день
+                // второй раз (боевое 14.09.2026, Станок 2, заказ 5286: окно 15.09 01:00–01:42 =
+                // 30 мин «смена ножей» + 12 мин резки, наладка отработана вечером 14.09).
+                // Мерка дня факта — «Начато» (#4593), как у earlyRun. Факт проходов НЕИЗВЕСТЕН
+                // (done == null, отчёт не отдал колонку) — не отклонение: нулём его не выдумываем
+                // (#4381/#4830, та же мерка, что в deviationSettlePlan).
+                if (done != null && done <= 0 && isFinite(fk) && fk < pk) res.earlySetup.push(c);
                 return;
             }
             // #4593: выполнено ДОСРОЧНО = закончено раньше СВОЕГО планового дня. Условие «плановый
@@ -2869,6 +2886,7 @@
         res.overdue.sort(byPlan);
         res.early.sort(byPlan);
         res.earlyRun.sort(byPlan);
+        res.earlySetup.sort(byPlan);
         res.shiftClosed.sort(byPlan);
         return res;
     }
@@ -3128,9 +3146,14 @@
         // хоть вчера вечером). На них работа не идёт, поэтому начатое с неизвестным фактом
         // двигается вслепую; у станков с идущей сменой — неприкосновенность #4381.
         var notOpenSlitters = o.shiftNotOpenSlitters || {};
-        var pendingSet = {}, earlyRunSet = {}, shiftClosedSet = {};
+        var pendingSet = {}, earlyRunSet = {}, earlySetupSet = {}, shiftClosedSet = {};
         pending.forEach(function(c) { if (c && c.id != null) pendingSet[String(c.id)] = true; });
         (g.earlyRun || []).forEach(function(c) { if (c && c.id != null) earlyRunSet[String(c.id)] = true; });
+        // #4962: «наладка сделана заранее» — свой список. В `pending` (просрочка ∪ закрытая смена)
+        // ему не место: плановый день ещё впереди, переносить задание некуда и незачем. Разделяется
+        // оно тем же правилом, что и наладка накануне план-дня (#4885), поэтому дальше идёт рядом с
+        // earlyRun: отрезаем наладку в день её выполнения, резки остаются на плановом времени.
+        (g.earlySetup || []).forEach(function(c) { if (c && c.id != null) earlySetupSet[String(c.id)] = true; });
         (g.shiftClosed || []).forEach(function(c) { if (c && c.id != null) shiftClosedSet[String(c.id)] = true; });
         // #4564: частично выполненные — отдельным решением. Их выполненная часть уходит в СВОЙ
         // фактический день, поэтому в очередь просроченных («перед следующим заданием станка»)
@@ -3141,7 +3164,7 @@
         // отрезается и кладётся в ДЕНЬ ВЫПОЛНЕНИЯ, а ОСТАТОК остаётся на своём плановом времени —
         // и всё, что стои́т после него, сдвигается ВЛЕВО на освободившееся время (это делает
         // пересборка). Отсюда общий цикл: правило одно, отличается только место остатка.
-        [].concat(pending, g.earlyRun || []).forEach(function(c) {
+        [].concat(pending, g.earlyRun || [], g.earlySetup || []).forEach(function(c) {
             if (!c || c.id == null) return;
             var planned = Math.floor(Number(c.plannedRuns) || 0);
             var done = cutDoneRuns(c);
@@ -3154,8 +3177,13 @@
             // момент нажали кнопку. Предварительный «stay» остатка живёт только до очереди:
             // день план-дня для станка кончился (#4596), place() кладёт остаток перед
             // следующим заданием или на ближайший свободный день.
+            // #4962: сюда же — группа «наладка сделана заранее» (earlySetup). Правило то же
+            // («наладка выполнена не в тот день, на который запланирована»), меняется только
+            // повод, по которому задание попало в форму: там план-день уже кончился, здесь он
+            // ещё впереди. Остаток при этом ОСТАЁТСЯ на плановом времени («stay») и в очередь
+            // переносов не идёт — двигать задание, чей день не настал, не за чем.
             if (done != null && done <= 0
-                    && pendingSet[String(c.id)] && cutIsStarted(c)) {
+                    && (pendingSet[String(c.id)] || earlySetupSet[String(c.id)]) && cutIsStarted(c)) {
                 var setupTs = planTsSeconds(c.startDate);
                 if (setupTs != null
                         && planDateDayKey(setupTs) !== planDateDayKey(c.planDate)) {
