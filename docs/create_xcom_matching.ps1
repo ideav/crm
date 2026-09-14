@@ -21,6 +21,7 @@ $script:Sequence = 800000
 $script:AuthToken = $Token
 $script:Xsrf = $XsrfToken
 $script:RootPath = Split-Path $PSScriptRoot -Parent
+$script:PublishedDirs = [System.Collections.Generic.HashSet[string]]::new()
 
 function Write-XcomLog {
     param([string]$Message)
@@ -145,14 +146,17 @@ function Ensure-XcomRecord {
 
 function Resolve-XcomFunctionId {
     param([string]$Name)
-    if ($Name -eq "abn_ID") { return "85" }
     if ($DryRun) {
         Write-XcomLog "DRY-RUN функция '$Name' будет найдена через справочник t104"
         return "resolve:$Name"
     }
     $encoded = [Uri]::EscapeDataString($Name)
-    $options = @(Invoke-XcomApi -Endpoint "_ref_reqs/104?JSON&LIMIT=80&q=$encoded" -Method GET)
-    foreach ($option in $options) {
+    $answer = Invoke-XcomApi -Endpoint "_ref_reqs/104?JSON&LIMIT=80&q=$encoded" -Method GET
+    # Ручка отдаёт словарь {"<id>":"<имя>"}; массив объектов приходит от других ручек.
+    foreach ($property in @($answer.PSObject.Properties)) {
+        if ((Normalize-XcomName $property.Value) -eq (Normalize-XcomName $Name)) { return [string]$property.Name }
+    }
+    foreach ($option in @($answer)) {
         $id = [string]($option.i ?? $option.id ?? $option.obj)
         $labels = @($option.label, $option.val, $option.name)
         if ($option.r) { $labels += @($option.r) }
@@ -162,7 +166,13 @@ function Resolve-XcomFunctionId {
             }
         }
     }
-    throw "Функция отчёта '$Name' не найдена через _ref_reqs/104. Проверьте версию ядра базы."
+    # Справочник функций — данные базы, а не версия ядра: в базе, созданной при
+    # регистрации, есть стандартные 20 функций, а нужной шаблону может не быть.
+    $created = Invoke-XcomApi -Endpoint "_m_new/63?JSON=1" -Form @{ up = "1"; t63 = $Name }
+    $id = [string]($created.id ?? $created.obj)
+    if ([string]::IsNullOrWhiteSpace($id)) { throw "Не удалось завести функцию отчёта '$Name' в справочнике (t63)" }
+    Write-XcomLog "Функция '$Name' добавлена в справочник: $id"
+    return $id
 }
 
 function Get-XcomReportSpec {
@@ -247,10 +257,18 @@ function Publish-XcomAsset {
     $isTemplate = $RelativePath.StartsWith("templates/xcom/")
     $leafDir = Split-Path (Split-Path $RelativePath -Parent) -Leaf
     $addPath = if ($isTemplate) { "/" } else { "/$leafDir" }
+    $headers = @{ "X-Authorization" = $script:AuthToken; Cookie = "idb_$DbName=$($script:AuthToken)" }
+    $uri = "$($BaseUrl.TrimEnd('/'))/$DbName/dir_admin/"
+    # Отсутствующий подкаталог файловый менеджер не создаёт: он молча кладёт файл
+    # в корень, а рабочие места ссылаются на /js и /css — и грузятся без скриптов.
+    if (-not $isTemplate -and -not $script:PublishedDirs.Contains($leafDir)) {
+        $folder = @{ add_path = "/"; dir_name = $leafDir; mkdir = "1"; download = "1"; _xsrf = $script:Xsrf; token = $script:AuthToken }
+        Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -Form $folder | Out-Null
+        $script:PublishedDirs.Add($leafDir) | Out-Null
+    }
     $form = @{ add_path = $addPath; upload = "Загрузить"; rewrite = "1"; _xsrf = $script:Xsrf; token = $script:AuthToken; userfile = Get-Item -LiteralPath $source }
     if ($isTemplate) { $form["templates"] = "1" } else { $form["download"] = "1" }
-    $headers = @{ "X-Authorization" = $script:AuthToken; Cookie = "idb_$DbName=$($script:AuthToken)" }
-    Invoke-RestMethod -Uri "$($BaseUrl.TrimEnd('/'))/$DbName/dir_admin/" -Method Post -Headers $headers -Form $form | Out-Null
+    Invoke-RestMethod -Uri $uri -Method Post -Headers $headers -Form $form | Out-Null
 }
 
 if (Test-Path -LiteralPath $LogPath) { Clear-Content -LiteralPath $LogPath }
@@ -283,7 +301,14 @@ Ensure-XcomRecord ([string]$settingsTable.id) "config" $seedFields $settingsRows
 Write-XcomLog "Сид конфига установлен"
 
 $roles = Get-XcomRows "42"
-$businessTables = @($metadata | ForEach-Object { [string]$_.id }) + @("269")
+# Только таблицы шаблона: `metadata` — это ВСЯ база, и при установке к клиенту
+# роли иначе получают права на пользователей, роли, гранты и чужие данные.
+$templateTables = @()
+foreach ($source in @($metadataSource)) {
+    $installed = Find-XcomTable $metadata ([string]$source.val)
+    if ($installed) { $templateTables += [string]$installed.id }
+}
+$businessTables = $templateTables + @("269")
 foreach ($roleSpec in @($manifest.roles)) {
     $roleId = Ensure-XcomRole ([string]$roleSpec.name) ([string]$roleSpec.description) $roles
     foreach ($objectId in @($businessTables + $queryIds)) { Ensure-XcomGrant $roleId $objectId ([string]$roleSpec.grant) }
