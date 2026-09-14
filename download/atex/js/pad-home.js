@@ -20,6 +20,10 @@
  * генерируется и запоминается (pad-guard.ensureToken), иначе показанный код не
  * совпал бы с тем, с которым устройство придёт в следующий раз.
  *
+ * #4944: неизвестный «Планшету» код планшет заодно кладёт в таблицу
+ * «Планшет-кандидат» (pad-guard.publishCandidate) — диспетчер берёт его оттуда,
+ * а не с голоса оператора.
+ *
  * Чистая часть (разбор ролей, решение «куда вести») экспортируется через
  * module.exports для тестов (experiments/atex-pad-home.test.js).
  */
@@ -155,8 +159,37 @@
             var table = guard.findTable(metadata);
             if (!table) throw new Error('В базе нет таблицы «' + TABLE_NAME + '»');
             return getJson(ctx, guard.buildLookupPath(table.id, token)).then(function(rows) {
-                return { table: table, pad: guard.padFromRows(rows, token, guard.nameColIndex(table), table) };
+                return {
+                    table: table, metadata: metadata,   // #4944: в них же «Планшет-кандидат»
+                    pad: guard.padFromRows(rows, token, guard.nameColIndex(table), table)
+                };
             });
+        });
+    }
+
+    // #4944: код неизвестного планшета уходит администратору сам — в «Планшет-кандидат».
+    // Строка о судьбе кода дописывается в карточку уже показанного экрана. Таблицы
+    // кандидатов в базе нет — строки нет: код на экране, его диктуют, как раньше.
+    // metadata уже прочитаны сторожем — не перечитываем; их нет (код только что
+    // сгенерирован) — читаем сами.
+    function announceCode(ctx, guard, token, metadata, screen) {
+        var card = screen && screen.childNodes[0];
+        if (!card || !guard.publishCandidate || !guard.isToken(token)) return;
+        var status = null;
+        (metadata ? Promise.resolve(metadata) : getJson(ctx, 'metadata')).then(function(meta) {
+            if (!guard.findCandidateTable(meta)) return null;
+            status = el('div', { class: 'atex-pad-status', text: 'Передаём код администратору…' });
+            card.appendChild(status);
+            return guard.publishCandidate(ctx, meta, token).then(function(res) {
+                status.textContent = res.saved
+                    ? 'Код передан администратору: он записан в таблицу «' + guard.CANDIDATE_TABLE
+                        + '». Дождитесь настройки планшета и обновите страницу.'
+                    : 'Код передать не удалось — продиктуйте его администратору.';
+            });
+        }).catch(function(err) {
+            if (!status) { status = el('div', { class: 'atex-pad-error' }); card.appendChild(status); }
+            status.textContent = 'Код не удалось передать администратору ('
+                + (err && err.message ? err.message : err) + ') — продиктуйте его.';
         });
     }
 
@@ -165,6 +198,8 @@
         if (!script) return;
         var ctx = {
             db: script.getAttribute('data-pad-db') || root.db || '',
+            // #4944: запись «Планшет-кандидата» — POST, ему нужен токен XSRF страницы.
+            xsrf: script.getAttribute('data-pad-xsrf') || root.xsrf || '',
             action: script.getAttribute('data-pad-action') || root.action || '',
             roleId: script.getAttribute('data-pad-role-id') || root.roleId || '',
             roles: parseRoles(script.getAttribute('data-pad-roles')),
@@ -178,15 +213,16 @@
         var token = guard.readToken(root.localStorage);
         showScreen('Открываем рабочее место…', '', '');
         if (!guard.isToken(token)) {
-            showScreen('Рабочее место не настроено', reasonText('no-pad'),
-                guard.ensureToken(root.localStorage, root.crypto));
+            var fresh = guard.ensureToken(root.localStorage, root.crypto);
+            announceCode(ctx, guard, fresh, null,
+                showScreen('Рабочее место не настроено', reasonText('no-pad'), fresh));
             return;
         }
 
         loadPad(ctx, guard, token).then(function(res) {
             if (!res.pad) {
-                showScreen('Рабочее место не настроено', reasonText('no-pad'),
-                    guard.ensureToken(root.localStorage, root.crypto));
+                announceCode(ctx, guard, token, res.metadata,
+                    showScreen('Рабочее место не настроено', reasonText('no-pad'), token));
                 return;
             }
             var target = guard.padWorkspace(res.pad);

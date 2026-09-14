@@ -268,15 +268,18 @@
             if (!isPadRole) return;
             var base = '/download/' + db + '/js/';
             var guard = document.createElement('script');
-            guard.src = base + 'pad-guard.js?{_global_.version}.2';
+            guard.src = base + 'pad-guard.js?{_global_.version}.3';
             guard.onload = function() {
                 var home = document.createElement('script');
-                home.src = base + 'pad-home.js?{_global_.version}.2';
+                home.src = base + 'pad-home.js?{_global_.version}.3';
                 home.setAttribute('data-pad-roles', PAD_ROLE_IDS.join(','));
                 home.setAttribute('data-pad-db', db);
                 home.setAttribute('data-pad-action', action);
                 home.setAttribute('data-pad-role-id', roleId);
-                home.setAttribute('data-pad-css', '/download/' + db + '/css/atex-brand.css?{_global_.version}.2');
+                // #4944: код незарегистрированного планшета уходит в «Планшет-кандидат» —
+                // это POST, ему нужен токен XSRF страницы.
+                home.setAttribute('data-pad-xsrf', xsrf);
+                home.setAttribute('data-pad-css', '/download/' + db + '/css/atex-brand.css?{_global_.version}.3');
                 document.head.appendChild(home);
             };
             document.head.appendChild(guard);
