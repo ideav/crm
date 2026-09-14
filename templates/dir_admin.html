@@ -226,6 +226,29 @@
     <p>Запросов выполняется: {_parent_.SESSIONS}. &nbsp;<a href="/{_global_.z}/dir_admin/?{_parent_.FOLDER}=1&add_path={_parent_.ADD_PATH}">Обновить</a></p>
 </form>
 <!-- End:&Sessions -->
+<!-- Секция задач cron живёт в своём подблоке по той же причине, что и сессии: шаблон обязан
+     пережить ядро, которое про cron ещё не знает. Счётчик берётся у родителя через _parent_. -->
+<!-- Begin:&Crontab -->
+<br />
+<h4>Задачи cron</h4>
+<p>Задачи расписания сервера для этой базы: имя базы стоит в строке запуска (db=имя базы, адрес /имя базы/ или папка базы).
+   Секреты в строке скрыты. Задачи заводит администратор сервера.</p>
+<table class="table table-striped table-condensed table-bordered">
+  <tr>
+    <td><b>Расписание</b></td>
+    <td><b>Команда</b></td>
+    <td><b>Пояснение</b></td>
+  </tr>
+<!-- Begin:&Cronlist -->
+  <tr>
+    <td style="font-family:monospace;white-space:nowrap">{SCHEDULE}</td>
+    <td style="font-family:monospace;font-size:12px;word-break:break-all">{COMMAND}</td>
+    <td>{NOTE}</td>
+  </tr>
+<!-- End:&Cronlist -->
+</table>
+<p>Задач: {_parent_.CRONTASKS}.</p>
+<!-- End:&Crontab -->
 <!-- End:&Dir_Admin -->
 </div>
 </div>
