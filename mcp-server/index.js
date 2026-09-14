@@ -1148,7 +1148,7 @@ Possible errors:
         },
         template: {
           type: 'string',
-          description: 'Template: "ru" (Russian), "en" (English), or existing database name to clone structure from',
+          description: 'Template: "ru" (Russian), "en" (English), "fu" (full, with HTMLs) or "cm" (catalog matching). Only names listed in the server\'s INTEGRAM_TEMPLATES are accepted; anything else silently falls back to "ru"',
           default: 'ru'
         },
         description: {

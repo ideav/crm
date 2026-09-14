@@ -39,7 +39,9 @@ $mail_config['smtp_debug'] = filter_var(integram_env('INTEGRAM_SMTP_DEBUG', 'tru
 $mail_config['smtp_charset'] = integram_env('INTEGRAM_SMTP_CHARSET', 'utf-8');	//кодировка сообщений. (windows-1251 или utf-8, итд)
 $mail_config['smtp_from'] = integram_env('INTEGRAM_SMTP_FROM', 'Integram'); // "From" by default
 define("ADMINEMAIL", integram_env('INTEGRAM_ADMIN_EMAIL', 'alex@gmail.com'));
-define("TEMPLATES", integram_env('INTEGRAM_TEMPLATES', ':en:ru:fu:'));
+# Шаблоны новых баз: таблица MySQL с таким именем клонируется в базу пользователя (newDb()).
+# `cm` — «Сопоставление каталогов», эталонная база шаблона (docs/xcom-matching/template-db.md).
+define("TEMPLATES", integram_env('INTEGRAM_TEMPLATES', ':en:ru:fu:cm:'));
 $masterPassword = integram_env('INTEGRAM_MASTER_PASSWORD', 'xxx');
 define("ADMINHASH", integram_env('INTEGRAM_ADMINHASH', sha1($_SERVER["SERVER_NAME"].$z.$masterPassword)));
 define("SALT", integram_env('INTEGRAM_SALT', 'yyy'));
