@@ -807,6 +807,14 @@ function newDb($db, $template, $name, $email, $pwd){
 		$template = strtolower($template);
 	else
 		$template = "ru";
+	# Шаблон — это таблица MySQL, её заводят на сервере отдельно (docs/xcom-matching/template-db.md).
+	# Без проверки отсутствующая таблица даёт на CREATE ... LIKE ошибку 1146, а Exec_sql толкует её
+	# как «База $z не существует» и уводит на страницу входа: сообщение про НОВУЮ базу вместо шаблона.
+	if(!mysqli_fetch_array(Exec_sql("SHOW TABLES LIKE '$template'", "Check the template table exists"))){
+		$z = $oldz;
+		my_die(t9n("[RU]Шаблон «$template» не установлен на этом сервере"
+		        ."[EN]Template '$template' is not installed on this server"));
+	}
 	Exec_sql("CREATE TABLE $z LIKE $template", "Create the initial table");
 	Exec_sql("INSERT INTO $z SELECT * FROM $template", "Fill in the table by template");
 
