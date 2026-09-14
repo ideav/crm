@@ -11,8 +11,15 @@ const installer = fs.readFileSync(path.join(root, 'docs/create_xcom_matching.ps1
 
 assert.strictEqual(manifest.slug, 'xcom-matching');
 assert.strictEqual(manifest.schema_version, 1);
-assert.deepStrictEqual(manifest.workspaces, ['wizard', 'matching', 'mass_match', 'settings', 'export']);
-assert.deepStrictEqual(manifest.reports, ['mass_match', 'Сопоставление', 'matching_export']);
+assert.deepStrictEqual(manifest.workspaces, ['wizard', 'matching', 'mass_match', 'tokens', 'settings', 'export']);
+assert.deepStrictEqual(manifest.reports,
+    ['mass_match', 'Сопоставление', 'matching_export', 'token_usage', 'Токенизация SKU', 'Токенизация RFP']);
+// Манифест — опись версии: каждое рабочее место и отчёт обязаны ставиться
+// инсталлятором, иначе партнёр получит пункт меню без страницы или наоборот.
+const reportNames = new Set(reports.map(report => report.name));
+manifest.reports.forEach(name => assert(reportNames.has(name), `отчёт ${name} описан в xcom_reports.json`));
+manifest.workspaces.forEach(name => assert(
+    manifest.assets.includes(`templates/xcom/${name}.html`), `рабочее место ${name} входит в ассеты`));
 assert.deepStrictEqual(manifest.roles.map(role => role.name), ['Партнёр', 'Оператор каталогов']);
 manifest.assets.forEach(asset => assert(fs.existsSync(path.join(root, asset)), `manifest asset exists: ${asset}`));
 

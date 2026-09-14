@@ -1,0 +1,55 @@
+<link rel="stylesheet" href="/download/{_global_.z}/css/xcom-tokens.css?{_global_.version}.1">
+
+<div id="xcom-tokens-app" class="xcom-tokens" data-db="{_global_.z}">
+    <section class="xcom-tokens-panel">
+        <div class="xcom-tokens-head">
+            <div>
+                <h1>Разметка токенов</h1>
+                <p class="xcom-tokens-hint">Отметьте, чем является каждый токен: товаром, маркой или моделью. Совпадение по всем трём даёт признак ТММ и поднимает пару в подборе. Сверху — самые частые токены: они влияют на результат сильнее всего.</p>
+            </div>
+            <div class="xcom-tokens-counters">
+                <span id="xcom-tokens-progress" class="xcom-tokens-counter">—</span>
+            </div>
+        </div>
+
+        <div class="xcom-tokens-controls">
+            <label class="xcom-tokens-search">
+                <span>Поиск</span>
+                <input id="xcom-tokens-search" class="xcom-tokens-input" type="search" placeholder="часть токена" autocomplete="off">
+            </label>
+            <label class="xcom-tokens-check">
+                <input id="xcom-tokens-only-empty" type="checkbox" checked>
+                <span>Только неразмеченные</span>
+            </label>
+            <label class="xcom-tokens-check">
+                <input id="xcom-tokens-hide-rare" type="checkbox">
+                <span>Скрыть одиночные (встречаются 1 раз)</span>
+            </label>
+        </div>
+
+        <div class="xcom-tokens-table-wrap">
+            <table class="xcom-tokens-table">
+                <thead>
+                    <tr>
+                        <th class="xcom-tokens-col-token">Токен</th>
+                        <th class="xcom-tokens-col-num" title="В скольких позициях номенклатуры встречается">Номенклатур</th>
+                        <th class="xcom-tokens-col-num" title="В скольких строках заявок встречается">Заявок</th>
+                        <th class="xcom-tokens-col-flag">Товар</th>
+                        <th class="xcom-tokens-col-flag">Марка</th>
+                        <th class="xcom-tokens-col-flag">Модель</th>
+                    </tr>
+                </thead>
+                <tbody id="xcom-tokens-rows"></tbody>
+            </table>
+            <p id="xcom-tokens-empty" class="xcom-tokens-empty" hidden>Ничего не найдено.</p>
+        </div>
+
+        <div class="xcom-tokens-actions">
+            <button id="xcom-tokens-save" class="xcom-tokens-btn xcom-tokens-btn-primary" type="button" disabled>Сохранить</button>
+            <button id="xcom-tokens-reload" class="xcom-tokens-btn xcom-tokens-btn-secondary" type="button">Обновить</button>
+            <span id="xcom-tokens-status" class="xcom-tokens-status" role="status"></span>
+        </div>
+    </section>
+</div>
+
+<script src="/download/{_global_.z}/js/xcom-tokens.js?{_global_.version}.1" defer></script>

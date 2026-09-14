@@ -252,7 +252,7 @@ function Ensure-XcomGrant {
 
 function Ensure-XcomMenu {
     param([string]$RoleId, [string]$Action)
-    $names = @{ wizard = "Первичная настройка"; settings = "Настройки сопоставления"; matching = "Ручное сопоставление"; mass_match = "Массовый подбор"; export = "Выгрузка результата" }
+    $names = @{ wizard = "Первичная настройка"; settings = "Настройки сопоставления"; matching = "Ручное сопоставление"; mass_match = "Массовый подбор"; export = "Выгрузка результата"; tokens = "Разметка токенов" }
     $rows = Get-XcomRows "151" "&F_U=$RoleId"
     if (Find-XcomRecord $rows $names[$Action]) { return }
     Invoke-XcomApi -Endpoint "_m_new/151?JSON=1" -Form @{ up = $RoleId; t151 = $names[$Action]; t153 = $Action } | Out-Null
