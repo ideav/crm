@@ -67,4 +67,36 @@ assert(/не обещается|не обещаем/i.test(partner), 'партн
     assert(!invented, `в презентации ${who} появилась непроверенная метрика: ${invented && invented[0]}`);
 });
 
+// --- Слайды: те же правила, что и у текстовых версий ------------------------
+
+const slidesPartner = read('docs/xcom-matching/slides/deck-partner.html');
+const slidesClient = read('docs/xcom-matching/slides/deck-client.html');
+
+[['партнёра', slidesPartner, partner], ['клиента', slidesClient, client]].forEach(([who, deck]) => {
+    const invented = deck.match(/в \d+ раз[а]? (быстрее|дешевле)|экономия \d+%|на \d+% (быстрее|дешевле)/i);
+    assert(!invented, `в слайдах ${who} появилась непроверенная метрика: ${invented && invented[0]}`);
+    assert(new RegExp(target).test(deck), `слайды ${who} обязаны называть тот же норматив (${target})`);
+    assert(/целев/i.test(deck), `в слайдах ${who} норматив должен быть назван целевым`);
+});
+
+assert(new RegExp(discount + '\\s*%').test(slidesPartner), `слайды партнёра называют утверждённую скидку ${discount}%`);
+['скидк', 'маржа', 'кастом'].forEach(topic => assert(!new RegExp(topic, 'i').test(slidesClient),
+    `во внешних слайдах не должно быть внутренней темы: ${topic}`));
+
+// У каждого слайда клиентской колоды — подсказка выступающему: показывает партнёр.
+const htmlSlides = slidesClient.split('<section class="slide"').slice(1);
+assert(htmlSlides.length >= 10, `клиентская колода должна состоять из слайдов, найдено: ${htmlSlides.length}`);
+htmlSlides.forEach((slide, index) => assert(/class="notes-src"/.test(slide),
+    `у слайда ${index + 1} нет подсказки выступающему`));
+
+// Тёмная тема: тени и цвета не должны объявляться ТОЛЬКО внутри media/[data-theme] —
+// иначе страница в системной теме рисует текст одной темы на фоне другой.
+[['партнёра', slidesPartner], ['клиента', slidesClient]].forEach(([who, deck]) => {
+    const rootBlock = (deck.match(/:root\s*\{[\s\S]*?\}/) || [''])[0];
+    ['--ground', '--surface', '--ink', '--accent', '--rule'].forEach(token => assert(
+        rootBlock.includes(token), `в слайдах ${who} токен ${token} обязан быть объявлен на голом :root`));
+    assert(/body\s*\{[^}]*background:\s*var\(--ground\)/.test(deck),
+        `в слайдах ${who} фон body должен браться из токена, иначе страница займёт фон хоста`);
+});
+
 console.log('OK: test-issue-4954-xcom-decks');
