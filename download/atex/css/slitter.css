@@ -171,7 +171,9 @@
 .atex-sl-cut-item:hover { background: var(--sl-surface); }
 .atex-sl-cut-item.is-active { background: var(--sl-active-bg); }
 .atex-sl-cut-item.is-next { box-shadow: inset 4px 0 0 var(--sl-accent); }
-.atex-sl-cut-main { display: flex; flex-direction: column; gap: 2px; overflow: hidden; }
+/* #4958 п.1: статус переехал внутрь первой строки карточки, вторым столбцом карточки
+   его больше нет — колонка строк занимает всю ширину. */
+.atex-sl-cut-main { display: flex; flex-direction: column; gap: 2px; overflow: hidden; flex: 1 1 auto; min-width: 0; }
 .atex-sl-cut-label { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .atex-sl-cut-sub { font-size: 12px; color: var(--sl-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* #3646: карточка списка — № (жирный) + «Вид сырья / Намотка / Метраж м * Резок»,
@@ -184,6 +186,10 @@
    (оператор ищет задание по заказу, крупное число ни с чем не спутать).
    Слева от него — № по порядку (.atex-sl-cut-num), там же, где был № раньше. */
 .atex-sl-cut-order { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+/* #4958 п.1: статус — в той же строке, что и номер, прижат к правому краю карточки.
+   Выравнивание по центру строки, а не по базовой линии: у пилюли базовая линия ниже
+   цифр номера (22px), и по baseline она выпадала из строки вниз. */
+.atex-sl-cut-order .atex-sl-badge { margin-left: auto; align-self: center; flex: none; }
 .atex-sl-cut-order-no {
     font-size: 22px;
     font-weight: 700;

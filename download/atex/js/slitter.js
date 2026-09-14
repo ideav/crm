@@ -1297,6 +1297,63 @@
         return map;
     }
 
+    // #4958: ширина позиции задания — из того же отчёта cut_planning, что и номер заказа
+    // (колонка cut_roller_width, «Ширина, мм» позиции заказа). Строк на задание столько,
+    // сколько у него обеспечений, и позиции бывают разной ширины — собираем уникальные в
+    // порядке появления. Пустая ширина (задание в запас, цепочка дробления без обеспечения)
+    // в карту не попадает: подпись просто обходится без неё.
+    function rowsToCutWidths(rows) {
+        var map = {};
+        (rows || []).forEach(function(row) {
+            var cutId = firstField(row, ['cut_id', 'id']);
+            var width = toNumber(firstField(row, ['cut_roller_width']));
+            if (!cutId || !(width > 0)) return;
+            var text = String(round3(width));
+            if (!map[cutId]) map[cutId] = [];
+            if (map[cutId].indexOf(text) < 0) map[cutId].push(text);
+        });
+        return map;
+    }
+
+    // #4958: счётная форма слова «резка» для подписи карточки: 1 резка, 3 резки, 11 резок.
+    function runsWord(count) {
+        var n = Math.abs(Math.round(toNumber(count)));
+        var tens = n % 100, ones = n % 10;
+        if (tens >= 11 && tens <= 14) return 'резок';
+        if (ones === 1) return 'резка';
+        if (ones >= 2 && ones <= 4) return 'резки';
+        return 'резок';
+    }
+
+    // #4958: подпись задания в карточке очереди — тем же порядком, каким позиция написана
+    // в плане диспетчера («{сырьё} {ширина} x {длина} {намотка}», formatStripSummaryLine
+    // в production-planning), плюс сколько проходов резать: «MB 30 x 122 IN - 11 резок».
+    // Оператор сверяет карточку с планом глазами, поэтому порядок частей там и тут один.
+    // Неизвестная часть опускается, а не даёт прочерк: ширины нет у задания без обеспечения,
+    // намотки — у задания без позиции, проходов — у задания-«настройки» (#3635 п.5).
+    function cutSpecLine(cut, material, widths) {
+        var parts = [];
+        var mat = String(material == null ? '' : material).trim();
+        parts.push(mat !== '' ? mat : '—');
+        var widthText = (widths || [])
+            .map(function(w) { return toNumber(w); })
+            .filter(function(w) { return w > 0; })
+            .map(function(w) { return String(round3(w)); })
+            .filter(function(v, i, all) { return all.indexOf(v) === i; })
+            .join('/');
+        var len = toNumber(cut && cut.runLength);
+        var dims = [];
+        if (widthText !== '') dims.push(widthText);
+        dims.push(len > 0 ? String(round3(len)) : '—');
+        parts.push(dims.join(' x '));
+        var winding = String((cut && cut.winding) == null ? '' : cut.winding).trim();
+        if (winding !== '') parts.push(winding);
+        var line = parts.join(' ');
+        var runs = toNumber(cut && cut.plannedRuns);
+        if (runs > 0) line += ' - ' + round3(runs) + ' ' + runsWord(runs);
+        return line;
+    }
+
     // #4606: подпись заказа в карточке задания. Один заказ — «3738», несколько —
     // «3738, 3742»; сверх лимита (по умолчанию 2 — карточка узкая) остаток уходит
     // в счётчик: «3738, 3742 +3». Пусто → подпись не рисуется вовсе.
@@ -1433,6 +1490,8 @@
         rowsToShiftEvents: rowsToShiftEvents, // #3674
         rowsToCutOrders: rowsToCutOrders,   // #4606
         cutOrderLabel: cutOrderLabel,       // #4606
+        rowsToCutWidths: rowsToCutWidths,   // #4958: ширина позиции из cut_planning
+        cutSpecLine: cutSpecLine,           // #4958: подпись позиции в карточке очереди
         isForeignWarehouse: isForeignWarehouse,
         // #3460: раскладка ножей (визуализация)
         totalKnives: totalKnives,
@@ -1520,7 +1579,8 @@
         this.refOptions = {};     // кеш опций searchable reference inputs по reqId
         this.cuts = [];           // производственные резки [{ id, label, status, slitter }]
         this.cutOrders = {};      // #4606: { cutId: [номера заказов] } из report/cut_planning
-        this.cutOrdersSlitterId = null; // станок, для которого загружены cutOrders
+        this.cutWidths = {};      // #4958: { cutId: [ширины позиции, мм] } — тот же отчёт
+        this.cutOrdersSlitterId = null; // станок, для которого загружены cutOrders/cutWidths
         // #3460: восстанавливаем выбор станка из localStorage при открытии формы.
         // #4789: станок планшета (таблица «Планшет») сильнее памяти браузера. Ссылкой он
         // известен сразу — до загрузки справочника: тогда и первый запрос заданий уходит
@@ -1845,7 +1905,7 @@
     AtexSlitter.prototype.loadCuts = function() {
         var self = this;
         var sid = this.selectedSlitterId;
-        if (!sid) { this.cuts = []; this.cutOrders = {}; this.cutOrdersSlitterId = null; return Promise.resolve(); }
+        if (!sid) { this.cuts = []; this.cutOrders = {}; this.cutWidths = {}; this.cutOrdersSlitterId = null; return Promise.resolve(); }
         return this.getJson('report/slitter_cuts?JSON_KV&FR_cut_slitter_id=' + encodeURIComponent(sid) + '&LIMIT=0,2000')
             .then(function(rows) {
                 self.cuts = core.rowsToCuts(Array.isArray(rows) ? rows : (rows && rows.rows) || []);
@@ -1859,17 +1919,21 @@
     // вызывается после каждой отметки прохода/статуса, а состав заказов за смену не
     // меняется. Отчёт недоступен (нет прав у роли / нет колонки order_no) — карточки
     // просто остаются без номера заказа, остальной пульт работает как раньше.
+    // #4958: из того же ответа берём ширину позиции (cut_roller_width) для подписи
+    // карточки — она идёт теми же строками, отдельного запроса не нужно.
     AtexSlitter.prototype.loadCutOrders = function() {
         var self = this;
         var sid = this.selectedSlitterId;
-        if (!sid) { this.cutOrders = {}; this.cutOrdersSlitterId = null; return Promise.resolve(); }
+        if (!sid) { this.cutOrders = {}; this.cutWidths = {}; this.cutOrdersSlitterId = null; return Promise.resolve(); }
         if (this.cutOrdersSlitterId === String(sid)) return Promise.resolve();
         return this.getJson('report/cut_planning?JSON_KV&FR_cut_slitter_id=' + encodeURIComponent(sid) + '&LIMIT=0,5000')
             .then(function(rows) {
-                self.cutOrders = core.rowsToCutOrders(Array.isArray(rows) ? rows : (rows && rows.rows) || []);
+                var list = Array.isArray(rows) ? rows : (rows && rows.rows) || [];
+                self.cutOrders = core.rowsToCutOrders(list);
+                self.cutWidths = core.rowsToCutWidths(list);   // #4958
                 self.cutOrdersSlitterId = String(sid);
             })
-            .catch(function() { self.cutOrders = {}; self.cutOrdersSlitterId = null; });
+            .catch(function() { self.cutOrders = {}; self.cutWidths = {}; self.cutOrdersSlitterId = null; });
     };
 
     // #4606: подпись заказа для задания («3738» / «3738, 3742 +1»); пусто — если
@@ -1877,6 +1941,17 @@
     AtexSlitter.prototype.cutOrderText = function(cut) {
         if (!cut) return '';
         return core.cutOrderLabel((this.cutOrders || {})[String(cut.id)]);
+    };
+
+    // #4958: подпись позиции задания для карточки очереди — «MB 30 x 122 IN - 11 резок».
+    // Вид сырья резолвим как раньше (партия сырья → отчёт → ссылка), ширину берём из
+    // cut_planning; нет её — подпись просто без ширины.
+    AtexSlitter.prototype.cutSpecText = function(cut) {
+        if (!cut) return '';
+        var batch = this.findBatch(cut.batchId);
+        // #3674: cut.material приходит из отчёта slitter_cuts
+        var material = (batch && batch.materialLabel) || cut.material || cut.batch || '';
+        return core.cutSpecLine(cut, material, (this.cutWidths || {})[String(cut.id)]);
     };
 
     AtexSlitter.prototype.loadCutsFromTable = function() {
@@ -2440,6 +2515,22 @@
         });
     };
 
+    // #3646/#4606/#4958: две верхние строки карточки очереди — общие у заданий дня и
+    // будущих дней. Первая: маркер (№ по порядку либо «→»/«✓»), крупный номер заказа и
+    // СТАТУС — всё в одну строку (#4958 п.1: раньше бейдж висел отдельным столбцом по
+    // центру карточки, то есть напротив спецификации). Вторая: сама позиция
+    // («MB 30 x 122 IN - 11 резок»). Номера заказа может не быть (задание в запас или
+    // отчёт недоступен) — тогда в первой строке только маркер и статус.
+    function cutCardRows(marker, orderText, spec, status) {
+        var head = [el('span', { class: 'atex-sl-cut-num', text: marker })];
+        if (orderText) head.push(el('span', { class: 'atex-sl-cut-order-no', text: orderText }));
+        head.push(el('span', { class: 'atex-sl-badge ' + badgeClass(status), text: status }));
+        return [
+            el('div', { class: 'atex-sl-cut-order' }, head),
+            el('div', { class: 'atex-sl-cut-line1' }, [el('span', { class: 'atex-sl-cut-spec', text: spec })])
+        ];
+    }
+
     AtexSlitter.prototype.renderCuts = function() {
         var self = this;
         var box = this.cutsEl;
@@ -2465,35 +2556,7 @@
             var active = String(self.currentCutId) === String(cut.id);
             var isFirstOpen = firstOpenId && String(firstOpenId) === String(cut.id);
             var locked = self.isCutLocked(cut);
-            // #3646: карточка списка — № + «Вид сырья / Намотка / Метраж м * Резок» (стр. 1)
-            // и время начала–окончания (стр. 2). Вид сырья — из «Партии сырья» (Вид сырья).
-            var batch = self.findBatch(cut.batchId);
-            var material = (batch && batch.materialLabel) || cut.material || cut.batch || '—'; // #3674: cut.material из отчёта
-            var runLen = core.toNumber(cut.runLength);
-            var runsN = core.toNumber(cut.plannedRuns);
-            var dims = (runLen > 0 ? core.round3(runLen) + 'м' : '—') + (runsN > 0 ? ' * ' + runsN : '');
-            var spec = [material, cut.winding || '—', dims].join(' / ');
-            var cutMain = [];
-            // #4606: номер заказа — первой строкой и крупно: оператор ищет задание
-            // по заказу, а не по позиции в очереди. Подписи «Заказ» нет — её место
-            // слева от номера занимает № по порядку (.atex-sl-cut-num), поэтому
-            // спецификация уезжает второй строкой. Нет заказа (задание в запас или
-            // отчёт недоступен) — карточка остаётся прежней: «№ + спецификация».
-            var orderText = self.cutOrderText(cut);
-            if (orderText) {
-                cutMain.push(el('div', { class: 'atex-sl-cut-order' }, [
-                    el('span', { class: 'atex-sl-cut-num', text: String(idx + 1) }),
-                    el('span', { class: 'atex-sl-cut-order-no', text: orderText })
-                ]));
-                cutMain.push(el('div', { class: 'atex-sl-cut-line1' }, [
-                    el('span', { class: 'atex-sl-cut-spec', text: spec })
-                ]));
-            } else {
-                cutMain.push(el('div', { class: 'atex-sl-cut-line1' }, [
-                    el('span', { class: 'atex-sl-cut-num', text: String(idx + 1) }),
-                    el('span', { class: 'atex-sl-cut-spec', text: spec })
-                ]));
-            }
+            var cutMain = cutCardRows(String(idx + 1), self.cutOrderText(cut), self.cutSpecText(cut), cut.status);
             var timeTxt = core.cutQueueTime(cut);
             if (timeTxt) cutMain.push(el('div', { class: 'atex-sl-cut-time', text: timeTxt }));
             if (locked) cutMain.push(el('span', { class: 'atex-sl-cut-sub', text: 'ожидает предыдущую' }));
@@ -2501,8 +2564,7 @@
                 class: 'atex-sl-cut-item' + (active ? ' is-active' : '') + (isFirstOpen && !active ? ' is-next' : '') + (locked ? ' is-disabled' : ''),
                 type: 'button'
             }, [
-                el('div', { class: 'atex-sl-cut-main' }, cutMain),
-                el('span', { class: 'atex-sl-badge ' + badgeClass(cut.status), text: cut.status })
+                el('div', { class: 'atex-sl-cut-main' }, cutMain)
             ]);
             // #3557 #8: клик доступен всегда (просмотр деталей даже у заблокированной).
             item.addEventListener('click', function() { self.openCut(cut.id); });
@@ -2541,39 +2603,16 @@
         var self = this;
         var active = String(this.currentCutId) === String(cut.id);
         var isNext = nextId != null && String(nextId) === String(cut.id);
-        var batch = this.findBatch(cut.batchId);
-        var material = (batch && batch.materialLabel) || cut.material || cut.batch || '—';
-        var runLen = core.toNumber(cut.runLength), runsN = core.toNumber(cut.plannedRuns);
-        var dims = (runLen > 0 ? core.round3(runLen) + 'м' : '—') + (runsN > 0 ? ' * ' + runsN : '');
-        var spec = [material, cut.winding || '—', dims].join(' / ');
         // #4606: номер заказа крупно — как в карточках дня. Слева от него маркер
-        // «→»/«✓» (в карточке дня на этом месте № по порядку), спецификация —
-        // второй строкой; без заказа карточка остаётся однострочной.
-        var orderText = this.cutOrderText(cut);
-        var marker = isNext ? '→' : '✓';
-        var main = [];
-        if (orderText) {
-            main.push(el('div', { class: 'atex-sl-cut-order' }, [
-                el('span', { class: 'atex-sl-cut-num', text: marker }),
-                el('span', { class: 'atex-sl-cut-order-no', text: orderText })
-            ]));
-            main.push(el('div', { class: 'atex-sl-cut-line1' }, [
-                el('span', { class: 'atex-sl-cut-spec', text: spec })
-            ]));
-        } else {
-            main.push(el('div', { class: 'atex-sl-cut-line1' }, [
-                el('span', { class: 'atex-sl-cut-num', text: marker }),
-                el('span', { class: 'atex-sl-cut-spec', text: spec })
-            ]));
-        }
+        // «→»/«✓» (в карточке дня на этом месте № по порядку).
+        var main = cutCardRows(isNext ? '→' : '✓', this.cutOrderText(cut), this.cutSpecText(cut), cut.status);
         var timeTxt = core.cutQueueTime(cut);
         if (timeTxt) main.push(el('div', { class: 'atex-sl-cut-time', text: timeTxt }));
         var card = el('button', {
             class: 'atex-sl-cut-item atex-sl-cut-future' + (active ? ' is-active' : '') + (isNext ? '' : ' is-past'),
             type: 'button'
         }, [
-            el('div', { class: 'atex-sl-cut-main' }, main),
-            el('span', { class: 'atex-sl-badge ' + badgeClass(cut.status), text: cut.status })
+            el('div', { class: 'atex-sl-cut-main' }, main)
         ]);
         card.addEventListener('click', function() { self.openCut(cut.id); });
         return card;
