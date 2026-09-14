@@ -217,6 +217,10 @@ function Ensure-XcomReport {
         if ($column.formula) { $update["t101"] = [string]$column.formula }
         if ($column.sort) { $update["t109"] = [string]$column.sort }
         if ($column.hidden -eq $true) { $update["t107"] = "X" }
+        # «Знач. (от)» — отбор строк (у токенизации `!%` = ещё не заполнено),
+        # «Присвоить» — выражение SET-запроса: без него отчёт только читает.
+        if ($column.valueFrom) { $update["t102"] = [string]$column.valueFrom }
+        if ($column.assign) { $update["t132"] = [string]$column.assign }
         if ($update.Count) { Invoke-XcomApi -Endpoint "_m_set/${columnId}?JSON=1" -Form $update | Out-Null }
     }
     if ($resolved.joins) {

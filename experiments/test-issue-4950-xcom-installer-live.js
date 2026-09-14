@@ -51,7 +51,7 @@ const templateTableIds = new Set(templateTables.map(table => String(table.id)));
 // Справочник свежей базы: часть нужных шаблону функций в нём отсутствует.
 const standFunctions = { 85: 'abn_ID', 73: 'SUM', 235: 'GROUP_CONCAT' };
 const functions = { ...standFunctions };
-const calls = { created: [], grants: [], uploads: [], dirs: [] };
+const calls = { created: [], updated: [], grants: [], uploads: [], dirs: [] };
 let sequence = 900;
 
 // Тело режется по границам частей. Имя поля PowerShell пишет БЕЗ кавычек
@@ -102,7 +102,10 @@ const server = http.createServer((req, res) => {
             calls.created.push({ table, fields });
             return send({ id: String(sequence), obj: String(sequence) });
         }
-        if (endpoint.startsWith('_m_set/')) return send({ ok: true });
+        if (endpoint.startsWith('_m_set/')) {
+            calls.updated.push({ id: endpoint.split('/')[1].split('?')[0], fields: Object.fromEntries(new URLSearchParams(body)) });
+            return send({ ok: true });
+        }
         return send([]);
     });
 });
@@ -149,6 +152,17 @@ server.listen(0, '127.0.0.1', async () => {
     jsUploads.forEach(upload => assert.strictEqual(upload.addPath, '/js', `js-ассет ${upload.file} ушёл в ${upload.addPath}`));
     assert(calls.dirs.includes('js') && calls.dirs.includes('css'),
         `каталоги ассетов не создаются перед заливкой, создано: ${JSON.stringify(calls.dirs)}`);
+
+    // 4. Токенизация ставится именно SET-запросом: без «Присвоить» (t132) отчёт
+    //    только читает, справочник остаётся пустым и подбор молчит.
+    const setters = calls.updated.filter(update => update.fields.t132);
+    assert.strictEqual(setters.length, 2, `ожидались SET-колонки обеих сторон, отправлено: ${setters.length}`);
+    setters.forEach(update => {
+        assert(/REGEXP_REPLACE/.test(update.fields.t132), 'разбор наименования уходит выражением');
+        assert.strictEqual(update.fields.t102, '!%', 'берутся только записи без токенов');
+    });
+    const batches = calls.updated.filter(update => update.fields.t134 === '10000');
+    assert.strictEqual(batches.length, 2, 'обоим токенизаторам ставится размер пачки');
 
     console.log('OK: test-issue-4950-xcom-installer-live');
 });
