@@ -1,0 +1,675 @@
+{
+  "version": 1,
+  "project": "sportzania-spz",
+  "description": "Спортзания: Битрикс24 → Интеграм, учебная база spz",
+  "sources": {
+    "b24": {
+      "type": "bitrix24",
+      "portal": "b24.sportzania.ru",
+      "webhook": "${B24_WEBHOOK}",
+      "page_size": 50,
+      "timeout_sec": 30,
+      "requests_per_sec": 2,
+      "retries": 3,
+      "timezone": "Europe/Moscow"
+    }
+  },
+  "target": {
+    "type": "integram",
+    "base_url": "https://ideav.ru",
+    "db": "spz",
+    "token": "${INTEGRAM_TOKEN}",
+    "max_file_bytes": 7000000,
+    "max_rows_per_file": 5000,
+    "request_time_sec": 120
+  },
+  "runtime": {
+    "timezone": "Europe/Moscow",
+    "state_dir": "state/sportzania-spz",
+    "log_dir": "logs/sportzania-spz",
+    "log_keep_days": 30,
+    "lock_file": "state/sportzania-spz/run.lock",
+    "schedule_hint": "0 * * * *",
+    "dry_run": false
+  },
+  "safety": {
+    "on_schema_drift": "stop",
+    "never_send_empty_name": true,
+    "require_key": true,
+    "verify_counts": true,
+    "max_new_ratio_on_full_load": 0.2,
+    "advance_state_only_after_upload": true
+  },
+  "notify": {
+    "enabled": false,
+    "telegram_bot_token": "${NOTIFY_TG_TOKEN}",
+    "telegram_chat_id": "${NOTIFY_TG_CHAT}",
+    "on": [
+      "error",
+      "schema_drift",
+      "manual_binding_required"
+    ]
+  },
+  "dictionaries": {
+    "deal_stage": {
+      "connection": "b24",
+      "source": "crm.status.list",
+      "entity_prefix": "DEAL_STAGE",
+      "code": "STATUS_ID",
+      "name": "NAME"
+    },
+    "lead_source": {
+      "connection": "b24",
+      "source": "crm.status.list",
+      "entity_prefix": "SOURCE",
+      "code": "STATUS_ID",
+      "name": "NAME"
+    },
+    "lead_direction": {
+      "connection": "b24",
+      "source": "crm.lead.fields",
+      "field": "UF_CRM_1648027063964",
+      "items": "items",
+      "code": "ID",
+      "name": "VALUE"
+    },
+    "task_status": {
+      "source": "static",
+      "map": {
+        "1": "Новая",
+        "2": "Принята",
+        "3": "Выполняется",
+        "4": "Ждёт контроля",
+        "5": "Завершена",
+        "6": "Отложена",
+        "7": "Отклонена"
+      }
+    }
+  },
+  "order": [
+    "departments",
+    "tabel",
+    "bitrix_users",
+    "leads",
+    "deals",
+    "tasks"
+  ],
+  "entities": {
+    "departments": {
+      "enabled": true,
+      "source": {
+        "connection": "b24",
+        "method": "department.get",
+        "pagination": "start",
+        "result_path": "result"
+      },
+      "load": {
+        "mode": "full"
+      },
+      "target": {
+        "table": "Департамент",
+        "table_id": 2859,
+        "key": "ID Битрикс",
+        "mode": "upsert",
+        "bind_existing": {
+          "by": "@name",
+          "normalize": [
+            "trim",
+            "lower",
+            "yo"
+          ]
+        }
+      },
+      "hierarchy": {
+        "parent_field": "PARENT"
+      },
+      "fields": {
+        "ID": {
+          "column": "ID Битрикс",
+          "transform": "number"
+        },
+        "NAME": {
+          "column": "@name"
+        },
+        "SORT": {
+          "column": "Сортировка",
+          "transform": "number"
+        },
+        "UF_HEAD": {
+          "column": "Руководитель (ID)",
+          "transform": "number"
+        },
+        "PARENT": {
+          "column": "Родительский",
+          "ref": {
+            "entity": "departments",
+            "by": "key",
+            "missing": "skip"
+          }
+        }
+      },
+      "on_source_delete": "keep"
+    },
+    "tabel": {
+      "enabled": true,
+      "source": {
+        "from_entity": "bitrix_users"
+      },
+      "load": {
+        "mode": "full"
+      },
+      "target": {
+        "table": "Табельный",
+        "table_id": 2946,
+        "key": "@name",
+        "mode": "insert_only"
+      },
+      "fields": {
+        "ID": {
+          "column": "@name"
+        },
+        "LAST_NAME": {
+          "column": "Фамилия"
+        },
+        "NAME": {
+          "column": "Имя"
+        },
+        "SECOND_NAME": {
+          "column": "Отчество"
+        },
+        "FIO": {
+          "column": "ФИО",
+          "transform": "template",
+          "template": "{LAST_NAME} {NAME} {SECOND_NAME}"
+        }
+      },
+      "on_source_delete": "keep"
+    },
+    "bitrix_users": {
+      "enabled": true,
+      "source": {
+        "connection": "b24",
+        "method": "user.get",
+        "pagination": "start",
+        "result_path": "result",
+        "filters": [
+          {
+            "ACTIVE": true
+          },
+          {
+            "ACTIVE": false
+          }
+        ]
+      },
+      "load": {
+        "mode": "full"
+      },
+      "target": {
+        "table": "Пользователь Битрикс",
+        "table_id": 969767,
+        "key": "@name",
+        "mode": "upsert"
+      },
+      "fields": {
+        "ID": {
+          "column": "@name"
+        },
+        "ID@tabel": {
+          "column": "Табельный",
+          "from": "ID",
+          "ref": {
+            "entity": "tabel",
+            "by": "key",
+            "missing": "skip"
+          }
+        },
+        "ACTIVE": {
+          "column": "Активен",
+          "transform": "yn"
+        },
+        "LAST_NAME": {
+          "column": "Фамилия"
+        },
+        "NAME": {
+          "column": "Имя"
+        },
+        "SECOND_NAME": {
+          "column": "Отчество"
+        },
+        "EMAIL": {
+          "column": "Email"
+        },
+        "WORK_PHONE": {
+          "column": "Рабочий телефон"
+        },
+        "PERSONAL_MOBILE": {
+          "column": "Мобильный"
+        },
+        "WORK_POSITION": {
+          "column": "Должность"
+        },
+        "UF_DEPARTMENT": {
+          "column": "Департаменты (ID)",
+          "transform": "join"
+        },
+        "UF_DEPARTMENT@ref": {
+          "column": "Департамент",
+          "from": "UF_DEPARTMENT",
+          "ref": {
+            "entity": "departments",
+            "by": "key",
+            "missing": "skip",
+            "multi": true
+          }
+        },
+        "LAST_LOGIN": {
+          "column": "Последний вход",
+          "transform": "datetime"
+        },
+        "DATE_REGISTER": {
+          "column": "Дата регистрации",
+          "transform": "datetime"
+        }
+      },
+      "on_source_delete": "keep"
+    },
+    "leads": {
+      "enabled": true,
+      "source": {
+        "connection": "b24",
+        "method": "crm.lead.list",
+        "pagination": "id_cursor",
+        "result_path": "result",
+        "order": {
+          "ID": "ASC"
+        }
+      },
+      "load": {
+        "mode": "incremental",
+        "period": {
+          "field": "DATE_CREATE",
+          "from": "2026-01-01",
+          "to": null
+        },
+        "new": {
+          "cursor": "ID"
+        },
+        "updated": {
+          "field": "DATE_MODIFY"
+        }
+      },
+      "target": {
+        "table": "Лид",
+        "table_id": 482971,
+        "key": "@name",
+        "mode": "upsert"
+      },
+      "fields": {
+        "ID": {
+          "column": "@name"
+        },
+        "DATE_CREATE": {
+          "column": "Дата создания",
+          "transform": "datetime"
+        },
+        "DATE_MODIFY": {
+          "column": "Дата изменения",
+          "transform": "datetime"
+        },
+        "TITLE": {
+          "column": "Название"
+        },
+        "NAME": {
+          "column": "Имя"
+        },
+        "SECOND_NAME": {
+          "column": "Отчество"
+        },
+        "LAST_NAME": {
+          "column": "Фамилия"
+        },
+        "COMPANY_TITLE": {
+          "column": "Компания"
+        },
+        "SOURCE_ID": {
+          "column": "Источник лида",
+          "transform": "dict:lead_source",
+          "ref": {
+            "by": "name",
+            "missing": "create"
+          }
+        },
+        "SOURCE_DESCRIPTION": {
+          "column": "Описание источника"
+        },
+        "STATUS_ID": {
+          "column": "Статус",
+          "ref": {
+            "by": "name",
+            "missing": "create"
+          }
+        },
+        "STATUS_SEMANTIC_ID": {
+          "column": "Семантика статуса"
+        },
+        "OPPORTUNITY": {
+          "column": "Сумма",
+          "transform": "money"
+        },
+        "IS_MANUAL_OPPORTUNITY": {
+          "column": "Ручная сумма",
+          "transform": "yn"
+        },
+        "OPENED": {
+          "column": "Открыт",
+          "transform": "yn"
+        },
+        "COMMENTS": {
+          "column": "Комментарий"
+        },
+        "HAS_PHONE": {
+          "column": "Есть телефон",
+          "transform": "yn"
+        },
+        "HAS_EMAIL": {
+          "column": "Есть почта",
+          "transform": "yn"
+        },
+        "HAS_IMOL": {
+          "column": "Есть чат",
+          "transform": "yn"
+        },
+        "ASSIGNED_BY_ID": {
+          "column": "Табельный",
+          "ref": {
+            "entity": "tabel",
+            "by": "key",
+            "missing": "skip"
+          }
+        },
+        "CREATED_BY_ID": {
+          "column": "Создал (ID)",
+          "transform": "number"
+        },
+        "MODIFY_BY_ID": {
+          "column": "Изменил (ID)",
+          "transform": "number"
+        },
+        "MOVED_BY_ID": {
+          "column": "Переместил (ID)",
+          "transform": "number"
+        },
+        "CONTACT_ID": {
+          "column": "Контакт",
+          "transform": "number"
+        },
+        "IS_RETURN_CUSTOMER": {
+          "column": "Повторный",
+          "transform": "yn",
+          "ref": {
+            "by": "name",
+            "missing": "create"
+          }
+        },
+        "ORIGINATOR_ID": {
+          "column": "Инициатор"
+        },
+        "ORIGIN_ID": {
+          "column": "Источник происхождения",
+          "ref": {
+            "by": "name",
+            "missing": "create"
+          }
+        },
+        "UTM_SOURCE": {
+          "column": "UTM источник"
+        },
+        "UTM_MEDIUM": {
+          "column": "UTM канал"
+        },
+        "UTM_CAMPAIGN": {
+          "column": "UTM кампания"
+        },
+        "UTM_CONTENT": {
+          "column": "UTM контент"
+        },
+        "UTM_TERM": {
+          "column": "UTM ключ"
+        },
+        "LAST_ACTIVITY_BY": {
+          "column": "Активность",
+          "transform": "number"
+        },
+        "LAST_COMMUNICATION_TIME": {
+          "column": "Последняя связь",
+          "transform": "datetime"
+        },
+        "PHONE": {
+          "column": "Телефоны",
+          "transform": "multifield"
+        },
+        "EMAIL": {
+          "column": "Почта",
+          "transform": "multifield"
+        },
+        "WEB": {
+          "column": "Сайты",
+          "transform": "multifield"
+        },
+        "IM": {
+          "column": "Мессенджеры",
+          "transform": "multifield"
+        },
+        "UF_CRM_1648027063964": {
+          "column": "Направление",
+          "transform": "dict:lead_direction"
+        },
+        "LINK": {
+          "column": "Ссылка",
+          "transform": "number",
+          "optional": true
+        }
+      },
+      "on_source_delete": "keep"
+    },
+    "deals": {
+      "enabled": true,
+      "source": {
+        "connection": "b24",
+        "method": "crm.deal.list",
+        "pagination": "id_cursor",
+        "result_path": "result",
+        "order": {
+          "ID": "ASC"
+        }
+      },
+      "load": {
+        "mode": "incremental",
+        "period": {
+          "field": "DATE_CREATE",
+          "from": "2026-01-01",
+          "to": null
+        },
+        "new": {
+          "cursor": "ID"
+        },
+        "updated": {
+          "field": "DATE_MODIFY"
+        }
+      },
+      "target": {
+        "table": "Сделка",
+        "table_id": 865423,
+        "key": "@name",
+        "mode": "upsert"
+      },
+      "fields": {
+        "ID": {
+          "column": "@name"
+        },
+        "TITLE": {
+          "column": "Название"
+        },
+        "LEAD_ID": {
+          "column": "Лид",
+          "ref": {
+            "entity": "leads",
+            "by": "key",
+            "missing": "skip"
+          }
+        },
+        "STAGE_ID": {
+          "column": "Стадия",
+          "transform": "dict:deal_stage",
+          "ref": {
+            "by": "name",
+            "missing": "create"
+          }
+        },
+        "OPPORTUNITY": {
+          "column": "Сумма",
+          "transform": "money"
+        },
+        "CURRENCY_ID": {
+          "column": "Валюта"
+        },
+        "DATE_CREATE": {
+          "column": "Дата создания",
+          "transform": "datetime"
+        },
+        "DATE_MODIFY": {
+          "column": "Дата изменения",
+          "transform": "datetime"
+        },
+        "ASSIGNED_BY_ID": {
+          "column": "Табельный",
+          "ref": {
+            "entity": "tabel",
+            "by": "key",
+            "missing": "skip"
+          }
+        },
+        "CLOSED": {
+          "column": "Закрыта",
+          "transform": "yn"
+        },
+        "COMMENTS": {
+          "column": "Комментарий"
+        }
+      },
+      "on_source_delete": "keep"
+    },
+    "tasks": {
+      "enabled": true,
+      "source": {
+        "connection": "b24",
+        "method": "tasks.task.list",
+        "pagination": "id_cursor",
+        "result_path": "result.tasks",
+        "response_keys": "camelCase",
+        "order": {
+          "ID": "ASC"
+        }
+      },
+      "load": {
+        "mode": "incremental",
+        "period": {
+          "field": "CREATED_DATE",
+          "from": "2026-01-01",
+          "to": null
+        },
+        "new": {
+          "cursor": "ID"
+        },
+        "updated": {
+          "field": "CHANGED_DATE"
+        }
+      },
+      "target": {
+        "table": "ID задачи",
+        "table_id": 8903,
+        "key": "@name",
+        "mode": "upsert"
+      },
+      "fields": {
+        "ID": {
+          "column": "@name"
+        },
+        "TITLE": {
+          "column": "Название"
+        },
+        "DESCRIPTION": {
+          "column": "Описание"
+        },
+        "STATUS": {
+          "column": "Статус задачи",
+          "transform": "dict:task_status",
+          "ref": {
+            "by": "name",
+            "missing": "create"
+          }
+        },
+        "PRIORITY": {
+          "column": "Приоритет",
+          "ref": {
+            "by": "name",
+            "missing": "create"
+          }
+        },
+        "RESPONSIBLE_ID": {
+          "column": "Исполнитель",
+          "ref": {
+            "entity": "tabel",
+            "by": "key",
+            "missing": "skip"
+          }
+        },
+        "CREATED_BY": {
+          "column": "Автор",
+          "ref": {
+            "entity": "tabel",
+            "by": "key",
+            "missing": "skip"
+          }
+        },
+        "DEADLINE": {
+          "column": "Крайний срок",
+          "transform": "datetime"
+        },
+        "CREATED_DATE": {
+          "column": "Дата создания",
+          "transform": "datetime"
+        },
+        "CHANGED_DATE": {
+          "column": "Дата изменения",
+          "transform": "datetime"
+        },
+        "CLOSED_DATE": {
+          "column": "Дата закрытия",
+          "transform": "datetime"
+        },
+        "GROUP_ID": {
+          "column": "Группа ID",
+          "transform": "number"
+        },
+        "PARENT_ID": {
+          "column": "Родительская задача",
+          "transform": "number"
+        },
+        "TIME_ESTIMATE": {
+          "column": "Оценка времени",
+          "transform": "number"
+        },
+        "ALLOW_CHANGE_DEADLINE": {
+          "column": "Можно менять срок",
+          "transform": "yn"
+        },
+        "TAGS": {
+          "column": "Теги",
+          "transform": "join"
+        }
+      },
+      "on_source_delete": "keep"
+    }
+  }
+}
