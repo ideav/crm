@@ -345,7 +345,8 @@
             var width = round3(s.width);
             var count = Math.max(0, Math.round(toNumber(s.knives)));
             for (var k = 0; k < count; k++) {
-                segments.push({ stripIndex: stripIndex, width: width, offset: round3(offset) });
+                // #4957: core — втулочная полоса 110 мм, а не продукт (цвет и подсказка).
+                segments.push({ stripIndex: stripIndex, width: width, offset: round3(offset), core: !!s.core });
                 offset = round3(offset + width);
             }
         });
@@ -357,17 +358,27 @@
     //   items — желаемые полосы [{width(номинал), qty}];
     //   options.rollLength — длина рулона, м (для площади отхода);
     //   options.actualWidthIndex — индекс справочника фактической ширины (#3474);
-    //   options.maxMaps — потолок числа карт (по умолчанию 3).
+    //   options.maxMaps — потолок числа карт (по умолчанию 3);
+    //   options.sleeve — втулка { inches, widthMm } (#4957): диаметр участвует в резолве
+    //     фактической ширины (правила `s=…`), а на 0,5″ действуют правила #3812 —
+    //     производимость и втулочные полосы 110 мм.
     function computePlan(inputWidth, items, options) {
         options = options || {};
         var W = round3(inputWidth);
         var rollLength = round3(options.rollLength);
         var maxMaps = options.maxMaps > 0 ? Math.floor(options.maxMaps) : MAX_MAPS;
         var index = options.actualWidthIndex || null;
-        var ctx = { jumbo: W > 0 ? W : null, inches: null };
+        var sleeve = options.sleeve || {};
+        var sleeveInches = toNumber(sleeve.inches) > 0 ? toNumber(sleeve.inches) : null;
+        var ctx = { jumbo: W > 0 ? W : null, inches: sleeveInches };
+
+        // #4957: втулка 0,5″ — риббон у́же 55 мм не производится. Такие ширины выбывают
+        // из расчёта (в планировании позиция уходит в «пропуски»), и о них сказано.
+        var asked = normalizeItems(items);
+        var notProducible = asked.filter(function(it) { return !isSleeveWidthProducible(sleeveInches, it.width); });
+        var norm = asked.filter(function(it) { return isSleeveWidthProducible(sleeveInches, it.width); });
 
         // Номинал → факт; агрегируем по фактической ширине (по ней режем и считаем).
-        var norm = normalizeItems(items);
         var byActual = {};
         var order = [];
         norm.forEach(function(it) {
@@ -379,12 +390,32 @@
             if (byActual[key].nominalWidth !== it.width) byActual[key].nominalWidth = null;
         });
         var all = order.map(function(k) { return byActual[k]; });
-        var overflow = all.filter(function(it) { return it.actualWidth > W; });
-        var usable = all.filter(function(it) { return it.actualWidth <= W; });
+
+        // #4957: втулочные полосы 110 мм (#3812). Диапазон считается по НОМИНАЛЬНОЙ
+        // ширине продукта. Ширина 110 мм, заданная в желаемых рулонах, — не продукт,
+        // а те самые полосы: в планировании резка-носитель обеспечивает уже заказанные
+        // 110 мм своими втулочными полосами и не режет их сверх (#3872).
+        var isCoreWidth = function(it) { return round3(it.actualWidth) === CORE_STRIP_WIDTH; };
+        var product = all.filter(function(it) { return !isCoreWidth(it); });
+        var corePlan = sleeveCoreStripPlan(sleeveInches, sleeve.widthMm, product.map(function(it) {
+            return it.nominalWidth != null ? it.nominalWidth : it.actualWidth;
+        }));
+        var coreCount = corePlan.count;
+        // Полосы занимают ширину джамбо ТОЙ ЖЕ резки — резервируем её до укладки продукта.
+        var effW = round3(W - coreCount * CORE_STRIP_WIDTH);
+        var coreServed = coreCount > 0 ? all.filter(isCoreWidth) : [];
+        var rest = coreCount > 0 ? product : all;
+        var overflow = rest.filter(function(it) { return it.actualWidth > effW; });
+        var usable = rest.filter(function(it) { return it.actualWidth <= effW; });
 
         var base = {
             inputWidth: W, rollLength: rollLength,
             items: all, overflow: overflow,
+            // #4957: ширины, выбывшие из расчёта (втулка 0,5″, у́же 55 мм), и план
+            // втулочных полос 110 мм — рабочее место говорит о них прямо.
+            notProducible: notProducible.map(function(it) { return { width: it.width, qty: it.qty }; }),
+            coreStrip: { width: CORE_STRIP_WIDTH, count: coreCount, mixed: !!corePlan.mixed,
+                servedWidths: coreServed.map(function(it) { return it.actualWidth; }) },
             feasible: false, reason: '', proportionKept: true,
             maps: [], results: [],
             mapCount: 0, totalPasses: 0,
@@ -393,10 +424,18 @@
         };
 
         if (W <= 0) { base.reason = 'Укажите ширину входа (джамбо) больше нуля.'; return base; }
+        if (coreCount > 0 && effW <= 0) {
+            base.reason = 'Втулочные полосы (' + coreCount + ' × ' + CORE_STRIP_WIDTH
+                + ' мм) не помещаются в ширину входа ' + W + ' мм.';
+            return base;
+        }
         if (!usable.length) {
             base.reason = overflow.length
                 ? 'Все заданные ширины больше ширины входа — раскроить нельзя.'
-                : 'Добавьте хотя бы одну полосу (ширина и количество).';
+                : (notProducible.length
+                    ? 'На втулке 0,5″ риббон у́же ' + SLEEVE_MIN_WIDTH + ' мм не производится: '
+                        + notProducible.map(function(it) { return it.width + ' мм'; }).join(', ') + '.'
+                    : 'Добавьте хотя бы одну полосу (ширина и количество).');
             return base;
         }
 
@@ -405,10 +444,11 @@
 
         // #4804 п.2: карта раскроя ОДНА — все ширины лежат на ней. Разбиения на «Карту 1»
         // и «Карту 2» больше нет: заказчику нужен один вариант со всеми ширинами.
-        var single = packSingleMap(W, widths, qtys);
+        // #4957: продукт укладывается в ширину за вычетом втулочных полос (effW).
+        var single = packSingleMap(effW, widths, qtys);
         if (!single.fits) {
             base.reason = 'По одному ножу на каждую ширину — уже шире входа ('
-                + round3(widths.reduce(function(s, w) { return s + w; }, 0)) + ' мм при входе ' + W
+                + round3(widths.reduce(function(s, w) { return s + w; }, 0)) + ' мм при входе ' + effW
                 + ' мм). Уберите часть ширин.';
             base.items = all;
             return base;
@@ -418,21 +458,29 @@
         var maps = bestChoice.packs.map(function(p, mi) {
             var pattern = p.idxs.map(function(i, j) {
                 return { width: widths[i], nominalWidth: usable[i].nominalWidth, knives: p.pack.knives[j] };
-            }).filter(function(s) { return s.knives > 0; })
-              .sort(function(a, b) { return b.width - a.width; });
+            }).filter(function(s) { return s.knives > 0; });
+            // #4957: втулочные полосы 110 мм встают в тот же ряд по своей ширине и
+            // помечены core — рисунок и таблица отличают их от продукта.
+            if (coreCount > 0) {
+                pattern.push({ width: CORE_STRIP_WIDTH, nominalWidth: CORE_STRIP_WIDTH,
+                    knives: coreCount, core: true });
+            }
+            pattern.sort(function(a, b) { return b.width - a.width; });
+            var coreWidthUsed = round3(coreCount * CORE_STRIP_WIDTH);
             return {
                 index: mi + 1,
                 pattern: pattern,
                 segments: expandSegments(pattern),
                 passes: p.pack.passes,
-                knivesTotal: p.pack.knives.reduce(function(s, c) { return s + c; }, 0),
-                usedWidth: p.pack.usedWidth,
+                knivesTotal: p.pack.knives.reduce(function(s, c) { return s + c; }, 0) + coreCount,
+                usedWidth: round3(p.pack.usedWidth + coreWidthUsed),
                 trimWidth: p.pack.trimWidth,
                 // #4828: % отхода менеджеру — от ЭФФЕКТИВНОЙ ширины резки (занятой
                 // полосами), а не от общей рабочей ширины джамбо: по нему видно, на
                 // сколько процентов надо умножить цену прайса, чтобы продать дорезок
                 // (вход 891, занято 740, отход 151 → 20,405%, а не 16,947%).
-                trimPct: p.pack.usedWidth > 0 ? round3(p.pack.trimWidth / p.pack.usedWidth * 100) : 0,
+                trimPct: (p.pack.usedWidth + coreWidthUsed) > 0
+                    ? round3(p.pack.trimWidth / (p.pack.usedWidth + coreWidthUsed) * 100) : 0,
                 fits: p.pack.fits
             };
         });
@@ -446,19 +494,32 @@
             });
         });
 
-        var results = usable.map(function(it) {
+        var totalPasses = maps.reduce(function(s, m) { return s + m.passes; }, 0);
+        // #4957/#3872: заказанные 110 мм обеспечены втулочными полосами — их выпуск
+        // это полосы × проходов, отдельных ножей под них в раскрое нет.
+        if (coreCount > 0) {
+            var coreKey = String(CORE_STRIP_WIDTH);
+            producedByWidth[coreKey] = (producedByWidth[coreKey] || 0) + coreCount * totalPasses;
+        }
+
+        // Строки таблицы идут в порядке заданных ширин; обеспеченные полосами 110 мм
+        // помечены core.
+        var inPlan = all.filter(function(it) {
+            return usable.indexOf(it) >= 0 || coreServed.indexOf(it) >= 0;
+        });
+        var results = inPlan.map(function(it) {
             var produced = producedByWidth[String(it.actualWidth)] || 0;
             return {
                 actualWidth: it.actualWidth,
                 nominalWidth: it.nominalWidth,
                 desiredQty: it.qty,
                 produced: produced,
-                deviation: produced - it.qty
+                deviation: produced - it.qty,
+                core: coreServed.indexOf(it) >= 0
             };
         });
 
-        var totalPasses = maps.reduce(function(s, m) { return s + m.passes; }, 0);
-        var totalDesired = qtys.reduce(function(s, q) { return s + q; }, 0);
+        var totalDesired = results.reduce(function(s, r) { return s + r.desiredQty; }, 0);
         var totalProduced = results.reduce(function(s, r) { return s + r.produced; }, 0);
         var totalWasteWidth = round3(maps.reduce(function(s, m) { return s + m.trimWidth * m.passes; }, 0));
         // Доля отхода = отход во всех проходах ÷ полная ширина всех проходов джамбо.
@@ -585,6 +646,103 @@
         if (exact) return exact;
         var meter = fit.filter(function(rec) { return !(toNumber(rec.sleeveWidth) > 0); })[0];
         return meter || null;
+    }
+
+    // ── #4957: особенности втулки 0,5″ (правила #3812 из планирования) ───────────────
+    // На втулке 0,5″ риббон у́же 55 мм не производится — ограниченная размерная сетка.
+    // При ширине втулки 110 мм в резку добавляются полосы 110 мм: продуктовая ширина
+    // 55–57 мм → 2 полосы, 63–64 мм → 1 полоса, прочие (58–62, 65–70) — ни одной;
+    // ширина > 70 мм режется по обычному правилу втулки 1″. Полосы занимают ширину
+    // джамбо ТОЙ ЖЕ резки: перед укладкой продукта ширина входа уменьшается на
+    // count × 110. Диапазон считается по НОМИНАЛЬНОЙ ширине заказа.
+    //
+    // Те же числа и та же семантика, что в планировании производства
+    // (download/atex/js/production-planning/10-planning-engine.js — isSleeveWidthProducible,
+    // sleeveCoreStripPlan; docs/atex_production_planning_algorithm.md, «Шаг 2.0»).
+    var SLEEVE_MIN_WIDTH = 55;      // у́же — на втулке 0,5″ не производится
+    var CORE_STRIP_WIDTH = 110;     // ширина втулочной полосы, мм
+    var CORE_STRIP_BANDS = [
+        { lo: 55, hi: 57, count: 2 },
+        { lo: 63, hi: 64, count: 1 }
+    ];
+
+    function isHalfInch(inches) {
+        return Math.abs(toNumber(inches) - 0.5) < 1e-6;
+    }
+
+    // Ширина втулки из названия записи «Диаметр втулки» — фолбэк к реквизиту
+    // «Ширина втулки, мм»: «Втулка картонная 0.5" ширина 110 мм» → 110. Нет шаблона
+    // → null (метровая палка). Тот же разбор, что в планировании.
+    function parseSleeveWidthFromName(name) {
+        var m = String(name == null ? '' : name).match(/ширина\s*(\d+(?:[.,]\d+)?)\s*мм/i);
+        if (!m) return null;
+        var n = Number(m[1].replace(',', '.'));
+        return isFinite(n) && n > 0 ? n : null;
+    }
+
+    // Ширина ГОТОВОЙ втулки по записи справочника: реквизит, а если он не заполнен —
+    // название записи. Ни там, ни там → null (метровая палка, режется под размер).
+    function sleeveRecordWidth(rec) {
+        var w = toNumber(rec && rec.sleeveWidth);
+        if (w > 0) return round3(w);
+        return parseSleeveWidthFromName(rec && rec.label);
+    }
+
+    // Ширины готовых втулок выбранного диаметра — варианты поля «Ширина втулки, мм»
+    // (у 0,5″ это 57 и 110). По возрастанию, без дублей; метровая палка вариантом
+    // не становится.
+    function sleeveWidthOptions(sleeves, inches) {
+        var seen = {}, out = [];
+        (sleeves || []).forEach(function(rec) {
+            if (!rec || !sameInches(rec.inches, inches)) return;
+            var w = sleeveRecordWidth(rec);
+            if (!(w > 0) || seen[String(w)]) return;
+            seen[String(w)] = true;
+            out.push(w);
+        });
+        return out.sort(function(a, b) { return a - b; });
+    }
+
+    // Спрашивать ли ширину втулки у этого диаметра. У 0,5″ — да: от неё зависят
+    // втулочные полосы 110 мм. У 1″ правил по ширине втулки нет.
+    function sleeveNeedsCoreWidth(inches) {
+        return isHalfInch(inches);
+    }
+
+    // Ширину можно произвести? Втулка 0,5″ запрещает риббон у́же 55 мм. Диаметр не
+    // выбран — не ограничиваем (калькулятор считает и без втулки).
+    function isSleeveWidthProducible(inches, orderWidth) {
+        var w = toNumber(orderWidth);
+        if (isHalfInch(inches) && w > 0 && w < SLEEVE_MIN_WIDTH) return false;
+        return true;
+    }
+
+    // Сколько втулочных полос 110 мм требует ОДНА продуктовая ширина.
+    function coreStripCountForWidth(inches, coreWidthMm, orderWidth) {
+        if (!isHalfInch(inches) || round3(coreWidthMm) !== CORE_STRIP_WIDTH) return 0;
+        var w = toNumber(orderWidth);
+        var band = CORE_STRIP_BANDS.filter(function(b) {
+            return w >= b.lo - 1e-9 && w <= b.hi + 1e-9;
+        })[0];
+        return band ? band.count : 0;
+    }
+
+    // План втулочных полос для карты раскроя: { stripWidth, count, mixed }.
+    // Число полос задаёт диапазон, а не отдельная полоса, поэтому оно должно быть
+    // ОДНО на всю карту: в планировании число втулочных полос — измерение профиля,
+    // и позиции разных диапазонов физически расходятся по разным резкам. Калькулятор
+    // кладёт все ширины на одну карту (#4804), поэтому разные диапазоны в одном
+    // задании — это `mixed: true`: полос не добавляем и говорим об этом прямо.
+    function sleeveCoreStripPlan(inches, coreWidthMm, orderWidths) {
+        var none = { stripWidth: 0, count: 0, mixed: false };
+        var ws = (orderWidths || []).map(toNumber).filter(function(w) { return w > 0; });
+        if (!ws.length) return none;
+        var counts = {};
+        ws.forEach(function(w) { counts[String(coreStripCountForWidth(inches, coreWidthMm, w))] = true; });
+        var keys = Object.keys(counts);
+        if (keys.length > 1) return { stripWidth: 0, count: 0, mixed: true };
+        var count = Number(keys[0]);
+        return count > 0 ? { stripWidth: CORE_STRIP_WIDTH, count: count, mixed: false } : none;
     }
 
     // Доля сегмента шириной `width` в шкале карты. Шкала — максимум из ширины
@@ -726,6 +884,9 @@
     function stockPointMatches(point, ctx) {
         if (!point || !(toNumber(point.width) > 0)) return false;
         ctx = ctx || {};
+        // #4957: на втулке 0,5″ риббон у́же 55 мм не производится — такую точку запаса
+        // не предлагаем: нарезать впрок то, чего не делают, нельзя.
+        if (!isSleeveWidthProducible((ctx.sleeveChoice || {}).inches, point.width)) return false;
         return stockRefMatches(point.material, ctx.material) &&
             stockNumberMatches(point.length, ctx.length) &&
             stockWindingMatches(point.winding, ctx.winding) &&
@@ -790,7 +951,16 @@
         sleeveInchesOptions: sleeveInchesOptions,
         sleeveNeedsMaterial: sleeveNeedsMaterial,
         sleeveMatchesChoice: sleeveMatchesChoice,
-        resolveSleeve: resolveSleeve
+        resolveSleeve: resolveSleeve,
+        // #4957: особенности втулки 0,5″ — те же правила, что в планировании (#3812).
+        SLEEVE_MIN_WIDTH: SLEEVE_MIN_WIDTH,
+        CORE_STRIP_WIDTH: CORE_STRIP_WIDTH,
+        parseSleeveWidthFromName: parseSleeveWidthFromName,
+        sleeveWidthOptions: sleeveWidthOptions,
+        sleeveNeedsCoreWidth: sleeveNeedsCoreWidth,
+        isSleeveWidthProducible: isSleeveWidthProducible,
+        coreStripCountForWidth: coreStripCountForWidth,
+        sleeveCoreStripPlan: sleeveCoreStripPlan
     };
 
     // ─────────────────────────── Браузерный слой ───────────────────────────
@@ -901,6 +1071,9 @@
         // подбирается под ширину полосы (core.resolveSleeve).
         this.sleeveInches = '';
         this.sleeveMaterialId = '';
+        // #4957: ширина втулки (мм) — спрашивается у 0,5″, от неё зависят втулочные
+        // полосы 110 мм в раскрое (правила #3812 планирования).
+        this.sleeveCoreWidth = '';
         this.windingValue = '';
         this.stockPoints = [];    // [{ id, width, length, winding, material, sleeve, leader, limit }]
         this.stockLoadFailed = false;  // справочник не прочитался (нет доступа/сети) — говорим прямо
@@ -1240,12 +1413,39 @@
             el('label', { class: 'atex-co-label', text: 'Материал втулки' }),
             el('div', { class: 'atex-co-readonly', text: core.CARDBOARD_LABEL })
         ]);
+        // #4957: у 0,5″ спрашиваем ещё и ШИРИНУ втулки (57 или 110) — от неё зависят
+        // втулочные полосы 110 мм в раскрое (#3812). Варианты — ширины готовых втулок
+        // этого диаметра из справочника, а не выдуманный список.
+        var coreWidthSel = el('select', { class: 'atex-co-input' });
+        var coreWidthField = el('div', { class: 'atex-co-field' }, [
+            el('label', { class: 'atex-co-label', text: 'Ширина втулки, мм' }), coreWidthSel,
+            el('div', { class: 'atex-co-field-hint',
+                text: 'Втулка ' + core.CORE_STRIP_WIDTH + ' мм добавляет в резку полосы '
+                    + core.CORE_STRIP_WIDTH + ' мм: ширина 55–57 мм → 2 полосы, 63–64 мм → 1 полоса.' })
+        ]);
         function syncSleeveMaterial() {
             var needs = core.sleeveNeedsMaterial(self.sleeveInches);
             var chosen = String(self.sleeveInches || '') !== '';
             sleeveMatField.style.display = needs ? '' : 'none';
             cardboardNote.style.display = (chosen && !needs) ? '' : 'none';
+            // Ширина втулки: только у диаметра, для которого есть правила (0,5″), и
+            // только если в справочнике есть готовые втулки такой ширины.
+            var widths = core.sleeveNeedsCoreWidth(self.sleeveInches)
+                ? core.sleeveWidthOptions(self.sleeves, self.sleeveInches) : [];
+            coreWidthField.style.display = widths.length ? '' : 'none';
+            if (!widths.length) { self.sleeveCoreWidth = ''; return; }
+            if (widths.map(String).indexOf(String(self.sleeveCoreWidth)) < 0) self.sleeveCoreWidth = '';
+            coreWidthSel.innerHTML = '';
+            coreWidthSel.appendChild(el('option', { value: '', text: '— не указана —' }));
+            widths.forEach(function(w) {
+                coreWidthSel.appendChild(el('option', { value: String(w), text: String(w) }));
+            });
+            coreWidthSel.value = String(self.sleeveCoreWidth || '');
         }
+        coreWidthSel.addEventListener('change', function() {
+            self.sleeveCoreWidth = coreWidthSel.value;
+            self.maybeRecalc();   // втулочные полосы меняют раскрой
+        });
         inchesSel.addEventListener('change', function() {
             self.sleeveInches = inchesSel.value;
             // Диаметр без выбора материала (0,5″) — прежний выбор материала не должен
@@ -1253,6 +1453,7 @@
             if (!core.sleeveNeedsMaterial(self.sleeveInches)) self.sleeveMaterialId = '';
             syncSleeveMaterial();
             self.renderStockPoints();
+            self.maybeRecalc();   // #4957: диаметр влияет на раскрой (производимость, полосы)
         });
         var windingSel = el('select', { class: 'atex-co-input' }, [
             el('option', { value: '', text: '— не указано —' }),
@@ -1272,6 +1473,7 @@
         ]));
         form.appendChild(sleeveMatField);
         form.appendChild(cardboardNote);
+        form.appendChild(coreWidthField);
         syncSleeveMaterial();
         form.appendChild(el('div', { class: 'atex-co-field' }, [
             el('label', { class: 'atex-co-label', text: 'Тип намотки' }), windingSel
@@ -1500,11 +1702,17 @@
         if (!inches) return '— не указана —';
         var opt = core.sleeveInchesOptions().filter(function(o) { return o.value === inches; })[0];
         var label = opt ? opt.label : inches;
-        if (!core.sleeveNeedsMaterial(inches)) return label + ' · ' + core.CARDBOARD_LABEL;
+        // #4957: у 0,5″ к подписи добавляется ширина втулки, если она выбрана.
+        var coreWidth = toNumber(this.sleeveCoreWidth) > 0 ? ' · ' + round3(this.sleeveCoreWidth) + ' мм' : '';
+        if (!core.sleeveNeedsMaterial(inches)) return label + ' · ' + core.CARDBOARD_LABEL + coreWidth;
         var mat = (this.sleeveMaterials || []).filter(function(m) {
             return String(m.id) === String(this.sleeveMaterialId || '');
         }, this)[0];
         return label + (mat ? ' · ' + mat.label : ' · материал не выбран');
+    };
+    // #4957: втулка для расчёта раскроя — диаметр и ширина втулки (правила #3812).
+    AtexCutOptimizer.prototype.sleeveCutOption = function() {
+        return { inches: this.sleeveInches || '', widthMm: this.sleeveCoreWidth || '' };
     };
     // Записи справочника «Диаметр втулки» по id — чтобы у точки запаса прочитать
     // диаметр и материал той втулки, на которую она ссылается.
@@ -1614,7 +1822,8 @@
         this.plan = computePlan(inputWidth, items, {
             rollLength: rollLength,
             actualWidthIndex: this.actualWidthIndex,
-            maxMaps: MAX_MAPS
+            maxMaps: MAX_MAPS,
+            sleeve: this.sleeveCutOption()   // #4957: диаметр и ширина втулки — правила #3812
         });
         this.calculated = true;   // после первого расчёта правки полей пересчитывают раскладку (#3478)
         this.renderResult();
@@ -1665,6 +1874,26 @@
             view.appendChild(el('div', { class: 'atex-co-note',
                 text: 'Не помещаются (шире джамбо): ' + p.overflow.map(function(o) { return o.actualWidth + ' мм'; }).join(', ') }));
         }
+        // #4957: особенности втулки 0,5″ (#3812) — о каждой говорим прямо.
+        if (p.notProducible && p.notProducible.length) {
+            view.appendChild(el('div', { class: 'atex-co-note',
+                text: 'На втулке 0,5″ риббон у́же ' + core.SLEEVE_MIN_WIDTH + ' мм не производится, ширины убраны из расчёта: '
+                    + p.notProducible.map(function(it) { return it.width + ' мм'; }).join(', ') + '.' }));
+        }
+        if (p.coreStrip && p.coreStrip.count > 0) {
+            var served = p.coreStrip.servedWidths && p.coreStrip.servedWidths.length;
+            view.appendChild(el('div', { class: 'atex-co-note',
+                text: 'Втулка 0,5″ шириной ' + core.CORE_STRIP_WIDTH + ' мм: в резку добавлены '
+                    + p.coreStrip.count + ' полосы ' + core.CORE_STRIP_WIDTH + ' мм ('
+                    + round3(p.coreStrip.count * core.CORE_STRIP_WIDTH) + ' мм ширины джамбо)'
+                    + (served ? '; ими же обеспечены заказанные ' + core.CORE_STRIP_WIDTH + ' мм' : '') + '.' }));
+        }
+        if (p.coreStrip && p.coreStrip.mixed) {
+            view.appendChild(el('div', { class: 'atex-co-note',
+                text: 'Ширины требуют разного числа втулочных полос ' + core.CORE_STRIP_WIDTH
+                    + ' мм (55–57 → 2, 63–64 → 1, прочие → 0) — в производстве они идут разными резками. '
+                    + 'Полосы в эту карту не добавлены: посчитайте такие ширины по отдельности.' }));
+        }
 
         view.appendChild(this.renderSummary(p));
         view.appendChild(this.renderMaps(p));
@@ -1689,7 +1918,10 @@
             var bar = el('div', { class: 'atex-co-bar' });
             m.segments.forEach(function(seg) {
                 var pct = widthPercent(seg.width, p.inputWidth, m.usedWidth);
-                var node = el('div', { class: 'atex-co-seg atex-co-seg-order', title: seg.width + ' мм · Заказ' });
+                // #4957: втулочная полоса 110 мм — свой цвет и подсказка: это не заказ.
+                var node = el('div', {
+                    class: 'atex-co-seg ' + (seg.core ? 'atex-co-seg-core' : 'atex-co-seg-order'),
+                    title: seg.width + ' мм · ' + (seg.core ? 'Втулочная полоса (втулка 0,5″)' : 'Заказ') });
                 node.style.width = pct + '%';
                 // Подпись ширины — для ВСЕХ полос, в т.ч. узких (#3478-fix): узкая
                 // подпись поворачивается вертикально (класс is-narrow), чтобы влезть.
@@ -1718,10 +1950,13 @@
             ]));
             wrap.appendChild(card);
         });
-        wrap.appendChild(el('div', { class: 'atex-co-legend-keys' }, [
-            legendKey('order', 'Заказ'),
-            legendKey('remainder', 'Отход')
-        ]));
+        var legend = [legendKey('order', 'Заказ')];
+        // #4957: ключ «Втулочные полосы» показываем, только когда они в карте есть.
+        if (p.coreStrip && p.coreStrip.count > 0) {
+            legend.push(legendKey('core', 'Втулочные полосы ' + core.CORE_STRIP_WIDTH + ' мм'));
+        }
+        legend.push(legendKey('remainder', 'Отход'));
+        wrap.appendChild(el('div', { class: 'atex-co-legend-keys' }, legend));
         return wrap;
 
         // Подпись ширины для ВСЕХ полос; узкая (pct < 6) поворачивается вертикально.
@@ -1755,7 +1990,10 @@
             var nominal = (r.nominalWidth == null) ? '—'
                 : (r.nominalWidth === r.actualWidth ? '=' : String(r.nominalWidth));
             table.appendChild(el('div', { class: 'atex-co-table-row' }, [
-                el('span', { text: String(r.actualWidth) }),
+                // #4957/#3872: ширина, обеспеченная втулочными полосами, названа прямо —
+                // отдельных ножей под неё в раскрое нет.
+                el('span', { text: String(r.actualWidth) + (r.core ? ' · втулочные полосы' : ''),
+                    title: r.core ? 'Обеспечено втулочными полосами ' + core.CORE_STRIP_WIDTH + ' мм' : '' }),
                 el('span', { class: 'atex-co-nominal', text: nominal }),
                 el('span', { text: String(r.desiredQty) }),
                 el('span', { text: String(r.produced) }),
