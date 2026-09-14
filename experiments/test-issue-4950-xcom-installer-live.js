@@ -48,7 +48,9 @@ const foreignTables = [
 const metadata = foreignTables.concat(templateTables);
 const templateTableIds = new Set(templateTables.map(table => String(table.id)));
 
-const functions = { 85: 'abn_ID', 73: 'SUM', 235: 'GROUP_CONCAT' }; // JSON_ARRAYAGG в свежей базе нет
+// Справочник свежей базы: часть нужных шаблону функций в нём отсутствует.
+const standFunctions = { 85: 'abn_ID', 73: 'SUM', 235: 'GROUP_CONCAT' };
+const functions = { ...standFunctions };
 const calls = { created: [], grants: [], uploads: [], dirs: [] };
 let sequence = 900;
 
@@ -127,10 +129,14 @@ server.listen(0, '127.0.0.1', async () => {
 
     assert.strictEqual(run.status, 0, `установщик упал:\n${run.stdout}\n${run.stderr}`);
 
-    // 1. Недостающая функция отчёта заводится, а не роняет установку.
+    // 1. Функции, которых в справочнике базы нет, заводятся — а не роняют установку.
+    const reports = JSON.parse(fs.readFileSync(path.join(root, 'docs/xcom_reports.json'), 'utf8'));
+    const needed = new Set(reports.flatMap(report => (report.columns || []).map(column => column.function).filter(Boolean)));
+    const missing = [...needed].filter(name => !Object.values(standFunctions).includes(name));
     const createdFunctions = calls.created.filter(call => call.table === '63').map(call => call.fields.t63);
-    assert(createdFunctions.includes('JSON_ARRAYAGG'),
-        `установщик должен завести отсутствующую функцию в справочнике t63, создано: ${JSON.stringify(createdFunctions)}`);
+    assert(missing.length > 0, 'стенд обязан не иметь хотя бы одной нужной функции — иначе проверка ничего не значит');
+    missing.forEach(name => assert(createdFunctions.includes(name),
+        `установщик должен завести '${name}' в справочнике t63, создано: ${JSON.stringify(createdFunctions)}`));
 
     // 2. Гранты ролей не выходят за таблицы шаблона.
     const foreignGrants = calls.grants.filter(id => !templateTableIds.has(id) && id !== '269' && Number(id) < 400);

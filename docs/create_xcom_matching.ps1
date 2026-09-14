@@ -184,6 +184,7 @@ function Get-XcomReportSpec {
         name = $Spec.name
         master = $base.master
         description = $Spec.description
+        limit = $base.limit
         joins = $base.joins
         columns = $base.columns
     }
@@ -199,18 +200,22 @@ function Ensure-XcomReport {
         $queryId = [string]($answer.id ?? $answer.obj)
         Write-XcomLog "Создан отчёт '$($resolved.name)': $queryId"
     }
+    if ($resolved.limit) { Invoke-XcomApi -Endpoint "_m_set/${queryId}?JSON=1" -Form @{ t134 = [string]$resolved.limit } | Out-Null }
     $existingColumns = Get-XcomRows "28" "&F_U=$queryId"
     foreach ($column in @($resolved.columns)) {
         $existingColumn = Find-XcomRecordByAnyValue $existingColumns ([string]$column.name)
         if ($existingColumn) { $columnId = [string]$existingColumn.i }
         else {
-            $sourceId = Find-XcomFieldId $Metadata ([string]$column.source) ([string]$column.field)
+            # Вычисляемая колонка не привязана к реквизиту: источник — 0, всё в формуле.
+            $sourceId = if ($column.computed -eq $true) { "0" } else { Find-XcomFieldId $Metadata ([string]$column.source) ([string]$column.field) }
             $form = @{ up = $queryId; t28 = $sourceId; t100 = [string]$column.name }
             $created = Invoke-XcomApi -Endpoint "_m_new/28?JSON=1" -Form $form
             $columnId = [string]($created.id ?? $created.obj)
         }
         $update = @{}
         if ($column.function) { $update["t104"] = Resolve-XcomFunctionId ([string]$column.function) }
+        if ($column.formula) { $update["t101"] = [string]$column.formula }
+        if ($column.sort) { $update["t109"] = [string]$column.sort }
         if ($column.hidden -eq $true) { $update["t107"] = "X" }
         if ($update.Count) { Invoke-XcomApi -Endpoint "_m_set/${columnId}?JSON=1" -Form $update | Out-Null }
     }

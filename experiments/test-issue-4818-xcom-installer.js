@@ -17,8 +17,15 @@ assert.deepStrictEqual(manifest.roles.map(role => role.name), ['Партнёр',
 manifest.assets.forEach(asset => assert(fs.existsSync(path.join(root, asset)), `manifest asset exists: ${asset}`));
 
 const tables = new Map(metadata.map(table => [table.val, table]));
-['SKU', 'RFP', 'Токен', 'Токен SKU', 'Токен RFP', 'Настройка сопоставления', 'Решение по паре', 'Журнал развёртывания', 'Профиль загрузки']
+['SKU', 'RFP', 'Токен', 'Настройка сопоставления', 'Решение по паре', 'Журнал развёртывания', 'Профиль загрузки']
     .forEach(name => assert(tables.has(name), `schema contains ${name}`));
+// Стороны связываются общим справочником токенов через МНОЖЕСТВЕННУЮ ссылку —
+// так устроен рабочий кейс; таблиц-связок нет, и отчёт обходится без FROM.
+['SKU', 'RFP'].forEach(name => {
+    const link = tables.get(name).reqs.find(req => req.val === 'Токен');
+    assert(link && link.ref === tables.get('Токен').id, `${name} ссылается на справочник токенов`);
+    assert(JSON.parse(link.attrs || '{}').multi === true, `ссылка ${name}.Токен множественная`);
+});
 ['Наш артикул', 'Кандидаты', 'Точность подбора', 'ИИ-вердикт']
     .forEach(name => assert(tables.get('RFP').reqs.some(req => req.val === name), `RFP contains ${name}`));
 ['RFP ID', 'SKU ID', 'Решение', 'Дата', 'Кто', 'Источник']
@@ -28,7 +35,10 @@ const reportMap = new Map(reports.map(report => [report.name, report]));
 assert(reportMap.has('mass_match'));
 assert(reportMap.has('Сопоставление'));
 assert(reportMap.has('matching_export'));
-assert(reportMap.get('mass_match').joins.length >= 3, 'mass report includes the token joins');
+assert(!reportMap.get('mass_match').joins, 'подбор идёт по общему справочнику токенов, а не через FROM-связки');
+['Вес', 'ТММ'].forEach(name => assert(
+    reportMap.get('mass_match').columns.some(column => column.name === name && column.computed === true),
+    `mass report считает ${name} вычисляемой колонкой — её читают рабочие места`));
 assert(reportMap.get('Сопоставление').inherits === 'mass_match', 'manual report reuses mass report definition');
 assert(reportMap.get('matching_export').columns.some(column => column.name === 'Наш артикул'));
 

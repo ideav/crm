@@ -2,26 +2,23 @@
   {
     "name": "mass_match",
     "master": "RFP",
-    "description": "Кандидаты SKU для одной строки RFP; внешний фильтр FR_RFPID.",
-    "joins": [
-      { "table": "Токен RFP", "alias": "rt", "condition": "RFP.ID = rt.RFP" },
-      { "table": "Токен SKU", "alias": "st", "condition": "rt.Токен = st.Токен" },
-      { "table": "SKU", "alias": "sku", "condition": "st.SKU = sku.ID" }
-    ],
+    "description": "Кандидаты SKU для одной строки RFP. Стороны связываются через общий справочник «Токен» множественной ссылкой — записей FROM у отчёта нет. Внешний фильтр FR_RFPID.",
+    "limit": "10",
     "columns": [
-      { "source": "RFP", "field": "$id", "name": "RFPID", "function": "abn_ID", "hidden": true },
-      { "source": "SKU", "field": "$id", "name": "SKUID", "function": "abn_ID" },
+      { "source": "RFP", "field": "$id", "name": "RFP" },
+      { "source": "RFP", "field": "Бренд", "name": "Бренд RFP", "hidden": true },
+      { "source": "SKU", "field": "Бренд", "name": "Бренд SKU", "hidden": true },
+      { "source": "Токен", "field": "$id", "name": "Токенов", "formula": "токен", "function": "COUNT", "hidden": true },
       { "source": "SKU", "field": "Наименование", "name": "Наименование SKU" },
-      { "source": "SKU", "field": "Артикул", "name": "Артикул" },
-      { "source": "Токен", "field": "$id", "name": "токены", "function": "JSON_ARRAYAGG" },
-      { "source": "RFP", "field": "Бренд", "name": "Бренд RFP" },
-      { "source": "SKU", "field": "Бренд", "name": "Бренд SKU" },
-      { "source": "RFP", "field": "Модель", "name": "Модель RFP" },
-      { "source": "SKU", "field": "Модель", "name": "Модель SKU" },
-      { "source": "RFP", "field": "Тип", "name": "Тип RFP" },
-      { "source": "SKU", "field": "Тип", "name": "Тип SKU" },
-      { "source": "RFP", "field": "Размер", "name": "Размер RFP" },
-      { "source": "SKU", "field": "Размер", "name": "Размер SKU" }
+      { "source": "Токен", "field": "$id", "name": "токены", "function": "GROUP_CONCAT" },
+      { "computed": true, "name": "Вес", "formula": "COUNT(DISTINCT токен) + COUNT(ТокенТовар) + COUNT(ТокенБренд) + COUNT(ТокенМодель)", "sort": "-2" },
+      { "source": "RFP", "field": "$id", "name": "RFPID", "function": "abn_ID", "hidden": true },
+      { "source": "Токен", "field": "Товар", "name": "Товар", "formula": "ТокенТовар", "hidden": true },
+      { "source": "Токен", "field": "Бренд", "name": "Марка", "formula": "ТокенБренд", "hidden": true },
+      { "source": "Токен", "field": "Модель", "name": "Модель", "formula": "ТокенМодель", "hidden": true },
+      { "computed": true, "name": "ТММ", "formula": "(COUNT(ТокенТовар)>0 AND COUNT(ТокенБренд)>0 AND COUNT(ТокенМодель)>0)", "sort": "-1" },
+      { "source": "SKU", "field": "Артикул", "name": "Артикул", "function": "MAX" },
+      { "source": "SKU", "field": "$id", "name": "SKUID", "function": "abn_ID" }
     ]
   },
   {
