@@ -83,20 +83,42 @@ assert(new RegExp(discount + '\\s*%').test(slidesPartner), `слайды пар�
 ['скидк', 'маржа', 'кастом'].forEach(topic => assert(!new RegExp(topic, 'i').test(slidesClient),
     `во внешних слайдах не должно быть внутренней темы: ${topic}`));
 
-// У каждого слайда клиентской колоды — подсказка выступающему: показывает партнёр.
-const htmlSlides = slidesClient.split('<section class="slide"').slice(1);
-assert(htmlSlides.length >= 10, `клиентская колода должна состоять из слайдов, найдено: ${htmlSlides.length}`);
-htmlSlides.forEach((slide, index) => assert(/class="notes-src"/.test(slide),
-    `у слайда ${index + 1} нет подсказки выступающему`));
+// Колода разбирается так же, как её читает собственный сценарий показа, и
+// утверждения делаются о ДАННЫХ разбора — тексте подсказок и значениях токенов.
+function slideNotes(html) {
+    return html.split('<section class="slide"').slice(1).map((slide) => {
+        const found = slide.match(/<aside class="notes-src">([\s\S]*?)<\/aside>/);
+        return found ? found[1].trim() : '';
+    });
+}
 
-// Тёмная тема: тени и цвета не должны объявляться ТОЛЬКО внутри media/[data-theme] —
-// иначе страница в системной теме рисует текст одной темы на фоне другой.
+const htmlNotes = slideNotes(slidesClient);
+assert(htmlNotes.length >= 10, `клиентская колода должна состоять из слайдов, найдено: ${htmlNotes.length}`);
+assert.strictEqual(htmlNotes.filter(Boolean).length, htmlNotes.length,
+    `подсказка выступающему есть не у всех слайдов: пустых ${htmlNotes.filter(note => !note).length}`);
+htmlNotes.forEach((note, index) => assert(note.length > 40,
+    `подсказка слайда ${index + 1} слишком коротка, чтобы помочь на показе: «${note}»`));
+
+// Объявления одного селектора → словарь свойств.
+function declarations(css, selector) {
+    const start = css.indexOf(selector + ' {');
+    if (start === -1) return {};
+    const block = css.slice(start + selector.length, css.indexOf('}', start));
+    const result = {};
+    block.replace(/([\w-]+)\s*:\s*([^;]+);/g, (all, name, value) => { result[name] = value.trim(); return all; });
+    return result;
+}
+
+// Страница рисуется в теме зрителя, и у неё три состояния: тёмная, светлая и
+// системная — в последней на корне нет никакой пометки. Поэтому полный набор
+// токенов обязан жить на голом `:root`, а фон body — браться из токена: иначе
+// в системной теме страница возьмёт фон хоста и покажет текст чужой темы.
 [['партнёра', slidesPartner], ['клиента', slidesClient]].forEach(([who, deck]) => {
-    const rootBlock = (deck.match(/:root\s*\{[\s\S]*?\}/) || [''])[0];
+    const rootTokens = declarations(deck, ':root');
     ['--ground', '--surface', '--ink', '--accent', '--rule'].forEach(token => assert(
-        rootBlock.includes(token), `в слайдах ${who} токен ${token} обязан быть объявлен на голом :root`));
-    assert(/body\s*\{[^}]*background:\s*var\(--ground\)/.test(deck),
-        `в слайдах ${who} фон body должен браться из токена, иначе страница займёт фон хоста`);
+        rootTokens[token], `в слайдах ${who} токен ${token} не объявлен на голом :root`));
+    assert.strictEqual(declarations(deck, 'body').background, 'var(--ground)',
+        `в слайдах ${who} фон body должен браться из токена`);
 });
 
 console.log('OK: test-issue-4954-xcom-decks');
