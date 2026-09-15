@@ -1,0 +1,198 @@
+/* РМ «Настройки сопоставления» (issue #4817). Состав тот же, что у массового подбора:
+   панель на карточке, поля одной колонкой, кнопки — как xcom-mass. */
+
+.xcom-settings {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 16px;
+    font-family: inherit;
+    color: inherit;
+}
+
+.xcom-settings-panel {
+    background: var(--background, oklch(99% 0.006 255));
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 10px;
+    padding: 20px 24px;
+}
+
+.xcom-settings-head h1 {
+    margin: 0 0 4px;
+    font-size: 1.25rem;
+}
+
+.xcom-settings-head p {
+    margin: 0 0 16px;
+    color: rgba(0, 0, 0, 0.6);
+    font-size: 0.9rem;
+}
+
+.xcom-settings-form {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.xcom-settings-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.xcom-settings-grid label,
+.xcom-settings-weight {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 0.9rem;
+}
+
+.xcom-settings-grid-compact {
+    max-width: 360px;
+    margin-top: 12px;
+}
+
+.xcom-settings-weight {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-width: 280px;
+    font-size: 0.9rem;
+}
+
+.xcom-settings-input {
+    padding: 7px 10px;
+    border: 1px solid rgba(0, 0, 0, 0.2);
+    border-radius: 6px;
+    font: inherit;
+    background: var(--background, oklch(99% 0.006 255));
+    color: inherit;
+}
+
+.xcom-settings-input:focus-visible,
+.xcom-settings-btn:focus-visible {
+    outline: 2px solid var(--button-primary, oklch(55% 0.2 255));
+    outline-offset: 2px;
+}
+
+.xcom-settings-attrs {
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 8px;
+    padding: 12px 16px 16px;
+}
+
+.xcom-settings-attrs legend {
+    font-weight: 600;
+    padding: 0 6px;
+}
+
+.xcom-settings-note {
+    margin: 0 0 10px;
+    color: rgba(0, 0, 0, 0.6);
+    font-size: 0.85rem;
+}
+
+.xcom-settings-attr {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.xcom-settings-weight-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) 90px auto;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.xcom-settings-check {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    font-size: 0.9rem;
+}
+
+.xcom-settings-check input {
+    margin-top: 3px;
+}
+
+.xcom-settings-attr .xcom-settings-input {
+    flex: 1 1 45%;
+}
+
+.xcom-settings-attr-sep {
+    color: rgba(0, 0, 0, 0.45);
+}
+
+.xcom-settings-btn {
+    padding: 7px 14px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    font: inherit;
+    cursor: pointer;
+}
+
+.xcom-settings-btn-secondary {
+    background: transparent;
+    border-color: rgba(0, 0, 0, 0.2);
+}
+
+.xcom-settings-btn-primary {
+    background: var(--button-primary, oklch(55% 0.2 255));
+    color: oklch(98% 0.005 255);
+}
+
+.xcom-settings-btn-primary:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.xcom-settings-btn-danger {
+    background: transparent;
+    color: #b91c1c;
+    border-color: rgba(185, 28, 28, 0.35);
+    padding: 4px 10px;
+}
+
+.xcom-settings-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.xcom-settings-status {
+    font-size: 0.85rem;
+    color: rgba(0, 0, 0, 0.6);
+}
+
+.xcom-settings-status-ok {
+    color: #15803d;
+}
+
+.xcom-settings-status-error {
+    color: #b91c1c;
+}
+
+@media (max-width: 680px) {
+    .xcom-settings-grid,
+    .xcom-settings-weight-row {
+        grid-template-columns: 1fr;
+    }
+
+    .xcom-settings-attr {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .xcom-settings-attr-sep {
+        display: none;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .xcom-settings * {
+        scroll-behavior: auto !important;
+    }
+}

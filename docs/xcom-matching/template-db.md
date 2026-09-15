@@ -70,16 +70,21 @@ mysql -u <user> -p <schema> < docs/scripts/prepare_cm_template.sql
 
 ### 2. Выложить файлы рабочих мест
 
-Рабочие места и ассеты шаблона едут на сервер из репозитория через `update.conf`:
+У шаблона свой комплект файлов в репозитории — `templates/cm/` и `download/cm/{css,js}/`. Он едет
+на сервер через `update.conf`:
 
 ```
-templates/xcom/*     → templates/custom/cm/
-download/xcom/css/*  → download/cm/css/
-download/xcom/js/*   → download/cm/js/
+templates/cm/*     → templates/custom/cm/
+download/cm/css/*  → download/cm/css/
+download/cm/js/*   → download/cm/js/
 ```
 
-Каталоги `templates/custom/cm` и `download/cm` — источник для `cp -r` при создании базы. Пока их
-нет, база создастся, но рабочие места откроются без JS и CSS.
+Каталоги `templates/custom/cm` и `download/cm` на сервере — источник для `cp -r` при создании
+базы: их содержимое ложится в каталоги, одноимённые с новой базой. Пока их нет, база создастся,
+но рабочие места откроются без JS и CSS.
+
+Шаблон развивается сам по себе: `templates/xcom/` и `download/xcom/` — проект конкретного клиента,
+и правка в нём не попадает в шаблон. Версия шаблона — `templates/cm/manifest.json`.
 
 ### 3. Включить шаблон на сервере
 
@@ -104,7 +109,7 @@ INTEGRAM_TEMPLATES=:en:ru:fu:cm:
 
 Шаблон — данные, а не код: правки в уже созданных базах клиентов не появляются. Новая версия
 делается так же, с нуля: рабочая база приводится в порядок, `prepare_cm_template.sql` пересобирает
-`cm`, версия отмечается в `templates/xcom/manifest.json`. Базы, созданные раньше, остаются на
+`cm`, версия отмечается в `templates/cm/manifest.json`. Базы, созданные раньше, остаются на
 своей версии.
 
 ## Грабли
