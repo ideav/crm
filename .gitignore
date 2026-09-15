@@ -10,6 +10,7 @@
 # карантин обязаны попадать в коммит без `git add -f`, иначе новый тест молча не доедет до PR.
 experiments/*
 !experiments/*.test.js
+!experiments/*.test.php
 !experiments/test-*.js
 !experiments/*-test.js
 !experiments/*_test.js

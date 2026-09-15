@@ -377,11 +377,17 @@ if(getCookie('tips_off')==='1')
 </defs>
 </svg> <small class="tips-text"><font color="#1A1A1A">Экспорт BKI</font></small>
 		</a>
-		<a btn="database-restore.png" class="export" title="Импорт файла BKI" onclick="$('#bki').toggleClass('hidden');$('#controls').toggleClass('hidden')" style="display:none;">
+		<a btn="database-restore.png" class="export" title="Импорт архива: файл BKI или JSON" onclick="$('#bki').toggleClass('hidden');$('#controls').toggleClass('hidden')" style="display:none;">
 			<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
 <path fill-rule="evenodd" clip-rule="evenodd" d="M4.406 1.342C5.40548 0.480135 6.68024 0.00413852 8 0C10.69 0 12.923 2 13.166 4.579C14.758 4.804 16 6.137 16 7.773C16 9.569 14.502 11 12.687 11H10C9.86739 11 9.74021 10.9473 9.64645 10.8536C9.55268 10.7598 9.5 10.6326 9.5 10.5C9.5 10.3674 9.55268 10.2402 9.64645 10.1464C9.74021 10.0527 9.86739 10 10 10H12.688C13.979 10 15 8.988 15 7.773C15 6.557 13.98 5.545 12.687 5.545H12.187V5.045C12.188 2.825 10.328 1 8 1C6.91988 1.00431 5.87684 1.39443 5.059 2.1C4.302 2.752 3.906 3.538 3.906 4.155V4.603L3.461 4.652C2.064 4.805 1 5.952 1 7.318C1 8.785 2.23 10 3.781 10H6C6.13261 10 6.25979 10.0527 6.35355 10.1464C6.44732 10.2402 6.5 10.3674 6.5 10.5C6.5 10.6326 6.44732 10.7598 6.35355 10.8536C6.25979 10.9473 6.13261 11 6 11H3.781C1.708 11 0 9.366 0 7.318C0 5.555 1.266 4.095 2.942 3.725C3.085 2.862 3.64 2.002 4.406 1.342Z" fill="#212529"/>
 <path fill-rule="evenodd" clip-rule="evenodd" d="M7.646 4.146C7.69245 4.09944 7.74762 4.06249 7.80837 4.03729C7.86911 4.01208 7.93423 3.99911 8 3.99911C8.06577 3.99911 8.13089 4.01208 8.19163 4.03729C8.25238 4.06249 8.30755 4.09944 8.354 4.146L11.354 7.146C11.4479 7.23989 11.5006 7.36722 11.5006 7.5C11.5006 7.63278 11.4479 7.76011 11.354 7.854C11.2601 7.94789 11.1328 8.00063 11 8.00063C10.8672 8.00063 10.7399 7.94789 10.646 7.854L8.5 5.707V14.5C8.5 14.6326 8.44732 14.7598 8.35355 14.8536C8.25979 14.9473 8.13261 15 8 15C7.86739 15 7.74021 14.9473 7.64645 14.8536C7.55268 14.7598 7.5 14.6326 7.5 14.5V5.707L5.354 7.854C5.26011 7.94789 5.13278 8.00063 5 8.00063C4.86722 8.00063 4.73989 7.94789 4.646 7.854C4.55211 7.76011 4.49937 7.63278 4.49937 7.5C4.49937 7.36722 4.55211 7.23989 4.646 7.146L7.646 4.146Z" fill="#212529"/>
-</svg> <small class="tips-text"><font color="#1A1A1A">Импорт BKI</font></small>
+</svg> <small class="tips-text"><font color="#1A1A1A">Импорт архива</font></small>
+		</a>
+		<a btn="database-export.png" class="export" title="Экспорт архива JSON: метаданные и данные одним документом" onclick="byId('exp').name='json_export';sendForm()" style="display:none;">
+			<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<path d="M6.5 1.5C5.4 1.5 5 2.1 5 3V5C5 6 4.5 7 3.5 7V9C4.5 9 5 10 5 11V13C5 13.9 5.4 14.5 6.5 14.5" stroke="#212529" stroke-linecap="round"/>
+<path d="M9.5 1.5C10.6 1.5 11 2.1 11 3V5C11 6 11.5 7 12.5 7V9C11.5 9 11 10 11 11V13C11 13.9 10.6 14.5 9.5 14.5" stroke="#212529" stroke-linecap="round"/>
+</svg> <small class="tips-text"><font color="#1A1A1A">Экспорт JSON</font></small>
 		</a>
 		<a btn="custom.png" class="export" title="Кастомизируемая таблица" style="" href="/{_global_.z}/table/{_global_.id}">
 			<svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -530,8 +536,8 @@ if(getCookie('tips_off')==='1')
 		<FORM method="post" ENCTYPE="multipart/form-data" action="/{_global_.z}/object/{ID}">
 		<input type="hidden" name="_xsrf" value="{_global_.xsrf}">
 		<input type="hidden" name="F_U" value="{F_U}">
-		<input class="btn btn-sm" type="file" name="bki_file">
-		<button name="import" class="btn btn-sm btn-primary">Импорт&nbsp;BKI</button>&nbsp;&nbsp;&nbsp;
+		<input class="btn btn-sm" type="file" name="bki_file" accept=".bki,.json,.txt,text/plain,application/json" title="Файл BKI или JSON-архив — формат определяется по содержимому">
+		<button name="import" class="btn btn-sm btn-primary">Импорт&nbsp;архива</button>&nbsp;&nbsp;&nbsp;
 		<button type="button" class="btn btn-sm btn-outline-secondary" onclick="$('#controls').toggleClass('hidden'); $('#bki').toggleClass('hidden');">&nbsp;Отменить&nbsp;</button>
 		</FORM>
 		</td>
