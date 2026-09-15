@@ -1,0 +1,576 @@
+<title>Сопоставление каталогов</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+    /* Светлая палитра — полная, на голом :root. Тёмная переопределяет ТОЛЬКО токены. */
+    :root {
+        --ground: #F4F6F8;
+        --surface: #FFFFFF;
+        --ink: #17202B;
+        --muted: #5B6775;
+        --faint: #8B97A5;
+        --rule: #DCE2E9;
+        --accent: #B26A15;
+        --accent-ink: #8A5210;
+        --accent-wash: #F6E9D6;
+        --match: #2F7A4F;
+        --nomatch: #A6432F;
+        --shadow: 0 1px 2px rgba(23, 32, 43, .06), 0 12px 32px rgba(23, 32, 43, .07);
+
+        --step-0: 1rem;
+        --step-1: 1.19rem;
+        --step-2: 1.5rem;
+        --step-3: 2rem;
+        --step-4: 2.75rem;
+        --step-5: 3.75rem;
+    }
+
+    @media (prefers-color-scheme: dark) {
+        :root:not([data-theme="light"]) {
+            --ground: #0E141B;
+            --surface: #161E27;
+            --ink: #E7ECF2;
+            --muted: #9DA9B7;
+            --faint: #74808E;
+            --rule: #26313D;
+            --accent: #E0A052;
+            --accent-ink: #F0BE7E;
+            --accent-wash: #2A2116;
+            --match: #67B98A;
+            --nomatch: #DC8871;
+            --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 12px 32px rgba(0, 0, 0, .35);
+        }
+    }
+
+    :root[data-theme="dark"] {
+        --ground: #0E141B;
+        --surface: #161E27;
+        --ink: #E7ECF2;
+        --muted: #9DA9B7;
+        --faint: #74808E;
+        --rule: #26313D;
+        --accent: #E0A052;
+        --accent-ink: #F0BE7E;
+        --accent-wash: #2A2116;
+        --match: #67B98A;
+        --nomatch: #DC8871;
+        --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 12px 32px rgba(0, 0, 0, .35);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+        margin: 0;
+        background: var(--ground);
+        color: var(--ink);
+        font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+        font-size: var(--step-0);
+        line-height: 1.55;
+        -webkit-font-smoothing: antialiased;
+    }
+
+    .deck { min-height: 100vh; display: flex; flex-direction: column; }
+
+    .slide {
+        display: none;
+        flex: 1;
+        padding: clamp(28px, 5vh, 64px) clamp(20px, 6vw, 92px) 96px;
+        max-width: 1180px;
+        width: 100%;
+        margin: 0 auto;
+        animation: rise .32s ease both;
+    }
+
+    .slide[data-active="true"] { display: flex; flex-direction: column; gap: clamp(16px, 2.4vh, 28px); }
+
+    @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+    @media (prefers-reduced-motion: reduce) { .slide { animation: none; } }
+
+    .eyebrow {
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: .72rem;
+        letter-spacing: .16em;
+        text-transform: uppercase;
+        color: var(--accent-ink);
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+    }
+
+    .eyebrow::after {
+        content: "";
+        flex: 1;
+        height: 1px;
+        background: var(--rule);
+    }
+
+    h1 {
+        font-family: Archivo, "Arial Narrow", system-ui, sans-serif;
+        font-weight: 700;
+        font-size: var(--step-5);
+        line-height: 1.02;
+        letter-spacing: -.02em;
+        margin: 0;
+        text-wrap: balance;
+    }
+
+    h2 {
+        font-family: Archivo, "Arial Narrow", system-ui, sans-serif;
+        font-weight: 600;
+        font-size: var(--step-4);
+        line-height: 1.08;
+        letter-spacing: -.015em;
+        margin: 0;
+        text-wrap: balance;
+    }
+
+    h3 {
+        font-family: Archivo, "Arial Narrow", system-ui, sans-serif;
+        font-weight: 600;
+        font-size: var(--step-1);
+        margin: 0 0 6px;
+        letter-spacing: -.005em;
+    }
+
+    p { margin: 0; max-width: 68ch; }
+    .lead { font-size: var(--step-2); line-height: 1.35; color: var(--muted); max-width: 40ch; }
+    .muted { color: var(--muted); }
+    strong { font-weight: 600; }
+
+    ul { margin: 0; padding-left: 0; list-style: none; display: grid; gap: 10px; max-width: 70ch; }
+    li { padding-left: 20px; position: relative; }
+    li::before {
+        content: "";
+        position: absolute;
+        left: 0;
+        top: .62em;
+        width: 7px;
+        height: 1px;
+        background: var(--accent);
+    }
+
+    .cols { display: grid; gap: clamp(16px, 3vw, 40px); grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); align-items: start; }
+    .cols-2 { display: grid; gap: clamp(16px, 3vw, 40px); grid-template-columns: 1fr 1fr; align-items: start; }
+    @media (max-width: 820px) { .cols-2 { grid-template-columns: 1fr; } }
+
+    .card {
+        background: var(--surface);
+        border: 1px solid var(--rule);
+        border-radius: 4px;
+        padding: 18px 20px;
+        display: grid;
+        gap: 6px;
+    }
+
+    .card-accent { border-left: 3px solid var(--accent); }
+
+    /* Мотив колоды: наименование, распавшееся на токены. */
+    .chips { display: flex; flex-wrap: wrap; gap: 7px; }
+    .chip {
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: .8rem;
+        padding: 3px 9px;
+        border: 1px solid var(--rule);
+        border-radius: 3px;
+        background: var(--surface);
+        color: var(--muted);
+        white-space: nowrap;
+    }
+    .chip-on { border-color: var(--accent); background: var(--accent-wash); color: var(--accent-ink); }
+
+    .hero-chips .chip { animation: drop .5s ease both; }
+    @keyframes drop { from { opacity: 0; transform: translateY(-6px) rotate(-1.5deg); } to { opacity: 1; transform: none; } }
+    @media (prefers-reduced-motion: reduce) { .hero-chips .chip { animation: none; } }
+
+    .source-line {
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: clamp(.95rem, 2.2vw, 1.35rem);
+        color: var(--ink);
+        border-left: 3px solid var(--accent);
+        padding-left: 14px;
+    }
+
+    .table-wrap { overflow-x: auto; }
+    table { border-collapse: collapse; width: 100%; font-size: .95rem; }
+    th, td { text-align: left; padding: 9px 14px 9px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+    th {
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-weight: 500;
+        font-size: .72rem;
+        letter-spacing: .1em;
+        text-transform: uppercase;
+        color: var(--faint);
+    }
+    td.num { font-variant-numeric: tabular-nums; }
+    .yes { color: var(--match); font-weight: 600; }
+    .no { color: var(--nomatch); font-weight: 600; }
+
+    code, .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: .88em; }
+    pre {
+        margin: 0;
+        background: var(--surface);
+        border: 1px solid var(--rule);
+        border-left: 3px solid var(--accent);
+        border-radius: 3px;
+        padding: 14px 16px;
+        overflow-x: auto;
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: .85rem;
+        line-height: 1.6;
+        color: var(--ink);
+    }
+
+    .steps { display: grid; gap: 2px; }
+    .step { display: grid; grid-template-columns: 44px 1fr; gap: 14px; padding: 11px 0; border-bottom: 1px solid var(--rule); }
+    .step-n {
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: .82rem;
+        color: var(--accent-ink);
+        padding-top: 3px;
+        font-variant-numeric: tabular-nums;
+    }
+    .step-who { color: var(--faint); font-size: .85rem; }
+
+    .split { display: grid; grid-template-columns: 1fr 1fr; gap: 0; border: 1px solid var(--rule); border-radius: 4px; overflow: hidden; }
+    .split > div { padding: 16px 18px; display: grid; gap: 8px; align-content: start; }
+    .split > div + div { border-left: 1px solid var(--rule); }
+    .split h3 { font-size: .95rem; }
+    .split-yes { background: var(--surface); }
+    .split-no { background: color-mix(in srgb, var(--nomatch) 5%, var(--surface)); }
+    @media (max-width: 820px) {
+        .split { grid-template-columns: 1fr; }
+        .split > div + div { border-left: none; border-top: 1px solid var(--rule); }
+    }
+
+    .bignum { font-family: Archivo, system-ui, sans-serif; font-size: var(--step-3); font-weight: 700; line-height: 1; }
+
+    /* Нижняя панель управления */
+    .bar {
+        position: fixed;
+        left: 0; right: 0; bottom: 0;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 10px clamp(16px, 5vw, 40px);
+        background: color-mix(in srgb, var(--ground) 88%, transparent);
+        backdrop-filter: blur(8px);
+        border-top: 1px solid var(--rule);
+    }
+
+    .progress { flex: 1; height: 2px; background: var(--rule); position: relative; }
+    .progress span { position: absolute; inset: 0 auto 0 0; background: var(--accent); transition: width .3s ease; }
+
+    .counter {
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: .78rem;
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+    }
+
+    .navbtn {
+        font: inherit;
+        font-size: .82rem;
+        padding: 5px 12px;
+        border: 1px solid var(--rule);
+        background: var(--surface);
+        color: var(--ink);
+        border-radius: 3px;
+        cursor: pointer;
+    }
+    .navbtn:hover { border-color: var(--accent); color: var(--accent-ink); }
+    .navbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .deck-name { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: .72rem; letter-spacing: .12em; text-transform: uppercase; color: var(--faint); }
+    @media (max-width: 700px) { .deck-name { display: none; } }
+
+    @media print {
+        .bar { display: none; }
+        .slide, .slide[data-active="true"] { display: flex !important; flex-direction: column; page-break-after: always; min-height: 100vh; animation: none; }
+    }
+</style>
+
+<div class="deck">
+    <section class="slide" data-active="true" data-eyebrow="Партнёрский шаблон">
+        <div class="eyebrow"><span>Интеграм · партнёрский шаблон</span></div>
+        <h1>Сопоставление каталогов</h1>
+        <p class="lead">Заявка покупателя, написанная его словами, автоматически ложится на вашу номенклатуру.</p>
+        <div class="source-line">Картридж HP CF280A черный 2700 страниц</div>
+        <div class="chips hero-chips" id="heroChips" aria-hidden="true"></div>
+        <p class="muted" style="margin-top:4px">Наименование разбирается на токены — на них и строится подбор. Дальше в этой презентации: что продавать, как внедрять и где проходит граница вашей ответственности.</p>
+    </section>
+
+    <section class="slide" data-eyebrow="Задача">
+        <div class="eyebrow"><span>Задача</span></div>
+        <h2>Одно и то же. Формально — разные строки</h2>
+        <div class="cols-2">
+            <div class="card card-accent">
+                <h3>Заявка покупателя</h3>
+                <p class="mono">картридж hp cf280a чёрный, 2700 стр.</p>
+            </div>
+            <div class="card card-accent">
+                <h3>Ваш каталог</h3>
+                <p class="mono">Картридж HP CF280A черный 2700 страниц</p>
+            </div>
+        </div>
+        <ul>
+            <li>ВПР ищет точное совпадение — здесь его нет ни в одной строке.</li>
+            <li>Поиск по артикулу работает, пока покупатель пишет ваш артикул. Обычно он пишет свой.</li>
+            <li>Руками — работает, но не масштабируется и не повторяется: при обновлении каталога всё заново.</li>
+        </ul>
+    </section>
+
+    <section class="slide" data-eyebrow="Что это">
+        <h2>Не библиотека, а разворачиваемое приложение</h2>
+        <p class="lead">Схема данных, отчёты, права, меню и шесть рабочих мест ставятся в базу одной командой. Дальше всё настраивается данными.</p>
+        <div class="cols">
+            <div class="card"><h3>Ставится</h3><p class="muted">Одна команда — таблицы, отчёты, роли, гранты, меню, файлы рабочих мест.</p></div>
+            <div class="card"><h3>Настраивается</h3><p class="muted">Мастер на два Excel и конфиг категории. В конструктор базы заходить не нужно.</p></div>
+            <div class="card"><h3>Обновляется</h3><p class="muted">Повторным прогоном установщика: он идемпотентен и не трогает настройки базы.</p></div>
+        </div>
+    </section>
+
+    <section class="slide" data-eyebrow="Механика">
+        <h2>Как устроен подбор</h2>
+        <div class="steps">
+            <div class="step"><div class="step-n">01</div><div><h3>Токенизация</h3><p class="muted">Наименования обеих сторон разбираются на слова и складываются в общий справочник.</p></div></div>
+            <div class="step"><div class="step-n">02</div><div><h3>Подбор по общим токенам</h3><p class="muted">Чем больше общих токенов, тем выше вес пары. Совпали товар, марка и модель — признак ТММ поднимает пару отдельно.</p></div></div>
+            <div class="step"><div class="step-n">03</div><div><h3>Человек в конце</h3><p class="muted">Спорные пары подтверждает оператор. Решение запоминается и больше не переспрашивается.</p></div></div>
+        </div>
+        <p><strong>Никакой чёрной коробки.</strong> На вопрос «почему эта пара» всегда есть ответ: вот общие токены, вот вес, вот кто подтвердил.</p>
+    </section>
+
+    <section class="slide" data-eyebrow="Рынок">
+        <h2>Кому это продавать</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Кому</th><th>Их боль</th></tr></thead>
+                <tbody>
+                    <tr><td>Дистрибьюторы и поставщики</td><td class="muted">Входящие заявки в наименованиях покупателя</td></tr>
+                    <tr><td>Тендерные отделы</td><td class="muted">Сопоставить позиции закупки со своим ассортиментом в срок</td></tr>
+                    <tr><td>Снабжение производств</td><td class="muted">Прайсы разных поставщиков на одну номенклатуру</td></tr>
+                    <tr><td>Сети и маркетплейс-операторы</td><td class="muted">Слияние карточек товаров из разных источников</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <p><strong>Признак хорошего клиента:</strong> у обеих сторон есть текстовое наименование и хотя бы один устойчивый признак — артикул, бренд, модель, размер. Позиции, описанные только кодами, чертежами или фотографиями, — не наш сценарий.</p>
+    </section>
+
+    <section class="slide" data-eyebrow="Внедрение">
+        <h2>Шесть шагов до первого прогона</h2>
+        <div class="steps">
+            <div class="step"><div class="step-n">01</div><div><span class="step-who">партнёр</span><p>Получает от клиента два файла — его заявку и свой каталог</p></div></div>
+            <div class="step"><div class="step-n">02</div><div><span class="step-who">партнёр</span><p>Ставит шаблон в базу клиента одной командой</p></div></div>
+            <div class="step"><div class="step-n">03</div><div><span class="step-who">партнёр</span><p>Проходит мастер: раскладывает колонки Excel по полям</p></div></div>
+            <div class="step"><div class="step-n">04</div><div><span class="step-who">партнёр</span><p>Загружает данные и прогоняет токенизацию</p></div></div>
+            <div class="step"><div class="step-n">05</div><div><span class="step-who">оператор клиента</span><p>Размечает верхние токены: что товар, что марка, что модель</p></div></div>
+            <div class="step"><div class="step-n">06</div><div><span class="step-who">оператор клиента</span><p>Массовый подбор, проверка спорных пар, выгрузка</p></div></div>
+        </div>
+        <p><span class="bignum">60 минут</span> — целевой норматив от двух файлов до первого прогона. Это норматив, а не замер: он зафиксирован до пилота и проверяется на первом наблюдаемом внедрении.</p>
+    </section>
+
+    <section class="slide" data-eyebrow="Настройка · уровень 1">
+        <h2>Первичная: установка и мастер</h2>
+        <pre>pwsh -File .\docs\create_xcom_matching.ps1 -DbName clientdb -DryRun   # план без записи
+pwsh -File .\docs\create_xcom_matching.ps1 -DbName clientdb           # установка</pre>
+        <p>Дальше мастер в четыре шага: два Excel разбираются прямо в браузере, система предлагает соответствие колонок, вы подтверждаете или правите, настройка сохраняется.</p>
+        <div class="card card-accent">
+            <h3>Это и есть граница</h3>
+            <p class="muted">В конструктор базы заходить не нужно. Если для внедрения пришлось его открыть — что-то пошло не по шаблону.</p>
+        </div>
+    </section>
+
+    <section class="slide" data-eyebrow="Настройка · уровень 2">
+        <h2>Тонкая: конфиг категории</h2>
+        <p class="lead">Отраслевая специфика живёт в настройках, а не в коде. Правится формой.</p>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Что</th><th>Зачем крутить</th></tr></thead>
+                <tbody>
+                    <tr><td>Обязательные атрибуты</td><td class="muted">Жёсткий отсев: обе стороны заполнены и различаются — пара отбрасывается до расчёта</td></tr>
+                    <tr><td>Мягкие веса атрибутов</td><td class="muted">Совпал бренд или размер — оценка выше, но пара остаётся</td></tr>
+                    <tr><td>Вес точного артикула</td><td class="muted">Насколько доверять совпадению кода</td></tr>
+                    <tr><td>Серая зона</td><td class="muted">Диапазон, где решает человек, а не автомат</td></tr>
+                    <tr><td>Отраслевой пресет</td><td class="muted">Стартовый набор правил — отправная точка, не готовое решение</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <p><strong>Здесь партнёр работает сам и всегда.</strong> Правка конфига — это данные, не разработка.</p>
+    </section>
+
+    <section class="slide" data-eyebrow="Настройка · уровень 3">
+        <h2>Сложная: правка запросов токенизации</h2>
+        <p>Разбор наименования задан выражением в отчётах «Токенизация SKU» и «Токенизация RFP». Это SET-запросы: сначала превью, затем применение, до 10 000 записей за прогон.</p>
+        <div class="split">
+            <div class="split-yes">
+                <h3>Партнёр делает сам</h3>
+                <ul>
+                    <li>стоп-слова: выкинуть отраслевой мусор</li>
+                    <li>разделители: не резать артикулы по дефису</li>
+                    <li>нормализация написаний</li>
+                </ul>
+            </div>
+            <div class="split-no">
+                <h3>Присылайте нам — час-два</h3>
+                <ul>
+                    <li>правила для единиц измерения</li>
+                    <li>объём, мощность, длина, ресурс</li>
+                    <li>всё, что меняет подбор на всём каталоге</li>
+                </ul>
+            </div>
+        </div>
+    </section>
+
+    <section class="slide" data-eyebrow="Настройка · уровень 3">
+        <h2>Показательный случай: ресурс в страницах</h2>
+        <p>В каталогах картриджей его пишут по-разному: <span class="mono">2700 страниц</span>, <span class="mono">2700 стр.</span>, <span class="mono">2700 ст</span>, <span class="mono">2700 с</span>.</p>
+        <div class="cols-2">
+            <div class="card">
+                <h3>Обычный разбор даёт мусор</h3>
+                <div class="chips"><span class="chip">2700</span><span class="chip">страниц</span></div>
+                <p class="muted">Число совпадает с любой позицией, где есть 2700 чего угодно. «страниц» совпадает вообще со всеми картриджами. Разные написания не совпадут между собой.</p>
+            </div>
+            <div class="card card-accent">
+                <h3>Правило склейки</h3>
+                <div class="chips"><span class="chip chip-on">2700стр</span></div>
+                <p class="muted">Число от трёх цифр склеивается с обозначением ресурса в один различающий токен, одинаковый для всех написаний. Порог в три цифры не даёт слепить «10 шт».</p>
+            </div>
+        </div>
+        <p class="muted">Цена ошибки в таких правилах высокая — поэтому они и приходят к нам, а не настраиваются на месте.</p>
+    </section>
+
+    <section class="slide" data-eyebrow="Ответственность">
+        <h2>Где проходит граница</h2>
+        <p class="lead">Решается данными — это шаблон. Требует правки кода или схемы — это кастомный проект.</p>
+        <div class="split">
+            <div class="split-yes">
+                <h3>Остаётся шаблоном</h3>
+                <ul>
+                    <li>другая категория: свои атрибуты, веса, маппинг</li>
+                    <li>другие имена колонок и листов Excel</li>
+                    <li>пороги, серая зона, включение ИИ</li>
+                    <li>стоп-слова и разделители токенизации</li>
+                </ul>
+            </div>
+            <div class="split-no">
+                <h3>Становится кастомом</h3>
+                <ul>
+                    <li>новые сущности данных</li>
+                    <li>изменение самого алгоритма оценки</li>
+                    <li>интеграции дальше JSON-экспорта</li>
+                    <li>другая модель процесса</li>
+                </ul>
+            </div>
+        </div>
+        <p class="muted">Первая линия — вы, по гайду внедренца. Вторая — мы, через issue с версией шаблона, конфигом базы, пройденными шагами и обезличенным образцом данных. Без этого набора диагноз не ставится.</p>
+    </section>
+
+    <section class="slide" data-eyebrow="Экономика">
+        <h2>На чём вы зарабатываете</h2>
+        <div class="cols-2">
+            <div class="card card-accent">
+                <h3>Внедрение</h3>
+                <p>Продаёте сами и назначаете свою цену. Аргумент — час работы вместо недель ручного сопоставления.</p>
+            </div>
+            <div class="card card-accent">
+                <h3>Облачный тариф</h3>
+                <p><span class="bignum">30%</span></p>
+                <p class="muted">скидка от публичной цены. Разница остаётся вам постоянной маржой на всё время подписки клиента.</p>
+            </div>
+        </div>
+        <p>Заработок не разовый: чем больше развёрнутых баз, тем больше recurring-часть. Отдельной лицензии нет — платформа подписная.</p>
+    </section>
+
+    <section class="slide" data-eyebrow="Честно">
+        <h2>Что говорить про ограничения</h2>
+        <ul>
+            <li><strong>Стопроцентной автоматики не будет</strong> и не обещается. Спорные пары проверяет человек — это свойство задачи, а не недоделка.</li>
+            <li><strong>Разметку токенов ведёт человек</strong> и возвращается к ней после каждой загрузки. Весь справочник размечать не нужно: список отсортирован по частоте, верхняя сотня даёт работающий ТММ.</li>
+            <li><strong>ИИ-доуточнение — опция,</strong> по умолчанию выключено. Без него всё работает; включение добавляет внешнюю зависимость и стоимость запросов.</li>
+            <li><strong>Наблюдаемый пилот ещё не проведён.</strong> Норматив 60 минут — цель, а не измеренный факт.</li>
+        </ul>
+        <p class="muted">Этот слайд продаёт лучше остальных: человек, который сам называет границы, вызывает доверие.</p>
+    </section>
+
+    <section class="slide" data-eyebrow="Дальше">
+        <h2>С чего начать</h2>
+        <div class="steps">
+            <div class="step"><div class="step-n">01</div><div><p>Прочитать гайд внедренца — он пошаговый</p></div></div>
+            <div class="step"><div class="step-n">02</div><div><p>Развернуть шаблон на тестовой базе и пройти цикл на своих данных</p></div></div>
+            <div class="step"><div class="step-n">03</div><div><p>Показать презентацию для заказчика первому кандидату</p></div></div>
+            <div class="step"><div class="step-n">04</div><div><p>Первое боевое внедрение провести с нами на связи — это и есть наблюдаемый пилот</p></div></div>
+        </div>
+        <div class="chips hero-chips" style="margin-top:8px" aria-hidden="true">
+            <span class="chip chip-on">картридж</span><span class="chip chip-on">hp</span><span class="chip chip-on">cf</span><span class="chip chip-on">280</span><span class="chip chip-on">a</span><span class="chip chip-on">2700стр</span>
+        </div>
+    </section>
+</div>
+
+<nav class="bar" aria-label="Навигация по слайдам">
+    <span class="deck-name">Сопоставление каталогов · партнёру</span>
+    <button class="navbtn" type="button" data-nav="prev" aria-label="Предыдущий слайд">←</button>
+    <button class="navbtn" type="button" data-nav="next" aria-label="Следующий слайд">→</button>
+    <div class="progress"><span id="progressFill"></span></div>
+    <span class="counter" id="counter" aria-live="polite"></span>
+</nav>
+
+<script>
+    (function () {
+        'use strict';
+
+        var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+        var counter = document.getElementById('counter');
+        var fill = document.getElementById('progressFill');
+        var index = 0;
+
+        function show(next) {
+            index = Math.max(0, Math.min(slides.length - 1, next));
+            slides.forEach(function (slide, i) {
+                if (i === index) slide.setAttribute('data-active', 'true');
+                else slide.removeAttribute('data-active');
+            });
+            counter.textContent = (index + 1) + ' / ' + slides.length;
+            fill.style.width = ((index + 1) / slides.length * 100) + '%';
+            if (location.hash !== '#' + (index + 1)) history.replaceState(null, '', '#' + (index + 1));
+            window.scrollTo(0, 0);
+        }
+
+        document.addEventListener('keydown', function (event) {
+            if (event.key === 'ArrowRight' || event.key === 'PageDown' || event.key === ' ') { event.preventDefault(); show(index + 1); }
+            else if (event.key === 'ArrowLeft' || event.key === 'PageUp') { event.preventDefault(); show(index - 1); }
+            else if (event.key === 'Home') { event.preventDefault(); show(0); }
+            else if (event.key === 'End') { event.preventDefault(); show(slides.length - 1); }
+        });
+
+        document.querySelectorAll('[data-nav]').forEach(function (button) {
+            button.addEventListener('click', function () {
+                show(index + (button.getAttribute('data-nav') === 'next' ? 1 : -1));
+            });
+        });
+
+        var touchX = null;
+        document.addEventListener('touchstart', function (e) { touchX = e.changedTouches[0].clientX; }, { passive: true });
+        document.addEventListener('touchend', function (e) {
+            if (touchX === null) return;
+            var delta = e.changedTouches[0].clientX - touchX;
+            if (Math.abs(delta) > 60) show(index + (delta < 0 ? 1 : -1));
+            touchX = null;
+        }, { passive: true });
+
+        // Мотив титульного слайда: наименование распадается на токены.
+        var hero = document.getElementById('heroChips');
+        if (hero) {
+            'картридж hp cf 280 a черный 2700стр'.split(' ').forEach(function (token, i) {
+                var chip = document.createElement('span');
+                chip.className = 'chip' + (i > 3 ? ' chip-on' : '');
+                chip.textContent = token;
+                chip.style.animationDelay = (120 + i * 70) + 'ms';
+                hero.appendChild(chip);
+            });
+        }
+
+        var fromHash = parseInt((location.hash || '').replace('#', ''), 10);
+        show(isNaN(fromHash) ? 0 : fromHash - 1);
+    })();
+</script>

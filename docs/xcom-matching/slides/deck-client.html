@@ -1,0 +1,515 @@
+<title>Заявка ложится на каталог</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+    :root {
+        --ground: #F4F6F8;
+        --surface: #FFFFFF;
+        --ink: #17202B;
+        --muted: #5B6775;
+        --faint: #8B97A5;
+        --rule: #DCE2E9;
+        --accent: #B26A15;
+        --accent-ink: #8A5210;
+        --accent-wash: #F6E9D6;
+        --match: #2F7A4F;
+        --match-wash: #E7F2EB;
+        --nomatch: #A6432F;
+        --note-bg: #1D2630;
+        --note-ink: #E3E8EE;
+
+        --step-0: 1rem;
+        --step-1: 1.19rem;
+        --step-2: 1.5rem;
+        --step-3: 2rem;
+        --step-4: 2.85rem;
+        --step-5: 3.9rem;
+    }
+
+    @media (prefers-color-scheme: dark) {
+        :root:not([data-theme="light"]) {
+            --ground: #0E141B;
+            --surface: #161E27;
+            --ink: #E7ECF2;
+            --muted: #9DA9B7;
+            --faint: #74808E;
+            --rule: #26313D;
+            --accent: #E0A052;
+            --accent-ink: #F0BE7E;
+            --accent-wash: #2A2116;
+            --match: #67B98A;
+            --match-wash: #16261D;
+            --nomatch: #DC8871;
+            --note-bg: #202A35;
+            --note-ink: #E3E8EE;
+        }
+    }
+
+    :root[data-theme="dark"] {
+        --ground: #0E141B;
+        --surface: #161E27;
+        --ink: #E7ECF2;
+        --muted: #9DA9B7;
+        --faint: #74808E;
+        --rule: #26313D;
+        --accent: #E0A052;
+        --accent-ink: #F0BE7E;
+        --accent-wash: #2A2116;
+        --match: #67B98A;
+        --match-wash: #16261D;
+        --nomatch: #DC8871;
+        --note-bg: #202A35;
+        --note-ink: #E3E8EE;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+        margin: 0;
+        background: var(--ground);
+        color: var(--ink);
+        font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+        font-size: var(--step-0);
+        line-height: 1.55;
+        -webkit-font-smoothing: antialiased;
+    }
+
+    .slide {
+        display: none;
+        padding: clamp(32px, 7vh, 80px) clamp(20px, 7vw, 100px) 110px;
+        max-width: 1120px;
+        margin: 0 auto;
+        min-height: 100vh;
+        animation: rise .32s ease both;
+    }
+
+    .slide[data-active="true"] { display: flex; flex-direction: column; gap: clamp(18px, 3vh, 30px); justify-content: center; }
+
+    @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+    @media (prefers-reduced-motion: reduce) { .slide { animation: none; } }
+
+    .eyebrow {
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: .72rem;
+        letter-spacing: .16em;
+        text-transform: uppercase;
+        color: var(--accent-ink);
+        display: flex;
+        align-items: baseline;
+        gap: 12px;
+    }
+    .eyebrow::after { content: ""; flex: 1; height: 1px; background: var(--rule); }
+
+    h1 {
+        font-family: Archivo, "Arial Narrow", system-ui, sans-serif;
+        font-weight: 700;
+        font-size: var(--step-5);
+        line-height: 1.02;
+        letter-spacing: -.02em;
+        margin: 0;
+        text-wrap: balance;
+    }
+
+    h2 {
+        font-family: Archivo, "Arial Narrow", system-ui, sans-serif;
+        font-weight: 600;
+        font-size: var(--step-4);
+        line-height: 1.08;
+        letter-spacing: -.015em;
+        margin: 0;
+        text-wrap: balance;
+    }
+
+    h3 { font-family: Archivo, system-ui, sans-serif; font-weight: 600; font-size: var(--step-1); margin: 0 0 4px; }
+
+    p { margin: 0; max-width: 66ch; }
+    .lead { font-size: var(--step-2); line-height: 1.35; color: var(--muted); max-width: 42ch; }
+    .muted { color: var(--muted); }
+    strong { font-weight: 600; }
+
+    ul { margin: 0; padding-left: 0; list-style: none; display: grid; gap: 12px; max-width: 68ch; }
+    li { padding-left: 22px; position: relative; }
+    li::before { content: ""; position: absolute; left: 0; top: .62em; width: 8px; height: 1px; background: var(--accent); }
+
+    .cols-2 { display: grid; gap: clamp(16px, 3vw, 36px); grid-template-columns: 1fr 1fr; align-items: start; }
+    .cols-3 { display: grid; gap: clamp(16px, 3vw, 28px); grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+    @media (max-width: 820px) { .cols-2 { grid-template-columns: 1fr; } }
+
+    .card { background: var(--surface); border: 1px solid var(--rule); border-radius: 4px; padding: 18px 20px; display: grid; gap: 6px; }
+    .card-accent { border-left: 3px solid var(--accent); }
+
+    .source-line {
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: clamp(1rem, 2.4vw, 1.45rem);
+        border-left: 3px solid var(--accent);
+        padding-left: 16px;
+        color: var(--ink);
+    }
+
+    .chips { display: flex; flex-wrap: wrap; gap: 7px; }
+    .chip {
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: .82rem;
+        padding: 3px 9px;
+        border: 1px solid var(--rule);
+        border-radius: 3px;
+        background: var(--surface);
+        color: var(--muted);
+        white-space: nowrap;
+    }
+    .chip-on { border-color: var(--match); background: var(--match-wash); color: var(--match); font-weight: 500; }
+
+    .hero-chips .chip { animation: drop .5s ease both; }
+    @keyframes drop { from { opacity: 0; transform: translateY(-7px) rotate(-1.5deg); } to { opacity: 1; transform: none; } }
+    @media (prefers-reduced-motion: reduce) { .hero-chips .chip { animation: none; } }
+
+    .table-wrap { overflow-x: auto; }
+    table { border-collapse: collapse; width: 100%; font-size: .95rem; }
+    th, td { text-align: left; padding: 10px 14px 10px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+    th {
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-weight: 500;
+        font-size: .72rem;
+        letter-spacing: .1em;
+        text-transform: uppercase;
+        color: var(--faint);
+    }
+    td.num { font-variant-numeric: tabular-nums; }
+    .yes { color: var(--match); font-weight: 600; }
+    .no { color: var(--nomatch); font-weight: 600; }
+    .rank { font-family: "IBM Plex Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; color: var(--accent-ink); }
+
+    .steps { display: grid; gap: 2px; }
+    .step { display: grid; grid-template-columns: 40px 1fr; gap: 14px; padding: 11px 0; border-bottom: 1px solid var(--rule); }
+    .step-n { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: .82rem; color: var(--accent-ink); padding-top: 3px; font-variant-numeric: tabular-nums; }
+
+    .bignum { font-family: Archivo, system-ui, sans-serif; font-size: var(--step-3); font-weight: 700; line-height: 1; display: block; }
+
+    /* Подсказки выступающему: на экране клиента их нет, пока не включишь. */
+    .notes {
+        position: fixed;
+        left: 0; right: 0; bottom: 48px;
+        background: var(--note-bg);
+        color: var(--note-ink);
+        padding: 16px clamp(16px, 5vw, 40px);
+        border-top: 2px solid var(--accent);
+        display: none;
+        font-size: .95rem;
+        line-height: 1.5;
+        max-height: 38vh;
+        overflow-y: auto;
+    }
+    .notes[data-open="true"] { display: block; }
+    .notes-label {
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: .68rem;
+        letter-spacing: .16em;
+        text-transform: uppercase;
+        color: var(--accent);
+        display: block;
+        margin-bottom: 6px;
+    }
+    .notes p { max-width: 90ch; color: var(--note-ink); }
+
+    .bar {
+        position: fixed;
+        left: 0; right: 0; bottom: 0;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        padding: 10px clamp(16px, 5vw, 40px);
+        background: color-mix(in srgb, var(--ground) 88%, transparent);
+        backdrop-filter: blur(8px);
+        border-top: 1px solid var(--rule);
+    }
+
+    .progress { flex: 1; height: 2px; background: var(--rule); position: relative; }
+    .progress span { position: absolute; inset: 0 auto 0 0; background: var(--accent); transition: width .3s ease; }
+
+    .counter { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: .78rem; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+    .navbtn {
+        font: inherit;
+        font-size: .82rem;
+        padding: 5px 12px;
+        border: 1px solid var(--rule);
+        background: var(--surface);
+        color: var(--ink);
+        border-radius: 3px;
+        cursor: pointer;
+    }
+    .navbtn:hover { border-color: var(--accent); color: var(--accent-ink); }
+    .navbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .navbtn[aria-pressed="true"] { background: var(--accent-wash); border-color: var(--accent); color: var(--accent-ink); }
+
+    @media print {
+        .bar { display: none; }
+        .notes { display: block !important; position: static; max-height: none; color: #111; background: #fff; border-top: 1px solid #999; }
+        .notes p { color: #111; }
+        .slide, .slide[data-active="true"] { display: flex !important; flex-direction: column; page-break-after: always; animation: none; min-height: auto; padding-bottom: 24px; }
+    }
+</style>
+
+<main>
+    <section class="slide" data-active="true">
+        <div class="eyebrow"><span>Сопоставление каталогов</span></div>
+        <h1>Заявка ложится на каталог</h1>
+        <p class="lead">Пришла заявка на 3 000 позиций. В ней — наименования покупателя.</p>
+        <div class="source-line">картридж hp cf280a чёрный, 2700 стр.</div>
+        <p class="muted">В вашем каталоге та же позиция называется иначе:</p>
+        <div class="source-line">Картридж HP CF280A черный 2700 страниц</div>
+        <p><strong>Одно и то же. Формально — разные строки.</strong></p>
+        <aside class="notes-src">Попросите вспомнить последнюю крупную заявку и спросите, сколько человеко-часов ушло на её разбор. Дальше слушайте — цифру называет клиент, а не вы.</aside>
+    </section>
+
+    <section class="slide">
+        <div class="eyebrow"><span>Почему это до сих пор больно</span></div>
+        <h2>Привычные средства здесь не работают</h2>
+        <ul>
+            <li><strong>ВПР в Excel</strong> ищет точное совпадение. Здесь его нет ни в одной строке.</li>
+            <li><strong>Поиск по артикулу</strong> работает, пока покупатель пишет ваш артикул. Обычно он пишет свой или не пишет вовсе.</li>
+            <li><strong>Руками</strong> — работает всегда, но не масштабируется и не повторяется: при обновлении каталога всё начинается заново, а результат зависит от того, кто разбирал.</li>
+        </ul>
+        <aside class="notes-src">Здесь клиент обычно сам называет свой обходной путь. Не спорьте с ним — спросите, что происходит, когда этот человек в отпуске.</aside>
+    </section>
+
+    <section class="slide">
+        <div class="eyebrow"><span>Что предлагается</span></div>
+        <h2>Рабочее место, которое разбирает заявку по вашему каталогу</h2>
+        <div class="cols-3">
+            <div class="card card-accent"><h3>Объяснимо</h3><p class="muted">Для каждой пары видно, почему она предложена: вот общие слова, вот совпавшие марка и модель.</p></div>
+            <div class="card card-accent"><h3>Воспроизводимо</h3><p class="muted">Тот же файл через месяц даёт тот же результат — независимо от того, кто работает.</p></div>
+            <div class="card card-accent"><h3>С памятью</h3><p class="muted">Решение, принятое человеком, запоминается и не переспрашивается при следующих прогонах.</p></div>
+        </div>
+        <aside class="notes-src">Подчеркните третий пункт. Именно он отличает систему от разовой магии: работа накапливается, а не повторяется.</aside>
+    </section>
+
+    <section class="slide">
+        <div class="eyebrow"><span>Как это работает</span></div>
+        <h2>По-русски, за тридцать секунд</h2>
+        <div class="steps">
+            <div class="step"><div class="step-n">01</div><div><p>Наименования с обеих сторон разбираются на слова</p></div></div>
+            <div class="step"><div class="step-n">02</div><div><p>Слова складываются в общий словарь; ваш человек один раз отмечает, что из них товар, что марка, что модель</p></div></div>
+            <div class="step"><div class="step-n">03</div><div><p>Позиции сопоставляются по общим словам; совпали и товар, и марка, и модель — пара идёт первой</p></div></div>
+            <div class="step"><div class="step-n">04</div><div><p>Спорные пары показываются человеку на подтверждение</p></div></div>
+        </div>
+        <div class="chips hero-chips" id="heroChips" aria-hidden="true"></div>
+        <aside class="notes-src">Пройдите по шагам пальцем по экрану. Главное — что на втором шаге участвует их сотрудник: система не угадывает, чем является «GSB13», ей это говорят один раз.</aside>
+    </section>
+
+    <section class="slide">
+        <div class="eyebrow"><span>Пример</span></div>
+        <h2>Заявка: картридж hp cf280a чёрный, 2700 стр.</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Кандидат из вашего каталога</th><th>Общие слова</th><th>Товар+марка+модель</th><th>Место</th></tr></thead>
+                <tbody>
+                    <tr>
+                        <td>Картридж HP CF280A черный 2700 страниц</td>
+                        <td><div class="chips"><span class="chip chip-on">картридж</span><span class="chip chip-on">hp</span><span class="chip chip-on">cf</span><span class="chip chip-on">280</span><span class="chip chip-on">a</span><span class="chip chip-on">2700стр</span></div></td>
+                        <td class="yes">да</td>
+                        <td class="rank">1</td>
+                    </tr>
+                    <tr>
+                        <td>Картридж HP CF280X черный 6900 страниц</td>
+                        <td><div class="chips"><span class="chip chip-on">картридж</span><span class="chip chip-on">hp</span><span class="chip chip-on">cf</span><span class="chip chip-on">280</span></div></td>
+                        <td class="yes">да</td>
+                        <td class="rank">2</td>
+                    </tr>
+                    <tr>
+                        <td>Картридж HP CE285A черный 1600 страниц</td>
+                        <td><div class="chips"><span class="chip chip-on">картридж</span><span class="chip chip-on">hp</span><span class="chip chip-on">a</span></div></td>
+                        <td class="no">нет</td>
+                        <td class="rank">3</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <p class="muted">Обратите внимание на «2700 стр.» и «2700 страниц»: система приводит их к одному признаку ресурса, и именно он ставит нужный картридж на первое место.</p>
+        <aside class="notes-src">Это не подстроенный пример — так работает правило для единиц измерения. Если у клиента своя специфика (метры, вольты, диаметры), скажите, что такие правила настраиваются, и не углубляйтесь.</aside>
+    </section>
+
+    <section class="slide">
+        <div class="eyebrow"><span>Рабочий цикл</span></div>
+        <h2>Пять действий, все — в браузере</h2>
+        <div class="steps">
+            <div class="step"><div class="step-n">01</div><div><p>Загрузить обновлённые каталоги</p></div></div>
+            <div class="step"><div class="step-n">02</div><div><p>Разметить новые слова — что товар, что марка, что модель</p></div></div>
+            <div class="step"><div class="step-n">03</div><div><p>Запустить массовый подбор</p></div></div>
+            <div class="step"><div class="step-n">04</div><div><p>Проверить спорные пары</p></div></div>
+            <div class="step"><div class="step-n">05</div><div><p>Выгрузить результат в Excel или отдать по JSON в свою систему</p></div></div>
+        </div>
+        <aside class="notes-src">Шаги 1–3 занимают минуты, шаг 4 — столько, сколько клиент готов потратить на качество. Второй шаг с каждой загрузкой короче: словарь уже размечен, доразмечать нужно только новое.</aside>
+    </section>
+
+    <section class="slide">
+        <div class="eyebrow"><span>Результат</span></div>
+        <h2>Что получаете на выходе</h2>
+        <div class="table-wrap">
+            <table>
+                <thead><tr><th>Поле</th><th>Что это</th></tr></thead>
+                <tbody>
+                    <tr><td>Наш артикул</td><td class="muted">Подобранная позиция вашего каталога</td></tr>
+                    <tr><td>Кандидаты</td><td class="muted">Другие подходящие позиции — если нужно перепроверить</td></tr>
+                    <tr><td>Точность подбора</td><td class="muted">Объяснимая оценка: из чего она сложилась, видно</td></tr>
+                    <tr><td>История решений</td><td class="muted">Кто и когда подтвердил пару</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <p>Выгрузка — <strong>Excel</strong> для человека и <strong>JSON</strong> для вашей учётной системы.</p>
+        <aside class="notes-src">Спросите, куда результат идёт дальше. Если в 1С или ERP — скажите про JSON и остановитесь: детали интеграции считаются отдельно.</aside>
+    </section>
+
+    <section class="slide">
+        <div class="eyebrow"><span>Что нужно от вас</span></div>
+        <h2>Два файла, один человек, час на настройку</h2>
+        <div class="cols-3">
+            <div class="card"><h3>Два файла</h3><p class="muted">Заявка покупателя и ваш каталог. Excel, любые названия колонок.</p></div>
+            <div class="card"><h3>Один сотрудник</h3><p class="muted">Тот, кто знает ассортимент: разметить словарь и проверять спорные пары.</p></div>
+            <div class="card"><h3><span class="bignum">60 мин</span></h3><p class="muted">Целевой норматив первой настройки.</p></div>
+        </div>
+        <p>Заходить в конструктор базы, писать формулы или программировать не нужно.</p>
+        <aside class="notes-src">Норматив в час — это цель по внедрению, а не обещание, что задача клиента решится за час. Формулируйте именно так: за точность здесь платят доверием.</aside>
+    </section>
+
+    <section class="slide">
+        <div class="eyebrow"><span>Роль человека</span></div>
+        <h2>Система не решает за вас там, где не уверена</h2>
+        <p class="lead">Пары с пограничной оценкой попадают в отдельную очередь на проверку. Это осознанное решение, а не ограничение.</p>
+        <div class="card card-accent">
+            <h3>А что с ИИ</h3>
+            <p class="muted">Спорную очередь можно дополнительно прогонять через ИИ: он даёт рекомендацию и объяснение, но не заменяет подтверждение человеком. По умолчанию функция выключена, и без неё всё работает.</p>
+        </div>
+        <aside class="notes-src">Если клиент спрашивает «а почему не просто ИИ» — ответ здесь. Нейросеть не объяснит, почему через месяц ответ изменился, а этот подход объяснит. ИИ ставим туда, где он полезен: на спорный остаток.</aside>
+    </section>
+
+    <section class="slide">
+        <div class="eyebrow"><span>Данные</span></div>
+        <h2>Каталоги остаются у вас</h2>
+        <ul>
+            <li>Каталоги и заявки лежат <strong>в вашей базе</strong>, наружу не уезжают.</li>
+            <li>Разбор Excel идёт <strong>в браузере</strong>: файл на сторонние сервисы не отправляется.</li>
+            <li>Обращение к ИИ — отдельно включаемая функция. Выключена — значит, никаких внешних вызовов.</li>
+        </ul>
+        <aside class="notes-src">Для тендерных и закупочных отделов это часто решающий слайд. Не проскакивайте его.</aside>
+    </section>
+
+    <section class="slide">
+        <div class="eyebrow"><span>Честно</span></div>
+        <h2>Чего не обещаем</h2>
+        <ul>
+            <li><strong>Стопроцентной автоматики:</strong> часть пар всегда проверяет человек.</li>
+            <li><strong>Работы «из коробки»</strong> на позициях, описанных только кодами, чертежами или фотографиями, — там нечего сопоставлять по тексту.</li>
+            <li><strong>Мгновенного идеального качества</strong> на первой загрузке: правила под вашу отрасль настраиваются, и первые прогоны нужны, чтобы их уточнить.</li>
+        </ul>
+        <aside class="notes-src">Этот слайд продаёт лучше предыдущих. Клиент слышал много обещаний; человек, который сам называет границы, вызывает доверие.</aside>
+    </section>
+
+    <section class="slide">
+        <div class="eyebrow"><span>Дальше</span></div>
+        <h2>Пришлите два файла</h2>
+        <div class="steps">
+            <div class="step"><div class="step-n">01</div><div><p>Присылаете заявку и каталог — можно обезличенные</p></div></div>
+            <div class="step"><div class="step-n">02</div><div><p>Разворачиваем шаблон на вашей базе и проходим первую настройку вместе</p></div></div>
+            <div class="step"><div class="step-n">03</div><div><p>Смотрите результат на <strong>своих</strong> данных и решаете</p></div></div>
+        </div>
+        <aside class="notes-src">Закрывайте на этом. Просьба «пришлите два файла» — маленький шаг, на который легко согласиться, и он же лучший квалификатор: если файлов нет, значит, задачи пока нет.</aside>
+    </section>
+</main>
+
+<div class="notes" id="notes" aria-live="polite"><span class="notes-label">Что сказать</span><p id="notesText"></p></div>
+
+<nav class="bar" aria-label="Навигация по слайдам">
+    <button class="navbtn" type="button" data-nav="prev" aria-label="Предыдущий слайд">←</button>
+    <button class="navbtn" type="button" data-nav="next" aria-label="Следующий слайд">→</button>
+    <button class="navbtn" type="button" id="notesToggle" aria-pressed="false">Подсказки</button>
+    <div class="progress"><span id="progressFill"></span></div>
+    <span class="counter" id="counter" aria-live="polite"></span>
+</nav>
+
+<script>
+    (function () {
+        'use strict';
+
+        var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+        var counter = document.getElementById('counter');
+        var fill = document.getElementById('progressFill');
+        var notes = document.getElementById('notes');
+        var notesText = document.getElementById('notesText');
+        var notesToggle = document.getElementById('notesToggle');
+        var index = 0;
+        var notesOpen = false;
+
+        function currentNote() {
+            var source = slides[index].querySelector('.notes-src');
+            return source ? source.textContent.trim() : '';
+        }
+
+        function paintNotes() {
+            notesText.textContent = currentNote();
+            notes.setAttribute('data-open', notesOpen && currentNote() ? 'true' : 'false');
+            notesToggle.setAttribute('aria-pressed', notesOpen ? 'true' : 'false');
+        }
+
+        function show(next) {
+            index = Math.max(0, Math.min(slides.length - 1, next));
+            slides.forEach(function (slide, i) {
+                if (i === index) slide.setAttribute('data-active', 'true');
+                else slide.removeAttribute('data-active');
+            });
+            counter.textContent = (index + 1) + ' / ' + slides.length;
+            fill.style.width = ((index + 1) / slides.length * 100) + '%';
+            if (location.hash !== '#' + (index + 1)) history.replaceState(null, '', '#' + (index + 1));
+            paintNotes();
+            window.scrollTo(0, 0);
+        }
+
+        document.addEventListener('keydown', function (event) {
+            if (event.key === 'ArrowRight' || event.key === 'PageDown' || event.key === ' ') { event.preventDefault(); show(index + 1); }
+            else if (event.key === 'ArrowLeft' || event.key === 'PageUp') { event.preventDefault(); show(index - 1); }
+            else if (event.key === 'Home') { event.preventDefault(); show(0); }
+            else if (event.key === 'End') { event.preventDefault(); show(slides.length - 1); }
+            else if (event.key === 's' || event.key === 'S' || event.key === 'ы' || event.key === 'Ы') { notesOpen = !notesOpen; paintNotes(); }
+        });
+
+        document.querySelectorAll('[data-nav]').forEach(function (button) {
+            button.addEventListener('click', function () {
+                show(index + (button.getAttribute('data-nav') === 'next' ? 1 : -1));
+            });
+        });
+
+        notesToggle.addEventListener('click', function () { notesOpen = !notesOpen; paintNotes(); });
+
+        var touchX = null;
+        document.addEventListener('touchstart', function (e) { touchX = e.changedTouches[0].clientX; }, { passive: true });
+        document.addEventListener('touchend', function (e) {
+            if (touchX === null) return;
+            var delta = e.changedTouches[0].clientX - touchX;
+            if (Math.abs(delta) > 60) show(index + (delta < 0 ? 1 : -1));
+            touchX = null;
+        }, { passive: true });
+
+        var hero = document.getElementById('heroChips');
+        if (hero) {
+            'картридж hp cf 280 a 2700стр'.split(' ').forEach(function (token, i) {
+                var chip = document.createElement('span');
+                chip.className = 'chip chip-on';
+                chip.textContent = token;
+                chip.style.animationDelay = (120 + i * 70) + 'ms';
+                hero.appendChild(chip);
+            });
+        }
+
+        var fromHash = parseInt((location.hash || '').replace('#', ''), 10);
+        show(isNaN(fromHash) ? 0 : fromHash - 1);
+    })();
+</script>
+
+<style>
+    /* Исходники подсказок живут в разметке, но на слайде не показываются:
+       их место — панель внизу, которую включает выступающий. */
+    .notes-src { display: none; }
+    @media print { .notes-src { display: block; margin-top: 14px; padding-top: 10px; border-top: 1px dashed var(--rule); color: var(--muted); font-size: .9rem; } }
+</style>

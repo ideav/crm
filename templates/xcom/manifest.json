@@ -4,20 +4,46 @@
   "version": "1.0.0",
   "schema_version": 1,
   "issue": 4816,
-  "workspaces": ["wizard", "matching", "mass_match", "settings", "export"],
-  "reports": ["mass_match", "Сопоставление", "matching_export"],
+  "workspaces": [
+    "wizard",
+    "matching",
+    "mass_match",
+    "tokens",
+    "settings",
+    "export"
+  ],
+  "reports": [
+    "mass_match",
+    "Сопоставление",
+    "matching_export",
+    "token_usage",
+    "Токенизация SKU",
+    "Токенизация RFP"
+  ],
   "roles": [
     {
       "name": "Партнёр",
       "description": "Разворачивает и настраивает сопоставление под клиента",
       "grant": "WRITE",
-      "menus": ["wizard", "settings", "matching", "mass_match", "export"]
+      "menus": [
+        "wizard",
+        "settings",
+        "matching",
+        "tokens",
+        "mass_match",
+        "export"
+      ]
     },
     {
       "name": "Оператор каталогов",
       "description": "Загружает каталоги, проверяет пары и выгружает результат",
       "grant": "WRITE",
-      "menus": ["matching", "mass_match", "export"]
+      "menus": [
+        "matching",
+        "tokens",
+        "mass_match",
+        "export"
+      ]
     }
   ],
   "assets": [
@@ -37,7 +63,10 @@
     "download/xcom/css/xcom-match.css",
     "download/xcom/css/xcom-mass-match.css",
     "download/xcom/css/xcom-settings.css",
-    "download/xcom/css/xcom-export.css"
+    "download/xcom/css/xcom-export.css",
+    "templates/xcom/tokens.html",
+    "download/xcom/js/xcom-tokens.js",
+    "download/xcom/css/xcom-tokens.css"
   ],
   "changelog": [
     {
