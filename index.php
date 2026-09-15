@@ -223,8 +223,13 @@ elseif($z==="auth.asp" && !empty($_GET['error'])){
     include "include/connection.php";
     login("", "", "oauthError", htmlspecialchars($_GET['error']));
 }
-elseif(!preg_match(DB_MASK, $z))
+elseif(!preg_match(DB_MASK, $z)){
+    # 404, а не 200: сюда попадает любой мусорный URL с вебрута (опечатки,
+    # удалённые *.html — у них точка в имени, DB_MASK её не пропускает).
+    # Ответ 200 плодил в Яндексе «малоценные» дубли на каждый битый адрес.
+    http_response_code(404);
     die("Invalid database");
+}
 
 # Callback асинхронного ИИ-агента (server-to-server, без сессии). Принимаем результат
 # здесь — до подключения к БД и до Validate_Token(); аутентификация — секрет per-job
