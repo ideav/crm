@@ -34,14 +34,18 @@ def col_name(req):
     return req["val"]
 
 
-def load_schema(cfg, schema_file):
+def load_schema(cfg, schema_file, db):
     if schema_file:
         return json.load(open(schema_file, encoding="utf-8"))
     tgt = cfg["target"]
     token = os.environ.get(tgt["token"].strip("${}"), "")
     if not token:
         sys.exit(f"нет токена в переменной окружения {tgt['token']} (или используйте --schema)")
-    url = f"{tgt['base_url']}/{tgt['db']}/metadata?JSON=1"
+    # база: --db важнее, иначе target.db из конфига (в конфиге его может и не быть)
+    db = db or tgt.get("db")
+    if not db:
+        sys.exit("не задана база: передайте --db=<база> (target.db в конфиге не обязателен)")
+    url = f"{tgt['base_url']}/{db}/metadata?JSON=1"
     req = urllib.request.Request(url, headers={"X-Authorization": token})
     with urllib.request.urlopen(req, timeout=120) as r:
         return json.loads(r.read().decode("utf-8"))
@@ -61,6 +65,10 @@ def main():
         sys.exit(__doc__)
     cfg_path = args[0]
     schema_file = args[args.index("--schema") + 1] if "--schema" in args else None
+    db = None
+    for a in args:
+        if a.startswith("--db="):
+            db = a[5:]
     cfg = json.load(open(cfg_path, encoding="utf-8"))
 
     if "source" in cfg and "sources" not in cfg:   # формат v1: один источник
@@ -72,7 +80,7 @@ def main():
         return report()
     check_secrets(cfg)
 
-    tables = {t["id"]: t for t in load_schema(cfg, schema_file)}
+    tables = {t["id"]: t for t in load_schema(cfg, schema_file, db)}
     by_name = {}
     for t in tables.values():
         by_name.setdefault(t["val"], []).append(t)
@@ -136,7 +144,8 @@ def main():
         if load.get("mode") not in LOAD_MODES:
             err(f"{p}.load.mode: {load.get('mode')} — допустимо {sorted(LOAD_MODES)}")
         # Битрикс: pagination=start (user.get/department.get) не умеет период и инкремент
-        if src.get("method") and src.get("pagination", "start") != "id_cursor":
+        esrc = ent.get("source", {})
+        if esrc.get("method") and esrc.get("pagination", "start") != "id_cursor":
             if load.get("mode") == "incremental":
                 err(f"{p}: load.mode=incremental требует source.pagination=id_cursor")
             if load.get("period"):

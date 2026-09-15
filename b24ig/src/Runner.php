@@ -341,13 +341,16 @@ TXT;
                 $secrets = is_file($p['secrets']) ? json_decode(file_get_contents($p['secrets']), true) : array();
                 if (!is_array($secrets)) throw new ConnectorException('secrets.json базы: ошибка JSON');
                 $cfg = self::loadConfig($p['config'], $secrets);
-                if ((string)arr_get($cfg, 'target.db') !== $opts['db']) {
-                    throw new ConnectorException("target.db конфига («" . arr_get($cfg, 'target.db') . "») не совпадает с базой «{$opts['db']}»");
-                }
+                // База — текущая, из URL/--db. В конфиге target.db указывать не нужно; если указан —
+                // должен совпадать (защита от чужого конфига, скопированного в другую базу).
+                $td = (string)arr_get($cfg, 'target.db');
+                if ($td === '') $cfg['target']['db'] = $opts['db'];
+                elseif ($td !== $opts['db']) throw new ConnectorException("target.db конфига («{$td}») не совпадает с текущей базой «{$opts['db']}» — уберите target.db (возьмётся текущая) или исправьте");
                 $dataRoot = $p['data_root'];
                 self::protectDir($dataRoot);   // второй барьер: secrets.json/логи не отдаются веб-сервером
             } else {
                 $cfg = self::loadConfig($opts['config']);
+                if ((string)arr_get($cfg, 'target.db') === '') throw new ConnectorException('в проектном режиме (--config без --db) в конфиге нужен target.db');
                 $dataRoot = $codeRoot;
             }
             $confine = !empty($opts['db']);

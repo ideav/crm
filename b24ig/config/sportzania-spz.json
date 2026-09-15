@@ -663,10 +663,6 @@
         "ALLOW_CHANGE_DEADLINE": {
           "column": "Можно менять срок",
           "transform": "yn"
-        },
-        "TAGS": {
-          "column": "Теги",
-          "transform": "join"
         }
       },
       "on_source_delete": "keep"
