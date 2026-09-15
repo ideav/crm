@@ -1,0 +1,25 @@
+<link rel="stylesheet" href="/download/{_global_.z}/css/xcom-export.css?{_global_.version}.1">
+
+<div id="xcom-export-app" class="xcom-export" data-db="{_global_.z}" data-report="matching_export">
+    <header class="xcom-export-head">
+        <div>
+            <h1>Выгрузка сопоставления</h1>
+            <p>Готовый результат для передачи клиенту или программной интеграции.</p>
+        </div>
+        <div class="xcom-export-actions">
+            <button id="xcom-export-refresh" class="xcom-export-btn xcom-export-btn-secondary" type="button">Обновить</button>
+            <button id="xcom-export-json" class="xcom-export-btn xcom-export-btn-secondary" type="button" disabled>JSON</button>
+            <button id="xcom-export-excel" class="xcom-export-btn xcom-export-btn-primary" type="button" disabled>Excel</button>
+        </div>
+    </header>
+    <div id="xcom-export-status" class="xcom-export-status" role="status" aria-live="polite">Загрузка результата…</div>
+    <div id="xcom-export-table" class="xcom-export-table-wrap"></div>
+    <details class="xcom-export-api">
+        <summary>JSON API для интеграции</summary>
+        <code id="xcom-export-api-url"></code>
+        <p>Ответ содержит те же строки и колонки, что выгружаются в Excel. Для постраничной интеграции добавьте <code>LIMIT=смещение,размер</code>.</p>
+    </details>
+</div>
+
+<script src="/js/xlsx0.18.5.full.min.js?{_global_.version}" defer></script>
+<script src="/download/{_global_.z}/js/xcom-export.js?{_global_.version}.1" defer></script>

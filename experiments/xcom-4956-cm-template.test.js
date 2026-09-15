@@ -13,10 +13,16 @@
 //      Не прошло — ядро молча подставляет "ru", и вместо сопоставления каталогов
 //      разворачивается обычная русская база;
 //   2. каталоги `templates/custom/cm` и `download/cm` существуют на сервере, то есть
-//      публикуются `update.conf`. Нет источника — `cp -r` копировать нечего, рабочие места
-//      открываются без JS и CSS (ровно дефект #4949 п.4);
-//   3. рабочие места адресуют свои ассеты через `{_global_.z}`. Зашитое имя базы пережило бы
-//      клонирование, и база клиента тянула бы файлы чужой базы.
+//      публикуются `update.conf` из СВОИХ каталогов шаблона `templates/cm` и `download/cm`.
+//      Нет источника — `cp -r` копировать нечего, рабочие места открываются без JS и CSS
+//      (ровно дефект #4949 п.4);
+//   3. рабочие места адресуют свои ассеты через `{_global_.z}` и каждый такой ассет лежит в
+//      каталогах шаблона. Зашитое имя базы или файл из чужого каталога не переживают
+//      клонирование: база клиента запросила бы файл, которого у неё нет.
+//
+// Шаблон и проект конкретного клиента (`xcom`) — разные комплекты файлов: шаблон развивается
+// дальше, клиентский проект зафиксирован. Поэтому проверяется не только цель публикации, но и
+// источник: правило, ведущее в `templates/custom/cm` из чужого каталога, ронять этот тест.
 //
 // Run with: node experiments/xcom-4956-cm-template.test.js
 
@@ -83,10 +89,11 @@ function publishedTargets() {
         return acc;
     }, []);
 }
-function publishesInto(dir) {
-    return publishedTargets().some(function (rule) {
+// Правила, раскладывающие файлы в каталог `dir` боевого сервера, с их источниками в репозитории.
+function sourcesPublishedInto(dir) {
+    return publishedTargets().filter(function (rule) {
         return rule.target.replace(/\/+$/, '').slice(-dir.length - 1) === '/' + dir;
-    });
+    }).map(function (rule) { return rule.source.replace(/\/\*$/, ''); });
 }
 
 // --- 1. Шаблон «Сопоставление» доходит до ядра ------------------------------------------
@@ -115,28 +122,37 @@ cabinets.forEach(function (cabinet) {
         cabinet.rel + ': шаблон сопоставления каталогов предлагается в ЛК');
 });
 
-// --- 2. Файлы шаблона есть на сервере ----------------------------------------------------
+// --- 2. Файлы шаблона есть на сервере и берутся из каталогов шаблона ----------------------
 
-assert(publishesInto('templates/custom/cm'),
-    'update.conf: рабочие места шаблона публикуются в templates/custom/cm');
-assert(publishesInto('download/cm/js'), 'update.conf: JS шаблона публикуется в download/cm/js');
-assert(publishesInto('download/cm/css'), 'update.conf: CSS шаблона публикуется в download/cm/css');
+[
+    { dir: 'templates/custom/cm', from: 'templates/cm',    what: 'рабочие места' },
+    { dir: 'download/cm/js',      from: 'download/cm/js',  what: 'JS' },
+    { dir: 'download/cm/css',     from: 'download/cm/css', what: 'CSS' }
+].forEach(function (rule) {
+    assertEqual(sourcesPublishedInto(rule.dir), [rule.from],
+        'update.conf: ' + rule.what + ' шаблона едут в ' + rule.dir + ' из ' + rule.from);
+});
 
 // --- 3. Ассеты рабочих мест переживают клонирование --------------------------------------
 
-var workspaces = fs.readdirSync(path.join(root, 'templates/xcom'))
+var workspaces = fs.readdirSync(path.join(root, 'templates/cm'))
     .filter(function (name) { return /\.html$/.test(name); });
-assert(workspaces.length > 0, 'templates/xcom: рабочие места шаблона на месте');
+assert(workspaces.length > 0, 'templates/cm: рабочие места шаблона на месте');
 
 workspaces.forEach(function (name) {
     // Подстановка ядра: {_global_.z} → имя базы, в которую развёрнут шаблон.
-    var rendered = read('templates/xcom/' + name).replace(/\{_global_\.z\}/g, 'clientdb');
-    var foreign = [], link, re = /(?:src|href)="([^"]*)"/g;
+    var rendered = read('templates/cm/' + name).replace(/\{_global_\.z\}/g, 'clientdb');
+    var foreign = [], missing = [], link, re = /(?:src|href)="([^"]*)"/g;
     while ((link = re.exec(rendered)) !== null) {
-        var owner = link[1].match(/^\/download\/([^/]+)\//);
-        if (owner && owner[1] !== 'clientdb') foreign.push(link[1]);
+        var own = link[1].match(/^\/download\/([^/]+)\/((?:css|js)\/[^?"]+)/);
+        if (!own) continue;
+        if (own[1] !== 'clientdb') { foreign.push(link[1]); continue; }
+        // Файл окажется в базе клиента, только если он есть в каталогах шаблона: `cp -r`
+        // копирует download/cm, а не тот каталог, откуда файл взят исторически.
+        if (!fs.existsSync(path.join(root, 'download/cm', own[2]))) missing.push(own[2]);
     }
-    assertEqual(foreign, [], 'templates/xcom/' + name + ': ассеты берутся из своей базы');
+    assertEqual(foreign, [], 'templates/cm/' + name + ': ассеты берутся из своей базы');
+    assertEqual(missing, [], 'templates/cm/' + name + ': ассеты лежат в download/cm');
 });
 
 console.log('\n' + passed + '/' + total + ' проверок пройдено');

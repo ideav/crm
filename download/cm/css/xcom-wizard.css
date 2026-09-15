@@ -1,0 +1,470 @@
+.xcom-wizard {
+    --xw-ink: var(--text-primary, oklch(28% 0.025 255));
+    --xw-muted: var(--text-secondary, oklch(52% 0.03 255));
+    --xw-line: var(--border-color, oklch(88% 0.018 255));
+    --xw-surface: var(--card-bg, oklch(99% 0.006 255));
+    --xw-subtle: var(--bg-secondary, oklch(96% 0.012 255));
+    --xw-accent: var(--button-primary, oklch(55% 0.2 255));
+    --xw-danger: var(--danger, oklch(48% 0.19 25));
+    --xw-success: var(--success, oklch(48% 0.14 145));
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 24px;
+    color: var(--xw-ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+}
+
+.xcom-wizard [hidden] {
+    display: none !important;
+}
+
+.xcom-wizard .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.xcom-wizard-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 24px;
+    margin-bottom: 22px;
+}
+
+.xcom-wizard-kicker {
+    display: block;
+    margin-bottom: 6px;
+    color: var(--xw-accent);
+    font-size: 0.76rem;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+}
+
+.xcom-wizard-head h1 {
+    margin: 0;
+    max-width: 26ch;
+    font-size: 1.75rem;
+    line-height: 1.18;
+}
+
+.xcom-wizard-head p {
+    max-width: 68ch;
+    margin: 8px 0 0;
+    color: var(--xw-muted);
+    line-height: 1.55;
+}
+
+.xcom-wizard-timer {
+    min-width: 72px;
+    padding: 8px 11px;
+    border: 1px solid var(--xw-line);
+    border-radius: 7px;
+    background: var(--xw-subtle);
+    color: var(--xw-muted);
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+}
+
+.xcom-wizard-steps {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 0;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.xcom-wizard-steps li {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px 14px 0;
+    border-bottom: 2px solid var(--xw-line);
+    color: var(--xw-muted);
+    font-size: 0.86rem;
+}
+
+.xcom-wizard-steps b {
+    display: grid;
+    width: 24px;
+    height: 24px;
+    place-items: center;
+    border: 1px solid var(--xw-line);
+    border-radius: 50%;
+    background: var(--xw-surface);
+    font-size: 0.75rem;
+}
+
+.xcom-wizard-steps li[aria-current="step"] {
+    border-color: var(--xw-accent);
+    color: var(--xw-ink);
+    font-weight: 650;
+}
+
+.xcom-wizard-steps li[aria-current="step"] b,
+.xcom-wizard-steps li.is-complete b {
+    border-color: var(--xw-accent);
+    background: var(--xw-accent);
+    color: oklch(98% 0.006 255);
+}
+
+.xcom-wizard-status {
+    min-height: 24px;
+    margin: 10px 0 2px;
+    color: var(--xw-muted);
+    font-size: 0.86rem;
+}
+
+.xcom-wizard-status.is-error {
+    color: var(--xw-danger);
+}
+
+.xcom-wizard-status.is-success {
+    color: var(--xw-success);
+}
+
+.xcom-wizard-stage {
+    min-height: 470px;
+    padding: 28px 0 18px;
+}
+
+.xcom-wizard-step-copy > span {
+    color: var(--xw-muted);
+    font-size: 0.78rem;
+}
+
+.xcom-wizard-step-copy h2 {
+    margin: 5px 0 0;
+    font-size: 1.25rem;
+}
+
+.xcom-wizard-step-copy p {
+    max-width: 70ch;
+    margin: 7px 0 22px;
+    color: var(--xw-muted);
+    line-height: 1.5;
+}
+
+.xcom-wizard-files {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px;
+}
+
+.xcom-wizard-file {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 10px 12px;
+    padding: 20px;
+    border: 1px solid var(--xw-line);
+    border-radius: 9px;
+    background: var(--xw-surface);
+}
+
+.xcom-wizard-file > label:first-child,
+.xcom-wizard-file > input,
+.xcom-wizard-file-summary {
+    grid-column: 1 / -1;
+}
+
+.xcom-wizard-file > label:first-child {
+    font-weight: 650;
+}
+
+.xcom-wizard-sheet {
+    align-self: center;
+    color: var(--xw-muted);
+    font-size: 0.84rem;
+}
+
+.xcom-wizard-file input[type="file"] {
+    padding: 10px;
+    border: 1px dashed var(--xw-line);
+    border-radius: 7px;
+    background: var(--xw-subtle);
+}
+
+.xcom-wizard-file select,
+.xcom-wizard-mapping select,
+.xcom-wizard-rule-top input,
+.xcom-wizard-rule-top select,
+.xcom-wizard-rule input[type="number"] {
+    min-height: 38px;
+    box-sizing: border-box;
+    border: 1px solid var(--xw-line);
+    border-radius: 6px;
+    background: var(--xw-surface);
+    color: var(--xw-ink);
+    font: inherit;
+}
+
+.xcom-wizard-file-summary {
+    min-height: 42px;
+    color: var(--xw-muted);
+    font-size: 0.84rem;
+    line-height: 1.45;
+}
+
+.xcom-wizard-mapping-head,
+.xcom-wizard-map-row {
+    display: grid;
+    grid-template-columns: minmax(150px, 0.7fr) repeat(2, minmax(180px, 1fr));
+    gap: 12px;
+    align-items: center;
+}
+
+.xcom-wizard-mapping-head {
+    padding: 0 10px 8px;
+    color: var(--xw-muted);
+    font-size: 0.78rem;
+    font-weight: 650;
+    text-transform: uppercase;
+}
+
+.xcom-wizard-map-row {
+    padding: 10px;
+    border-top: 1px solid var(--xw-line);
+}
+
+.xcom-wizard-map-label b {
+    display: block;
+    font-size: 0.9rem;
+}
+
+.xcom-wizard-map-label span {
+    display: block;
+    margin-top: 3px;
+    color: var(--xw-muted);
+    font-size: 0.75rem;
+}
+
+.xcom-wizard-preview {
+    margin-top: 20px;
+    color: var(--xw-muted);
+}
+
+.xcom-wizard-preview summary {
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.xcom-wizard-preview-table {
+    margin-top: 12px;
+    overflow: auto;
+}
+
+.xcom-wizard-preview-table table {
+    width: 100%;
+    min-width: 680px;
+    border-collapse: collapse;
+    color: var(--xw-ink);
+    font-size: 0.8rem;
+}
+
+.xcom-wizard-preview-table th,
+.xcom-wizard-preview-table td {
+    padding: 7px 9px;
+    border-bottom: 1px solid var(--xw-line);
+    text-align: left;
+}
+
+.xcom-wizard-rule-top {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr 0.7fr;
+    gap: 14px;
+    margin-bottom: 22px;
+}
+
+.xcom-wizard-rule-top label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    color: var(--xw-muted);
+    font-size: 0.84rem;
+}
+
+.xcom-wizard-rule-top input,
+.xcom-wizard-rule-top select {
+    width: 100%;
+    padding: 7px 9px;
+}
+
+.xcom-wizard-rule {
+    display: grid;
+    grid-template-columns: minmax(160px, 1fr) minmax(220px, 1.5fr) 100px;
+    gap: 14px;
+    align-items: center;
+    padding: 12px 10px;
+    border-top: 1px solid var(--xw-line);
+}
+
+.xcom-wizard-rule label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.xcom-wizard-rule small {
+    color: var(--xw-muted);
+}
+
+.xcom-wizard-review {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px 24px;
+    padding: 18px 0;
+    border-top: 1px solid var(--xw-line);
+    border-bottom: 1px solid var(--xw-line);
+}
+
+.xcom-wizard-review dl {
+    margin: 0;
+}
+
+.xcom-wizard-review dt {
+    color: var(--xw-muted);
+    font-size: 0.78rem;
+}
+
+.xcom-wizard-review dd {
+    margin: 4px 0 13px;
+    overflow-wrap: anywhere;
+    font-weight: 600;
+}
+
+.xcom-wizard-saved-mapping {
+    margin-top: 20px;
+    padding-top: 18px;
+    border-top: 1px solid var(--xw-line);
+}
+
+.xcom-wizard-saved-mapping h3 {
+    margin: 0;
+    font-size: 1rem;
+}
+
+.xcom-wizard-saved-mapping > p {
+    margin: 6px 0 14px;
+    color: var(--xw-muted);
+    line-height: 1.5;
+}
+
+.xcom-wizard-confirm {
+    display: flex;
+    align-items: flex-start;
+    gap: 9px;
+    margin-top: 18px;
+}
+
+.xcom-wizard-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding-top: 16px;
+    border-top: 1px solid var(--xw-line);
+}
+
+.xcom-wizard-actions > span {
+    flex: 1;
+    color: var(--xw-muted);
+    font-size: 0.83rem;
+}
+
+.xcom-wizard-btn {
+    min-height: 40px;
+    padding: 8px 16px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    font: inherit;
+    font-weight: 650;
+    cursor: pointer;
+}
+
+.xcom-wizard-btn-primary {
+    border-color: var(--xw-accent);
+    background: var(--xw-accent);
+    color: oklch(98% 0.006 255);
+}
+
+.xcom-wizard-btn-secondary {
+    border-color: var(--xw-line);
+    background: var(--xw-surface);
+    color: var(--xw-ink);
+}
+
+.xcom-wizard-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.xcom-wizard button:focus-visible,
+.xcom-wizard input:focus-visible,
+.xcom-wizard select:focus-visible,
+.xcom-wizard summary:focus-visible {
+    outline: 2px solid var(--xw-accent);
+    outline-offset: 2px;
+}
+
+@media (max-width: 780px) {
+    .xcom-wizard {
+        padding: 16px;
+    }
+
+    .xcom-wizard-head,
+    .xcom-wizard-files {
+        grid-template-columns: 1fr;
+    }
+
+    .xcom-wizard-head {
+        display: grid;
+    }
+
+    .xcom-wizard-timer {
+        justify-self: start;
+    }
+
+    .xcom-wizard-steps li {
+        justify-content: center;
+        padding-right: 0;
+    }
+
+    .xcom-wizard-steps span {
+        display: none;
+    }
+
+    .xcom-wizard-mapping-head {
+        display: none;
+    }
+
+    .xcom-wizard-map-row,
+    .xcom-wizard-rule-top,
+    .xcom-wizard-rule,
+    .xcom-wizard-review {
+        grid-template-columns: 1fr;
+    }
+
+    .xcom-wizard-actions {
+        flex-wrap: wrap;
+    }
+
+    .xcom-wizard-actions > span {
+        flex-basis: 100%;
+        order: -1;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .xcom-wizard * {
+        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important;
+    }
+}
