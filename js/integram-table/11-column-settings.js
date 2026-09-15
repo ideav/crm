@@ -835,18 +835,18 @@
          * Delete a table via API (issue #1932).
          * Uses _d_del/{tableId}?JSON. On success returns {id, obj, next_act, args, warnings}.
          *
-         * Issue #2746: if the table is referenced by another column (metadata
-         * exposes a "referenced" id), the server refuses to delete it. Fetch
-         * fresh metadata, delete each reference first via _d_del/{referenced},
-         * then delete the table itself. Surface the full server error on
-         * failure (no truncation, no generic "HTTP 400").
+         * Issue #2746: if a "reference to table" type points at this table
+         * (metadata exposes its id in "referenced"), the server refuses to
+         * delete it. Fetch fresh metadata, delete each reference first via
+         * _d_del/{referenced}, then delete the table itself. Surface the full
+         * server error on failure (no truncation, no generic "HTTP 400").
          *
          * @returns {Promise<{success: boolean, error?: string}>}
          */
         async deleteTable(tableId) {
             const apiBase = this.getApiBase();
             try {
-                // Issue #2746: remove any reference columns pointing to this table
+                // Issue #2746: remove any reference types pointing to this table
                 // before deleting the table itself. Bypass the cache so we see
                 // the current server-side state.
                 const refResult = await this.deleteTableReferences(tableId);
@@ -883,50 +883,39 @@
         }
 
         /**
-         * Delete every column that references the given table (issue #2746).
-         * The server marks such tables in metadata with a "referenced" field
-         * holding the requisite id; deleting that requisite removes the link.
-         * Repeats until metadata reports no more references or the request
-         * fails. Returns the full server error on failure.
+         * Delete every "reference to table" type pointing at the given table
+         * (issue #2746). Such a type counts as an instance of the table, so it
+         * must go first, silently (issue #4966). Repeats until metadata reports
+         * no more references or the request fails. Returns the full server
+         * error on failure, naming the columns that hold the table back.
          *
          * @returns {Promise<{success: boolean, error?: string}>}
          */
         async deleteTableReferences(tableId) {
-            const apiBase = this.getApiBase();
             const seen = new Set();
             // Cap iterations to avoid a runaway loop if the server keeps
             // returning the same referenced id (it would also be caught by
             // `seen`, but the cap is a defensive backstop).
             for (let i = 0; i < 32; i++) {
-                let metadata;
-                try {
-                    const resp = await fetch(`${apiBase}/metadata/${tableId}`);
-                    if (!resp.ok) {
-                        // Can't inspect references; let the table-delete call
-                        // surface whatever error the server returns.
-                        return { success: true };
-                    }
-                    const text = await resp.text();
-                    try { metadata = JSON.parse(text); } catch (_) { return { success: true }; }
-                } catch (_) {
-                    return { success: true };
-                }
-                if (Array.isArray(metadata)) metadata = metadata[0];
-                if (!metadata) return { success: true };
-                const referenced = metadata.referenced;
-                if (!referenced) return { success: true };
+                const refIds = await this.findTableReferences(tableId);
+                if (!refIds.length) return { success: true };
 
-                const refIds = Array.isArray(referenced) ? referenced : [referenced];
                 let removedAny = false;
-                for (const rawRefId of refIds) {
-                    const refId = String(rawRefId || '').trim();
-                    if (!refId || seen.has(refId)) continue;
+                for (const refId of refIds) {
+                    if (seen.has(refId)) continue;
                     seen.add(refId);
                     const delResult = await this.deleteReferenceRequisite(refId);
                     if (!delResult.success) {
+                        // Issue #4966: the reference type survives only while
+                        // columns of other tables use it — name them, instead of
+                        // leaving the user with "экземпляров (всего: 1)".
+                        const referrers = await this.describeTableReferrers(tableId);
+                        const detail = referrers.length
+                            ? ` На таблицу ссылаются колонки: ${referrers.join(', ')} — удалите их и повторите.`
+                            : '';
                         return {
                             success: false,
-                            error: `Не удалось удалить ссылку ${refId}: ${delResult.error}`,
+                            error: `Не удалось удалить ссылку ${refId}: ${delResult.error}${detail}`,
                         };
                     }
                     removedAny = true;
@@ -940,6 +929,86 @@
                 }
             }
             return { success: true };
+        }
+
+        /**
+         * Ids of the "reference to table" types pointing at the given table
+         * (issue #4966). `_d_ref` stores such a type as a row with up=0 and
+         * t={tableId}; the instance check of `_d_del`
+         * (`WHERE t={tableId} AND t!=up`) counts it alongside real records, so
+         * an empty table is refused with «Нельзя удалить тип при наличии его
+         * экземпляров (всего: 1)».
+         *
+         * The server reports the id in the `referenced` field of metadata, and
+         * fills that field only in the database-wide `metadata`: for
+         * `metadata/{id}` it selects the single row `obj.id={id}` and has
+         * nothing to build the field from. Ask the per-table endpoint first
+         * (cheap, and it answers whenever the field is there) and fall back to
+         * the database-wide metadata.
+         *
+         * @returns {Promise<string[]>} ref-type ids, empty when there are none
+         */
+        async findTableReferences(tableId) {
+            const apiBase = this.getApiBase();
+            const own = await this.fetchMetadataJson(`${apiBase}/metadata/${tableId}`);
+            const direct = this.referencedIds(Array.isArray(own) ? own[0] : own);
+            if (direct.length) return direct;
+
+            const all = await this.fetchMetadataJson(`${apiBase}/metadata`);
+            const list = Array.isArray(all) ? all : (all ? [all] : []);
+            return this.referencedIds(list.find(t => t && String(t.id) === String(tableId)));
+        }
+
+        /**
+         * GET a metadata endpoint and parse it (issue #4966).
+         * Returns null when the metadata cannot be fetched or parsed — callers
+         * fall back to a plain delete so the user still sees the server error.
+         */
+        async fetchMetadataJson(url) {
+            try {
+                const resp = await fetch(url);
+                if (!resp.ok) return null;
+                return JSON.parse(await resp.text());
+            } catch (_) {
+                return null;
+            }
+        }
+
+        /**
+         * Normalize the `referenced` field of a metadata entry into a list of
+         * non-empty ids (issue #4966).
+         */
+        referencedIds(meta) {
+            if (!meta || !meta.referenced) return [];
+            const raw = Array.isArray(meta.referenced) ? meta.referenced : [meta.referenced];
+            return raw.map(v => String(v == null ? '' : v).trim()).filter(Boolean);
+        }
+
+        /**
+         * Human-readable list of the columns that reference the given table
+         * (issue #4966), e.g. ["Заказы.Метка"]. A reference column carries the
+         * target table id in `ref` (`orig` repeats it), and its own name in the
+         * `alias` of `attrs`. Empty when metadata is unavailable.
+         *
+         * @returns {Promise<string[]>}
+         */
+        async describeTableReferrers(tableId) {
+            const all = await this.fetchMetadataJson(`${this.getApiBase()}/metadata`);
+            const list = Array.isArray(all) ? all : (all ? [all] : []);
+            const names = [];
+            for (const table of list) {
+                if (!table || String(table.id) === String(tableId) || !Array.isArray(table.reqs)) continue;
+                for (const req of table.reqs) {
+                    if (!req || String(req.ref || req.orig || '') !== String(tableId)) continue;
+                    let alias = '';
+                    try {
+                        const attrs = JSON.parse(req.attrs || '{}');
+                        alias = (attrs && attrs.alias) || '';
+                    } catch (_) { /* attrs is not JSON - no alias */ }
+                    names.push(`${table.val || table.id}.${alias || req.val || req.id}`);
+                }
+            }
+            return names;
         }
 
         /**

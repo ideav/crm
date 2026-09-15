@@ -51,6 +51,11 @@ const methodSources = [
     extractMethod('deleteTable'),
     extractMethod('deleteTableReferences'),
     extractMethod('deleteReferenceRequisite'),
+    // Helpers the reference lookup is built on (issue #4966).
+    extractMethod('findTableReferences'),
+    extractMethod('fetchMetadataJson'),
+    extractMethod('referencedIds'),
+    extractMethod('describeTableReferrers'),
 ].join('\n');
 
 // Build a small class that hosts those exact methods so we can call them with
