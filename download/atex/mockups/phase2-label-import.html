@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<!-- Макет рабочего места «Импорт из 1С» (Администратор, Диспетчер), ideav/crm#4974.
+     Состав: docs/atex_phase2_solution_composition.md §5.8 -->
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Импорт из 1С — макет</title>
+<link rel="stylesheet" href="phase2-mockup.css">
+<script src="phase2-mockup.js" defer></script>
+</head>
+<body>
+
+<h1 class="mk-h1">Импорт из 1С</h1>
+<p class="mk-sub">Роль: Администратор, Диспетчер · URL <code>/atex/label-import</code> · таблицы: Заказ, Заказанное количество, Нож, Вал, Движение пробега, Клиент</p>
+
+<div class="mk-note">
+    Три выгрузки: заказы этикетки, справочник ножей и валов, начальный пробег ножей.
+    Импорт всегда идёт через предпросмотр: сначала показываем, что будет создано, обновлено
+    и отвергнуто, и только потом пишем. <b>Начальный пробег заводится ровно одной записью
+    движения на нож</b> — дальше пробег двигает только пульт высечки.
+</div>
+
+<div class="mk-tabs">
+    <button class="mk-tab is-on" data-tab="orders">Заказы</button>
+    <button class="mk-tab" data-tab="dies">Ножи и валы</button>
+    <button class="mk-tab" data-tab="mileage">Начальный пробег</button>
+</div>
+
+<div data-tab-body="orders">
+
+    <div class="mk-toolbar">
+        <span class="mk-badge mk-badge-info">orders_2026-09-16.csv · 148 строк · загружен 09:12</span>
+        <button class="mk-btn">Выбрать другой файл</button>
+        <button class="mk-btn mk-btn-primary">Записать 141 строку</button>
+    </div>
+
+    <div class="mk-kpis">
+        <div class="mk-kpi"><div class="mk-kpi-v">27</div><div class="mk-kpi-l">новых заказов</div></div>
+        <div class="mk-kpi"><div class="mk-kpi-v">114</div><div class="mk-kpi-l">обновлённых позиций</div></div>
+        <div class="mk-kpi is-warn"><div class="mk-kpi-v">4</div><div class="mk-kpi-l">дубля — пропустим</div></div>
+        <div class="mk-kpi is-bad"><div class="mk-kpi-v">3</div><div class="mk-kpi-l">ошибки — не запишем</div></div>
+    </div>
+
+    <div class="mk-panel">
+        <div class="mk-panel-title">Ключ сверки</div>
+        <p style="margin:0;font-size:0.86rem;line-height:1.5">
+            Позиция опознаётся парой <b>«Заказ клиента» + артикул</b>. Совпала пара —
+            обновляем количество, срок и атрибуты этикетки; не совпала — создаём. Номер ножа из
+            выгрузки ищется в справочнике по полю <b>«Номер ножа»</b>; ножа нет — позиция пишется,
+            но помечается «нет ножа» и в планирование не уходит.
+        </p>
+    </div>
+
+    <div class="mk-panel">
+        <div class="mk-panel-title">Предпросмотр</div>
+        <table class="mk-table">
+            <thead><tr><th>Строка</th><th>Заказ клиента</th><th>Клиент</th><th>Артикул</th><th class="mk-num">Кол-во</th><th>Срок</th><th>Нож</th><th>Что будет</th></tr></thead>
+            <tbody>
+            <tr><td class="mk-num">12</td><td>ЯВ-000418</td><td>Ярмарка Вкуса</td><td>ЭТ-85038-МЛ</td><td class="mk-num">600 000</td><td>22.09</td><td>1247</td><td><span class="mk-badge mk-badge-info">обновить количество 500 000 → 600 000</span></td></tr>
+            <tr><td class="mk-num">13</td><td>ЯВ-000418</td><td>Ярмарка Вкуса</td><td>ЭТ-60040-КФ</td><td class="mk-num">240 000</td><td>22.09</td><td>1712</td><td><span class="mk-badge mk-badge-ok">создать позицию</span></td></tr>
+            <tr><td class="mk-num">41</td><td>СЛ-002210</td><td>Сладко</td><td>ЭТ-50050-ПР</td><td class="mk-num">180 000</td><td>25.09</td><td>—</td><td><span class="mk-badge mk-badge-warn">создать, нож не найден</span></td></tr>
+            <tr><td class="mk-num">58</td><td>СЛ-002210</td><td>Сладко</td><td>ЭТ-50050-ПР</td><td class="mk-num">180 000</td><td>25.09</td><td>—</td><td><span class="mk-badge mk-badge-mute">дубль строки 41 — пропустить</span></td></tr>
+            <tr><td class="mk-num">77</td><td>—</td><td>Вкуснотеево</td><td>ЭТ-70045-СМ</td><td class="mk-num">90 000</td><td>19.09</td><td>1533</td><td><span class="mk-badge mk-badge-bad">пустой «Заказ клиента» — не записывать</span></td></tr>
+            <tr><td class="mk-num">92</td><td>ВК-000771</td><td>Вкуснотеево</td><td>ЭТ-70045-СМ</td><td class="mk-num">−5</td><td>19.09</td><td>1533</td><td><span class="mk-badge mk-badge-bad">количество ≤ 0 — не записывать</span></td></tr>
+            <tr><td class="mk-num">103</td><td>МК-000902</td><td>Молком</td><td>ЭТ-90060-ЙГ</td><td class="mk-num">320 000</td><td>14.09</td><td>1108</td><td><span class="mk-badge mk-badge-bad">срок в прошлом — не записывать</span></td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="mk-panel">
+        <div class="mk-panel-title">Что импорт не трогает</div>
+        <ul style="margin:0;padding-left:18px;font-size:0.84rem;line-height:1.5">
+            <li>позиции, по которым уже есть выпуск: количество можно только увеличить;</li>
+            <li>сформированные задания высечки и их съёмы;</li>
+            <li>пробег ножей — у него единственный источник, пульт высечки.</li>
+        </ul>
+    </div>
+
+</div>
+
+<div data-tab-body="dies" style="display:none">
+
+    <div class="mk-toolbar">
+        <span class="mk-badge mk-badge-info">dies_2026-09-16.csv · 2 351 строка</span>
+        <button class="mk-btn">Выбрать другой файл</button>
+        <button class="mk-btn mk-btn-primary">Записать 2 348 строк</button>
+    </div>
+
+    <div class="mk-kpis">
+        <div class="mk-kpi"><div class="mk-kpi-v">2 348</div><div class="mk-kpi-l">ножей в выгрузке</div></div>
+        <div class="mk-kpi"><div class="mk-kpi-v">4</div><div class="mk-kpi-l">вала: 96, 106, 120, 132</div></div>
+        <div class="mk-kpi is-warn"><div class="mk-kpi-v">19</div><div class="mk-kpi-l">без геометрии — заведём заглушкой</div></div>
+        <div class="mk-kpi is-bad"><div class="mk-kpi-v">3</div><div class="mk-kpi-l">дубля номера ножа</div></div>
+    </div>
+
+    <div class="mk-panel">
+        <div class="mk-panel-title">Разбор названия ножа</div>
+        <p style="margin:0 0 10px;font-size:0.86rem;line-height:1.5">
+            Название в 1С выглядит как <span class="mk-mono">«85 х 38 (80)»</span>: размер этикетки
+            и в скобках ширина втулки. Из него получаем ширину и высоту этикетки и ширину втулки;
+            число ручьёв и шагов по раппорту берём из отдельных колонок выгрузки.
+        </p>
+        <table class="mk-table">
+            <thead><tr><th>Номер</th><th>Название в 1С</th><th class="mk-num">Этикетка</th><th class="mk-num">Втулка</th><th class="mk-num">Вал</th><th class="mk-num">Ручьёв</th><th class="mk-num">Формат</th><th>Что будет</th></tr></thead>
+            <tbody>
+            <tr><td>1247</td><td class="mk-mono">85 х 38 (80)</td><td class="mk-num">85 × 38</td><td class="mk-num">80</td><td class="mk-num">106</td><td class="mk-num">3</td><td class="mk-num">270</td><td><span class="mk-badge mk-badge-ok">создать</span></td></tr>
+            <tr><td>1712</td><td class="mk-mono">60 х 40 (76)</td><td class="mk-num">60 × 40</td><td class="mk-num">76</td><td class="mk-num">96</td><td class="mk-num">4</td><td class="mk-num">270</td><td><span class="mk-badge mk-badge-ok">создать</span></td></tr>
+            <tr><td>1108</td><td class="mk-mono">90 х 60 (80)</td><td class="mk-num">90 × 60</td><td class="mk-num">80</td><td class="mk-num">120</td><td class="mk-num">3</td><td class="mk-num">300</td><td><span class="mk-badge mk-badge-info">обновить вал 106 → 120</span></td></tr>
+            <tr><td>0904</td><td class="mk-mono">этикетка круг</td><td class="mk-num">—</td><td class="mk-num">—</td><td class="mk-num">96</td><td class="mk-num">—</td><td class="mk-num">—</td><td><span class="mk-badge mk-badge-warn">завести, геометрию дозаполнит технолог</span></td></tr>
+            <tr><td>1533</td><td class="mk-mono">70 х 45 (76)</td><td class="mk-num">70 × 45</td><td class="mk-num">76</td><td class="mk-num">106</td><td class="mk-num">3</td><td class="mk-num">255</td><td><span class="mk-badge mk-badge-bad">дубль номера — вторая строка отвергнута</span></td></tr>
+            </tbody>
+        </table>
+        <p style="margin:10px 0 0;font-size:0.82rem;color:var(--atex-muted)">
+            Номер ножа уникален: две строки с одним номером — ошибка выгрузки, пишется первая,
+            вторая попадает в протокол.
+        </p>
+    </div>
+
+</div>
+
+<div data-tab-body="mileage" style="display:none">
+
+    <div class="mk-toolbar">
+        <span class="mk-badge mk-badge-info">mileage_2026-09-16.csv · 2 348 строк</span>
+        <button class="mk-btn">Выбрать другой файл</button>
+        <button class="mk-btn mk-btn-primary">Записать начальные остатки</button>
+    </div>
+
+    <div class="mk-panel">
+        <div class="mk-panel-title">Как заводится пробег</div>
+        <p style="margin:0;font-size:0.86rem;line-height:1.5">
+            Поле «Пробег» у ножа — сумма движений и руками не правится. Импорт пишет на каждый нож
+            <b>одну</b> запись движения с типом <b>«начальный остаток»</b> на дату загрузки. Повторный
+            импорт по ножу, у которого начальный остаток уже есть, эту запись <b>не задваивает</b>:
+            он либо ничего не делает, либо правит ту же самую запись.
+        </p>
+    </div>
+
+    <table class="mk-table">
+        <thead><tr><th>Нож</th><th class="mk-num">Пробег в 1С</th><th class="mk-num">Сейчас в системе</th><th>Движение</th><th>Что будет</th></tr></thead>
+        <tbody>
+        <tr><td>1247</td><td class="mk-num">408 300</td><td class="mk-num">0</td><td>начальный остаток 16.09</td><td><span class="mk-badge mk-badge-ok">создать запись</span></td></tr>
+        <tr><td>1712</td><td class="mk-num">1 104 500</td><td class="mk-num">0</td><td>начальный остаток 16.09</td><td><span class="mk-badge mk-badge-ok">создать запись</span></td></tr>
+        <tr><td>1108</td><td class="mk-num">96 000</td><td class="mk-num">96 000</td><td>начальный остаток 12.09</td><td><span class="mk-badge mk-badge-mute">уже заведён — пропустить</span></td></tr>
+        <tr><td>1533</td><td class="mk-num">712 400</td><td class="mk-num">716 400</td><td>начальный 12.09 + съёмы 4 000</td><td><span class="mk-badge mk-badge-warn">пульт уже писал — импорт не трогает</span></td></tr>
+        <tr><td>0904</td><td class="mk-num">—</td><td class="mk-num">0</td><td>—</td><td><span class="mk-badge mk-badge-bad">пробег пуст — строка пропущена</span></td></tr>
+        </tbody>
+    </table>
+
+    <div class="mk-panel">
+        <div class="mk-panel-title">Приёмка рабочего места</div>
+        <ul style="margin:0;padding-left:18px;font-size:0.84rem;line-height:1.5">
+            <li>без предпросмотра импорт не пишет ничего;</li>
+            <li>ошибочные строки не записываются и видны в протоколе с номером строки;</li>
+            <li>повторный импорт того же файла не создаёт дублей;</li>
+            <li>начальный пробег — ровно одна запись движения на нож;</li>
+            <li>импорт не уменьшает количество по позициям, где уже есть выпуск.</li>
+        </ul>
+    </div>
+
+</div>
+
+</body>
+</html>

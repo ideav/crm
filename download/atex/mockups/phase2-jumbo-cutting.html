@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<!-- Макет рабочего места «Раскрой джамбо» (Диспетчер), ideav/crm#4974.
+     Состав: docs/atex_phase2_solution_composition.md §5.4 -->
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Раскрой джамбо — макет</title>
+<link rel="stylesheet" href="phase2-mockup.css">
+<script src="phase2-mockup.js" defer></script>
+</head>
+<body>
+
+<h1 class="mk-h1">Раскрой джамбо (большой слиттер)</h1>
+<p class="mk-sub">Роль: Диспетчер · URL <code>/atex/jumbo-cutting</code> · таблицы: Задание первичной резки, Полоса раскроя, Партия джамбо, Мастер-рулон</p>
+
+<div class="mk-note">
+    Ширина джамбо не одна: номинал лежит в <b>справочнике сырья</b>, партия наследует его и
+    правится по паспорту рулона. Раскрой считается по <b>фактической</b> ширине конкретной
+    партии — у ПДЖ-207 это 1528 мм при номинале 1530. Задача — классический одномерный
+    раскрой: закрыть дефицит форматов из очереди высечки, минимизируя отход кромки; остаток
+    ширины добивается ходовыми форматами в запас.
+</div>
+
+<div class="mk-kpis">
+    <div class="mk-kpi"><div class="mk-kpi-v">2</div><div class="mk-kpi-l">задания в очереди большого станка</div></div>
+    <div class="mk-kpi"><div class="mk-kpi-v">4.5 %</div><div class="mk-kpi-l">отход кромки по выбранной карте</div></div>
+    <div class="mk-kpi is-warn"><div class="mk-kpi-v">64 %</div><div class="mk-kpi-l">дефицит формата 270 закрывается</div></div>
+    <div class="mk-kpi"><div class="mk-kpi-v">20</div><div class="mk-kpi-l">мастер-рулонов на выходе</div></div>
+</div>
+
+<div class="mk-cols">
+<div class="mk-col-main">
+
+    <div class="mk-panel">
+        <div class="mk-panel-title">Очередь большого станка</div>
+        <table class="mk-table">
+            <thead><tr><th>Задание</th><th>Партия джамбо</th><th>Сырьё</th><th class="mk-num">Ширина факт</th><th>Карта раскроя</th><th class="mk-num">Кромка</th><th>План-старт</th><th>Статус</th></tr></thead>
+            <tbody>
+            <tr class="is-picked">
+                <td><b>ПР-318</b></td><td>ПДЖ-207</td><td>Бумага п/гл 80, каучук</td>
+                <td class="mk-num">1528 мм</td><td>270 × 3 + 325 × 2</td>
+                <td class="mk-num">68 мм · 4.5 %</td><td>16.09, 06:00</td>
+                <td><span class="mk-badge mk-badge-info">в работе</span></td>
+            </tr>
+            <tr>
+                <td><b>ПР-319</b></td><td>ПДЖ-211</td><td>ПП белый 50, акрил</td>
+                <td class="mk-num">1520 мм</td><td>315 × 4 + 255 × 1</td>
+                <td class="mk-num">5 мм · 0.3 %</td><td>16.09, 11:30</td>
+                <td><span class="mk-badge mk-badge-mute">запланировано</span></td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="mk-panel">
+        <div class="mk-panel-title">ПР-318 · карта раскроя партии ПДЖ-207 (1528 мм × 4000 м)</div>
+        <div class="mk-web">
+            <div class="mk-web-strip" style="flex:270 0 0;background:#134174">270<small>дефицит</small></div>
+            <div class="mk-web-strip" style="flex:270 0 0;background:#134174">270<small>дефицит</small></div>
+            <div class="mk-web-strip" style="flex:270 0 0;background:#134174">270<small>дефицит</small></div>
+            <div class="mk-web-strip" style="flex:325 0 0;background:#1d5596">325<small>в запас</small></div>
+            <div class="mk-web-strip" style="flex:325 0 0;background:#1d5596">325<small>в запас</small></div>
+            <div class="mk-web-strip mk-web-edge" style="flex:68 0 0">кромка<small>68</small></div>
+        </div>
+        <table class="mk-table" style="margin-top:12px">
+            <thead><tr><th>Формат</th><th class="mk-num">Полос</th><th class="mk-num">Метров</th><th class="mk-num">Мастер-рулонов 2 км</th><th>Назначение</th></tr></thead>
+            <tbody>
+            <tr><td><b>270 мм</b></td><td class="mk-num">3</td><td class="mk-num">12 000</td><td class="mk-num">6</td><td>дефицит заказов 2611, 2590, 2601, 2614</td></tr>
+            <tr><td><b>325 мм</b></td><td class="mk-num">2</td><td class="mk-num">8 000</td><td class="mk-num">4</td><td>ходовой формат, в запас</td></tr>
+            <tr><td>кромка</td><td class="mk-num">—</td><td class="mk-num">—</td><td class="mk-num">—</td><td>68 мм × 4000 м в отход (4.5 %)</td></tr>
+            <tr style="font-weight:600"><td>Итого</td><td class="mk-num">5</td><td class="mk-num">20 000</td><td class="mk-num">10</td><td>1460 + 68 = 1528 мм</td></tr>
+            </tbody>
+        </table>
+        <p style="margin:10px 0 0;font-size:0.82rem;color:var(--atex-muted)">
+            Сумма полос плюс кромка равна фактической ширине партии — это жёсткое правило,
+            карта раскроя за ширину не выходит.
+        </p>
+    </div>
+
+    <div class="mk-panel">
+        <div class="mk-panel-title">Варианты раскроя — что предлагает подбор</div>
+        <table class="mk-table">
+            <thead><tr><th>Вариант</th><th>Полосы</th><th class="mk-num">Кромка</th><th class="mk-num">Дефицит 270 закроет</th><th>Итог</th></tr></thead>
+            <tbody>
+            <tr><td>минимальный отход</td><td>270 × 2 + 325 × 3</td><td class="mk-num">13 мм · 0.9 %</td><td class="mk-num">8 000 из 18 853 м</td><td><span class="mk-badge mk-badge-mute">не выбран</span></td></tr>
+            <tr class="is-picked"><td><b>компромисс</b></td><td>270 × 3 + 325 × 2</td><td class="mk-num">68 мм · 4.5 %</td><td class="mk-num">12 000 из 18 853 м</td><td><span class="mk-badge mk-badge-ok">выбран</span></td></tr>
+            <tr><td>закрыть дефицит</td><td>270 × 5</td><td class="mk-num">178 мм · 11.6 %</td><td class="mk-num">20 000 из 18 853 м</td><td><span class="mk-badge mk-badge-mute">не выбран</span></td></tr>
+            </tbody>
+        </table>
+        <div class="mk-toolbar" style="margin:12px 0 0">
+            <button class="mk-btn mk-btn-primary">Подобрать заново</button>
+            <button class="mk-btn">Задать полосы вручную</button>
+            <button class="mk-btn">Применить карту</button>
+        </div>
+    </div>
+
+</div>
+<div class="mk-col-side">
+
+    <div class="mk-panel">
+        <div class="mk-panel-title">Партия ПДЖ-207</div>
+        <div class="mk-fields" style="grid-template-columns:1fr 1fr">
+            <div><span class="mk-field-l">Сырьё</span><div class="mk-field-v">Бумага п/гл 80, каучук</div></div>
+            <div><span class="mk-field-l">Приход</span><div class="mk-field-v">14.09.2026</div></div>
+            <div><span class="mk-field-l">Ширина по справочнику</span><div class="mk-field-v">1530 мм</div></div>
+            <div><span class="mk-field-l">Ширина факт</span><div class="mk-field-v"><strong>1528 мм</strong></div></div>
+            <div><span class="mk-field-l">Длина</span><div class="mk-field-v">4000 м</div></div>
+            <div><span class="mk-field-l">Остаток</span><div class="mk-field-v">4000 м</div></div>
+        </div>
+    </div>
+
+    <div class="mk-panel">
+        <div class="mk-panel-title">Справочник сырья — откуда берётся ширина</div>
+        <table class="mk-table">
+            <thead><tr><th>Сырьё</th><th class="mk-num">Ширина</th><th class="mk-num">Длина</th></tr></thead>
+            <tbody>
+            <tr><td>Бумага п/гл 80, каучук</td><td class="mk-num">1530</td><td class="mk-num">4000</td></tr>
+            <tr><td>ПП белый 50, акрил</td><td class="mk-num">1520</td><td class="mk-num">4000</td></tr>
+            <tr><td>Бумага термо ECO</td><td class="mk-num">1000</td><td class="mk-num">4000</td></tr>
+            </tbody>
+        </table>
+        <p style="margin:8px 0 0;font-size:0.82rem;color:var(--atex-muted)">
+            Партия наследует ширину и длину из справочника и правится по паспорту рулона.
+        </p>
+    </div>
+
+    <div class="mk-panel">
+        <div class="mk-panel-title">Синхронизация со сроками высечки</div>
+        <table class="mk-table">
+            <thead><tr><th>Формат</th><th>Нужен к</th><th>Резка даст</th><th></th></tr></thead>
+            <tbody>
+            <tr><td>270</td><td>17.09, 08:00</td><td>16.09, 11:30</td><td><span class="mk-badge mk-badge-ok">успевает</span></td></tr>
+            <tr><td>315</td><td>17.09, 08:00</td><td>16.09, 16:40</td><td><span class="mk-badge mk-badge-ok">успевает</span></td></tr>
+            <tr><td>270 (остаток 6 853 м)</td><td>18.09, 08:00</td><td>джамбо не назначено</td><td><span class="mk-badge mk-badge-bad">нужен ещё джамбо</span></td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="mk-panel">
+        <div class="mk-panel-title">Приёмка рабочего места</div>
+        <ul style="margin:0;padding-left:18px;font-size:0.84rem;line-height:1.5">
+            <li>карта раскроя не выходит за фактическую ширину партии;</li>
+            <li>сумма полос плюс кромка равна ширине;</li>
+            <li>выпуск по карте создаёт ровно полосы × съёмы по длине мастер-рулонов;</li>
+            <li>расхождение «нужен к / резка даст» подсвечивается, а не прячется.</li>
+        </ul>
+    </div>
+
+</div>
+</div>
+
+</body>
+</html>

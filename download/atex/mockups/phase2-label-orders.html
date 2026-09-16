@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<!-- Макет рабочего места «Заказы этикетки» (Менеджер), ideav/crm#4974.
+     Состав: docs/atex_phase2_solution_composition.md §5.1 -->
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Заказы этикетки — макет</title>
+<link rel="stylesheet" href="phase2-mockup.css">
+<script src="phase2-mockup.js" defer></script>
+</head>
+<body>
+
+<h1 class="mk-h1">Заказы этикетки</h1>
+<p class="mk-sub">Роль: Менеджер · URL <code>/atex/label-orders</code> · таблицы: Заказ, Заказанное количество (вид продукции = этикетка), Клиент, Сырьё этикетки, Нож</p>
+
+<div class="mk-note">
+    Позиция вводится в терминах заказчика — так же, как в выгрузке 1С: размер этикетки,
+    штук в рулоне, количество рулонов, материал, <b>тип ножей</b> («85 х 38 (80)» — размер и
+    ширина втулки). Нож подбирается сразу при сохранении и виден в строке. Нож не нашёлся —
+    позиция получает блокировку «нет ножа» и остаётся видимой и менеджеру, и диспетчеру.
+</div>
+
+<div class="mk-toolbar">
+    <button class="mk-btn mk-btn-primary">+ Заказ</button>
+    <button class="mk-btn">+ Позиция</button>
+    <button class="mk-btn">Согласовать</button>
+    <button class="mk-btn">В планирование</button>
+    <span class="mk-group">
+        <span>Вид продукции</span>
+        <button class="is-on">Этикетка</button>
+        <button>Рулоны</button>
+        <button>Все</button>
+    </span>
+    <input class="mk-input" placeholder="Поиск: клиент, заказ, артикул" style="min-width:230px">
+    <span class="mk-badge mk-badge-bad">нет ножа: 1</span>
+</div>
+
+<div class="mk-cols">
+<div class="mk-col-main">
+
+<table class="mk-table">
+    <thead>
+    <tr>
+        <th>Заказ</th><th>Клиент</th><th>Этикетка</th><th class="mk-num">Шт/рул</th>
+        <th class="mk-num">Рулонов</th><th>Материал</th><th>Тип ножей</th>
+        <th>Нож</th><th class="mk-num">Формат</th><th>Срок</th><th>Статус</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr class="is-picked">
+        <td><b>2611</b><br><small>1С-00541</small></td>
+        <td>Ярмарка Вкуса</td>
+        <td>85 × 38</td>
+        <td class="mk-num">5 000</td>
+        <td class="mk-num">120</td>
+        <td>Бумага п/гл 80, каучук</td>
+        <td class="mk-mono">85 х 38 (80)</td>
+        <td>№ 1247 <span class="mk-badge mk-badge-ok">подобран</span><br><small>3 ручья · вал 106 · 0.944</small></td>
+        <td class="mk-num">270</td>
+        <td>22.09.2026</td>
+        <td><span class="mk-badge mk-badge-info">в плане</span></td>
+    </tr>
+    <tr>
+        <td><b>2612</b><br><small>1С-00544</small></td>
+        <td>Лабель-Сервис</td>
+        <td>58 × 40</td>
+        <td class="mk-num">1 000</td>
+        <td class="mk-num">240</td>
+        <td>ПП белый 50, акрил</td>
+        <td class="mk-mono">58 х 40 (76)</td>
+        <td>№ 1583 <span class="mk-badge mk-badge-ok">подобран</span><br><small>4 ручья · вал 96 · 0.910</small></td>
+        <td class="mk-num">255</td>
+        <td>24.09.2026</td>
+        <td><span class="mk-badge mk-badge-info">в плане</span></td>
+    </tr>
+    <tr>
+        <td><b>2613</b><br><small>1С-00546</small></td>
+        <td>Фреш Маркет</td>
+        <td>148 × 210</td>
+        <td class="mk-num">250</td>
+        <td class="mk-num">60</td>
+        <td>Бумага п/гл 80, каучук</td>
+        <td class="mk-mono">148 х 210 (76)</td>
+        <td><span class="mk-badge mk-badge-bad">нет ножа</span><br><small>нет ножа 148 × 210 в работе</small></td>
+        <td class="mk-num">—</td>
+        <td>26.09.2026</td>
+        <td><span class="mk-badge mk-badge-bad">блокировка</span></td>
+    </tr>
+    <tr>
+        <td><b>2614</b><br><small>1С-00549</small></td>
+        <td>Сибпродукт</td>
+        <td>30 × 20</td>
+        <td class="mk-num">10 000</td>
+        <td class="mk-num">90</td>
+        <td>Бумага п/гл 80, каучук</td>
+        <td class="mk-mono">30 х 20 (76)</td>
+        <td>№ 1902 <span class="mk-badge mk-badge-ok">подобран</span><br><small>8 ручьёв · вал 96 · 0.889</small></td>
+        <td class="mk-num">270</td>
+        <td>25.09.2026</td>
+        <td><span class="mk-badge mk-badge-mute">новая</span></td>
+    </tr>
+    <tr>
+        <td><b>2615</b><br><small>1С-00551</small></td>
+        <td>Ярмарка Вкуса</td>
+        <td>100 × 150</td>
+        <td class="mk-num">500</td>
+        <td class="mk-num">40</td>
+        <td>ПП белый 50, акрил</td>
+        <td class="mk-mono">100 х 150 (76)</td>
+        <td>№ 2104 <span class="mk-badge mk-badge-warn">нож на заточке</span><br><small>вернётся 18.09</small></td>
+        <td class="mk-num">315</td>
+        <td>29.09.2026</td>
+        <td><span class="mk-badge mk-badge-warn">ждёт нож</span></td>
+    </tr>
+    </tbody>
+</table>
+
+<div class="mk-panel">
+    <div class="mk-panel-title">Позиция 2611 · этикетка 85 × 38 — форма ввода</div>
+    <div class="mk-fields">
+        <div><span class="mk-field-l">Размер этикетки, мм</span><div class="mk-field-v"><input class="mk-input" value="85 × 38" style="width:100%"></div></div>
+        <div><span class="mk-field-l">Штук в рулоне</span><div class="mk-field-v"><input class="mk-input" value="5000" style="width:100%"></div></div>
+        <div><span class="mk-field-l">Количество рулонов</span><div class="mk-field-v"><input class="mk-input" value="120" style="width:100%"></div></div>
+        <div><span class="mk-field-l">Материал</span><div class="mk-field-v"><select class="mk-select" style="width:100%"><option>Бумага п/гл 80, каучук</option><option>ПП белый 50, акрил</option><option>Бумага термо ECO</option></select></div></div>
+        <div><span class="mk-field-l">Тип ножей</span><div class="mk-field-v"><input class="mk-input mk-mono" value="85 х 38 (80)" style="width:100%"></div></div>
+        <div><span class="mk-field-l">Ширина втулки, мм</span><div class="mk-field-v"><input class="mk-input" value="80" style="width:100%"></div></div>
+        <div><span class="mk-field-l">Диаметр втулки</span><div class="mk-field-v"><select class="mk-select" style="width:100%"><option>76 мм</option><option>40 мм</option></select></div></div>
+        <div><span class="mk-field-l">Намотка</span><div class="mk-field-v"><select class="mk-select" style="width:100%"><option>Наружу</option><option>Внутрь</option></select></div></div>
+        <div><span class="mk-field-l">Срок изготовления</span><div class="mk-field-v"><input class="mk-input" value="22.09.2026" style="width:100%"></div></div>
+        <div><span class="mk-field-l">Артикул</span><div class="mk-field-v"><input class="mk-input mk-mono" value="ЭТ-85380-ПГК" style="width:100%"></div></div>
+    </div>
+    <div class="mk-toolbar" style="margin-top:12px;margin-bottom:0">
+        <button class="mk-btn mk-btn-primary">Сохранить</button>
+        <button class="mk-btn">Подобрать нож заново</button>
+        <button class="mk-btn">Отмена</button>
+    </div>
+</div>
+
+</div>
+<div class="mk-col-side">
+
+    <div class="mk-panel">
+        <div class="mk-panel-title">Подобранный нож</div>
+        <div class="mk-fields" style="grid-template-columns:1fr 1fr">
+            <div><span class="mk-field-l">Номер</span><div class="mk-field-v"><strong>№ 1247</strong></div></div>
+            <div><span class="mk-field-l">Состояние</span><div class="mk-field-v"><span class="mk-badge mk-badge-ok">в работе</span></div></div>
+            <div><span class="mk-field-l">Ручьёв</span><div class="mk-field-v">3</div></div>
+            <div><span class="mk-field-l">Этикеток на раппорте</span><div class="mk-field-v">24</div></div>
+            <div><span class="mk-field-l">Вал / раппорт</span><div class="mk-field-v">106 / 336.6 мм</div></div>
+            <div><span class="mk-field-l">Исп. формат</span><div class="mk-field-v">270 мм</div></div>
+            <div><span class="mk-field-l">Коэф. использования</span><div class="mk-field-v">0.944</div></div>
+            <div><span class="mk-field-l">Пробег</span><div class="mk-field-v">412 300 м</div></div>
+        </div>
+        <p style="margin:10px 0 0;font-size:0.82rem;color:var(--atex-muted)">
+            Выбран автоподбором: точное совпадение 85 × 38 и сырья, состояние «в работе»,
+            наименьший пробег из двух подходящих (№ 1866 — 1 180 400 м).
+        </p>
+        <div class="mk-toolbar" style="margin:10px 0 0">
+            <button class="mk-btn">Выбрать другой нож</button>
+        </div>
+    </div>
+
+    <div class="mk-panel">
+        <div class="mk-panel-title">Потребность позиции</div>
+        <table class="mk-table">
+            <tbody>
+            <tr><td>Этикеток</td><td class="mk-num">600 000</td></tr>
+            <tr><td>Раппортов</td><td class="mk-num">25 000</td></tr>
+            <tr><td>Метраж вырубки</td><td class="mk-num">8 415 м</td></tr>
+            <tr><td>Формат</td><td class="mk-num">270 мм</td></tr>
+            <tr><td>Мастер-рулонов 2 км</td><td class="mk-num">5</td></tr>
+            <tr><td>Втулок 80 мм</td><td class="mk-num">120</td></tr>
+            </tbody>
+        </table>
+        <p style="margin:8px 0 0;font-size:0.82rem;color:var(--atex-muted)">
+            Задание на втулки создаётся планировщиком высечки в общую с Фазой 1 таблицу —
+            пульт втулкореза видит его одним списком с заданиями на рулоны.
+        </p>
+    </div>
+
+    <div class="mk-panel">
+        <div class="mk-panel-title">Приёмка рабочего места</div>
+        <ul style="margin:0;padding-left:18px;font-size:0.84rem;line-height:1.5">
+            <li>позиция из выгрузки 1С заводится без ручного доопределения;</li>
+            <li>подбор ножа виден в строке списка, а не только в карточке;</li>
+            <li>блокировка «нет ножа» одинаково видна менеджеру и диспетчеру;</li>
+            <li>позиция «этикетка» не попадает в планирование резок Фазы 1.</li>
+        </ul>
+    </div>
+
+</div>
+</div>
+
+</body>
+</html>

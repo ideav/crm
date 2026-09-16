@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<!-- Макет рабочего места «Склад мастер-рулонов» (Кладовщик), ideav/crm#4974.
+     Состав: docs/atex_phase2_solution_composition.md §5.5 -->
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Склад мастер-рулонов — макет</title>
+<link rel="stylesheet" href="phase2-mockup.css">
+<script src="phase2-mockup.js" defer></script>
+</head>
+<body>
+
+<h1 class="mk-h1">Склад мастер-рулонов</h1>
+<p class="mk-sub">Роль: Кладовщик · URL <code>/atex/master-rolls</code> · таблицы: Мастер-рулон, Партия джамбо, Сырьё этикетки</p>
+
+<div class="mk-note">
+    Мастер-рулон — полуфабрикат между большим слиттером и высечкой: формат (ширина),
+    длина 2 км, сырьё, откуда приехал. <b>Мастер-рулон одного формата и сырья не
+    переназначается под другой заказ</b> — расход только вырубкой; это жёсткое правило,
+    аналог «партия не переименовывается» Фазы 1.
+</div>
+
+<div class="mk-tabs">
+    <button class="mk-tab is-on" data-tab="stock">Остатки по форматам</button>
+    <button class="mk-tab" data-tab="rolls">Рулоны</button>
+    <button class="mk-tab" data-tab="moves">Движение</button>
+</div>
+
+<div data-tab-body="stock">
+    <div class="mk-kpis">
+        <div class="mk-kpi"><div class="mk-kpi-v">22</div><div class="mk-kpi-l">мастер-рулонов на складе</div></div>
+        <div class="mk-kpi"><div class="mk-kpi-v">44 000 м</div><div class="mk-kpi-l">общий остаток</div></div>
+        <div class="mk-kpi is-warn"><div class="mk-kpi-v">3</div><div class="mk-kpi-l">початых (остаток &lt; 2 км)</div></div>
+        <div class="mk-kpi is-bad"><div class="mk-kpi-v">2</div><div class="mk-kpi-l">формата в дефиците</div></div>
+    </div>
+    <table class="mk-table">
+        <thead><tr><th>Формат</th><th>Сырьё</th><th class="mk-num">Рулонов</th><th class="mk-num">Остаток, м</th><th class="mk-num">Зарезервировано</th><th class="mk-num">Свободно</th><th>Потребность очереди</th></tr></thead>
+        <tbody>
+        <tr><td><b>255</b></td><td>Бумага п/гл 80</td><td class="mk-num">6</td><td class="mk-num">12 000</td><td class="mk-num">11 200</td><td class="mk-num">800</td><td><span class="mk-badge mk-badge-ok">закрыта</span></td></tr>
+        <tr><td><b>255</b></td><td>ПП белый 50</td><td class="mk-num">4</td><td class="mk-num">8 000</td><td class="mk-num">2 612</td><td class="mk-num">5 388</td><td><span class="mk-badge mk-badge-ok">закрыта</span></td></tr>
+        <tr><td><b>270</b></td><td>Бумага п/гл 80</td><td class="mk-num">3</td><td class="mk-num">6 000</td><td class="mk-num">6 000</td><td class="mk-num">0</td><td><span class="mk-badge mk-badge-bad">дефицит 18 853 м</span></td></tr>
+        <tr><td><b>300</b></td><td>Бумага п/гл 80</td><td class="mk-num">9</td><td class="mk-num">18 000</td><td class="mk-num">17 300</td><td class="mk-num">700</td><td><span class="mk-badge mk-badge-ok">закрыта</span></td></tr>
+        <tr><td><b>315</b></td><td>ПП белый 50</td><td class="mk-num">0</td><td class="mk-num">0</td><td class="mk-num">0</td><td class="mk-num">0</td><td><span class="mk-badge mk-badge-bad">дефицит 14 200 м</span></td></tr>
+        </tbody>
+    </table>
+</div>
+
+<div data-tab-body="rolls" style="display:none">
+    <div class="mk-toolbar">
+        <button class="mk-btn mk-btn-primary">Инвентаризация</button>
+        <button class="mk-btn">Списать</button>
+        <button class="mk-btn">Печать этикетки рулона</button>
+        <select class="mk-select"><option>Формат: все</option><option>255</option><option>270</option><option>300</option><option>315</option></select>
+        <select class="mk-select"><option>Статус: все</option><option>на складе</option><option>в работе</option><option>початый</option></select>
+    </div>
+    <table class="mk-table">
+        <thead><tr><th>Рулон</th><th class="mk-num">Формат</th><th>Сырьё</th><th class="mk-num">Длина</th><th class="mk-num">Остаток</th><th>Из резки</th><th>Джамбо</th><th>Статус</th></tr></thead>
+        <tbody>
+        <tr><td><b>МР-4417</b></td><td class="mk-num">270</td><td>Бумага п/гл 80</td><td class="mk-num">2 000</td><td class="mk-num">2 000</td><td>ПР-311</td><td>ПДЖ-198</td><td><span class="mk-badge mk-badge-ok">на складе</span></td></tr>
+        <tr><td><b>МР-4418</b></td><td class="mk-num">270</td><td>Бумага п/гл 80</td><td class="mk-num">2 000</td><td class="mk-num">2 000</td><td>ПР-311</td><td>ПДЖ-198</td><td><span class="mk-badge mk-badge-ok">на складе</span></td></tr>
+        <tr><td><b>МР-4421</b></td><td class="mk-num">270</td><td>Бумага п/гл 80</td><td class="mk-num">2 000</td><td class="mk-num">2 000</td><td>ПР-311</td><td>ПДЖ-198</td><td><span class="mk-badge mk-badge-info">в работе · ВЫС-1841</span></td></tr>
+        <tr><td><b>МР-4402</b></td><td class="mk-num">300</td><td>Бумага п/гл 80</td><td class="mk-num">2 000</td><td class="mk-num">640</td><td>ПР-305</td><td>ПДЖ-186</td><td><span class="mk-badge mk-badge-warn">початый</span></td></tr>
+        <tr><td><b>МР-4396</b></td><td class="mk-num">255</td><td>ПП белый 50</td><td class="mk-num">2 000</td><td class="mk-num">1 180</td><td>ПР-302</td><td>ПДЖ-181</td><td><span class="mk-badge mk-badge-warn">початый</span></td></tr>
+        </tbody>
+    </table>
+    <div class="mk-panel">
+        <div class="mk-panel-title">Початые рулоны (остаток меньше 2 км)</div>
+        <p style="margin:0;font-size:0.86rem;line-height:1.5">
+            Что с ними делать — <b>открытый вопрос заказчику</b>: пускать на мелкие заказы или
+            списывать. В макете они остаются на складе отдельным статусом и в подбор под задание
+            попадают только явным выбором диспетчера.
+        </p>
+    </div>
+</div>
+
+<div data-tab-body="moves" style="display:none">
+    <table class="mk-table">
+        <thead><tr><th>Дата</th><th>Операция</th><th>Рулон</th><th class="mk-num">Формат</th><th class="mk-num">Метры</th><th>Документ</th><th>Кто</th></tr></thead>
+        <tbody>
+        <tr><td>16.09 11:42</td><td><span class="mk-badge mk-badge-bad">расход</span></td><td>МР-4421</td><td class="mk-num">270</td><td class="mk-num">−2 000</td><td>ВЫС-1841 · съём 2</td><td>Ковалёв А.</td></tr>
+        <tr><td>16.09 10:30</td><td><span class="mk-badge mk-badge-bad">расход</span></td><td>МР-4417</td><td class="mk-num">270</td><td class="mk-num">−2 000</td><td>ВЫС-1841 · съём 1</td><td>Ковалёв А.</td></tr>
+        <tr><td>16.09 08:00</td><td><span class="mk-badge mk-badge-ok">приход</span></td><td>МР-4432…4437</td><td class="mk-num">270</td><td class="mk-num">+12 000</td><td>ПР-318 · ПДЖ-207</td><td>Сомов И.</td></tr>
+        <tr><td>16.09 08:00</td><td><span class="mk-badge mk-badge-ok">приход</span></td><td>МР-4438…4441</td><td class="mk-num">325</td><td class="mk-num">+8 000</td><td>ПР-318 · ПДЖ-207</td><td>Сомов И.</td></tr>
+        <tr><td>15.09 17:10</td><td><span class="mk-badge mk-badge-mute">инвентаризация</span></td><td>МР-4402</td><td class="mk-num">300</td><td class="mk-num">−60</td><td>акт 12/09</td><td>Кладовщик</td></tr>
+        </tbody>
+    </table>
+</div>
+
+</body>
+</html>

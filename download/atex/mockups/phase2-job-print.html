@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<!-- Макет печатной формы «Задание на производство» (высечка), ideav/crm#4974.
+     Состав: docs/atex_phase2_solution_composition.md §5.9 -->
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Задание на производство — макет</title>
+<link rel="stylesheet" href="phase2-mockup.css">
+<script src="phase2-mockup.js" defer></script>
+</head>
+<body>
+
+<h1 class="mk-h1">Задание на производство (печатная форма)</h1>
+<p class="mk-sub">Печать из планирования высечки и из пульта · таблицы: Задание высечки, Заказанное количество, Нож, Вал, Мастер-рулон</p>
+
+<div class="mk-note">
+    Бумажный лист, который едет со стопкой к станку и в упаковку: по нему оператор
+    выставляет вал и нож, а упаковщик собирает короб. Всё, что нужно на посту, — на одной
+    стороне листа A4. Печатается из очереди высечки на день и отдельным заданием.
+</div>
+
+<div class="mk-toolbar">
+    <button class="mk-btn mk-btn-primary">Печать</button>
+    <button class="mk-btn">Печать всей очереди на 16.09</button>
+    <button class="mk-btn">PDF</button>
+</div>
+
+<div class="mk-print">
+
+    <div class="mk-print-sub" style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px">
+        <div>
+            <div style="font-size:1.35rem;font-weight:700">ЗАДАНИЕ НА ПРОИЗВОДСТВО № ВЫС-1841</div>
+            <div>Высечка этикетки · станок 1 · план 16.09.2026, 10:15 — 13:40</div>
+        </div>
+        <div style="text-align:right">
+            <div style="font-size:1.6rem;font-weight:700;letter-spacing:2px">2611</div>
+            <div>заказ клиента</div>
+        </div>
+    </div>
+
+    <div class="mk-print-box">
+        <div class="mk-fields">
+            <div><span class="mk-field-l">Клиент</span><div class="mk-field-v">Ярмарка Вкуса</div></div>
+            <div><span class="mk-field-l">Заказ клиента (1С)</span><div class="mk-field-v">ЯВ-000418 от 08.09.2026</div></div>
+            <div><span class="mk-field-l">Срок отгрузки</span><div class="mk-field-v"><strong>22.09.2026</strong></div></div>
+            <div><span class="mk-field-l">Позиция</span><div class="mk-field-v">Этикетка «Молоко 3.2 %» 85 × 38</div></div>
+            <div><span class="mk-field-l">Артикул</span><div class="mk-field-v">ЭТ-85038-МЛ</div></div>
+            <div><span class="mk-field-l">Заказано</span><div class="mk-field-v"><strong>600 000 шт</strong> · 120 рулонов по 5 000</div></div>
+        </div>
+    </div>
+
+    <div class="mk-print-box">
+        <div class="mk-panel-title">Оснастка</div>
+        <div class="mk-fields">
+            <div><span class="mk-field-l">Вал</span><div class="mk-field-v"><strong>№ 106</strong> · раппорт 336.6 мм · 106 зубьев</div></div>
+            <div><span class="mk-field-l">Нож</span><div class="mk-field-v"><strong>№ 1247</strong> · «85 × 38 (80)» · 3 ручья × 8 по раппорту</div></div>
+            <div><span class="mk-field-l">Этикеток в раппорте</span><div class="mk-field-v">24</div></div>
+            <div><span class="mk-field-l">Лидер</span><div class="mk-field-v">по позиции · 12 мм</div></div>
+            <div><span class="mk-field-l">Формат сырья</span><div class="mk-field-v"><strong>270 мм</strong> · бумага п/гл 80, каучук</div></div>
+            <div><span class="mk-field-l">Втулка</span><div class="mk-field-v">80 мм · намотка наружу</div></div>
+        </div>
+        <p style="margin:8px 0 0;font-size:0.84rem">
+            Вал на станке перед заданием: <b>96</b> → требуется <b>смена вала</b> (≈ 90 мин).
+            Нож меняется на установленном валу (≈ 15 мин).
+        </p>
+    </div>
+
+    <div class="mk-print-box">
+        <div class="mk-panel-title">План вырубки</div>
+        <table class="mk-table">
+            <thead><tr><th>Съём</th><th>Мастер-рулон</th><th class="mk-num">Метров</th><th class="mk-num">Этикеток</th><th class="mk-num">Рулонов ГП</th><th>Отметка оператора</th></tr></thead>
+            <tbody>
+            <tr><td>1</td><td>МР-4417</td><td class="mk-num">2 000</td><td class="mk-num">142 600</td><td class="mk-num">28</td><td></td></tr>
+            <tr><td>2</td><td>МР-4418</td><td class="mk-num">2 000</td><td class="mk-num">142 600</td><td class="mk-num">28</td><td></td></tr>
+            <tr><td>3</td><td>МР-4421</td><td class="mk-num">2 000</td><td class="mk-num">142 600</td><td class="mk-num">28</td><td></td></tr>
+            <tr><td>4</td><td>из резки ПР-318</td><td class="mk-num">2 000</td><td class="mk-num">142 600</td><td class="mk-num">28</td><td></td></tr>
+            <tr><td>5</td><td>из резки ПР-318</td><td class="mk-num">415</td><td class="mk-num">29 600</td><td class="mk-num">8</td><td></td></tr>
+            <tr style="font-weight:600"><td>Итого</td><td>5 съёмов</td><td class="mk-num">8 415</td><td class="mk-num">600 000</td><td class="mk-num">120</td><td></td></tr>
+            </tbody>
+        </table>
+        <p style="margin:8px 0 0;font-size:0.84rem;color:var(--atex-muted)">
+            8 415 м = 600 000 шт ÷ 24 этикетки в раппорте × 336.6 мм раппорта.
+        </p>
+    </div>
+
+    <div class="mk-print-box">
+        <div class="mk-panel-title">Заполняет оператор</div>
+        <table class="mk-table">
+            <thead><tr><th>Начало</th><th>Окончание</th><th class="mk-num">Съёмов сделано</th><th class="mk-num">Брак, м</th><th>Смена вала / ножа</th><th>Оператор</th></tr></thead>
+            <tbody><tr><td style="height:36px"></td><td></td><td></td><td></td><td></td><td></td></tr></tbody>
+        </table>
+    </div>
+
+    <div class="mk-print-box">
+        <div class="mk-panel-title">Заполняет упаковщик</div>
+        <div class="mk-fields">
+            <div><span class="mk-field-l">Рулонов в коробе</span><div class="mk-field-v">20</div></div>
+            <div><span class="mk-field-l">Коробов</span><div class="mk-field-v">6</div></div>
+            <div><span class="mk-field-l">Короб</span><div class="mk-field-v">400 × 300 × 300</div></div>
+            <div><span class="mk-field-l">Упаковочных мест</span><div class="mk-field-v">6</div></div>
+            <div><span class="mk-field-l">Принято рулонов</span><div class="mk-field-v" style="min-height:22px"></div></div>
+            <div><span class="mk-field-l">Отклонено</span><div class="mk-field-v" style="min-height:22px"></div></div>
+        </div>
+    </div>
+
+    <div class="mk-sign">
+        <div>Оператор высечки ____________________ / ____________</div>
+        <div>Упаковщик ____________________ / ____________</div>
+        <div>Контроль ____________________ / ____________</div>
+    </div>
+
+</div>
+
+<div class="mk-panel">
+    <div class="mk-panel-title">Приёмка печатной формы</div>
+    <ul style="margin:0;padding-left:18px;font-size:0.84rem;line-height:1.5">
+        <li>лист печатается на одну сторону A4 и читается у станка без экрана;</li>
+        <li>номер вала, номер ножа и формат сырья видны в первую очередь;</li>
+        <li>итог плана съёмов сходится с заказанным количеством позиции;</li>
+        <li>печать всей очереди на день даёт по листу на задание в порядке очереди.</li>
+    </ul>
+</div>
+
+</body>
+</html>
