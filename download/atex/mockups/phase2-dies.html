@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<!-- Макет рабочего места «Ножи и валы» (Технолог, Диспетчер), ideav/crm#4974.
+     Состав: docs/atex_phase2_solution_composition.md §5.2 -->
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ножи и валы — макет</title>
+<link rel="stylesheet" href="phase2-mockup.css">
+<script src="phase2-mockup.js" defer></script>
+</head>
+<body>
+
+<h1 class="mk-h1">Ножи и валы</h1>
+<p class="mk-sub">Роль: Технолог, Диспетчер · URL <code>/atex/dies</code> · таблицы: Нож, Вал, Движение пробега ⊂ Нож, Сырьё этикетки</p>
+
+<div class="mk-note">
+    Справочник строится на компоненте <code>integram-table</code>: ~2 350 ножей, серверная
+    фильтрация и постраничность. <b>Пробег — накопитель факта</b>: его двигает только пульт
+    высечки при отметке съёма, руками поле не правится. У ножа лежит история движений
+    (вырубка / заточка / начальный остаток), поле «Пробег» — их сумма после последней заточки.
+</div>
+
+<div class="mk-tabs">
+    <button class="mk-tab is-on" data-tab="dies">Ножи</button>
+    <button class="mk-tab" data-tab="shafts">Валы</button>
+    <button class="mk-tab" data-tab="mileage">Пробег ножа № 1247</button>
+</div>
+
+<div data-tab-body="dies">
+
+    <div class="mk-toolbar">
+        <button class="mk-btn mk-btn-primary">+ Нож</button>
+        <button class="mk-btn">На заточку</button>
+        <button class="mk-btn">Вернуть в работу</button>
+        <button class="mk-btn">Списать</button>
+        <input class="mk-input" placeholder="Размер этикетки, напр. 85 x 38" style="min-width:210px">
+        <select class="mk-select"><option>Вал: все</option><option>96</option><option>106</option><option>120</option><option>132</option></select>
+        <select class="mk-select"><option>Сырьё: все</option><option>Бумага</option><option>ПП</option></select>
+        <select class="mk-select"><option>Состояние: в работе</option><option>заточка</option><option>списан</option><option>все</option></select>
+        <label style="font-size:0.84rem;color:var(--atex-muted)"><input type="checkbox"> только у порога заточки</label>
+    </div>
+
+    <div class="mk-kpis">
+        <div class="mk-kpi"><div class="mk-kpi-v">2 348</div><div class="mk-kpi-l">ножей всего</div></div>
+        <div class="mk-kpi"><div class="mk-kpi-v">1 972</div><div class="mk-kpi-l">в работе</div></div>
+        <div class="mk-kpi is-warn"><div class="mk-kpi-v">34</div><div class="mk-kpi-l">у порога заточки</div></div>
+        <div class="mk-kpi"><div class="mk-kpi-v">17</div><div class="mk-kpi-l">на заточке</div></div>
+        <div class="mk-kpi is-bad"><div class="mk-kpi-v">6</div><div class="mk-kpi-l">размеров заказа без ножа</div></div>
+    </div>
+
+    <table class="mk-table">
+        <thead>
+        <tr>
+            <th>№</th><th>Этикетка</th><th class="mk-num">Ручьи</th><th class="mk-num">Эт/рап</th>
+            <th class="mk-num">М/э</th><th class="mk-num">Между</th><th class="mk-num">Кромка</th>
+            <th class="mk-num">Вал</th><th class="mk-num">Раппорт</th><th>Сырьё</th>
+            <th class="mk-num">Мин/Опт/Исп</th><th class="mk-num">Втулка</th>
+            <th class="mk-num">Коэф.</th><th class="mk-num">Пробег, м</th><th>Состояние</th>
+        </tr>
+        </thead>
+        <tbody>
+        <tr class="is-picked">
+            <td><b>1247</b></td><td>85 × 38</td><td class="mk-num">3</td><td class="mk-num">24</td>
+            <td class="mk-num">4.1</td><td class="mk-num">3.0</td><td class="mk-num">2.0</td>
+            <td class="mk-num">106</td><td class="mk-num">336.6</td><td>Бумага</td>
+            <td class="mk-num">265 / 270 / 270</td><td class="mk-num">80</td>
+            <td class="mk-num">0.944</td><td class="mk-num">412 300</td>
+            <td><span class="mk-badge mk-badge-ok">в работе</span></td>
+        </tr>
+        <tr>
+            <td><b>1866</b></td><td>85 × 38</td><td class="mk-num">3</td><td class="mk-num">24</td>
+            <td class="mk-num">4.1</td><td class="mk-num">3.0</td><td class="mk-num">2.0</td>
+            <td class="mk-num">106</td><td class="mk-num">336.6</td><td>Бумага</td>
+            <td class="mk-num">265 / 270 / 270</td><td class="mk-num">80</td>
+            <td class="mk-num">0.944</td><td class="mk-num">1 180 400</td>
+            <td><span class="mk-badge mk-badge-warn">порог заточки</span></td>
+        </tr>
+        <tr>
+            <td><b>1583</b></td><td>58 × 40</td><td class="mk-num">4</td><td class="mk-num">28</td>
+            <td class="mk-num">3.5</td><td class="mk-num">3.0</td><td class="mk-num">5.0</td>
+            <td class="mk-num">96</td><td class="mk-num">304.8</td><td>ПП</td>
+            <td class="mk-num">251 / 255 / 255</td><td class="mk-num">76</td>
+            <td class="mk-num">0.910</td><td class="mk-num">268 900</td>
+            <td><span class="mk-badge mk-badge-ok">в работе</span></td>
+        </tr>
+        <tr>
+            <td><b>1902</b></td><td>30 × 20</td><td class="mk-num">8</td><td class="mk-num">104</td>
+            <td class="mk-num">3.4</td><td class="mk-num">3.0</td><td class="mk-num">4.0</td>
+            <td class="mk-num">96</td><td class="mk-num">304.8</td><td>Бумага</td>
+            <td class="mk-num">269 / 270 / 270</td><td class="mk-num">76</td>
+            <td class="mk-num">0.889</td><td class="mk-num">93 500</td>
+            <td><span class="mk-badge mk-badge-ok">в работе</span></td>
+        </tr>
+        <tr>
+            <td><b>2104</b></td><td>100 × 150</td><td class="mk-num">3</td><td class="mk-num">6</td>
+            <td class="mk-num">2.4</td><td class="mk-num">3.0</td><td class="mk-num">4.0</td>
+            <td class="mk-num">96</td><td class="mk-num">304.8</td><td>ПП</td>
+            <td class="mk-num">314 / 315 / 315</td><td class="mk-num">76</td>
+            <td class="mk-num">0.952</td><td class="mk-num">744 100</td>
+            <td><span class="mk-badge mk-badge-warn">на заточке до 18.09</span></td>
+        </tr>
+        <tr>
+            <td><b>1490</b></td><td>70 × 50</td><td class="mk-num">4</td><td class="mk-num">24</td>
+            <td class="mk-num">3.8</td><td class="mk-num">3.0</td><td class="mk-num">4.0</td>
+            <td class="mk-num">120</td><td class="mk-num">381.0</td><td>Бумага</td>
+            <td class="mk-num">297 / 300 / 300</td><td class="mk-num">76</td>
+            <td class="mk-num">0.933</td><td class="mk-num">1 402 700</td>
+            <td><span class="mk-badge mk-badge-mute">списан</span></td>
+        </tr>
+        </tbody>
+    </table>
+
+    <div class="mk-panel">
+        <div class="mk-panel-title">Подбор ножа под заказ</div>
+        <div class="mk-toolbar">
+            <input class="mk-input" value="85 × 38" style="width:120px">
+            <select class="mk-select"><option>Бумага п/гл 80, каучук</option><option>ПП белый 50, акрил</option></select>
+            <button class="mk-btn mk-btn-primary">Подобрать</button>
+        </div>
+        <table class="mk-table">
+            <thead><tr><th>Нож</th><th>Почему подходит</th><th class="mk-num">Пробег</th><th class="mk-num">Коэф.</th><th>Итог</th></tr></thead>
+            <tbody>
+            <tr><td><b>1247</b></td><td>размер и сырьё совпали, состояние «в работе»</td><td class="mk-num">412 300</td><td class="mk-num">0.944</td><td><span class="mk-badge mk-badge-ok">выбран — меньший пробег</span></td></tr>
+            <tr><td>1866</td><td>размер и сырьё совпали</td><td class="mk-num">1 180 400</td><td class="mk-num">0.944</td><td><span class="mk-badge mk-badge-warn">у порога заточки</span></td></tr>
+            </tbody>
+        </table>
+        <p style="margin:8px 0 0;font-size:0.82rem;color:var(--atex-muted)">
+            Ручной выбор диспетчера перекрывает автоподбор и запоминается в задании высечки.
+        </p>
+    </div>
+
+</div>
+
+<div data-tab-body="shafts" style="display:none">
+    <div class="mk-toolbar">
+        <button class="mk-btn mk-btn-primary">+ Вал</button>
+        <button class="mk-btn">Совместимость со станками</button>
+    </div>
+    <table class="mk-table">
+        <thead><tr><th>Вал</th><th class="mk-num">Раппорт, мм</th><th>Совместимые станки</th><th class="mk-num">Ножей на валу</th><th class="mk-num">Заданий в очереди</th></tr></thead>
+        <tbody>
+        <tr><td><b>96</b></td><td class="mk-num">304.8</td><td>1, 2, 3, 4, 5 высечка</td><td class="mk-num">812</td><td class="mk-num">9</td></tr>
+        <tr><td><b>106</b></td><td class="mk-num">336.6</td><td>1, 2, 3, 4 высечка</td><td class="mk-num">640</td><td class="mk-num">6</td></tr>
+        <tr><td><b>120</b></td><td class="mk-num">381.0</td><td>2, 3, 5 высечка</td><td class="mk-num">497</td><td class="mk-num">3</td></tr>
+        <tr><td><b>132</b></td><td class="mk-num">419.1</td><td>3, 5 высечка <span class="mk-badge mk-badge-warn">уточняется</span></td><td class="mk-num">399</td><td class="mk-num">2</td></tr>
+        </tbody>
+    </table>
+    <div class="mk-panel">
+        <div class="mk-panel-title">Раппорт и номер вала</div>
+        <p style="margin:0;font-size:0.86rem;line-height:1.5">
+            Номер вала — типоразмер в зубьях, шаг зуба 1/8″ = 3.175 мм: 96 → 304.8 мм,
+            106 → 336.6 мм, 120 → 381.0 мм, 132 → 419.1 мм. Справочник хранит оба значения и
+            при вводе проверяет, что они сходятся. <b>Совместимость валов со станками —
+            открытый вопрос заказчику;</b> пока в макете показан вариант с ограничениями,
+            и планировщик их учитывает как ограничение станка.
+        </p>
+    </div>
+</div>
+
+<div data-tab-body="mileage" style="display:none">
+    <div class="mk-kpis">
+        <div class="mk-kpi"><div class="mk-kpi-v">412 300 м</div><div class="mk-kpi-l">пробег после последней заточки</div></div>
+        <div class="mk-kpi"><div class="mk-kpi-v">1 200 000 м</div><div class="mk-kpi-l">порог заточки (параметр)</div></div>
+        <div class="mk-kpi"><div class="mk-kpi-v">34 %</div><div class="mk-kpi-l">израсходовано ресурса</div></div>
+        <div class="mk-kpi"><div class="mk-kpi-v">2</div><div class="mk-kpi-l">заточек в истории</div></div>
+    </div>
+    <table class="mk-table">
+        <thead><tr><th>Дата</th><th>Вид</th><th>Задание высечки</th><th>Оператор</th><th class="mk-num">Метры</th><th class="mk-num">Накоплено</th></tr></thead>
+        <tbody>
+        <tr><td>16.09.2026 11:42</td><td><span class="mk-badge mk-badge-info">вырубка</span></td><td>ВЫС-1841 · заказ 2611 · съём 2</td><td>Ковалёв А.</td><td class="mk-num">2 000</td><td class="mk-num">412 300</td></tr>
+        <tr><td>16.09.2026 10:30</td><td><span class="mk-badge mk-badge-info">вырубка</span></td><td>ВЫС-1841 · заказ 2611 · съём 1</td><td>Ковалёв А.</td><td class="mk-num">2 000</td><td class="mk-num">410 300</td></tr>
+        <tr><td>12.09.2026 16:05</td><td><span class="mk-badge mk-badge-info">вырубка</span></td><td>ВЫС-1802 · заказ 2588</td><td>Ковалёв А.</td><td class="mk-num">6 300</td><td class="mk-num">408 300</td></tr>
+        <tr><td>28.08.2026 09:00</td><td><span class="mk-badge mk-badge-warn">заточка</span></td><td>—</td><td>Технолог</td><td class="mk-num">отсечка</td><td class="mk-num">0</td></tr>
+        <tr><td>14.05.2026 12:00</td><td><span class="mk-badge mk-badge-mute">начальный остаток</span></td><td>импорт из 1С</td><td>Импорт</td><td class="mk-num">318 000</td><td class="mk-num">318 000</td></tr>
+        </tbody>
+    </table>
+    <div class="mk-panel">
+        <div class="mk-panel-title">Правило</div>
+        <p style="margin:0;font-size:0.86rem;line-height:1.5">
+            Пробег изменяется <b>только движением</b>, привязанным к съёму или к заточке.
+            Прямая правка поля запрещена — это кандидат в реестр инвариантов
+            (<code>05-invariants.js</code>) вместе с §15 ТЗ. Повторный импорт той же выгрузки
+            начальный остаток не удваивает: запись <i>начальный остаток</i> у ножа одна.
+        </p>
+    </div>
+</div>
+
+</body>
+</html>

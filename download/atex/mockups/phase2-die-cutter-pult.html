@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<!-- Макет рабочего места «Пульт высечки» (Оператор, планшет), ideav/crm#4974.
+     Состав: docs/atex_phase2_solution_composition.md §5.6 -->
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Пульт высечки — макет</title>
+<link rel="stylesheet" href="phase2-mockup.css">
+<script src="phase2-mockup.js" defer></script>
+</head>
+<body>
+
+<h1 class="mk-h1">Пульт высечки</h1>
+<p class="mk-sub">Роль: Оператор, планшет · URL <code>/atex/die-cutter</code> · таблицы: Задание высечки, Событие смены высечки, Мастер-рулон, Движение пробега, Партия ГП этикетки</p>
+
+<div class="mk-note">
+    Каркас планшета — как у пульта слиттера Фазы 1: сторож планшета (незарегистрированный
+    планшет пульт не загружает), счётчик простоя на 3 часа, модалки вместо
+    <code>alert/confirm/prompt</code>, тосты. Новое — <b>смена вала и смена ножа как события</b>
+    и <b>движение пробега при каждом съёме</b>: пробег ножа двигает только этот экран.
+</div>
+
+<div class="mk-toolbar">
+    <span class="mk-badge mk-badge-info">Планшет ПЛ-07 · 16.09.2026 · 1 высечка</span>
+    <span class="mk-badge mk-badge-ok">смена открыта 08:00 · Ковалёв А.</span>
+    <button class="mk-btn">Закрыть смену</button>
+    <button class="mk-btn">Сменить станок</button>
+</div>
+
+<div class="mk-pad">
+
+<div class="mk-pad-list">
+    <div class="mk-panel" style="padding:8px">
+        <div class="mk-panel-title" style="padding:0 4px">Мои задания на 16.09</div>
+        <div class="mk-job is-picked">
+            <div class="mk-job-top"><span class="mk-job-no">2611</span><span class="mk-job-time">в работе</span></div>
+            <div class="mk-job-meta">85 × 38 · нож 1247 · формат 270</div>
+            <div class="mk-job-meta">съёмов 2 из 5</div>
+        </div>
+        <div class="mk-job">
+            <div class="mk-job-swap">🔪 перед заданием — смена ножа</div>
+            <div class="mk-job-top"><span class="mk-job-no">2590</span><span class="mk-job-time">ожидает</span></div>
+            <div class="mk-job-meta">60 × 40 · нож 1712 · формат 270</div>
+            <div class="mk-job-meta">съёмов 0 из 3</div>
+        </div>
+        <div class="mk-day"><b>Следующее задание</b><span>17.09</span></div>
+        <div class="mk-job" style="opacity:0.75">
+            <div class="mk-job-top"><span class="mk-job-no">2601</span><span class="mk-job-time">17.09, 08:00</span></div>
+            <div class="mk-job-meta">85 × 38 · нож 1247 · 8 съёмов</div>
+        </div>
+    </div>
+</div>
+
+<div class="mk-pad-main">
+
+    <div class="mk-panel">
+        <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap">
+            <div class="mk-pad-order">2611</div>
+            <div style="font-size:1.05rem">Съём <b>3</b> из 5</div>
+            <span class="mk-badge mk-badge-info" style="margin-left:auto">Ярмарка Вкуса · срок 22.09</span>
+        </div>
+        <p style="margin:6px 0 0;font-size:0.95rem">
+            Этикетка 85 × 38 · бумага п/гл 80, каучук · 5 000 шт в рулоне · втулка 80 мм, намотка наружу
+        </p>
+
+        <div class="mk-steps">
+            <span class="mk-step is-done">Вал 106 установлен</span>
+            <span class="mk-step is-done">Нож 1247 установлен</span>
+            <span class="mk-step is-now">Вырубка</span>
+            <span class="mk-step">Готово</span>
+            <span class="mk-step">Передано в упаковку</span>
+        </div>
+
+        <div class="mk-toolbar" style="margin:0">
+            <button class="mk-btn mk-btn-primary mk-btn-lg">Съём выполнен</button>
+            <button class="mk-btn mk-btn-lg">Сколько съёмов пачкой</button>
+            <button class="mk-btn mk-btn-lg mk-btn-ok">Готово</button>
+            <button class="mk-btn mk-btn-lg">🔩 Смена вала</button>
+            <button class="mk-btn mk-btn-lg">🔪 Смена ножа</button>
+            <button class="mk-btn mk-btn-lg">Брак</button>
+        </div>
+    </div>
+
+    <div class="mk-panel">
+        <div class="mk-panel-title">Съёмы</div>
+        <div class="mk-takes">
+            <div class="mk-take is-done">1</div>
+            <div class="mk-take is-done">2</div>
+            <div class="mk-take is-now">3</div>
+            <div class="mk-take">4</div>
+            <div class="mk-take">5</div>
+        </div>
+        <div class="mk-fields" style="margin-top:12px">
+            <div><span class="mk-field-l">Мастер-рулон</span><div class="mk-field-v"><strong>МР-4421</strong> · 270 мм</div></div>
+            <div><span class="mk-field-l">Остаток рулона</span><div class="mk-field-v">2 000 м</div></div>
+            <div><span class="mk-field-l">Метраж съёма</span><div class="mk-field-v">1 683 м</div></div>
+            <div><span class="mk-field-l">Этикеток за съём</span><div class="mk-field-v">120 000</div></div>
+            <div><span class="mk-field-l">Рулонов на выходе</span><div class="mk-field-v">24</div></div>
+            <div><span class="mk-field-l">Брак/наладка</span><div class="mk-field-v">+3 этикетки к намотке</div></div>
+        </div>
+        <div class="mk-toolbar" style="margin:12px 0 0">
+            <button class="mk-btn">Сменить мастер-рулон</button>
+            <button class="mk-btn">Фото брака</button>
+            <button class="mk-btn">Примечание</button>
+        </div>
+    </div>
+
+    <div class="mk-cols">
+        <div class="mk-col-main">
+            <div class="mk-panel">
+                <div class="mk-panel-title">События смены</div>
+                <table class="mk-table">
+                    <thead><tr><th>Время</th><th>Событие</th><th>Подробности</th></tr></thead>
+                    <tbody>
+                    <tr><td>11:42</td><td><span class="mk-badge mk-badge-info">Съём</span></td><td>съём 2 · МР-4421 · 2 000 м</td></tr>
+                    <tr><td>10:30</td><td><span class="mk-badge mk-badge-info">Съём</span></td><td>съём 1 · МР-4417 · 2 000 м</td></tr>
+                    <tr><td>10:12</td><td><span class="mk-badge mk-badge-warn">Смена ножа</span></td><td>1712 → 1247 · 14 мин</td></tr>
+                    <tr><td>08:40</td><td><span class="mk-badge mk-badge-warn">Смена вала</span></td><td>96 → 106 · 87 мин</td></tr>
+                    <tr><td>08:00</td><td><span class="mk-badge mk-badge-ok">Смена открыта</span></td><td>Ковалёв А.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div class="mk-col-side">
+            <div class="mk-panel">
+                <div class="mk-panel-title">Пробег ножа 1247</div>
+                <table class="mk-table">
+                    <tbody>
+                    <tr><td>Было на начало смены</td><td class="mk-num">408 300 м</td></tr>
+                    <tr><td>Прибавили сегодня</td><td class="mk-num">+4 000 м</td></tr>
+                    <tr><td>Сейчас</td><td class="mk-num"><b>412 300 м</b></td></tr>
+                    <tr><td>До заточки</td><td class="mk-num">787 700 м</td></tr>
+                    </tbody>
+                </table>
+                <p style="margin:8px 0 0;font-size:0.82rem;color:var(--atex-muted)">
+                    Каждый отмеченный съём пишет движение пробега: дата, задание, метры, оператор.
+                    Другого способа изменить пробег нет.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <div class="mk-panel">
+        <div class="mk-panel-title">Приёмка рабочего места</div>
+        <ul style="margin:0;padding-left:18px;font-size:0.84rem;line-height:1.5">
+            <li>незарегистрированный планшет пульт не загружает;</li>
+            <li>отметка съёма пишет движение пробега и выпускает партию ГП в упаковку;</li>
+            <li>смена вала и смена ножа попадают в события и в факт наладки задания;</li>
+            <li>сохранённые съёмы и пробег не пересчитываются планировщиком;</li>
+            <li>сумма выпущенных этикеток по заданиям равна заказанному количеству.</li>
+        </ul>
+    </div>
+
+</div>
+</div>
+
+</body>
+</html>

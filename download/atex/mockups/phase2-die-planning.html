@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<!-- Макет рабочего места «Планирование высечки» (Диспетчер), ideav/crm#4974.
+     Состав: docs/atex_phase2_solution_composition.md §5.3 -->
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Планирование высечки — макет</title>
+<link rel="stylesheet" href="phase2-mockup.css">
+<script src="phase2-mockup.js" defer></script>
+</head>
+<body>
+
+<h1 class="mk-h1">Планирование высечки</h1>
+<p class="mk-sub">Роль: Диспетчер · URL <code>/atex/die-planning</code> · таблицы: Задание высечки, Станок высечки, Нож, Вал, Мастер-рулон, Обеспечение этикетки</p>
+
+<div class="mk-note">
+    Очередь пяти станков раскладывается <b>слоем вставки Фазы 1</b>
+    (<code>computeSlotPlacement</code>) — перебор точек вставки по минимальному штрафу.
+    Новое здесь — двухуровневая переналадка: <b>смена вала 🔩 дорогая</b>, поэтому задания
+    одного вала идут подряд; <b>смена ножа 🔪 на том же валу дешёвая</b>, внутри вала задания
+    группируются по ножу и сырью. Срок и группировки — штрафы, а не жёсткие правила;
+    просрочка свята.
+</div>
+
+<div class="mk-tabs">
+    <button class="mk-tab is-on" data-tab="queue">Очередь</button>
+    <button class="mk-tab" data-tab="deficit">Дефицит форматов</button>
+    <button class="mk-tab" data-tab="gantt">Гант</button>
+</div>
+
+<div data-tab-body="queue">
+
+<div class="mk-toolbar">
+    <span class="mk-group">
+        <span>Упорядочить</span>
+        <button class="is-on">Станок</button>
+        <button>Все</button>
+    </span>
+    <span class="mk-group">
+        <span>Дата плана</span>
+        <button>‹</button>
+        <button class="is-on">16.09.2026 — 18.09.2026</button>
+        <button>›</button>
+    </span>
+    <button class="mk-btn mk-btn-primary">↻ Пересчитать наладку</button>
+    <button class="mk-btn">Урегулировать</button>
+    <button class="mk-btn">Печать заданий</button>
+    <span class="mk-badge mk-badge-bad">блокировок: 2</span>
+    <span class="mk-badge mk-badge-warn">переналадок вала: 3</span>
+</div>
+
+<div class="mk-cols">
+<div class="mk-col-main">
+
+<div class="mk-queues">
+
+    <div class="mk-queue">
+        <div class="mk-queue-head"><b>1 высечка</b><span>вал 106 · 216 / 480 мин</span></div>
+        <div class="mk-queue-body">
+            <div class="mk-day"><b>16.09, ср</b><span>216 мин 🔓</span></div>
+            <div class="mk-job is-setup">
+                <div class="mk-job-top"><span class="mk-job-no">🔩</span> Смена вала 96 → 106<span class="mk-job-time">90 мин</span></div>
+                <div class="mk-job-meta">переналадка станка, заданий после неё: 2</div>
+            </div>
+            <div class="mk-job is-picked">
+                <div class="mk-job-top"><span class="mk-job-no">2611</span> 85 × 38<span class="mk-job-time">70 мин</span></div>
+                <div class="mk-job-meta">нож 1247 · формат 270 · 5 съёмов · 8 415 м</div>
+                <div class="mk-job-meta">Ярмарка Вкуса · срок 22.09</div>
+            </div>
+            <div class="mk-job">
+                <div class="mk-job-swap">🔪 смена ножа — 15 мин</div>
+                <div class="mk-job-top"><span class="mk-job-no">2590</span> 60 × 40<span class="mk-job-time">41 мин</span></div>
+                <div class="mk-job-meta">нож 1712 · формат 270 · 3 съёма · 4 900 м</div>
+                <div class="mk-job-meta">Сибпродукт · срок 23.09</div>
+            </div>
+            <div class="mk-day"><b>17.09, чт</b><span>124 мин 🔓</span></div>
+            <div class="mk-job">
+                <div class="mk-job-top"><span class="mk-job-no">2601</span> 85 × 38<span class="mk-job-time">124 мин</span></div>
+                <div class="mk-job-meta">нож 1247 · формат 270 · 8 съёмов · 14 900 м</div>
+                <div class="mk-job-meta">Фреш Маркет · срок 24.09</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="mk-queue">
+        <div class="mk-queue-head"><b>2 высечка</b><span>вал 96 · 74 / 480 мин</span></div>
+        <div class="mk-queue-body">
+            <div class="mk-day"><b>16.09, ср</b><span>74 мин 🔓</span></div>
+            <div class="mk-job">
+                <div class="mk-job-top"><span class="mk-job-no">2612</span> 58 × 40<span class="mk-job-time">22 мин</span></div>
+                <div class="mk-job-meta">нож 1583 · формат 255 · 2 съёма · 2 612 м</div>
+                <div class="mk-job-meta">Лабель-Сервис · срок 24.09</div>
+            </div>
+            <div class="mk-job">
+                <div class="mk-job-swap">🔪 смена ножа — 15 мин</div>
+                <div class="mk-job-top"><span class="mk-job-no">2614</span> 30 × 20<span class="mk-job-time">22 мин</span></div>
+                <div class="mk-job-meta">нож 1902 · формат 270 · 2 съёма · 2 638 м</div>
+                <div class="mk-job-meta">Сибпродукт · срок 25.09</div>
+            </div>
+            <div class="mk-day"><b>17.09, чт</b><span>не размещено 🔓</span></div>
+            <div class="mk-job is-blocked">
+                <div class="mk-job-top"><span class="mk-job-no">2620</span> 100 × 150<span class="mk-job-time">—</span></div>
+                <div class="mk-job-meta">нож 2104 · формат 315 · 4 съёма</div>
+                <div class="mk-job-meta" style="color:var(--atex-bad)">нет мастер-рулона 315 мм: ближайший из резки 17.09</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="mk-queue">
+        <div class="mk-queue-head"><b>3 высечка</b><span>вал 120 · 158 / 480 мин</span></div>
+        <div class="mk-queue-body">
+            <div class="mk-day"><b>16.09, ср</b><span>158 мин 🔓</span></div>
+            <div class="mk-job">
+                <div class="mk-job-top"><span class="mk-job-no">2597</span> 70 × 50<span class="mk-job-time">158 мин</span></div>
+                <div class="mk-job-meta">нож 1774 · формат 300 · 9 съёмов · 17 300 м</div>
+                <div class="mk-job-meta">Ярмарка Вкуса · срок 21.09</div>
+            </div>
+            <div class="mk-day"><b>17.09, чт</b><span>ждёт нож</span></div>
+            <div class="mk-job is-blocked">
+                <div class="mk-job-top"><span class="mk-job-no">2615</span> 100 × 150<span class="mk-job-time">—</span></div>
+                <div class="mk-job-meta">нож 2104 · формат 315</div>
+                <div class="mk-job-meta" style="color:var(--atex-bad)">нож на заточке до 18.09 — задание не ставится</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="mk-queue">
+        <div class="mk-queue-head"><b>4 высечка</b><span>вал 96 · 96 / 480 мин</span></div>
+        <div class="mk-queue-body">
+            <div class="mk-day"><b>16.09, ср</b><span>96 мин 🔓</span></div>
+            <div class="mk-job">
+                <div class="mk-job-top"><span class="mk-job-no">2604</span> 40 × 25<span class="mk-job-time">96 мин</span></div>
+                <div class="mk-job-meta">нож 1955 · формат 255 · 6 съёмов · 11 200 м</div>
+                <div class="mk-job-meta">Лабель-Сервис · срок 23.09</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="mk-queue">
+        <div class="mk-queue-head"><b>5 высечка</b><span>вал 132 · простой</span></div>
+        <div class="mk-queue-body">
+            <div class="mk-day"><b>16.09, ср</b><span>0 мин</span></div>
+            <p style="margin:6px 0;font-size:0.84rem;color:var(--atex-muted)">Заданий в очереди нет.<br>Станок в выгрузке 1С не встречается — <b>вопрос заказчику</b>.</p>
+        </div>
+    </div>
+
+</div>
+
+</div>
+<div class="mk-col-side">
+
+    <div class="mk-panel">
+        <div class="mk-panel-title">Задание ВЫС-1841 · заказ 2611</div>
+        <div class="mk-fields" style="grid-template-columns:1fr 1fr">
+            <div><span class="mk-field-l">Этикетка</span><div class="mk-field-v"><strong>85 × 38</strong></div></div>
+            <div><span class="mk-field-l">Станок</span><div class="mk-field-v">1 высечка</div></div>
+            <div><span class="mk-field-l">Нож / вал</span><div class="mk-field-v">1247 / 106</div></div>
+            <div><span class="mk-field-l">Формат</span><div class="mk-field-v">270 мм</div></div>
+            <div><span class="mk-field-l">Съёмов план</span><div class="mk-field-v">5</div></div>
+            <div><span class="mk-field-l">Метраж</span><div class="mk-field-v">8 415 м</div></div>
+            <div><span class="mk-field-l">Наладка</span><div class="mk-field-v">90 мин (вал)</div></div>
+            <div><span class="mk-field-l">Вырубка</span><div class="mk-field-v">70 мин</div></div>
+            <div><span class="mk-field-l">План-старт</span><div class="mk-field-v">16.09, 09:30</div></div>
+            <div><span class="mk-field-l">Срок заказа</span><div class="mk-field-v">22.09.2026</div></div>
+        </div>
+        <div class="mk-toolbar" style="margin:10px 0 0">
+            <button class="mk-btn mk-btn-primary">Печать задания</button>
+            <button class="mk-btn">Разделить</button>
+            <button class="mk-btn">Зафиксировать</button>
+        </div>
+    </div>
+
+    <div class="mk-panel">
+        <div class="mk-panel-title">Прогноз пробега ножа 1247</div>
+        <table class="mk-table">
+            <tbody>
+            <tr><td>Сейчас</td><td class="mk-num">412 300 м</td></tr>
+            <tr><td>После задания</td><td class="mk-num">420 715 м</td></tr>
+            <tr><td>Порог заточки</td><td class="mk-num">1 200 000 м</td></tr>
+            <tr><td>Запас</td><td class="mk-num">779 285 м</td></tr>
+            </tbody>
+        </table>
+        <p style="margin:8px 0 0;font-size:0.82rem;color:var(--atex-muted)">
+            Планировщик пробег не пишет — только показывает. Факт прибавит пульт при отметке съёма.
+        </p>
+    </div>
+
+    <div class="mk-panel">
+        <div class="mk-panel-title">Обеспечение заказа 2611</div>
+        <table class="mk-table">
+            <thead><tr><th>Мастер-рулон</th><th class="mk-num">Остаток</th><th>Статус</th></tr></thead>
+            <tbody>
+            <tr><td>МР-4417 · 270 мм</td><td class="mk-num">2 000 м</td><td><span class="mk-badge mk-badge-ok">на складе</span></td></tr>
+            <tr><td>МР-4418 · 270 мм</td><td class="mk-num">2 000 м</td><td><span class="mk-badge mk-badge-ok">на складе</span></td></tr>
+            <tr><td>МР-4421 · 270 мм</td><td class="mk-num">2 000 м</td><td><span class="mk-badge mk-badge-ok">на складе</span></td></tr>
+            <tr><td>из резки ПР-318</td><td class="mk-num">4 000 м</td><td><span class="mk-badge mk-badge-info">к 16.09, 08:00</span></td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="mk-panel">
+        <div class="mk-panel-title">Приёмка рабочего места</div>
+        <ul style="margin:0;padding-left:18px;font-size:0.84rem;line-height:1.5">
+            <li>просрочка свята: правила #4197 / #4200 / #4224 действуют дословно;</li>
+            <li>задания одного вала идут подряд, смена ножа внутри вала — дешёвая;</li>
+            <li>задание не ставится без ножа «в работе» и без мастер-рулона формата;</li>
+            <li>пересортировка очереди не трогает уже начатые задания;</li>
+            <li>непринятый план виден до применения, действия над очередью погашены.</li>
+        </ul>
+    </div>
+
+</div>
+</div>
+
+</div>
+
+<div data-tab-body="deficit" style="display:none">
+    <div class="mk-note">
+        Потребность считается по назначенным ножам очереди: метраж вырубки =
+        <code>рулонов × шт/рулон / этикеток на раппорте × раппорт</code> плюс брак на наладку.
+        Эта таблица — вход для <a href="phase2-jumbo-cutting.html">раскроя джамбо</a>:
+        красные строки задают, какие форматы резать из ближайшего джамбо.
+    </div>
+    <table class="mk-table">
+        <thead>
+        <tr><th>Формат</th><th>Сырьё</th><th class="mk-num">Нужно, м</th><th class="mk-num">На складе, м</th>
+            <th class="mk-num">В резке, м</th><th class="mk-num">Дефицит, м</th><th>Нужен к</th><th>Заказы</th></tr>
+        </thead>
+        <tbody>
+        <tr>
+            <td><b>270</b></td><td>Бумага п/гл 80</td><td class="mk-num">28 853</td><td class="mk-num">6 000</td>
+            <td class="mk-num">4 000</td><td class="mk-num" style="color:var(--atex-bad)"><b>18 853</b></td>
+            <td>17.09</td><td>2611, 2590, 2601, 2614</td>
+        </tr>
+        <tr>
+            <td><b>315</b></td><td>ПП белый 50</td><td class="mk-num">14 200</td><td class="mk-num">0</td>
+            <td class="mk-num">0</td><td class="mk-num" style="color:var(--atex-bad)"><b>14 200</b></td>
+            <td>17.09</td><td>2615, 2620</td>
+        </tr>
+        <tr>
+            <td><b>255</b></td><td>ПП белый 50</td><td class="mk-num">2 612</td><td class="mk-num">8 000</td>
+            <td class="mk-num">0</td><td class="mk-num">—</td><td>—</td><td>2612</td>
+        </tr>
+        <tr>
+            <td><b>255</b></td><td>Бумага п/гл 80</td><td class="mk-num">11 200</td><td class="mk-num">12 000</td>
+            <td class="mk-num">0</td><td class="mk-num">—</td><td>—</td><td>2604</td>
+        </tr>
+        <tr>
+            <td><b>300</b></td><td>Бумага п/гл 80</td><td class="mk-num">17 300</td><td class="mk-num">18 000</td>
+            <td class="mk-num">0</td><td class="mk-num">—</td><td>—</td><td>2597</td>
+        </tr>
+        </tbody>
+    </table>
+    <div class="mk-toolbar" style="margin-top:12px">
+        <button class="mk-btn mk-btn-primary">Передать в раскрой джамбо</button>
+        <button class="mk-btn">Показать по дням</button>
+    </div>
+</div>
+
+<div data-tab-body="gantt" style="display:none">
+    <div class="mk-note">
+        Та же диаграмма, что <code>cut-gantt</code> Фазы 1, по станкам высечки: полосы заданий
+        по времени, переналадки отдельным цветом, клик по полосе открывает задание в очереди.
+    </div>
+    <div class="mk-panel">
+        <div class="mk-panel-title">16.09.2026 · смена 08:00 — 16:00</div>
+        <table class="mk-table">
+            <thead><tr><th style="width:110px">Станок</th><th>08:00 → 16:00</th></tr></thead>
+            <tbody>
+            <tr><td>1 высечка</td><td>
+                <div class="mk-web" style="height:30px">
+                    <div class="mk-web-strip" style="flex:90 0 0;background:#a16207">🔩 вал 106<small>90 мин</small></div>
+                    <div class="mk-web-strip" style="flex:70 0 0;background:#134174">2611<small>70 мин</small></div>
+                    <div class="mk-web-strip" style="flex:15 0 0;background:#8da9c4">🔪</div>
+                    <div class="mk-web-strip" style="flex:41 0 0;background:#1d5596">2590<small>41 мин</small></div>
+                    <div class="mk-web-strip mk-web-edge" style="flex:264 0 0">свободно 264 мин</div>
+                </div></td></tr>
+            <tr><td>2 высечка</td><td>
+                <div class="mk-web" style="height:30px">
+                    <div class="mk-web-strip" style="flex:22 0 0;background:#134174">2612</div>
+                    <div class="mk-web-strip" style="flex:15 0 0;background:#8da9c4">🔪</div>
+                    <div class="mk-web-strip" style="flex:22 0 0;background:#1d5596">2614</div>
+                    <div class="mk-web-strip mk-web-edge" style="flex:421 0 0">свободно 421 мин</div>
+                </div></td></tr>
+            <tr><td>3 высечка</td><td>
+                <div class="mk-web" style="height:30px">
+                    <div class="mk-web-strip" style="flex:158 0 0;background:#134174">2597<small>158 мин</small></div>
+                    <div class="mk-web-strip mk-web-edge" style="flex:322 0 0">свободно 322 мин</div>
+                </div></td></tr>
+            <tr><td>4 высечка</td><td>
+                <div class="mk-web" style="height:30px">
+                    <div class="mk-web-strip" style="flex:96 0 0;background:#134174">2604<small>96 мин</small></div>
+                    <div class="mk-web-strip mk-web-edge" style="flex:384 0 0">свободно 384 мин</div>
+                </div></td></tr>
+            <tr><td>5 высечка</td><td>
+                <div class="mk-web" style="height:30px">
+                    <div class="mk-web-strip mk-web-edge" style="flex:480 0 0">простой</div>
+                </div></td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+</body>
+</html>

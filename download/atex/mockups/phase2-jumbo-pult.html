@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<!-- Макет рабочего места «Пульт большого слиттера» (Оператор, планшет), ideav/crm#4974.
+     Состав: docs/atex_phase2_solution_composition.md §5.7 -->
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Пульт большого слиттера — макет</title>
+<link rel="stylesheet" href="phase2-mockup.css">
+<script src="phase2-mockup.js" defer></script>
+</head>
+<body>
+
+<h1 class="mk-h1">Пульт большого слиттера</h1>
+<p class="mk-sub">Роль: Оператор, планшет · URL <code>/atex/jumbo-slitter</code> · таблицы: Задание первичной резки, Полоса раскроя, Мастер-рулон, Партия джамбо</p>
+
+<div class="mk-note">
+    Первичная резка: джамбо заправляется в большой слиттер, режется на полосы по карте
+    раскроя, каждая полоса даёт мастер-рулоны по 2 км. Оператор отмечает съёмы по длине и
+    <b>принимает мастер-рулоны</b> — каждый получает номер и попадает на склад.
+</div>
+
+<div class="mk-toolbar">
+    <span class="mk-badge mk-badge-info">Планшет ПЛ-02 · 16.09.2026 · Большой слиттер</span>
+    <span class="mk-badge mk-badge-ok">смена открыта 06:00 · Сомов И.</span>
+    <button class="mk-btn">Закрыть смену</button>
+</div>
+
+<div class="mk-pad">
+
+<div class="mk-pad-list">
+    <div class="mk-panel" style="padding:8px">
+        <div class="mk-panel-title" style="padding:0 4px">Задания на 16.09</div>
+        <div class="mk-job is-picked">
+            <div class="mk-job-top"><span class="mk-job-no">ПР-318</span><span class="mk-job-time">в работе</span></div>
+            <div class="mk-job-meta">ПДЖ-207 · бумага п/гл 80</div>
+            <div class="mk-job-meta">270 × 3 + 325 × 2 · съём 1 из 2</div>
+        </div>
+        <div class="mk-job">
+            <div class="mk-job-top"><span class="mk-job-no">ПР-319</span><span class="mk-job-time">11:30</span></div>
+            <div class="mk-job-meta">ПДЖ-211 · ПП белый 50</div>
+            <div class="mk-job-meta">315 × 4 + 255 × 1</div>
+        </div>
+    </div>
+</div>
+
+<div class="mk-pad-main">
+
+    <div class="mk-panel">
+        <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap">
+            <div class="mk-pad-order">ПР-318</div>
+            <div style="font-size:1.05rem">Съём по длине <b>1</b> из 2</div>
+            <span class="mk-badge mk-badge-info" style="margin-left:auto">ПДЖ-207 · 1528 мм × 4000 м</span>
+        </div>
+        <p style="margin:6px 0 0;font-size:0.95rem">Бумага п/гл 80, каучук · кромка по карте 68 мм</p>
+
+        <div class="mk-steps">
+            <span class="mk-step is-done">Джамбо заправлено</span>
+            <span class="mk-step is-done">Ножи выставлены по карте</span>
+            <span class="mk-step is-now">Резка, съём 1</span>
+            <span class="mk-step">Съём 2</span>
+            <span class="mk-step">Мастер-рулоны приняты</span>
+        </div>
+
+        <div class="mk-toolbar" style="margin:0">
+            <button class="mk-btn mk-btn-primary mk-btn-lg">Съём выполнен</button>
+            <button class="mk-btn mk-btn-lg mk-btn-ok">Принять мастер-рулоны</button>
+            <button class="mk-btn mk-btn-lg">Отход кромки</button>
+            <button class="mk-btn mk-btn-lg">Брак</button>
+        </div>
+    </div>
+
+    <div class="mk-panel">
+        <div class="mk-panel-title">Карта раскроя — что стоит на валу</div>
+        <div class="mk-web">
+            <div class="mk-web-strip" style="flex:270 0 0;background:#134174">270<small>полоса 1</small></div>
+            <div class="mk-web-strip" style="flex:270 0 0;background:#134174">270<small>полоса 2</small></div>
+            <div class="mk-web-strip" style="flex:270 0 0;background:#134174">270<small>полоса 3</small></div>
+            <div class="mk-web-strip" style="flex:325 0 0;background:#1d5596">325<small>полоса 4</small></div>
+            <div class="mk-web-strip" style="flex:325 0 0;background:#1d5596">325<small>полоса 5</small></div>
+            <div class="mk-web-strip mk-web-edge" style="flex:68 0 0">кромка<small>68</small></div>
+        </div>
+        <table class="mk-table" style="margin-top:12px">
+            <thead><tr><th>Полоса</th><th class="mk-num">Формат</th><th>Съём 1 (2 000 м)</th><th>Съём 2 (2 000 м)</th></tr></thead>
+            <tbody>
+            <tr><td>1</td><td class="mk-num">270</td><td><b>МР-4432</b> <span class="mk-badge mk-badge-ok">принят</span></td><td><span class="mk-badge mk-badge-mute">ожидает</span></td></tr>
+            <tr><td>2</td><td class="mk-num">270</td><td><b>МР-4433</b> <span class="mk-badge mk-badge-ok">принят</span></td><td><span class="mk-badge mk-badge-mute">ожидает</span></td></tr>
+            <tr><td>3</td><td class="mk-num">270</td><td><b>МР-4434</b> <span class="mk-badge mk-badge-ok">принят</span></td><td><span class="mk-badge mk-badge-mute">ожидает</span></td></tr>
+            <tr><td>4</td><td class="mk-num">325</td><td><b>МР-4438</b> <span class="mk-badge mk-badge-ok">принят</span></td><td><span class="mk-badge mk-badge-mute">ожидает</span></td></tr>
+            <tr><td>5</td><td class="mk-num">325</td><td><b>МР-4439</b> <span class="mk-badge mk-badge-ok">принят</span></td><td><span class="mk-badge mk-badge-mute">ожидает</span></td></tr>
+            </tbody>
+        </table>
+        <p style="margin:10px 0 0;font-size:0.82rem;color:var(--atex-muted)">
+            Механика станка — <b>открытый вопрос заказчику</b>: в макете один прогон даёт все полосы,
+            а по длине джамбо 4000 м делится на 2 съёма по 2 км. Если станок работает иначе,
+            меняется только число съёмов и их время.
+        </p>
+    </div>
+
+    <div class="mk-cols">
+        <div class="mk-col-main">
+            <div class="mk-panel">
+                <div class="mk-panel-title">События смены</div>
+                <table class="mk-table">
+                    <thead><tr><th>Время</th><th>Событие</th><th>Подробности</th></tr></thead>
+                    <tbody>
+                    <tr><td>08:00</td><td><span class="mk-badge mk-badge-ok">Приёмка</span></td><td>5 мастер-рулонов, 10 000 м</td></tr>
+                    <tr><td>07:05</td><td><span class="mk-badge mk-badge-info">Съём 1</span></td><td>2 000 м по каждой полосе</td></tr>
+                    <tr><td>06:20</td><td><span class="mk-badge mk-badge-warn">Настройка ножей</span></td><td>карта 270 × 3 + 325 × 2 · 42 мин</td></tr>
+                    <tr><td>06:00</td><td><span class="mk-badge mk-badge-ok">Смена открыта</span></td><td>Сомов И. · заправлено ПДЖ-207</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div class="mk-col-side">
+            <div class="mk-panel">
+                <div class="mk-panel-title">Отход</div>
+                <table class="mk-table">
+                    <tbody>
+                    <tr><td>Кромка по карте</td><td class="mk-num">68 мм</td></tr>
+                    <tr><td>Метров кромки</td><td class="mk-num">4 000</td></tr>
+                    <tr><td>Доля от джамбо</td><td class="mk-num">4.5 %</td></tr>
+                    <tr><td>Брак заправки</td><td class="mk-num">30 м</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="mk-panel">
+        <div class="mk-panel-title">Приёмка рабочего места</div>
+        <ul style="margin:0;padding-left:18px;font-size:0.84rem;line-height:1.5">
+            <li>приёмка создаёт ровно полосы × съёмы мастер-рулонов, каждый со своим номером;</li>
+            <li>остаток партии джамбо уменьшается на выпущенный метраж и кромку;</li>
+            <li>карта раскроя на пульте — та же, что в планировании: правится только там;</li>
+            <li>принятый мастер-рулон сразу виден на складе и в подборе под задание высечки.</li>
+        </ul>
+    </div>
+
+</div>
+</div>
+
+</body>
+</html>
