@@ -90,15 +90,17 @@ assertEqual(clean.devBtn.style.display, 'none', 'нет отклонений —
 c.openDeviations();
 var modal = c.root.querySelector('.atex-pp-dev-modal');
 assert(!!modal, 'форма отклонений добавлена в корень РМ');
-assertEqual(c.root.querySelectorAll('.atex-pp-dev-group').length, 4,
-    '#4584/#4596: четыре группы — просрочено, смена закрыта, выполнено досрочно, делается раньше плана');
+assertEqual(c.root.querySelectorAll('.atex-pp-dev-group').length, 5,
+    '#4584/#4596/#4962: пять групп — просрочено, смена закрыта, выполнено досрочно, '
+    + 'делается раньше плана, наладка сделана заранее');
 assert(!!c.root.querySelector('.atex-pp-dev-overdue') && !!c.root.querySelector('.atex-pp-dev-early'),
     'группы различимы по классу (просроченная подсвечивается красным)');
 assertEqual(c.root.querySelectorAll('.atex-pp-dev-item').length, 3, 'в списке все отклонившиеся задания (2 + 1)');
 
 var titles = c.root.querySelectorAll('.atex-pp-dev-group-title').map(function(n) { return n.textContent; });
 assertEqual(titles, ['Просрочено — 2', 'Смена закрыта, не выполнено — 0',
-                     'Выполнено досрочно — 1', 'Делается раньше плана — 0'],
+                     'Выполнено досрочно — 1', 'Делается раньше плана — 0',
+                     'Наладка сделана заранее — 0'],
     'заголовки групп несут количество');
 
 var items = c.root.querySelectorAll('.atex-pp-dev-item').map(function(n) { return n.textContent; });

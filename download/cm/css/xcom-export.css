@@ -1,0 +1,151 @@
+.xcom-export {
+    --xe-ink: var(--text-primary, oklch(28% 0.025 255));
+    --xe-muted: var(--text-secondary, oklch(52% 0.03 255));
+    --xe-line: var(--border-color, oklch(88% 0.018 255));
+    --xe-surface: var(--card-bg, oklch(99% 0.006 255));
+    --xe-subtle: var(--bg-secondary, oklch(96% 0.012 255));
+    --xe-accent: var(--button-primary, oklch(55% 0.2 255));
+    padding: 20px;
+    color: var(--xe-ink);
+}
+
+.xcom-export-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 18px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--xe-line);
+}
+
+.xcom-export-head h1 {
+    margin: 0;
+    font-size: 1.2rem;
+}
+
+.xcom-export-head p,
+.xcom-export-status,
+.xcom-export-api p {
+    color: var(--xe-muted);
+}
+
+.xcom-export-head p {
+    margin: 5px 0 0;
+}
+
+.xcom-export-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.xcom-export-btn {
+    min-height: 38px;
+    padding: 7px 13px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    font: inherit;
+    font-weight: 650;
+    cursor: pointer;
+}
+
+.xcom-export-btn-primary {
+    border-color: var(--xe-accent);
+    background: var(--xe-accent);
+    color: oklch(98% 0.006 255);
+}
+
+.xcom-export-btn-secondary {
+    border-color: var(--xe-line);
+    background: var(--xe-surface);
+    color: var(--xe-ink);
+}
+
+.xcom-export-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.xcom-export-btn:focus-visible,
+.xcom-export-api summary:focus-visible {
+    outline: 2px solid var(--xe-accent);
+    outline-offset: 2px;
+}
+
+.xcom-export-status {
+    min-height: 24px;
+    padding: 12px 0;
+    font-size: 0.86rem;
+}
+
+.xcom-export-status.is-error {
+    color: var(--danger, oklch(48% 0.19 25));
+}
+
+.xcom-export-table-wrap {
+    max-height: calc(100vh - 270px);
+    overflow: auto;
+    border: 1px solid var(--xe-line);
+    border-radius: 8px;
+}
+
+.xcom-export-table {
+    width: 100%;
+    min-width: 780px;
+    border-collapse: collapse;
+    font-size: 0.84rem;
+}
+
+.xcom-export-table th,
+.xcom-export-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--xe-line);
+    text-align: left;
+    vertical-align: top;
+}
+
+.xcom-export-table th {
+    position: sticky;
+    top: 0;
+    background: var(--xe-subtle);
+    color: var(--xe-muted);
+}
+
+.xcom-export-empty {
+    padding: 32px 18px;
+    color: var(--xe-muted);
+    text-align: center;
+}
+
+.xcom-export-api {
+    margin-top: 16px;
+}
+
+.xcom-export-api summary {
+    cursor: pointer;
+    font-weight: 650;
+}
+
+.xcom-export-api > code {
+    display: block;
+    margin-top: 10px;
+    padding: 10px;
+    overflow-wrap: anywhere;
+    border-radius: 6px;
+    background: var(--xe-subtle);
+}
+
+@media (max-width: 680px) {
+    .xcom-export {
+        padding: 14px;
+    }
+
+    .xcom-export-head {
+        flex-direction: column;
+    }
+
+    .xcom-export-actions,
+    .xcom-export-btn {
+        width: 100%;
+    }
+}

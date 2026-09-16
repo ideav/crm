@@ -1,0 +1,163 @@
+/* РМ «Разметка токенов» (issue #4953). Панель на карточке — как у настроек,
+   но шире: строк много, и таблица сама скроллится внутри своего блока. */
+
+.xcom-tokens {
+    max-width: 1040px;
+    margin: 0 auto;
+    padding: 16px;
+    font-family: inherit;
+    color: inherit;
+}
+
+.xcom-tokens-panel {
+    background: var(--background, oklch(99% 0.006 255));
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 10px;
+    padding: 20px 24px;
+}
+
+.xcom-tokens-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.xcom-tokens-head h1 {
+    margin: 0 0 4px;
+    font-size: 1.25rem;
+}
+
+.xcom-tokens-hint {
+    margin: 0 0 16px;
+    color: rgba(0, 0, 0, 0.6);
+    font-size: 0.9rem;
+    max-width: 70ch;
+}
+
+.xcom-tokens-counter {
+    white-space: nowrap;
+    font-size: 0.9rem;
+    color: rgba(0, 0, 0, 0.6);
+}
+
+.xcom-tokens-controls {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin-bottom: 12px;
+}
+
+.xcom-tokens-search {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.xcom-tokens-input {
+    padding: 6px 10px;
+    border: 1px solid rgba(0, 0, 0, 0.2);
+    border-radius: 6px;
+    font: inherit;
+    min-width: 220px;
+}
+
+.xcom-tokens-check {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.9rem;
+}
+
+.xcom-tokens-table-wrap {
+    max-height: 60vh;
+    overflow: auto;
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 8px;
+}
+
+.xcom-tokens-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.92rem;
+}
+
+.xcom-tokens-table thead th {
+    position: sticky;
+    top: 0;
+    background: var(--background, oklch(99% 0.006 255));
+    border-bottom: 1px solid rgba(0, 0, 0, 0.15);
+    padding: 8px 10px;
+    text-align: left;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.xcom-tokens-table td {
+    padding: 6px 10px;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.xcom-tokens-col-num,
+.xcom-tokens-col-flag {
+    text-align: center;
+    width: 92px;
+}
+
+.xcom-tokens-col-token {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    word-break: break-all;
+}
+
+.xcom-tokens-row-changed td {
+    background: rgba(255, 196, 0, 0.12);
+}
+
+.xcom-tokens-empty {
+    margin: 12px;
+    color: rgba(0, 0, 0, 0.6);
+}
+
+.xcom-tokens-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 16px;
+}
+
+.xcom-tokens-btn {
+    padding: 8px 16px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    font: inherit;
+    cursor: pointer;
+}
+
+.xcom-tokens-btn[disabled] {
+    opacity: 0.55;
+    cursor: default;
+}
+
+.xcom-tokens-btn-primary {
+    background: var(--primary, #2f6feb);
+    color: #fff;
+}
+
+.xcom-tokens-btn-secondary {
+    background: transparent;
+    border-color: rgba(0, 0, 0, 0.2);
+}
+
+.xcom-tokens-status {
+    font-size: 0.9rem;
+    color: rgba(0, 0, 0, 0.6);
+}
+
+.xcom-tokens-status-error {
+    color: #b3261e;
+}
+
+.xcom-tokens-status-ok {
+    color: #1e7d32;
+}

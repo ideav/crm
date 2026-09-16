@@ -1,0 +1,113 @@
+<link rel="stylesheet" href="/download/{_global_.z}/css/xcom-wizard.css?{_global_.version}.1">
+<link rel="stylesheet" href="/css/integram-table.css?{_global_.version}">
+
+<div id="xcom-wizard-app" class="xcom-wizard" data-db="{_global_.z}">
+    <header class="xcom-wizard-head">
+        <div>
+            <span class="xcom-wizard-kicker">Первое разворачивание</span>
+            <h1>Настройте сопоставление на данных клиента</h1>
+            <p>Два файла, проверка предложений и один сохраняемый профиль. Запросы Интеграма редактировать не нужно.</p>
+        </div>
+        <span id="xcom-wizard-timer" class="xcom-wizard-timer" aria-label="Время настройки">00:00</span>
+    </header>
+
+    <nav aria-label="Шаги настройки">
+        <ol id="xcom-wizard-steps" class="xcom-wizard-steps">
+            <li data-step-marker="1" aria-current="step"><b>1</b><span>Файлы</span></li>
+            <li data-step-marker="2"><b>2</b><span>Колонки</span></li>
+            <li data-step-marker="3"><b>3</b><span>Правила</span></li>
+            <li data-step-marker="4"><b>4</b><span>Проверка</span></li>
+        </ol>
+    </nav>
+
+    <div id="xcom-wizard-status" class="xcom-wizard-status" role="status" aria-live="polite"></div>
+
+    <main class="xcom-wizard-stage">
+        <section class="xcom-wizard-step" data-step="1" aria-labelledby="xcom-wizard-step-1-title">
+            <div class="xcom-wizard-step-copy">
+                <span>Шаг 1 из 4</span>
+                <h2 id="xcom-wizard-step-1-title">Выберите оба каталога</h2>
+                <p>Файлы разбираются в браузере и не отправляются наружу. Для каждого файла можно выбрать нужный лист.</p>
+            </div>
+            <div class="xcom-wizard-files">
+                <article class="xcom-wizard-file" data-file-side="rfp">
+                    <label for="xcom-wizard-rfp-file">Каталог клиента (RFP)</label>
+                    <input id="xcom-wizard-rfp-file" type="file" accept=".xlsx,.xls,.csv">
+                    <label class="xcom-wizard-sheet" for="xcom-wizard-rfp-sheet">Лист</label>
+                    <select id="xcom-wizard-rfp-sheet" disabled></select>
+                    <div id="xcom-wizard-rfp-summary" class="xcom-wizard-file-summary">Файл не выбран</div>
+                </article>
+                <article class="xcom-wizard-file" data-file-side="sku">
+                    <label for="xcom-wizard-sku-file">Ваш каталог (SKU)</label>
+                    <input id="xcom-wizard-sku-file" type="file" accept=".xlsx,.xls,.csv">
+                    <label class="xcom-wizard-sheet" for="xcom-wizard-sku-sheet">Лист</label>
+                    <select id="xcom-wizard-sku-sheet" disabled></select>
+                    <div id="xcom-wizard-sku-summary" class="xcom-wizard-file-summary">Файл не выбран</div>
+                </article>
+            </div>
+        </section>
+
+        <section class="xcom-wizard-step" data-step="2" hidden aria-labelledby="xcom-wizard-step-2-title">
+            <div class="xcom-wizard-step-copy">
+                <span>Шаг 2 из 4</span>
+                <h2 id="xcom-wizard-step-2-title">Проверьте сопоставление колонок</h2>
+                <p>Мастер использует названия колонок и примеры значений. Пустое поле означает, что роль не используется.</p>
+            </div>
+            <div class="xcom-wizard-mapping-head" aria-hidden="true"><span>Роль</span><span>RFP</span><span>SKU</span></div>
+            <div id="xcom-wizard-mapping" class="xcom-wizard-mapping"></div>
+            <details class="xcom-wizard-preview">
+                <summary>Посмотреть первые строки</summary>
+                <div id="xcom-wizard-preview-table" class="xcom-wizard-preview-table"></div>
+            </details>
+        </section>
+
+        <section class="xcom-wizard-step" data-step="3" hidden aria-labelledby="xcom-wizard-step-3-title">
+            <div class="xcom-wizard-step-copy">
+                <span>Шаг 3 из 4</span>
+                <h2 id="xcom-wizard-step-3-title">Настройте правила категории</h2>
+                <p>Обязательный атрибут отбрасывает пару при явном расхождении. Вес только повышает оценку подтверждённого совпадения.</p>
+            </div>
+            <div class="xcom-wizard-rule-top">
+                <label><span>Категория</span><input id="xcom-wizard-category" type="text" placeholder="Например, метизы"></label>
+                <label><span>Стартовый пресет</span><select id="xcom-wizard-preset"><option value="">Без пресета</option></select></label>
+                <label><span>Вес точного артикула</span><input id="xcom-wizard-tma-weight" type="number" min="0" max="1" step="0.05" value="0.5"></label>
+            </div>
+            <div id="xcom-wizard-rules" class="xcom-wizard-rules"></div>
+        </section>
+
+        <section class="xcom-wizard-step" data-step="4" hidden aria-labelledby="xcom-wizard-step-4-title">
+            <div class="xcom-wizard-step-copy">
+                <span>Шаг 4 из 4</span>
+                <h2 id="xcom-wizard-step-4-title">Проверьте и сохраните профиль</h2>
+                <p>Сохранится конфиг сопоставления и профиль исходных файлов. После этого можно запускать загрузку и первый массовый прогон.</p>
+            </div>
+            <div id="xcom-wizard-review" class="xcom-wizard-review"></div>
+            <div id="xcom-wizard-saved-mapping" class="xcom-wizard-saved-mapping" hidden>
+                <h3>Сохранённая карта загрузки</h3>
+                <p>Это платформенная таблица профиля. Её можно фильтровать, сортировать и проверять после повторного открытия мастера.</p>
+                <div data-integram-table
+                     data-api-url="/{_global_.z}/metadata/Профиль%20загрузки"
+                     data-page-size="30"
+                     data-cookie-prefix="xcom-wizard-mapping"
+                     data-title=""
+                     data-instance-name="xcomWizardMappingTable"></div>
+            </div>
+            <label class="xcom-wizard-confirm">
+                <input id="xcom-wizard-confirm" type="checkbox">
+                <span>Я проверил колонки и обязательные атрибуты</span>
+            </label>
+        </section>
+    </main>
+
+    <footer class="xcom-wizard-actions">
+        <button id="xcom-wizard-back" class="xcom-wizard-btn xcom-wizard-btn-secondary" type="button" hidden>Назад</button>
+        <span id="xcom-wizard-action-hint">Выберите два файла, чтобы продолжить.</span>
+        <button id="xcom-wizard-next" class="xcom-wizard-btn xcom-wizard-btn-primary" type="button" disabled>Далее</button>
+        <button id="xcom-wizard-save" class="xcom-wizard-btn xcom-wizard-btn-primary" type="button" hidden disabled>Сохранить профиль</button>
+    </footer>
+</div>
+
+<script src="/js/xlsx0.18.5.full.min.js?{_global_.version}" defer></script>
+<script src="/js/integram-table.js?{_global_.version}" defer></script>
+<script src="/download/{_global_.z}/js/xcom-presets.js?{_global_.version}.1" defer></script>
+<script src="/download/{_global_.z}/js/xcom-wizard.js?{_global_.version}.1" defer></script>

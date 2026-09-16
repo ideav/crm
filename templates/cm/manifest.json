@@ -1,0 +1,50 @@
+{
+  "name": "Сопоставление каталогов",
+  "slug": "cm",
+  "version": "1.0.0",
+  "schema_version": 1,
+  "issue": 4956,
+  "template_db": "cm",
+  "workspaces": ["wizard", "matching", "mass_match", "settings", "export"],
+  "reports": ["mass_match", "Сопоставление", "matching_export"],
+  "roles": [
+    {
+      "name": "Партнёр",
+      "description": "Разворачивает и настраивает сопоставление под клиента",
+      "grant": "WRITE",
+      "menus": ["wizard", "settings", "matching", "mass_match", "export"]
+    },
+    {
+      "name": "Оператор каталогов",
+      "description": "Загружает каталоги, проверяет пары и выгружает результат",
+      "grant": "WRITE",
+      "menus": ["matching", "mass_match", "export"]
+    }
+  ],
+  "assets": [
+    "templates/cm/wizard.html",
+    "templates/cm/matching.html",
+    "templates/cm/mass_match.html",
+    "templates/cm/settings.html",
+    "templates/cm/export.html",
+    "download/cm/js/xcom-wizard.js",
+    "download/cm/js/xcom-presets.js",
+    "download/cm/js/xcom-match.js",
+    "download/cm/js/xcom-review.js",
+    "download/cm/js/xcom-mass-match.js",
+    "download/cm/js/xcom-settings.js",
+    "download/cm/js/xcom-export.js",
+    "download/cm/css/xcom-wizard.css",
+    "download/cm/css/xcom-match.css",
+    "download/cm/css/xcom-mass-match.css",
+    "download/cm/css/xcom-settings.css",
+    "download/cm/css/xcom-export.css"
+  ],
+  "changelog": [
+    {
+      "version": "1.0.0",
+      "date": "2026-09-15",
+      "changes": "Первая версия шаблона базы: мастер, скоринг, пресеты, экспорт, ИИ-доуточнение и журнал решений."
+    }
+  ]
+}

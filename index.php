@@ -223,8 +223,13 @@ elseif($z==="auth.asp" && !empty($_GET['error'])){
     include "include/connection.php";
     login("", "", "oauthError", htmlspecialchars($_GET['error']));
 }
-elseif(!preg_match(DB_MASK, $z))
+elseif(!preg_match(DB_MASK, $z)){
+    # 404, а не 200: сюда попадает любой мусорный URL с вебрута (опечатки,
+    # удалённые *.html — у них точка в имени, DB_MASK её не пропускает).
+    # Ответ 200 плодил в Яндексе «малоценные» дубли на каждый битый адрес.
+    http_response_code(404);
     die("Invalid database");
+}
 
 # Callback асинхронного ИИ-агента (server-to-server, без сессии). Принимаем результат
 # здесь — до подключения к БД и до Validate_Token(); аутентификация — секрет per-job
@@ -664,6 +669,9 @@ define("SETTINGS_TYPE", 271);
 define("SETTINGS_VAL", 273);
 
 require_once __DIR__ . "/include/field_attrs.php";
+require_once __DIR__ . "/include/delimiters.php";
+require_once __DIR__ . "/include/json_archive.php";
+require_once __DIR__ . "/include/import_reconcile.php";
 # Default LIMIT parameter for queries with no filter
 define("DEFAULT_LIMIT", isset($_COOKIE["default_limit"])&&(int)$_COOKIE["default_limit"]>4&&(int)$_COOKIE["default_limit"]<1001?(int)$_COOKIE["default_limit"]:20);
 define("UPLOAD_DIR", "download/$z/");  # Uploaded files folder
@@ -807,6 +815,14 @@ function newDb($db, $template, $name, $email, $pwd){
 		$template = strtolower($template);
 	else
 		$template = "ru";
+	# Шаблон — это таблица MySQL, её заводят на сервере отдельно (docs/xcom-matching/template-db.md).
+	# Без проверки отсутствующая таблица даёт на CREATE ... LIKE ошибку 1146, а Exec_sql толкует её
+	# как «База $z не существует» и уводит на страницу входа: сообщение про НОВУЮ базу вместо шаблона.
+	if(!mysqli_fetch_array(Exec_sql("SHOW TABLES LIKE '$template'", "Check the template table exists"))){
+		$z = $oldz;
+		my_die(t9n("[RU]Шаблон «$template» не установлен на этом сервере"
+		        ."[EN]Template '$template' is not installed on this server"));
+	}
 	Exec_sql("CREATE TABLE $z LIKE $template", "Create the initial table");
 	Exec_sql("INSERT INTO $z SELECT * FROM $template", "Fill in the table by template");
 
@@ -2565,22 +2581,6 @@ function BuiltIn($par)
 	}
 	return $par;  # No matches found - return as is
 }
-function MaskDelimiters($v)
-{
-    return str_replace(";", "\;", str_replace(":", "\:", str_replace("\\", "\\\\", $v)));
-}
-function UnMaskDelimiters($v)
-{
-    return str_replace("\;", ";", str_replace("\:", ":", str_replace("\\\\", "\\", UnHideDelimiters($v))));
-}
-function HideDelimiters($v)
-{
-    return str_replace("\,", "%2C", str_replace("\;", "%3B", str_replace("\:", "%3A", str_replace("\\\\", "%5C", $v))));
-}
-function UnHideDelimiters($v)
-{
-    return str_replace("%2C", "\,", str_replace("%3B", "\;", str_replace("%3A", "\:", str_replace("%5C", "\\\\", $v))));
-}
 function constructHeader($id, $parent=0){
 	global $z;
 	if(!isset($GLOBALS["local_struct"][$id])){
@@ -2696,7 +2696,125 @@ function Export_reqs($id, $obj, $val, $ref=""){
 		}
 	}
 #my_die($id);
-	return $refs.$str.$children; // Refs declarations go first, before the object using them 
+	return $refs.$str.$children; // Refs declarations go first, before the object using them
+}
+/**
+ * issue #4968: запись таблицы для JSON-архива — то же, что даёт Export_reqs, но объектом.
+ *
+ * Отличия от BKI по существу формата:
+ *  - значения НЕ экранируются: границы задаёт JSON, `;`, `:`, `,` и перевод строки едут как есть;
+ *  - ссылки выгружаются ИМЕНАМИ целевых записей (мульти — массивом), а не их id, поэтому
+ *    архив переносится в другую базу без объявления id и без «курицы-яйца»;
+ *  - подчинённые таблицы (`arr`) в строку не вкладываются: они архивируются отдельно, как и в
+ *    сокращённом формате BKI (загрузка — своим файлом с F_U родителя).
+ */
+function Export_json_record($id, $obj, $val){
+	global $z;
+	$reqs = array();
+	$data_set = Exec_sql("SELECT DISTINCT obj.id, obj.t, obj.val, obj.ord, req.t req_t, req.val req_val, req.up rup
+							FROM $z obj LEFT JOIN $z req ON req.id=obj.t
+							WHERE obj.up=$obj ORDER BY obj.ord"
+						, "Get Obj data $id (json)");
+	while($row = mysqli_fetch_array($data_set)){
+		if(($row["rup"] != $id) && ($row["rup"] != 0)){	# Ссылка: obj.val — id реквизита, req.val — имя цели
+			if(!isset($reqs[$row["val"]]) || !is_array($reqs[$row["val"]]))
+				$reqs[$row["val"]] = array();
+			$reqs[$row["val"]][] = $row["req_val"];
+		}
+		elseif(isset($GLOBALS["arrays"][$row["t"]]))	# Подчинённая таблица — отдельный архив
+			continue;
+		elseif(!isset($GLOBALS["pwds"][$row["t"]]))	# Хэши паролей не выгружаются
+			$reqs[$row["t"]] = $row["val"];
+	}
+	$columns = JsonArchiveColumnsFromStruct($GLOBALS["local_struct"], $id);
+	$fields = array();
+	foreach($columns as $col){
+		if(($col["kind"] === "arr") || ($col["kind"] === "subst"))
+			continue;
+		if(!isset($reqs[$col["id"]]))
+			continue;
+		$value = $reqs[$col["id"]];
+		if($col["kind"] === "ref")
+			$value = $col["multi"] ? array_values($value) : $value[0];
+		$fields[JsonArchiveColumnKey($col, $columns)] = $value;
+	}
+	return array("val" => $val, "fields" => $fields);
+}
+/**
+ * issue #4968: свести колонки JSON-архива с колонками таблицы $id, недостающие — создать.
+ *
+ * Возвращает локальные колонки в порядке $GLOBALS["local_struct"][$id] (том же, в каком их
+ * перебирает разбор данных), привязанные к ключам полей архива — дальше строка архива
+ * раскладывается по ним JsonArchiveRowValues и едет в общий разбор сокращённого формата.
+ *
+ * Подчинённые таблицы (`arr`) не создаются и данными не заполняются: они архивируются
+ * отдельно и грузятся своим файлом с F_U записи-родителя.
+ */
+function JsonArchiveReconcile($doc, $id)
+{
+	$columns = JsonArchiveColumnsFromStruct($GLOBALS["local_struct"], $id);
+	$resolved = array();
+	foreach(JsonArchiveWantedColumns($doc) as $n => $want){
+		if(($want["kind"] === "arr") || ($want["kind"] === "subst"))
+			continue;
+		$local = JsonArchiveMatchColumn($want, $columns);
+		if(!$local){
+			trace(" json import: no column for ".$want["name"]." (".$want["kind"]."), creating");
+			$local = ($want["kind"] === "ref") ? JsonArchiveCreateRefReq($id, $want) : JsonArchiveCreateFieldReq($id, $want);
+			if(!$local)
+				continue;
+			$columns = JsonArchiveColumnsFromStruct($GLOBALS["local_struct"], $id);
+		}
+		$resolved[$n] = $local;
+	}
+	return JsonArchiveBindColumns($doc, $columns, $resolved);
+}
+# Создать обычный реквизит по описанию из архива и зарегистрировать его в структуре
+function JsonArchiveCreateFieldReq($id, $col)
+{
+	global $z;
+	$name = $col["name"];
+	if($name === "")
+		return 0;
+	$baseName = isset($GLOBALS["BT"][$col["base"]]) ? $col["base"] : "SHORT";
+	$base = $GLOBALS["BT"][$baseName];
+	$data_set = Exec_sql("SELECT id FROM $z WHERE val='".addslashes($name)."' AND up=0 AND id!=t AND t=$base", "Seek Req Typ (json)");
+	if($row = mysqli_fetch_array($data_set))
+		$typeId = $row["id"];
+	else
+		$typeId = Insert(0, 0, $base, $name, "Import json: new Type for Req");
+	$attrs = JsonArchiveAttrs($col);
+	$reqId = Insert($id, Get_Ord($id), $typeId, $attrs, "Import json: new Req");
+	$GLOBALS["local_struct"][$id][$reqId] = MaskDelimiters($name).":".$baseName.($attrs !== "" ? ":".MaskDelimiters($attrs) : "");
+	# Без этого Format_Val разбирает значение как SHORT: дата новой колонки легла бы текстом.
+	# Строкой — как кладёт constructHeader: разбор сверяет базу с "11" (BOOLEAN) через ===.
+	$GLOBALS["base"][$reqId] = (string)$base;
+	return $reqId;
+}
+# Создать ссылочный реквизит по описанию из архива; отсутствующую целевую таблицу — завести
+function JsonArchiveCreateRefReq($id, $col)
+{
+	global $z;
+	$target = ($col["target"] !== "") ? $col["target"] : $col["name"];
+	if($target === "")
+		return 0;
+	$row = mysqli_fetch_array(Exec_sql("SELECT id FROM $z WHERE up=0 AND id!=t AND val='".addslashes($target)."' ORDER BY id LIMIT 1"
+									, "Seek ref target type (json)"));
+	if($row)
+		$targetId = $row["id"];
+	else	# Целевой таблицы нет — заводим её пустой: записи в ней создаст разбор ссылок по именам
+		$targetId = Insert(0, 0, $GLOBALS["BT"]["SHORT"], $target, "Import json: new ref target type");
+	constructHeader($targetId);
+	$refRow = mysqli_fetch_array(Exec_sql("SELECT id FROM $z WHERE up=0 AND t=$targetId AND val='' LIMIT 1", "Seek ref row (json)"));
+	$refRow = $refRow ? $refRow["id"] : Insert(0, 0, $targetId, "", "Import json: new ref row");
+	$attrs = JsonArchiveAttrs($col);
+	$reqId = Insert($id, Get_Ord($id), $refRow, $attrs, "Import json: new ref Req");
+	$GLOBALS["local_struct"][$id][$reqId] = "ref:$reqId:$refRow".($attrs !== "" ? ":".MaskDelimiters($attrs) : "");
+	$GLOBALS["local_struct"][$refRow][0] = "$refRow:$targetId";
+	$GLOBALS["refs"][$reqId] = $targetId;
+	if(FieldAttrsHasMulti($attrs))
+		$GLOBALS["MULTI"][$reqId] = $targetId;
+	return $reqId;
 }
 function isRef($id, $par, $typ)
 {
@@ -5173,7 +5291,10 @@ function sendJsonHeaders($filename){
 function ResolveType($typ)
 {
 	global $z;
-	$data_set = Exec_sql("SELECT id FROM $z WHERE val='".addslashes($typ[1])."' AND up=0 AND t=".$GLOBALS["BT"][$typ[2]], "Seek Typ");
+	# Имя приехало из файла экранированным, а разбор строки заменил экранированные разделители
+	# маркерами. В базе имя лежит как есть, поэтому и ищется, и вставляется оно снятым.
+	$name = ImportDbName($typ[1]);
+	$data_set = Exec_sql("SELECT id FROM $z WHERE val='".addslashes($name)."' AND up=0 AND t=".$GLOBALS["BT"][$typ[2]], "Seek Typ");
 	if($row = mysqli_fetch_array($data_set))
 	{
 	    $id = $row["id"];
@@ -5181,8 +5302,10 @@ function ResolveType($typ)
 	}
 	else # No analogue, register the new one
 	{
-	    $id = Insert(0, (isset($typ[3])?"1":"0"), $GLOBALS["BT"][$typ[2]], $typ[1], "Insert type substitute");
-    	$GLOBALS["local_struct"][$id][0] = "$id:".MaskDelimiters($typ[1]).":".$GLOBALS["BT"][$typ[2]].(isset($typ[3])?":unique":"");
+	    $id = Insert(0, (isset($typ[3])?"1":"0"), $GLOBALS["BT"][$typ[2]], $name, "Insert type substitute");
+	    # Заголовок собирается так же, как его собирает constructHeader: имя экранировано,
+	    # базовый тип — ИМЕНЕМ, иначе заголовки местного и загружаемого типа не сравнить.
+    	$GLOBALS["local_struct"][$id][0] = "$id:".MaskDelimiters($name).":".$typ[2].(isset($typ[3])?":unique":"");
 	}
 	if($id != $typ[0])
 	{
@@ -6328,6 +6451,10 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 				die(t9n("[RU]Для удаления записей используйте метод POST[EN]Please use a POST request to delete records"));
 		    if(isset($_POST["bki"]) || isset($_GET["bki"]))
 				$GLOBALS["dataExport"] = Array();
+		    elseif(isset($_POST["json_export"]) || isset($_GET["json_export"])){	# issue #4968: тот же экспорт, формат JSON
+				$GLOBALS["dataExport"] = Array();
+				$GLOBALS["jsonExport"] = TRUE;
+		    }
 			if($f_u > 1){
 				if(isset($_REQUEST["_m_del_select"])){ # The user tries to drop the selection
         		    if($_SERVER["REQUEST_METHOD"] !== "POST")
@@ -6463,6 +6590,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 					die(t9n("[RU]Ошибка. Максимальный размер файла: $max_size Б[EN]The maximum file size is $max_size B)"));
 				$up = ($GLOBALS["parent_id"] > 1) ? $GLOBALS["parent_id"] : 1;
 				$handle = fopen($_FILES["bki_file"]["tmp_name"], "r");
+				$plain_data = $json_import = false;
 				$buffer = fgets($handle);
                 # Remove BOM, if exists
             	if(substr($buffer, 0, 3) == pack('CCC', 0xef, 0xbb, 0xbf))
@@ -6472,6 +6600,19 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 				    $plain_data = true; // Plain data with no definitions - the exact structure is already in place
 				    trace("Plain DATA");
 				    $i = $id;
+                }
+                elseif(substr(ltrim($buffer), 0, 1) === "{")
+                {	# issue #4968: JSON-архив — метаданные и данные одним документом
+                    try{
+                        $archive = JsonArchiveDecode(file_get_contents($_FILES["bki_file"]["tmp_name"]));
+                    }
+                    catch(JsonArchiveError $e){
+                        my_die(t9n("[RU]Архив не загружен: [EN]Archive not loaded: ").$e->getMessage());
+                    }
+                    $json_import = true;
+                    $plain_data = true;	// Строки архива едут в общий разбор данных
+                    trace("JSON archive, ".count($archive["rows"])." rows");
+                    $i = $id;
                 }
                 else
     				$i = (int)substr($buffer, 0, strpos($buffer, ":"));
@@ -6553,8 +6694,8 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
         				    else # The ID is free - create the Object with this ID
         				    {
         				        trace(" create the Object ".$obj);
-                                exec_sql("INSERT INTO $z (id, up, ord, t, val) VALUES ($obj, 0, ".(isset($typ[3])?"1":"0").", ".$GLOBALS["BT"][$typ[2]].", '".addslashes($typ[1])."')"
-                                            , "Import Obj with ID");
+                                exec_sql("INSERT INTO $z (id, up, ord, t, val) VALUES ($obj, 0, ".(isset($typ[3])?"1":"0").", ".$GLOBALS["BT"][$typ[2]].", '".addslashes(ImportDbName($typ[1]))."')"
+                                            , "Import Obj with ID");	# Имя в базе лежит без экранирования
                                 $GLOBALS["local_struct"][$obj][0] = $GLOBALS["imported"][$obj][0];
         				    }
         				if(feof($handle))
@@ -6573,30 +6714,16 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
     				            continue;
     				        trace(" Imported req $order ".$reqs[$order]);
     			            $typ = UnHideDelimiters(explode(":",  HideDelimiters($req)));
-    			            $value = $typ[0].":".CheckSubst($typ[1]);
-    			            if($typ[0] == "ref")
-    			            {
-    			                trace($typ[1]." is a ref");
-    	    		            $value .= $typ[2];
-    			            }
-    			            $found = false;
-    			            foreach($GLOBALS["local_struct"][$parent] as $local_type => $local_value)
-    			                if($found = ($value == substr($local_value, 0, strlen($value))))
-    			                    break;
-    				        if($found)
+    			            $subst = isset($GLOBALS["local_struct"]["subst"]) ? $GLOBALS["local_struct"]["subst"] : Array();
+    			            $value = ImportReqSignature($typ, $subst);
+    			            $local_type = ImportMatchLocalReq($value, $GLOBALS["local_struct"][$parent]);
+    				        if($local_type)
     				        {
-        				        trace("  match found for $value");
-        				        if($req == $local_value)
-            				        trace("   this is a full match $req => $local_value");
-        				        else
-        				        {
-            				        trace("   adjust $req => $local_value");
-        				            $local = UnHideDelimiters(explode(":",  HideDelimiters($local_value)));
-        				        }
-        				        if($typ[0] == "ref")
-            				        $GLOBALS["local_types"][$par][$order] = $typ[2];
-            				    else
-            				        $GLOBALS["local_types"][$par][$order] = $local_type;
+    				            $local_value = $GLOBALS["local_struct"][$parent][$local_type];
+        				        trace("  match found for $value: $req => $local_value");
+        				        # Разбор данных ждёт здесь id РЕКВИЗИТА: он идёт в t/val строки данных
+        				        # (Insert_batch) и по нему же смотрятся $GLOBALS["refs"] и ["MULTI"].
+        				        $GLOBALS["local_types"][$par][$order] = $local_type;
     				        }
     				        elseif($typ[0] == "ref")
     				        {
@@ -6638,10 +6765,12 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                                     exec_sql("INSERT INTO $z (id, up, ord, t, val) VALUES ($reqID, $parent, $order, $refID, '')", "Import ref Req with ID");
                                 trace("  attrs:".(isset($typ[3])?UnMaskDelimiters($typ[3]):""). " - multi");
 								if(FieldAttrsHasMulti(isset($typ[3])?UnMaskDelimiters($typ[3]):"")){
-									$GLOBALS["MULTI"][$reqID] = $refID;
-									trace("set $reqID = $refID MULTI");
+									$GLOBALS["MULTI"][$reqID] = $obj;
+									trace("set $reqID = $obj MULTI");
 								}
-    	    		            $GLOBALS["refs"][$reqID] = $refID;
+    	    		            # По id реквизита лежит ЦЕЛЕВОЙ ТИП ссылки — так же, как это делает
+    	    		            # constructHeader; разбор данных берёт отсюда тип создаваемой записи.
+    	    		            $GLOBALS["refs"][$reqID] = $obj;
                                 $GLOBALS["local_types"][$par][$order] = CheckSubst($reqID);
     				        }
     				        elseif($typ[0] == "arr")
@@ -6656,13 +6785,17 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
         				    else # A plain req - find an analogue or register the new one
         				    {
         				        trace("   $req is a plain req - find an analogue or register the new one");
-    							$data_set = Exec_sql("SELECT id FROM $z WHERE val='".addslashes($typ[0])."' AND up=0 AND id!=t AND t=".$GLOBALS["BT"][$typ[1]], "Seek Req Typ");
+    							# Имя реквизита сравнивается с базой снятым: в файле оно экранировано,
+    							# а разбор строки спрятал экранированные разделители в маркеры.
+    							$name = ImportDbName($typ[0]);
+    							$data_set = Exec_sql("SELECT id FROM $z WHERE val='".addslashes($name)."' AND up=0 AND id!=t AND t=".$GLOBALS["BT"][$typ[1]], "Seek Req Typ");
     							if($row = mysqli_fetch_array($data_set))	# The Type of the Req exists - add the Req to the Type
     								$i = $row["id"];
     							else	# No analogue, register the new one
-    								$i = Insert(0, 0, $GLOBALS["BT"][$typ[1]], $typ[0], "Import new Type for Req");
+    								$i = Insert(0, 0, $GLOBALS["BT"][$typ[1]], $name, "Import new Type for Req");
     							$i = Insert($parent, Get_Ord($parent), $i, isset($typ[2])?UnMaskDelimiters($typ[2]):"", "Import new Req");
     							$GLOBALS["local_struct"][$parent][$i] = $req;	# Register the new Req
+    							$GLOBALS["base"][$i] = (string)$GLOBALS["BT"][$typ[1]];	# Значения этой колонки форматируются по её базовому типу
         				        $GLOBALS["local_types"][$par][$order] = $i;
         				    }
         		        }
@@ -6671,6 +6804,10 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 				trace("Data");
 #print_r($GLOBALS);my_die();
 				$GLOBALS["cur_parent"][0] = $up;
+				if($json_import){	# issue #4968: свести колонки архива со структурой таблицы, недостающие создать
+					$jsonColumns = JsonArchiveReconcile($archive, $id);
+					$jsonRow = 0;
+				}
 				if($plain_data){
 				    $getParent = FALSE;
 					if(isset($GLOBALS["cur_parent"][$GLOBALS["parents"][$id]])){
@@ -6708,25 +6845,38 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 					$isUnique = $GLOBALS["uniq"][$id] === "1";
 					$keyReqsForDelete = UniqueKeyReqs($id);
 				    trace("$id is ".($isUnique?"":"not ")."unique");
-    				while(!feof($handle)){
-    					$buffer = fgets($handle);	# Read the line
-    					if(strlen($buffer)==0)
-    						continue;
-    					$object = UnHideDelimiters(explode(";", HideDelimiters($buffer)));	# Get fields array
+    				while($json_import ? ($jsonRow < count($archive["rows"])) : !feof($handle)){
+    					if($json_import){	# issue #4968: строка архива — тот же позиционный массив, что и строка файла
+    					    try{
+        					    $object = JsonArchiveRowValues($archive["rows"][$jsonRow++], $jsonColumns, $getParent);
+    					    }
+    					    catch(JsonArchiveError $e){
+    					        my_die(t9n("[RU]Строка $jsonRow архива: [EN]Archive row $jsonRow: ").$e->getMessage());
+    					    }
+    					    $buffer = "JSON #$jsonRow";
+    					}
+    					else{
+        					$buffer = fgets($handle);	# Read the line
+        					if(strlen($buffer)==0)
+        						continue;
+        					$object = UnHideDelimiters(explode(";", HideDelimiters($buffer)));	# Get fields array
+    					}
                         if($object[0] == ""){
                             // issue #2522: if the Type has uniqueness defined by composite key reqs, an emptied
                             // first column means the source row was cleared — find the existing record by the
                             // remaining columns and delete it. Without uniqueness keep the legacy skip behavior.
                             if(count($keyReqsForDelete) && !$getParent){
-                                while(count($object) <= $typesCount){	# There might be line breaks
-                                    if(feof($handle))
-                                        my_die(t9n("[RU]Неожиданный конец файла [EN]Unexpected end of file"));
-                                    $buffer .= fgets($handle);
-                                    $object = UnHideDelimiters(explode(";", HideDelimiters($buffer)));
-                                    $count++;
+                                if(!$json_import){	# в архиве строка уже целая — дочитывать и подрезать нечего
+                                    while(count($object) <= $typesCount){	# There might be line breaks
+                                        if(feof($handle))
+                                            my_die(t9n("[RU]Неожиданный конец файла [EN]Unexpected end of file"));
+                                        $buffer .= fgets($handle);
+                                        $object = UnHideDelimiters(explode(";", HideDelimiters($buffer)));
+                                        $count++;
+                                    }
+                                    end($object);
+                                    $object[key($object)] = rtrim(current($object), "\t\n\r\0\x0B");
                                 }
-                                end($object);
-                                $object[key($object)] = rtrim(current($object), "\t\n\r\0\x0B");
                                 // Build composite key values from the remaining columns
                                 $keyValuesForDelete = array();
                                 $ord = 0;
@@ -6735,7 +6885,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                                     $ord++;
                                     if(!isset($keyReqsForDelete[$reqId])) continue;
                                     $req = $keyReqsForDelete[$reqId];
-                                    $rawVal = isset($object[$ord]) ? UnMaskDelimiters($object[$ord]) : "";
+                                    $rawVal = ImportField($object, $ord, $json_import);
                                     $keyValuesForDelete[$reqId] = $req["ref_id"]
                                         ? UniqueKeyNormalizeRefs($req, $rawVal)
                                         : array("kind" => "value", "value" => UniqueKeyNormalizeValue($req["t"], $rawVal));
@@ -6760,28 +6910,30 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                             #my_die(t9n("[RU]Пустой объект типа $id (строка $count)[EN]Empty object of type $id (string $count)"));
                             continue;
                         }
-    					while(count($object) <= $typesCount)	# There might be line breaks
-    					{
-    					    if(feof($handle))
-    					        my_die(t9n("[RU]Неожиданный конец файла [EN]Unexpected end of file"));
-    						$buffer .= fgets($handle);	# Continue retrieving lines until we collect all the Reqs
-    						$object = UnHideDelimiters(explode(";", HideDelimiters($buffer)));
-        					$count++;
+    					if(!$json_import){	# в архиве строка уже целая — дочитывать и подрезать нечего
+        					while(count($object) <= $typesCount)	# There might be line breaks
+        					{
+        					    if(feof($handle))
+        					        my_die(t9n("[RU]Неожиданный конец файла [EN]Unexpected end of file"));
+        						$buffer .= fgets($handle);	# Continue retrieving lines until we collect all the Reqs
+        						$object = UnHideDelimiters(explode(";", HideDelimiters($buffer)));
+            					$count++;
+        					}
+        					end($object);
+        					$object[key($object)] = rtrim(current($object), "\t\n\r\0\x0B"); // Remove CR, LF and other ending chars, if any
     					}
-    					end($object);
-    					$object[key($object)] = rtrim(current($object), "\t\n\r\0\x0B"); // Remove CR, LF and other ending chars, if any
     					unset($existing);
         				trace("(".$count++.") Buffer: $buffer");
     					if($getParent){
     					    $orid = is_numeric($object[0]) ? "OR par.id=".(int)$object[0] : "";
     					    $sql = "SELECT par.id, max(reqs.ord) ord FROM $z par LEFT JOIN $z reqs ON reqs.up=par.id AND reqs.t=$id "
-    					                ."WHERE par.t=$parentType AND (par.val='".addcslashes(Format_Val($parentBase,UnMaskDelimiters($object[0])), "\\\'")."' $orid)  HAVING par.id IS NOT NULL";
+    					                ."WHERE par.t=$parentType AND (par.val='".addcslashes(Format_Val($parentBase, ImportField($object, 0, $json_import)), "\\\'")."' $orid)  HAVING par.id IS NOT NULL";
 							if($row = mysqli_fetch_array(Exec_sql($sql, "Get the parent and order for this rec"))){
 							    $parent = $row["id"];
 							    $cur_order = 1+$row["ord"];
 							}
 						    elseif(isset($_POST["createParent"])){
-						        $parent = Insert(1, 1, $parentType, addcslashes(Format_Val($parentBase,UnMaskDelimiters($object[0])), "\\\'"), "Auto create parent");
+						        $parent = Insert(1, 1, $parentType, addcslashes(Format_Val($parentBase, ImportField($object, 0, $json_import)), "\\\'"), "Auto create parent");
 						        $cur_order = 1;
 						    }
 						    else{
@@ -6801,7 +6953,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 						                $ord++;
 						                if(!isset($keyReqsForDelete[$reqId])) continue;
 						                $req = $keyReqsForDelete[$reqId];
-						                $rawVal = isset($object[$ord]) ? UnMaskDelimiters($object[$ord]) : "";
+						                $rawVal = ImportField($object, $ord, $json_import);
 						                $keyValuesForDelete[$reqId] = $req["ref_id"]
 						                    ? UniqueKeyNormalizeRefs($req, $rawVal)
 						                    : array("kind" => "value", "value" => UniqueKeyNormalizeValue($req["t"], $rawVal));
@@ -6832,11 +6984,14 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 						        continue;
 						    }
     					}
-    					$object[0] = Format_Val($GLOBALS["base"][$id], UnMaskDelimiters($object[0]));
+    					$object[0] = Format_Val($GLOBALS["base"][$id], ImportField($object, 0, $json_import));
 					    $reqs = Array();
 					    $ids = Array();
 					    $dupKey = NULL;
-    					$keyReqs = UniqueKeyReqs($id);
+    					# Состав ключа уникальности от строки к строке не меняется — он снят один раз
+    					# перед циклом ($keyReqsForDelete). Запрос на КАЖДУЮ строку файла давал лишний
+    					# SELECT на запись: на импорте в 10k строк — 10k запросов ни за чем.
+    					$keyReqs = $keyReqsForDelete;
     					if($isUnique || count($keyReqs)){
     					    if(count($keyReqs)){
     					        // Build key values from CSV columns to support composite uniqueness key
@@ -6847,7 +7002,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
     					            $ord++;
     					            if(!isset($keyReqs[$reqId])) continue;
     					            $req = $keyReqs[$reqId];
-    					            $rawVal = isset($object[$ord]) ? UnMaskDelimiters($object[$ord]) : "";
+    					            $rawVal = ImportField($object, $ord, $json_import);
     					            $keyValues[$reqId] = $req["ref_id"]
     					                ? UniqueKeyNormalizeRefs($req, $rawVal)
     					                : array("kind" => "value", "value" => UniqueKeyNormalizeValue($req["t"], $rawVal));
@@ -6922,9 +7077,11 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                             if($key == 0)
                                 continue;
                             $order++;
-        				    trace(" Parse $key ".$object[$order]." of $value");
-    						if(strlen($object[$order])){
-    						    $val = Format_Val(isset($GLOBALS["base"][$key]) ? $GLOBALS["base"][$key] : "3", UnMaskDelimiters($object[$order]));
+        				    trace(" Parse $key ".(is_array($object[$order]) ? implode(",", $object[$order]) : $object[$order])." of $value");
+    						if(ImportHasValue($object, $order)){
+    						    $raw = ImportField($object, $order, $json_import);
+    						    # У мульти-ссылки значение — массив имён, форматировать его нечем и незачем
+    						    $val = is_array($raw) ? "" : Format_Val(isset($GLOBALS["base"][$key]) ? $GLOBALS["base"][$key] : "3", $raw);
             				    trace(" isset(existing)=".isset($existing)." && isset(reqs[$key])=".isset($reqs[$key]));
     							if(isset($GLOBALS["refs"][$key])){ // Reference object
                 				    trace(" Reference object $key");
@@ -6941,13 +7098,18 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                 						Drop_batch_column($new_id, BATCH_MULTI, $key);
             						}
             						else{
-        						        if(isset($GLOBALS["MULTI"][$key]))
+        						        if(is_array($raw))	# issue #4968: в JSON-архиве мульти-ссылка — массив имён
+        						            $multies = $raw;
+        						        elseif(isset($GLOBALS["MULTI"][$key]) && !$json_import)
         						            $multies = UnHideDelimiters(explode(",", HideDelimiters($object[$order])));	# Get multiselect items set
         						        else
-        						            $multies = array($object[$order]);
+        						            $multies = array($raw);
         					            $ord = 1;
                     					foreach($multies as $ref){
-                    					    $ref = trim($ref);
+                    					    # Имя цели приходит экранированным, как и значения обычных колонок: без снятия
+                    					    # экранирования цель с ":" или ";" в имени не находится и создаётся дублем —
+                    					    # при том, что поиск дубля по ключу (UniqueKeyNormalizeRefs) её как раз находит.
+                    					    $ref = trim($json_import ? $ref : UniqueKeyUnmaskRefValue($ref));
                     					    # issue #4140: сначала разрешаем имя в id цели — из кэша имён этого импорта,
                     					    # затем из базы, и только потом создаём. Кэш экономит SELECT, но НЕ должен
                     					    # менять решение «заменить или добавить», которое принимается ниже.
@@ -7077,8 +7239,15 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 								    }
 								    if(!isset($GLOBALS["local_types"][$key])) // Remember the $key to fetch it faster
 								    {
-    								    $tmp = explode(":", $GLOBALS["local_struct"][$key][0]);
-								        $GLOBALS["local_types"][$key] = $tmp[1];
+								        # $key — id реквизита, и целевой тип ссылки лежит по нему в refs
+								        # (constructHeader). Запись в local_struct есть у строки-посредника,
+								        # поэтому она остаётся запасным путём.
+    								    $refType = (int)$GLOBALS["refs"][$key];
+    								    if(!$refType && isset($GLOBALS["local_struct"][$key][0])){
+        								    $tmp = explode(":", $GLOBALS["local_struct"][$key][0]);
+    									    $refType = (int)$tmp[1];
+    								    }
+								        $GLOBALS["local_types"][$key] = $refType;
 								    }
 								    $refType = $GLOBALS["local_types"][$key];
 								    if(!($refType > 0))
@@ -7532,7 +7701,9 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 			while($row = mysqli_fetch_array($data_set))
 			{
     			if(isset($GLOBALS["dataExport"])){
-    				$GLOBALS["dataExport"][] = Export_reqs($id, $row["id"], $row["val"]);
+    				$GLOBALS["dataExport"][] = isset($GLOBALS["jsonExport"])
+    				                            ? Export_json_record($id, $row["id"], $row["val"])
+    				                            : Export_reqs($id, $row["id"], $row["val"]);
     				#$str = Export_reqs($id, $row["id"], $row["val"]);
     				#fwrite($GLOBALS["CSV_handler"], $str);
 #{print($head_str);}#print_r($GLOBALS["data"]);print_r($GLOBALS);die();}
@@ -7639,6 +7810,20 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 			if(isset($_REQUEST["csv"])){
 				fclose($GLOBALS["CSV_handler"]);
 				echo ob_get_clean();
+				die();
+			}
+			elseif(isset($GLOBALS["jsonExport"])){	# issue #4968: метаданные и данные одним JSON-документом
+				sendJsonHeaders("data_export.json");
+				while(ob_get_level())	# в файл уходит ровно документ, без разметки страницы
+					ob_end_clean();
+				echo JsonArchiveEncode(array(
+					"format" => JSON_ARCHIVE_FORMAT,
+					"version" => JSON_ARCHIVE_VERSION,
+					"db" => $z,
+					"exported" => date("c"),
+					"table" => (int)$id,
+					"types" => JsonArchiveTypesFromStruct($GLOBALS["local_struct"]),
+					"rows" => $GLOBALS["dataExport"]));
 				die();
 			}
 			elseif(isset($GLOBALS["dataExport"])){

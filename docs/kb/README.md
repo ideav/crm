@@ -18,10 +18,12 @@
 | Запросы/отчёты `report/` | [queries.md](queries.md) | report, JSON_KV, FR_, TO_, колонка t28/t100/t104, SET-запрос, формула-фильтр |
 | Роли, права, меню | [roles.md](roles.md) | роль 42, юзер 18, меню 151, гранты 116/136, маска, объект FILE |
 | Файлы сервера `dir_admin` | [files.md](files.md) | dir_admin, del[], mkdir, touch, upload, gf, ?JSON=1, безопасность, задачи cron |
-| Деплой: update.php, PR, worktree | [deploy.md](deploy.md) | update.php, update.conf, форк unidel2035, git worktree, ветки |
+| Деплой: update.php, PR, worktree | [deploy.md](deploy.md) | update.php, update.conf, форк unidel2035, git worktree, ветки, шаблон базы, TEMPLATES, newDb |
 | Дэшборд / финмодель `dash` | [dashboard.md](dashboard.md) | Дэшборд 559, Лист, Панель, RG, Строка, Значение, period, RGtype, RGcolumns, Метка, формулы, словарь периодов |
+| Дэшборд: устройство кода и развитие | [dashboard-dev.md](dashboard-dev.md) | dash.js, dash-optimize.js, dash-import, конвейер загрузки, data-src, формулы, eval, правка ячеек, viz-настройки, плитки, opti, развитие дэшборда, подсветка влияющих ячеек |
 | Компонент таблиц (data-grid) | [table-component.md](table-component.md) | integram-table, data-integram-table, data-api-url, фильтры, инлайн-правка, экспорт, вставка из буфера, paste-data-btn, build.sh |
 | Импорт батчем `import=1` | [import.md](import.md) | bki_file, DATA, plain_data, формат строк, завершающий `;`, чанки 8МБ, upsert |
+| Архив таблицы: BKI и JSON | [json-archive.md](json-archive.md) | json_export, integram-archive, метаданные+данные, types, reqs, target, сведение колонок, перенос между базами |
 | Иерархический OLTP (разрезы) | [hierarchical-oltp.md](hierarchical-oltp.md) | разрез, частотность групп, накопитель меры, агрегаты, up-уровни |
 
 **Соседние справочники (не дублируем — ссылаемся):**
@@ -67,10 +69,16 @@
 | `Uncaught SyntaxError: Unexpected token '<'` на своём `.js` | файл под `assets/` — каталога нет в `update.conf`, сервер отдаёт HTML; вендорное класть в `js/` | [deploy.md](deploy.md) |
 | пред-авторизационная ручка отвечает `401 No authorization token provided` | ветки на сервере нет — `index.php` старее фичи (он не в `update.conf`), выкладывать отдельно | [deploy.md](deploy.md) |
 | страница пустая, при `?debug` в тексте сырые `{_block_..&имя}` | шаблон уехал вперёд ядра: разбор блока рвётся на первой точке вставки без значения — новую переменную ядра держать в отдельном подблоке через `{_parent_.ИМЯ}` | [deploy.md](deploy.md) |
+| в ЛК выбран шаблон, а база вышла обычной русской | имени нет в `TEMPLATES` — `newDb()` молча подставляет `ru`; `include/connection.php` выкладывается вручную | [deploy.md](deploy.md) |
+| база из шаблона открывается без стилей и скриптов | нет каталогов `templates/custom/<шаблон>` и `download/<шаблон>` — `cp -r` в `newDb()` копировать нечего | [deploy.md](deploy.md) |
 | правки в `integram-table.js` пропадают | это сгенерированный бандл — править модули + `build.sh` | [table-component.md](table-component.md) |
 | таблица не фильтрует по родителю | прокинуть `F_U`/`up`/`F_I` в URL | [table-component.md](table-component.md) |
 | импорт «склеивает» строки в одно поле | нет завершающего `;` в строке данных | [import.md](import.md) |
 | импорт >8 МБ отклоняется | лимит файла 8 МБ — бить на чанки | [import.md](import.md) |
+| после выгрузки и загрузки обратно `%3B`/`%3A` в значении превратились в `;`/`:` | маркеры экранирования BKI совпадали с обычным текстом — теперь `\x01..\x04`, в JSON-архиве экранирования нет | [json-archive.md](json-archive.md) |
+| значения колонки даты приехали в одноимённую колонку даты-времени | колонка искалась по ПРЕФИКСУ подписи, базовый тип в ней последний | [json-archive.md](json-archive.md) |
+| импорт падает «Тип N отсутствует в мета-данных» на колонке-ссылке | целевой тип ссылки лежит в `refs[<реквизит>]`, а не в `local_struct` по id реквизита | [json-archive.md](json-archive.md) |
+| после импорта два типа с одинаковым на вид именем | имя из файла сравнивалось с базой экранированным, с маркерами внутри | [json-archive.md](json-archive.md) |
 
 ## Как дополнять (правило для всех агентов)
 

@@ -70,8 +70,10 @@ assertEqual(
     'в отклонения не попали выполненные в срок, ожидающие сегодня, будущие и незапланированные'
 );
 assertEqual(planning.deviationGroups(cuts, Infinity).overdue.length, 0, 'без текущей даты групп нет');
-assertEqual(planning.deviationGroups([], TODAY), { overdue: [], early: [], earlyRun: [], shiftClosed: [] },
-    'пустая очередь — пустые группы (#4584: «делается раньше плана», #4596: «смена закрыта»)');
+assertEqual(planning.deviationGroups([], TODAY),
+    { overdue: [], early: [], earlyRun: [], earlySetup: [], shiftClosed: [] },
+    'пустая очередь — пустые группы (#4584: «делается раньше плана», #4596: «смена закрыта», '
+    + '#4962: «наладка сделана заранее»)');
 
 // ── planTsSeconds ─────────────────────────────────────────────────────────────
 assertEqual(planning.planTsSeconds(String(ts(22, 8))), ts(22, 8), 'unix-штамп в секундах — как есть');

@@ -1,0 +1,73 @@
+<link rel="stylesheet" href="/download/{_global_.z}/css/xcom-match.css?{_global_.version}.2">
+
+<div id="xcom-match-app"
+     class="xcom-match"
+     data-db="{_global_.z}"
+     data-sku-table="2032189"
+     data-match-report="Сопоставление">
+    <section class="xcom-match-search-panel" aria-label="Поиск SKU для строки RFP">
+        <form id="xcom-match-search-form" class="xcom-match-search-form">
+            <div class="xcom-match-search-head">
+                <div>
+                    <h1>Подбор из каталога поставщика</h1>
+                    <p>Поиск по первым трем полям таблицы RFP</p>
+                </div>
+                <div class="xcom-match-actions">
+                    <button id="xcom-match-reset" class="xcom-match-btn xcom-match-btn-secondary" type="button" title="Очистить">
+                        <i class="pi pi-times"></i>
+                        <span>Очистить</span>
+                    </button>
+                    <button class="xcom-match-btn xcom-match-btn-primary" type="submit" title="Найти">
+                        <i class="pi pi-search"></i>
+                        <span>Найти</span>
+                    </button>
+                </div>
+            </div>
+            <div id="xcom-match-fields" class="xcom-match-fields">
+                <div class="xcom-match-loading">
+                    <span class="xcom-match-spinner"></span>
+                    <span>Загрузка полей каталога...</span>
+                </div>
+            </div>
+        </form>
+    </section>
+
+    <div class="xcom-match-grid">
+        <section class="xcom-match-pane" aria-labelledby="xcom-match-sku-title">
+            <div class="xcom-match-pane-head">
+                <div>
+                    <h2 id="xcom-match-sku-title">Найденные RFP</h2>
+                    <span id="xcom-match-sku-summary" class="xcom-match-summary">До 20 записей</span>
+                </div>
+            </div>
+            <div id="xcom-match-sku-results" class="xcom-match-table-wrap">
+                <div class="xcom-match-empty">Введите данные строки RFP и нажмите «Найти».</div>
+            </div>
+        </section>
+
+        <section class="xcom-match-pane" aria-labelledby="xcom-match-report-title">
+            <div class="xcom-match-pane-head">
+                <div>
+                    <h2 id="xcom-match-report-title">Результаты сопоставления</h2>
+                    <span id="xcom-match-report-summary" class="xcom-match-summary">Выберите RFP из списка</span>
+                </div>
+            </div>
+            <div class="xcom-match-reviewbar" aria-label="Проверка спорных пар">
+                <button id="xcom-match-llm-refine" class="xcom-match-btn xcom-match-btn-secondary" type="button" disabled>
+                    <i class="pi pi-sparkles"></i><span>Доуточнить серую зону</span>
+                </button>
+                <span id="xcom-match-review-status" role="status" aria-live="polite">Выберите строку RFP.</span>
+            </div>
+            <div id="xcom-match-report-results" class="xcom-match-table-wrap">
+                <div class="xcom-match-empty">Выберите строку RFP слева, чтобы подобрать сопоставление.</div>
+            </div>
+            <details id="xcom-match-history" class="xcom-match-history">
+                <summary>История решений по этой позиции</summary>
+                <div id="xcom-match-history-list">Решений пока нет.</div>
+            </details>
+        </section>
+    </div>
+</div>
+
+<script src="/download/{_global_.z}/js/xcom-match.js?{_global_.version}.2" defer></script>
+<script src="/download/{_global_.z}/js/xcom-review.js?{_global_.version}.1" defer></script>

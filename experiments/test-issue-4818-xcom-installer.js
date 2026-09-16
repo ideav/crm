@@ -11,14 +11,28 @@ const installer = fs.readFileSync(path.join(root, 'docs/create_xcom_matching.ps1
 
 assert.strictEqual(manifest.slug, 'xcom-matching');
 assert.strictEqual(manifest.schema_version, 1);
-assert.deepStrictEqual(manifest.workspaces, ['wizard', 'matching', 'mass_match', 'settings', 'export']);
-assert.deepStrictEqual(manifest.reports, ['mass_match', 'Сопоставление', 'matching_export']);
+assert.deepStrictEqual(manifest.workspaces, ['wizard', 'matching', 'mass_match', 'tokens', 'settings', 'export']);
+assert.deepStrictEqual(manifest.reports,
+    ['mass_match', 'Сопоставление', 'matching_export', 'token_usage', 'Токенизация SKU', 'Токенизация RFP']);
+// Манифест — опись версии: каждое рабочее место и отчёт обязаны ставиться
+// инсталлятором, иначе партнёр получит пункт меню без страницы или наоборот.
+const reportNames = new Set(reports.map(report => report.name));
+manifest.reports.forEach(name => assert(reportNames.has(name), `отчёт ${name} описан в xcom_reports.json`));
+manifest.workspaces.forEach(name => assert(
+    manifest.assets.includes(`templates/xcom/${name}.html`), `рабочее место ${name} входит в ассеты`));
 assert.deepStrictEqual(manifest.roles.map(role => role.name), ['Партнёр', 'Оператор каталогов']);
 manifest.assets.forEach(asset => assert(fs.existsSync(path.join(root, asset)), `manifest asset exists: ${asset}`));
 
 const tables = new Map(metadata.map(table => [table.val, table]));
-['SKU', 'RFP', 'Токен', 'Токен SKU', 'Токен RFP', 'Настройка сопоставления', 'Решение по паре', 'Журнал развёртывания', 'Профиль загрузки']
+['SKU', 'RFP', 'Токен', 'Настройка сопоставления', 'Решение по паре', 'Журнал развёртывания', 'Профиль загрузки']
     .forEach(name => assert(tables.has(name), `schema contains ${name}`));
+// Стороны связываются общим справочником токенов через МНОЖЕСТВЕННУЮ ссылку —
+// так устроен рабочий кейс; таблиц-связок нет, и отчёт обходится без FROM.
+['SKU', 'RFP'].forEach(name => {
+    const link = tables.get(name).reqs.find(req => req.val === 'Токен');
+    assert(link && link.ref === tables.get('Токен').id, `${name} ссылается на справочник токенов`);
+    assert(JSON.parse(link.attrs || '{}').multi === true, `ссылка ${name}.Токен множественная`);
+});
 ['Наш артикул', 'Кандидаты', 'Точность подбора', 'ИИ-вердикт']
     .forEach(name => assert(tables.get('RFP').reqs.some(req => req.val === name), `RFP contains ${name}`));
 ['RFP ID', 'SKU ID', 'Решение', 'Дата', 'Кто', 'Источник']
@@ -28,7 +42,10 @@ const reportMap = new Map(reports.map(report => [report.name, report]));
 assert(reportMap.has('mass_match'));
 assert(reportMap.has('Сопоставление'));
 assert(reportMap.has('matching_export'));
-assert(reportMap.get('mass_match').joins.length >= 3, 'mass report includes the token joins');
+assert(!reportMap.get('mass_match').joins, 'подбор идёт по общему справочнику токенов, а не через FROM-связки');
+['Вес', 'ТММ'].forEach(name => assert(
+    reportMap.get('mass_match').columns.some(column => column.name === name && column.computed === true),
+    `mass report считает ${name} вычисляемой колонкой — её читают рабочие места`));
 assert(reportMap.get('Сопоставление').inherits === 'mass_match', 'manual report reuses mass report definition');
 assert(reportMap.get('matching_export').columns.some(column => column.name === 'Наш артикул'));
 
