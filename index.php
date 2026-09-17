@@ -8314,6 +8314,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 				myexit();
 			}
 			$blocks[$block]["sessions"][] = count(Get_processlist());
+			$blocks[$block]["crontasks"][] = count(Get_crontab());
 			$fname = isset($_REQUEST["dir_name"])?strtolower(trim($_REQUEST["dir_name"])):"";
 			if(isset($_REQUEST["mkdir"]))
 			{
@@ -8597,6 +8598,18 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 			}
 			break;
 
+		# Задачи cron этой базы (блок crontab-dir-admin)
+		case "&cronlist":
+			if(RepoGrant() == "BARRED")
+				break;
+			foreach(Get_crontab() as $task)
+			{
+				$blocks[$block]["schedule"][] = Crontab_html($task["schedule"]);
+				$blocks[$block]["command"][] = Crontab_html(Crontab_text($task["command"]));
+				$blocks[$block]["note"][] = Crontab_html(Crontab_text($task["note"]));
+			}
+			break;
+
 		case "&settings":
 			$sql = "SELECT sets.id, typ.val type, val.val settings FROM $z sets JOIN $z typ ON typ.up=sets.id AND typ.t=".SETTINGS_TYPE
                     ." LEFT JOIN $z val ON val.up=sets.id AND val.t=".SETTINGS_VAL
@@ -8760,6 +8773,130 @@ function Kill_processlist($pid)
     return t9n("[RU]Не удалось снять сессию $pid[EN]Couldn't kill session $pid");
 }
 # </processlist-4590>
+# <crontab-dir-admin>
+# Задачи cron в рабочем месте dir_admin: что и когда сервер запускает для этой базы.
+#
+# Задачи всех баз живут в одном crontab пользователя сайта, а в строке запуска бывают токены и
+# адреса вебхуков. Владельцу базы показываем только задачи его базы — по имени базы там, куда его
+# ставит сам Интеграм: параметр db=<база> (b24ig.php?db=…, CLI --db=…), первый сегмент адреса
+# https://сервер/<база>/… и папки базы templates/custom/<база>/, download/<база>/.
+# «Отдельным словом», как у сессий MySQL, искать нельзя: база ru совпала бы с каждым адресом
+# ideav.ru, база data — с каждым путём /var/www/www-root/data/. admin видит все задачи.
+# Секреты маскируются ДО обрезки строки, значения экранируются от HTML.
+
+define("CRONTAB_TEXT_CHARS", 300);   # сколько символов команды показываем
+
+function Crontab_sees_all()
+{
+    return isset($GLOBALS["GLOBAL_VARS"]["user"]) && ($GLOBALS["GLOBAL_VARS"]["user"] == "admin");
+}
+
+# Строки crontab → задачи: расписание, команда и пояснение (комментарий строкой выше).
+# Пустые строки, комментарии и переменные окружения (MAILTO=…) задачами не считаются.
+function Crontab_parse($lines)
+{
+    $tasks = array();
+    $note = "";
+    foreach((array)$lines as $line)
+    {
+        $line = trim(str_replace("\r", "", (string)$line));
+        if($line === "")
+        {
+            $note = "";
+            continue;
+        }
+        if($line[0] === "#")
+        {
+            $note = trim(substr($line, 1));
+            continue;
+        }
+        if(preg_match('/^(@(?:reboot|yearly|annually|monthly|weekly|daily|midnight|hourly))\s+(.+)$/', $line, $m))
+            $tasks[] = array("schedule" => $m[1], "command" => $m[2], "note" => $note);
+        elseif(!preg_match('/^[A-Za-z_][A-Za-z0-9_]*\s*=/', $line)
+               && preg_match('/^(\S+\s+\S+\s+\S+\s+\S+\s+\S+)\s+(.+)$/', $line, $m))
+            $tasks[] = array("schedule" => preg_replace('/\s+/', ' ', $m[1]), "command" => $m[2], "note" => $note);
+        $note = "";   # пояснение относится только к строке сразу под ним
+    }
+    return $tasks;
+}
+
+# Задача относится к базе $db? Имя ищем только там, где его ставит сам Интеграм.
+function Crontab_is_own($command, $db)
+{
+    if(!strlen($db))
+        return FALSE;
+    $q = preg_quote($db, "~");
+    return (bool)preg_match("~(?:^|[\\s?&\"'])-{0,2}db=$q(?=\$|[\\s&\"'])"
+                           ."|://[^/\\s\"']+/$q(?=\$|[/?#\\s\"'])"
+                           ."|(?:templates/custom|download)/$q(?=\$|[/\\s\"'])~", (string)$command);
+}
+
+# Секреты в строке запуска: значения token/secret/password/key/webhook/xsrf, переменные окружения
+# *TOKEN*/*SECRET*/*PASSWORD*/*KEY*, заголовок Authorization, пароль в адресе и в curl -u,
+# код вебхука Битрикса /rest/<id>/<код>/, cookie idb_<база>.
+function Crontab_mask($text)
+{
+    $rules = array(
+        '~((?:^|[\s?&"\'])-{0,2}(?:token|secret|password|passwd|pwd|pass|key|api_key|apikey|webhook|xsrf|_xsrf)=)[^&\s"\']+~i' => '$1***',
+        '~(\b[A-Z0-9_]*(?:TOKEN|SECRET|PASSWORD|PASSWD|PWD|PASS|WEBHOOK|KEY)[A-Z0-9_]*=)[^\s"\']+~' => '$1***',
+        '~((?:--password|--pass)\s+)[^\s"\']+~i' => '$1***',
+        '~(\s-p)(?!\s)[^\s"\']+~' => '$1***',
+        '~("(?:token|secret|password|passwd|pwd|api_key|apikey|key|webhook)"\s*:\s*")[^"]*~i' => '$1***',
+        '~((?:X-Authorization|Authorization)\s*:\s*)(?:(?:Bearer|Basic)\s+)?[^\s"\']+~i' => '$1***',
+        '~(://[^/\s:@"\']+:)[^@/\s"\']+@~' => '$1***@',
+        '~((?:^|\s)(?:-u|--user)\s+[^\s:"\']+:)[^\s"\']+~' => '$1***',
+        '~(/rest/\d+/)[A-Za-z0-9]+~' => '$1***',
+        '~(\bidb_[A-Za-z0-9_]+=)[^;\s"\']+~' => '$1***',
+    );
+    $s = (string)$text;
+    foreach($rules as $re => $to)
+        $s = preg_replace($re, $to, $s);
+    return $s;
+}
+
+# Одна строка не длиннее $chars СИМВОЛОВ (кириллицу не рубим пополам); секреты скрыты заранее.
+function Crontab_text($text, $chars = CRONTAB_TEXT_CHARS)
+{
+    $s = trim(preg_replace("/\s+/u", " ", Crontab_mask($text)));
+    return function_exists("mb_substr") ? mb_substr($s, 0, $chars, "UTF-8") : substr($s, 0, $chars);
+}
+
+# Значение для точки вставки — HTML-экранирование. Фигурные скобки отдельно не трогаем: движок сам
+# прячет их в значениях (Parse_block: { → &#123; при подстановке), {_global_.xsrf} в команде не подставится.
+function Crontab_html($text)
+{
+    return htmlspecialchars((string)$text, ENT_QUOTES, "UTF-8");
+}
+
+# Строки crontab пользователя, под которым работает сайт. Когда задач нет, crontab -l отвечает
+# ошибкой — это пустой список, а не сбой; без exec (disable_functions) — тоже пустой список.
+function Crontab_read()
+{
+    $disabled = array_map("trim", explode(",", (string)ini_get("disable_functions")));
+    if(!function_exists("exec") || in_array("exec", $disabled))
+        return array();
+    $out = array();
+    $rc = 0;
+    @exec("crontab -l 2>/dev/null", $out, $rc);
+    return $rc === 0 ? $out : array();
+}
+
+# Задачи, которые вправе видеть текущий пользователь. Нужны дважды (счётчик и таблица) — запоминаем.
+# $lines — готовые строки crontab (для мерки); без них читается crontab сервера.
+function Get_crontab($reload = FALSE, $lines = NULL)
+{
+    global $z;
+    if(!$reload && isset($GLOBALS["CRONTAB"]))
+        return $GLOBALS["CRONTAB"];
+    $all = Crontab_sees_all();
+    $tasks = array();
+    foreach(Crontab_parse($lines === NULL ? Crontab_read() : $lines) as $task)
+        if($all || Crontab_is_own($task["command"], $z))
+            $tasks[] = $task;
+    $GLOBALS["CRONTAB"] = $tasks;
+    return $tasks;
+}
+# </crontab-dir-admin>
 
 # Check grant to the repository
 function RepoGrant()
