@@ -3,7 +3,8 @@
 // Шаблоны едут на сервер сами (update.php), index.php — отдельно, поэтому секция, которой
 // нужны данные нового ядра, обязана жить в собственном подблоке (правило issue #4624), иначе
 // на старом ядре пропадёт вся страница. Поведение движка меряет
-// experiments/crontab-dir-admin.test.php (php-cli, движок берётся из index.php).
+// experiments/crontab-dir-admin.test.php (php-cli, движок берётся из index.php): там же
+// утверждается по готовой странице, что сырых точек вставки в выводе не остаётся.
 //
 // Run with: node experiments/dir-admin-crontab.test.js
 
@@ -24,7 +25,6 @@ function assert(cond, name) {
     assert(!!section, rel + ': секция задач cron обёрнута в подблок &Crontab');
     if (!section) return;
 
-    assert(text.indexOf('{CRONTASKS}') === -1, rel + ': голой точки вставки {CRONTASKS} нет');
     assert(section[1].indexOf('{_parent_.CRONTASKS}') !== -1, rel + ': счётчик задач берётся у родителя внутри подблока');
     assert(/<!-- Begin:&Cronlist -->[\s\S]*\{SCHEDULE\}[\s\S]*\{COMMAND\}[\s\S]*\{NOTE\}[\s\S]*<!-- End:&Cronlist -->/.test(section[1]),
         rel + ': строки задач — вложенный подблок &Cronlist с расписанием, командой и пояснением');
