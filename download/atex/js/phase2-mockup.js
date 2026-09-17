@@ -4,10 +4,14 @@
    на кнопки. Перечень рабочих мест, которые показывают макеты, —
    docs/atex_phase2_solution_composition.md §4.
    Файл грузится и браузером, и тестом experiments/atex-phase2-4974-mockups.test.js:
-   работа с DOM начинается только после DOMContentLoaded, вне браузера код молчит. */
+   работа с DOM начинается только после DOMContentLoaded, вне браузера код молчит.
+   Страницы макетов лежат рядом с этим файлом (download/atex/js), стиль — в
+   download/atex/css: маппинги деплоя перечислены в конфиге на сервере рядом с
+   update.php и из репозитория не обновляются, поэтому макеты едут в уже
+   выкладываемых каталогах (issue #4974). Вход — phase2-mockups.html. */
 
 var PHASE2_PAGES = [
-    { group: 'Обзор',        file: 'index.html',                    title: 'Состав решения',              role: 'навигатор макетов' },
+    { group: 'Обзор',        file: 'phase2-mockups.html',           title: 'Состав решения',              role: 'навигатор макетов' },
     { group: 'Заказ',        file: 'phase2-label-orders.html',      title: 'Заказы этикетки',             role: 'Менеджер' },
     { group: 'Заказ',        file: 'phase2-label-import.html',      title: 'Импорт из 1С',                role: 'Администратор, Диспетчер' },
     { group: 'Справочники',  file: 'phase2-dies.html',              title: 'Ножи и валы',                 role: 'Технолог, Диспетчер' },
@@ -90,7 +94,7 @@ function phase2BindTabs(doc) {
 
 function phase2Init(doc) {
     var path = (doc.location && doc.location.pathname) || '';
-    var current = path.split('/').pop() || 'index.html';
+    var current = path.split('/').pop() || PHASE2_PAGES[0].file;
     phase2RenderChrome(doc, current);
     phase2BindTabs(doc);
     doc.addEventListener('click', function (event) {

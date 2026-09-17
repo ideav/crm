@@ -4,7 +4,10 @@
    тёмно-синий #134174, стальной акцент #8da9c4, Montserrat.
    Состав решения, который показывают макеты: docs/atex_phase2_solution_composition.md */
 
-:root {
+/* Токены держатся на классе страницы макета, а не на :root: файл лежит в общем
+   каталоге download/atex/css рядом со стилями боевых рабочих мест, и палитра
+   макета не должна перекрывать бренд-переменные страницы, которая его подключит. */
+.mk-page {
     --atex-navy:    #134174;
     --atex-navy-d:  #0e3158;
     --atex-navy-l:  #1d5596;
@@ -23,12 +26,34 @@
     --atex-bad-bg:  #fee2e2;
     --atex-info:    #1e40af;
     --atex-info-bg: #eff6ff;
+    --atex-on-navy: #ffffff;
     --atex-font: "Montserrat", system-ui, -apple-system, "Segoe UI", Arial, sans-serif;
+}
+
+/* Тёмная тема оболочки рабочих мест: атрибут data-theme="dark" ставит главный
+   шаблон, макет подхватывает его теми же токенами (issue #3043). */
+[data-theme="dark"] .mk-page {
+    --atex-ink:     #e5e7eb;
+    --atex-muted:   #9ca3af;
+    --atex-line:    #374151;
+    --atex-bg:      #111827;
+    --atex-paper:   #1f2937;
+    --atex-ok:      #4ade80;
+    --atex-ok-bg:   rgba(74, 222, 128, 0.16);
+    --atex-warn:    #fbbf24;
+    --atex-warn-bg: rgba(251, 191, 36, 0.16);
+    --atex-bad:     #f87171;
+    --atex-bad-bg:  rgba(248, 113, 113, 0.16);
+    --atex-info:    #93c5fd;
+    --atex-info-bg: rgba(147, 197, 253, 0.16);
+    /* Шапка, активный пункт навигации и первичная кнопка остаются тёмно-синими
+       в обеих темах, поэтому текст на них белый и там, и там. */
+    --atex-on-navy: #ffffff;
 }
 
 * { box-sizing: border-box; }
 
-body {
+.mk-page {
     margin: 0;
     font-family: var(--atex-font);
     font-size: 14px;
@@ -44,7 +69,7 @@ body {
     gap: 16px;
     padding: 10px 18px;
     background: var(--atex-navy);
-    color: #fff;
+    color: var(--atex-on-navy);
 }
 
 .mk-top-logo {
@@ -70,7 +95,7 @@ body {
     flex: 0 0 236px;
     align-self: stretch;
     padding: 14px 10px 24px;
-    background: #fff;
+    background: var(--atex-paper);
     border-right: 1px solid var(--atex-line);
 }
 
@@ -95,7 +120,7 @@ body {
 
 .mk-nav a.is-current {
     background: var(--atex-navy);
-    color: #fff;
+    color: var(--atex-on-navy);
 }
 
 .mk-nav-role {
@@ -146,7 +171,7 @@ body {
     padding: 6px 12px;
     border: 1px solid var(--atex-line);
     border-radius: 7px;
-    background: #fff;
+    background: var(--atex-paper);
     color: var(--atex-ink);
     font: inherit;
     cursor: pointer;
@@ -157,7 +182,7 @@ body {
 .mk-btn-primary {
     background: var(--atex-navy);
     border-color: var(--atex-navy);
-    color: #fff;
+    color: var(--atex-on-navy);
 }
 
 .mk-btn-primary:hover { background: var(--atex-navy-d); }
@@ -169,7 +194,7 @@ body {
     padding: 5px 10px;
     border: 1px solid var(--atex-line);
     border-radius: 7px;
-    background: #fff;
+    background: var(--atex-paper);
     font: inherit;
     color: var(--atex-ink);
 }
@@ -180,7 +205,7 @@ body {
     border: 1px solid var(--atex-line);
     border-radius: 7px;
     overflow: hidden;
-    background: #fff;
+    background: var(--atex-paper);
 }
 
 .mk-group > span {
@@ -194,13 +219,13 @@ body {
     padding: 6px 11px;
     border: 0;
     border-right: 1px solid var(--atex-line);
-    background: #fff;
+    background: var(--atex-paper);
     font: inherit;
     cursor: pointer;
 }
 
 .mk-group button:last-child { border-right: 0; }
-.mk-group button.is-on { background: var(--atex-navy); color: #fff; }
+.mk-group button.is-on { background: var(--atex-navy); color: var(--atex-on-navy); }
 
 .mk-panel {
     padding: 12px 14px;
@@ -241,7 +266,7 @@ body {
 }
 
 .mk-tab.is-on {
-    background: #fff;
+    background: var(--atex-paper);
     border-color: var(--atex-line);
     color: var(--atex-navy);
     font-weight: 600;
@@ -251,7 +276,7 @@ body {
 .mk-table {
     width: 100%;
     border-collapse: collapse;
-    background: #fff;
+    background: var(--atex-paper);
     font-size: 0.86rem;
 }
 
@@ -267,11 +292,11 @@ body {
 
 .mk-table td {
     padding: 7px 10px;
-    border-bottom: 1px solid #e8edf3;
+    border-bottom: 1px solid var(--atex-line);
     vertical-align: top;
 }
 
-.mk-table tbody tr:hover { background: #f8fafc; }
+.mk-table tbody tr:hover { background: var(--atex-bg); }
 .mk-table tr.is-picked { background: var(--atex-info-bg); }
 .mk-num { text-align: right; font-variant-numeric: tabular-nums; }
 .mk-mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
@@ -288,7 +313,7 @@ body {
 .mk-badge-warn { background: var(--atex-warn-bg); color: var(--atex-warn); }
 .mk-badge-bad  { background: var(--atex-bad-bg);  color: var(--atex-bad); }
 .mk-badge-info { background: var(--atex-info-bg); color: var(--atex-info); }
-.mk-badge-mute { background: #eef2f6;             color: var(--atex-muted); }
+.mk-badge-mute { background: var(--atex-bg);      color: var(--atex-muted); }
 
 .mk-kpis { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
 
@@ -298,7 +323,7 @@ body {
     border: 1px solid var(--atex-line);
     border-left: 3px solid var(--atex-steel);
     border-radius: 8px;
-    background: #fff;
+    background: var(--atex-paper);
 }
 
 .mk-kpi-v { font-size: 1.3rem; font-weight: 700; color: var(--atex-navy); }
@@ -335,7 +360,7 @@ body {
     padding: 8px 10px;
     border-radius: 8px 8px 0 0;
     background: var(--atex-navy);
-    color: #fff;
+    color: var(--atex-on-navy);
 }
 
 .mk-queue-head b { font-size: 0.95rem; }
@@ -345,7 +370,7 @@ body {
     border: 1px solid var(--atex-line);
     border-top: 0;
     border-radius: 0 0 8px 8px;
-    background: #fff;
+    background: var(--atex-paper);
     padding: 8px;
 }
 
@@ -370,7 +395,7 @@ body {
     border: 1px solid var(--atex-line);
     border-left: 3px solid var(--atex-steel);
     border-radius: 8px;
-    background: #fff;
+    background: var(--atex-paper);
     cursor: pointer;
     font-size: 0.84rem;
     line-height: 1.35;
@@ -378,7 +403,7 @@ body {
 
 .mk-job:hover { border-color: var(--atex-steel); }
 .mk-job.is-picked { box-shadow: 0 0 0 3px rgba(19, 65, 116, 0.16); border-color: var(--atex-navy); }
-.mk-job.is-blocked { border-left-color: var(--atex-bad); background: #fff7f7; }
+.mk-job.is-blocked { border-left-color: var(--atex-bad); background: var(--atex-bad-bg); }
 .mk-job.is-setup   { border-left-color: var(--atex-warn); }
 .mk-job-top { display: flex; align-items: baseline; gap: 6px; }
 .mk-job-no { font-weight: 700; font-size: 0.95rem; }
@@ -394,7 +419,7 @@ body {
     border: 1px solid var(--atex-line);
     border-radius: 6px;
     overflow: hidden;
-    background: #fff;
+    background: var(--atex-paper);
     font-size: 0.76rem;
 }
 
@@ -403,14 +428,18 @@ body {
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    border-right: 1px solid #fff;
-    color: #fff;
+    border-right: 1px solid var(--atex-paper);
+    color: var(--atex-on-navy);
     text-align: center;
     line-height: 1.15;
 }
 
 .mk-web-strip small { opacity: 0.85; }
-.mk-web-edge { background: repeating-linear-gradient(45deg, #e2e8f0, #e2e8f0 4px, #f8fafc 4px, #f8fafc 8px); color: var(--atex-muted); }
+.mk-web-edge {
+    background: repeating-linear-gradient(45deg,
+        var(--atex-line), var(--atex-line) 4px, var(--atex-bg) 4px, var(--atex-bg) 8px);
+    color: var(--atex-muted);
+}
 
 /* ── Пульт оператора (планшет) ──────────────────────────────────────────── */
 
@@ -431,13 +460,13 @@ body {
     padding: 5px 12px;
     border: 1px solid var(--atex-line);
     border-radius: 999px;
-    background: #fff;
+    background: var(--atex-paper);
     font-size: 0.82rem;
     color: var(--atex-muted);
 }
 
 .mk-step.is-done { background: var(--atex-ok-bg); border-color: var(--atex-ok); color: var(--atex-ok); }
-.mk-step.is-now  { background: var(--atex-navy); border-color: var(--atex-navy); color: #fff; }
+.mk-step.is-now  { background: var(--atex-navy); border-color: var(--atex-navy); color: var(--atex-on-navy); }
 
 .mk-takes { display: flex; flex-wrap: wrap; gap: 6px; }
 
@@ -449,7 +478,7 @@ body {
     justify-content: center;
     border: 1px solid var(--atex-line);
     border-radius: 8px;
-    background: #fff;
+    background: var(--atex-paper);
     font-size: 0.95rem;
     color: var(--atex-muted);
 }
@@ -464,7 +493,7 @@ body {
     padding: 22px 26px;
     border: 1px solid var(--atex-line);
     border-radius: 6px;
-    background: #fff;
+    background: var(--atex-paper);
     box-shadow: 0 2px 14px rgba(19, 65, 116, 0.08);
 }
 
@@ -492,7 +521,7 @@ body {
     padding: 10px 16px;
     border-radius: 999px;
     background: var(--atex-navy);
-    color: #fff;
+    color: var(--atex-on-navy);
     font-size: 0.86rem;
     box-shadow: 0 6px 20px rgba(19, 65, 116, 0.3);
     z-index: 50;

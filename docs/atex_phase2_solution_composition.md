@@ -3,9 +3,14 @@
 **Нормативная постановка:** [`atex_phase2_labels_tz.md`](atex_phase2_labels_tz.md).
 **Образец декомпозиции Фазы 1:** [`atex_workplaces.md`](atex_workplaces.md).
 **Схема данных Фазы 1:** [`atex_data_schema.md`](atex_data_schema.md).
-**Макеты рабочих мест:** `download/atex/mockups/` — статичные HTML с зашитыми
-данными, открываются по прямой ссылке; на боевом сервере
-`https://ideav.ru/download/ateh/mockups/index.html` (маппинг в `update.conf`).
+**Макеты рабочих мест:** `download/atex/js/phase2-*.html` — статичные HTML с
+зашитыми данными, стиль в `download/atex/css/phase2-mockup.css`. Вход —
+`phase2-mockups.html`, на боевом сервере
+`https://ideav.ru/download/ateh/js/phase2-mockups.html`. Макеты лежат в каталогах
+`js` и `css`, потому что маппинги деплоя перечислены в конфиге рядом с
+`update.php` на сервере и из репозитория не обновляются: новый каталог
+потребовал бы ручной правки на бою, эти два уже выкладываются
+([`kb/deploy.md`](kb/deploy.md)).
 
 Этот документ — **перечень того, из чего состоит приложение Фазы 2**: рабочие
 места, таблицы, отчёты, печатные формы, роли. По нему принимается готовность:
@@ -124,15 +129,15 @@
 
 | # | Рабочее место | Роль | URL | Макет | Ключевые таблицы |
 |---|---|---|---|---|---|
-| 1 | Заказы этикетки | Менеджер | `/atex/label-orders` | [`phase2-label-orders.html`](../download/atex/mockups/phase2-label-orders.html) | Заказ, Заказанное количество, Клиент, Сырьё этикетки, Нож |
-| 2 | Ножи и валы | Технолог, Диспетчер | `/atex/dies` | [`phase2-dies.html`](../download/atex/mockups/phase2-dies.html) | Нож, Вал, Движение пробега, Сырьё этикетки |
-| 3 | Планирование высечки | Диспетчер | `/atex/die-planning` | [`phase2-die-planning.html`](../download/atex/mockups/phase2-die-planning.html) | Задание высечки, Станок высечки, Нож, Вал, Мастер-рулон, Обеспечение этикетки |
-| 4 | Раскрой джамбо | Диспетчер | `/atex/jumbo-cutting` | [`phase2-jumbo-cutting.html`](../download/atex/mockups/phase2-jumbo-cutting.html) | Задание первичной резки, Полоса раскроя, Партия джамбо, Мастер-рулон |
-| 5 | Склад мастер-рулонов | Кладовщик | `/atex/master-rolls` | [`phase2-master-rolls.html`](../download/atex/mockups/phase2-master-rolls.html) | Мастер-рулон, Партия джамбо, Сырьё этикетки |
-| 6 | Пульт высечки (планшет) | Оператор | `/atex/die-cutter` | [`phase2-die-cutter-pult.html`](../download/atex/mockups/phase2-die-cutter-pult.html) | Задание высечки, Событие смены высечки, Мастер-рулон, Движение пробега, Партия ГП этикетки |
-| 7 | Пульт большого слиттера (планшет) | Оператор | `/atex/jumbo-slitter` | [`phase2-jumbo-pult.html`](../download/atex/mockups/phase2-jumbo-pult.html) | Задание первичной резки, Полоса раскроя, Мастер-рулон, Партия джамбо |
-| 8 | Импорт из 1С | Администратор, Диспетчер | `/atex/label-import` | [`phase2-label-import.html`](../download/atex/mockups/phase2-label-import.html) | Заказ, Заказанное количество, Нож, Вал |
-| 9 | Печатная форма задания | — (печать из #3 и #6) | `/atex/die-job-print` | [`phase2-job-print.html`](../download/atex/mockups/phase2-job-print.html) | Задание высечки, Нож, Вал, Позиция заказа |
+| 1 | Заказы этикетки | Менеджер | `/atex/label-orders` | [`phase2-label-orders.html`](../download/atex/js/phase2-label-orders.html) | Заказ, Заказанное количество, Клиент, Сырьё этикетки, Нож |
+| 2 | Ножи и валы | Технолог, Диспетчер | `/atex/dies` | [`phase2-dies.html`](../download/atex/js/phase2-dies.html) | Нож, Вал, Движение пробега, Сырьё этикетки |
+| 3 | Планирование высечки | Диспетчер | `/atex/die-planning` | [`phase2-die-planning.html`](../download/atex/js/phase2-die-planning.html) | Задание высечки, Станок высечки, Нож, Вал, Мастер-рулон, Обеспечение этикетки |
+| 4 | Раскрой джамбо | Диспетчер | `/atex/jumbo-cutting` | [`phase2-jumbo-cutting.html`](../download/atex/js/phase2-jumbo-cutting.html) | Задание первичной резки, Полоса раскроя, Партия джамбо, Мастер-рулон |
+| 5 | Склад мастер-рулонов | Кладовщик | `/atex/master-rolls` | [`phase2-master-rolls.html`](../download/atex/js/phase2-master-rolls.html) | Мастер-рулон, Партия джамбо, Сырьё этикетки |
+| 6 | Пульт высечки (планшет) | Оператор | `/atex/die-cutter` | [`phase2-die-cutter-pult.html`](../download/atex/js/phase2-die-cutter-pult.html) | Задание высечки, Событие смены высечки, Мастер-рулон, Движение пробега, Партия ГП этикетки |
+| 7 | Пульт большого слиттера (планшет) | Оператор | `/atex/jumbo-slitter` | [`phase2-jumbo-pult.html`](../download/atex/js/phase2-jumbo-pult.html) | Задание первичной резки, Полоса раскроя, Мастер-рулон, Партия джамбо |
+| 8 | Импорт из 1С | Администратор, Диспетчер | `/atex/label-import` | [`phase2-label-import.html`](../download/atex/js/phase2-label-import.html) | Заказ, Заказанное количество, Нож, Вал |
+| 9 | Печатная форма задания | — (печать из #3 и #6) | `/atex/die-job-print` | [`phase2-job-print.html`](../download/atex/js/phase2-job-print.html) | Задание высечки, Нож, Вал, Позиция заказа |
 | 10 | Упаковка этикетки | Упаковщик | `/atex/packer` (расширение) | контур Фазы 1, §3.13 `atex_workplaces.md` | Партия ГП этикетки, Задание высечки, Упаковочное место |
 
 Пульт втулкореза (§3.6 `atex_workplaces.md`) и дашборды (§3.9) работают на
