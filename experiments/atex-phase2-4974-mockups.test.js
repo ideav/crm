@@ -7,13 +7,19 @@
 // DOM, ссылки со страниц разрешаются в файлы, карта деплоя update.conf разбирается в пары
 // «источник → приёмник».
 //
+// ПОЧЕМУ МАКЕТЫ ЛЕЖАТ В js/ И css/. Маппинги деплоя читаются из конфига НА СЕРВЕРЕ рядом с
+// update.php; репозиторный update.conf — образец и на бой не копируется. Свой каталог макетов
+// потребовал бы ручной правки боевого конфига и до неё отдавал бы 302 вместо страницы
+// (docs/kb/deploy.md), а download/atex/js и download/atex/css выкладываются давно.
+//
 // Run with: node experiments/atex-phase2-4974-mockups.test.js
 
 var fs = require('fs');
 var path = require('path');
 
 var ROOT = path.join(__dirname, '..');
-var DIR = path.join(ROOT, 'download', 'atex', 'mockups');
+var DIR = path.join(ROOT, 'download', 'atex', 'js');
+var CSS_DIR = path.join(ROOT, 'download', 'atex', 'css');
 
 var passed = 0, total = 0;
 function assert(cond, name, extra) {
@@ -74,8 +80,21 @@ function makeDoc(bodyKids) {
 }
 
 // ── 1. Список макетов и файлы на диске ──────────────────────────────────────────────────────
+// Макеты делят каталог с боевыми ассетами, поэтому их отличает префикс имени: страница макета —
+// это phase2-*.html, и чужих .html в каталоге быть не должно.
 var onDisk = fs.readdirSync(DIR).filter(function (n) { return /\.html$/.test(n); }).sort();
 var listed = PHASE2_PAGES.map(function (p) { return p.file; });
+
+var stray = onDisk.filter(function (name) { return name.indexOf('phase2-') !== 0; });
+assert(stray.length === 0,
+    'в каталоге нет посторонних html рядом с макетами',
+    stray.length ? '(' + stray.join(', ') + ')' : '(' + onDisk.length + ' страниц)');
+
+var mockupFiles = listed.concat(['phase2-mockup.js']);
+var collisions = mockupFiles.filter(function (name) { return name.indexOf('phase2-') !== 0; });
+assert(collisions.length === 0,
+    'имена файлов макетов начинаются с phase2- и не перебивают боевые ассеты',
+    collisions.length ? '(' + collisions.join(', ') + ')' : '');
 
 assert(listed.length === PHASE2_PAGES.length && new Set(listed).size === listed.length,
     'в PHASE2_PAGES нет повторов файлов', '(' + listed.length + ')');
@@ -90,7 +109,8 @@ onDisk.forEach(function (file) {
         'страница на диске попала в навигацию: ' + file);
 });
 
-assert(listed.indexOf('index.html') === 0, 'навигатор index.html — первый пункт');
+assert(listed.indexOf('phase2-mockups.html') === 0,
+    'навигатор phase2-mockups.html — первый пункт и вход в комплект');
 
 PHASE2_PAGES.forEach(function (page) {
     assert(!!page.group && !!page.title && !!page.role,
@@ -157,9 +177,11 @@ function localRefs(file) {
 }
 
 // Общий каркас: без этих двух файлов страница открывается без шапки и навигации, то есть
-// из неё нельзя попасть в остальные макеты. Утверждаем о РАЗОБРАННОМ списке адресов
+// из неё нельзя попасть в остальные макеты. Стиль лежит в соседнем каталоге css, и путь
+// `../css/…` должен разрешаться ровно так же, как он разрешится на сервере: страницы едут в
+// download/ateh/js, стиль — в download/ateh/css. Утверждаем о РАЗОБРАННОМ списке адресов
 // страницы, а не о её тексте.
-var CHROME = ['phase2-mockup.css', 'phase2-mockup.js'];
+var CHROME = ['../css/phase2-mockup.css', 'phase2-mockup.js'];
 
 onDisk.forEach(function (name) {
     var refs = localRefs(name);
@@ -174,10 +196,13 @@ onDisk.forEach(function (name) {
         missing.length ? '(нет: ' + missing.join(', ') + ')' : '');
 });
 
+assert(fs.existsSync(path.join(CSS_DIR, 'phase2-mockup.css')),
+    'стиль макетов лежит в download/atex/css');
+
 // ── 4. Карта деплоя ─────────────────────────────────────────────────────────────────────────
 // update.conf разбираем в пары «источник → приёмник» и спрашиваем у карты, куда поедет каждый
-// файл макетов. Шаблон `*` у update.php не рекурсивный и берёт только файлы, поэтому папка
-// макетов плоская и покрывается одной строкой.
+// файл макетов. Шаблон `*` у update.php не рекурсивный и берёт только файлы, поэтому макеты
+// лежат прямо в каталогах js и css, без вложенных папок.
 function deployMap() {
     var lines = fs.readFileSync(path.join(ROOT, 'update.conf'), 'utf8').split(/\r?\n/);
     var pairs = [];
@@ -201,26 +226,79 @@ function targetOf(pairs, repoPath) {
 }
 
 var maps = deployMap();
-var deployTargets = fs.readdirSync(DIR).map(function (name) {
-    return { name: name, to: targetOf(maps, 'download/atex/mockups/' + name) };
-});
+var deployTargets = mockupFiles.map(function (name) {
+    return { name: name, to: targetOf(maps, 'download/atex/js/' + name) };
+}).concat([{
+    name: 'phase2-mockup.css',
+    to: targetOf(maps, 'download/atex/css/phase2-mockup.css')
+}]);
+
 var undeployed = deployTargets.filter(function (t) { return !t.to; });
 assert(undeployed.length === 0,
     'каждый файл макетов попадает под правило деплоя',
     '(' + deployTargets.length + ' файлов' + (undeployed.length
         ? ', без правила: ' + undeployed.map(function (t) { return t.name; }).join(', ') : '') + ')');
 
-var targets = new Set(deployTargets.map(function (t) { return t.to; }));
-assert(targets.size === 1
-    && targets.has('/var/www/www-root/data/www/ideav.ru/download/ateh/mockups/'),
-    'макеты едут в одну папку живого сайта — download/ateh/mockups/',
-    '(' + Array.from(targets).join(', ') + ')');
+var LIVE_JS = '/var/www/www-root/data/www/ideav.ru/download/ateh/js/';
+var LIVE_CSS = '/var/www/www-root/data/www/ideav.ru/download/ateh/css/';
+
+var pagesTo = new Set(deployTargets.filter(function (t) { return t.name !== 'phase2-mockup.css'; })
+    .map(function (t) { return t.to; }));
+assert(pagesTo.size === 1 && pagesTo.has(LIVE_JS),
+    'страницы и каркас едут в download/ateh/js живого сайта',
+    '(' + Array.from(pagesTo).join(', ') + ')');
+
+var cssTo = deployTargets[deployTargets.length - 1].to;
+assert(cssTo === LIVE_CSS,
+    'стиль едет в download/ateh/css живого сайта', '(' + cssTo + ')');
+
+// Относительный `../css/…` со страницы должен попадать ровно в тот каталог, куда карта везёт
+// стиль: иначе на бою страница откроется без оформления.
+var cssFromPage = path.posix.normalize(LIVE_JS + '../css/');
+assert(cssFromPage === LIVE_CSS,
+    'путь ../css/ со страницы указывает на каталог стиля на сервере', '(' + cssFromPage + ')');
 
 // Живая ссылка для заказчика собирается из той же строки карты: подменили приёмник — тест
 // покажет другой адрес, и ссылку в составе решения тоже надо будет менять.
-var liveDir = Array.from(targets)[0].replace('/var/www/www-root/data/www/', 'https://');
-assert(liveDir + 'index.html' === 'https://ideav.ru/download/ateh/mockups/index.html',
-    'навигатор открывается по адресу из состава решения', '(' + liveDir + 'index.html)');
+var liveDir = LIVE_JS.replace('/var/www/www-root/data/www/', 'https://');
+assert(liveDir + PHASE2_PAGES[0].file === 'https://ideav.ru/download/ateh/js/phase2-mockups.html',
+    'навигатор открывается по адресу из состава решения',
+    '(' + liveDir + PHASE2_PAGES[0].file + ')');
+
+// ── 5. Палитра применяется к странице ───────────────────────────────────────────────────────
+// Токены макета объявлены не на :root, а на классе: файл лежит в общем каталоге стилей рядом с
+// боевыми рабочими местами, и его палитра не должна перекрывать бренд-переменные чужой страницы.
+// Цена такого решения — класс обязан стоять на <body> каждой страницы: без него токены не
+// применяются и макет открывается без оформления. Проверяем разобранное правило и разобранный
+// список классов страницы, а не написание файлов.
+function paletteRule() {
+    var sheet = fs.readFileSync(path.join(CSS_DIR, 'phase2-mockup.css'), 'utf8')
+        .replace(/\/\*[\s\S]*?\*\//g, '');
+    var re = /([^{}]+)\{([^{}]*)\}/g;
+    var m, light = null, dark = null;
+    while ((m = re.exec(sheet)) !== null) {
+        if (m[2].indexOf('--atex-paper') < 0) { continue; }
+        var sel = m[1].trim();
+        if (sel.indexOf('[data-theme') === 0) { dark = sel; } else if (!light) { light = sel; }
+    }
+    return { light: light, dark: dark };
+}
+
+function pageClasses(name) {
+    var markup = fs.readFileSync(path.join(DIR, name), 'utf8');
+    var m = /<body[^>]*\sclass="([^"]*)"/.exec(markup);
+    return m ? m[1].trim().split(/\s+/) : [];
+}
+
+var palette = paletteRule();
+var scoped = palette.light && palette.light.charAt(0) === '.' && palette.light.indexOf(' ') < 0;
+assert(scoped, 'палитра макетов объявлена на классе, а не на :root', '(' + palette.light + ')');
+
+var paletteScope = scoped ? palette.light.slice(1) : palette.light;
+var unscoped = onDisk.filter(function (name) { return pageClasses(name).indexOf(paletteScope) < 0; });
+assert(unscoped.length === 0,
+    'класс палитры стоит на body каждой страницы: ' + paletteScope,
+    unscoped.length ? '(нет на: ' + unscoped.join(', ') + ')' : '(' + onDisk.length + ' страниц)');
 
 // ── Итог ────────────────────────────────────────────────────────────────────────────────────
 console.log('\n' + passed + '/' + total + ' проверок прошли');
