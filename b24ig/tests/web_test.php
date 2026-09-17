@@ -75,7 +75,8 @@ try {
     $cfg = array(
         'version' => 1, 'project' => 'web-test',
         'sources' => array('b24' => array('type' => 'bitrix24', 'transport' => 'mock', 'fixtures_dir' => "$web/fixtures", 'timezone' => 'Europe/Moscow')),
-        'target' => array('type' => 'integram', 'base_url' => 'https://ideav.ru', 'db' => 'spz', 'token' => '${INTEGRAM_TOKEN}'),
+        // db намеренно НЕ указан: база берётся из URL (?db=spz) — как хочет заказчик
+        'target' => array('type' => 'integram', 'base_url' => 'https://ideav.ru', 'token' => '${INTEGRAM_TOKEN}'),
         'runtime' => array('timezone' => 'Europe/Moscow', 'state_dir' => 'state/web-test', 'log_dir' => 'logs/web-test', 'lock_file' => 'state/web-test/run.lock', 'log_keep_days' => 7),
         'safety' => $project['safety'],
         'order' => array('departments'),
