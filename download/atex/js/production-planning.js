@@ -15322,6 +15322,22 @@
             return out;
         } catch (e) { return []; }
     }
+    // #4986: у пакета в пути записи нет — без перечня операций строка трассы говорит только «была
+    // запись», и по логу уже не видно, ЧТО ушло. Именно по такому логу разбирают действия
+    // планировщика (#4979 построен на трассе #4177), поэтому пакет несёт состав: сколько операций
+    // и по каким записям. Ids режем — читаемость лога важнее полноты, полный состав рядом в fields.
+    var PP_BATCH_TRACE_IDS = 12;
+    function ppBatchDigest(op, params) {
+        if (op !== 'batch') return '';
+        var ops;
+        try { ops = JSON.parse((params && params.ops) || '[]'); } catch (e) { return ''; }
+        if (!Array.isArray(ops) || !ops.length) return '';
+        var ids = ops.slice(0, PP_BATCH_TRACE_IDS).map(function(o) {
+            return (o && o.op === 'set' ? 'S' : 'V') + (o && o.id != null ? o.id : '?');
+        });
+        return ' ops=' + ops.length + ', ids=' + ids.join(',')
+            + (ops.length > ids.length ? ',…+' + (ops.length - ids.length) : '');
+    }
     function tracePpWrite(path, params, ctx) {
         var kind = ppWriteKind(path);
         var seq = ++_ppWriteSeq;
@@ -15333,7 +15349,8 @@
             if (params[k] !== undefined && params[k] !== null && params[k] !== '') fields[k] = params[k];
         });
         var head = '[pp][WRITE#' + seq + '] ' + String(kind.op).toUpperCase()
-            + (kind.target ? ' t' + kind.target : '') + (up ? ' up=' + up : '');
+            + (kind.target ? ' t' + kind.target : '') + (up ? ' up=' + up : '')
+            + ppBatchDigest(kind.op, params);
         console.log(head + '  [' + op + ']  ← ' + ppWriteCallers(8).join(' ← '), { path: path, fields: fields });
         return {
             seq: seq,
@@ -15481,8 +15498,10 @@
     //
     // ПАКЕТ НЕ АТОМАРЕН (транзакций в платформе нет — docs/kb/crud.md «Грабли» #4981): операции
     // после упавшей всё равно выполняются, поэтому отказ отклоняет промис ПОСЛЕ разбора всего
-    // ответа и несёт поимённо, что упало (opId/results) и сколько применилось (applied).
-    // Вызывающий сообщает об ошибке сам — как и при одиночной записи.
+    // ответа и несёт поимённо, что упало (opId/failures/results) и сколько применилось (applied).
+    // `err.failures` — [{opId, op, message}] по КАЖДОЙ упавшей операции (#4986): разобрать отказ
+    // пакета построчно можно только так, по первой ошибке решения не принять — соседние операции
+    // всё равно применились. Вызывающий сообщает об ошибке сам — как и при одиночной записи.
     var PP_BATCH_OPS_MAX = 500;          // ядро держит 1000 (BATCH_OPS_LIMIT); берём с запасом
     // `index.php` едет на сервер отдельно от download/atex (docs/kb/deploy.md: update.conf его не
     // раскладывает), поэтому установка с этим клиентом может оказаться со СТАРЫМ ядром, где
@@ -15501,16 +15520,22 @@
     function ppNoBatch() { return ppErr('пакетной записи на этой установке нет', 0, 'nobatch'); }
     // Поля пакета нормализуются ровно как у одиночного post(): пустые значения не отправляются
     // (грабля #4366 — очистить поле этим путём нельзя, поведение общее для обоих путей).
+    // #4986: рядом с полями пакета несём их ДО приведения к строке (`raw`) — запасной путь шлёт
+    // именно их, и одиночная команда остаётся ровно той же, какой была без пакета. На проводе
+    // разницы нет (тело запроса всё равно текст), но перед отправкой значение не подменяется.
     function ppBatchOps(ops) {
         var out = [];
         (ops || []).forEach(function(o) {
             if (!o || o.id == null || o.id === '') return;
-            var fields = {};
+            var fields = {}, raw = {};
             Object.keys(o.fields || {}).forEach(function(k) {
-                if (o.fields[k] !== undefined && o.fields[k] !== null && o.fields[k] !== '') fields[k] = String(o.fields[k]);
+                if (o.fields[k] !== undefined && o.fields[k] !== null && o.fields[k] !== '') {
+                    fields[k] = String(o.fields[k]);
+                    raw[k] = o.fields[k];
+                }
             });
             if (!Object.keys(fields).length) return;   // пустой набор полей ядро отвергает
-            out.push({ op: (o.op === 'set' ? 'set' : 'save'), id: o.id, fields: fields });
+            out.push({ op: (o.op === 'set' ? 'set' : 'save'), id: o.id, fields: fields, raw: raw });
         });
         return out;
     }
@@ -15520,7 +15545,10 @@
     // непринятом пересчёте остаются в одной точке, а не разводятся по двум транспортам.
     // Поля запроса: `ops=<массив JSON>`; `?JSON` в адресе ручке не нужен (docs/kb/crud.md).
     function ppSendBatch(self, chunk) {
-        return self.post('_m_batch', { ops: JSON.stringify(chunk) }).then(function(result) {
+        // В теле — только контрактные поля операции (docs/kb/crud.md); `raw` служебное, оно для
+        // запасного пути и наружу не уходит.
+        var body = chunk.map(function(o) { return { op: o.op, id: o.id, fields: o.fields }; });
+        return self.post('_m_batch', { ops: JSON.stringify(body) }).then(function(result) {
             // Ответ ручки — `{results:[…],ok:N,failed:M}`. Ядро без этой команды отвечает не им.
             if (!result || !Array.isArray(result.results)) throw ppNoBatch();
             return result;
@@ -15532,18 +15560,24 @@
         });
     }
     // Запасной путь: те же операции одиночными командами, прежним пулом.
+    // #4986: отчитывается ТАК ЖЕ, как пакет — поимённо по операциям. Отказ одной команды не
+    // обрывает набор: пакет не атомарен и доводится до конца, и запасной путь обязан вести себя
+    // так же, иначе поведение зависело бы от того, есть ли на установке ручка `_m_batch`. Именно
+    // на этом различии разбор «записи нет» (#3895) переставал работать на старом ядре.
     function ppSendSingles(self, ops, onDone) {
-        var done = 0;
+        var done = 0, failures = [];
         return runWithConcurrency(ops.map(function(o) {
             return function() {
                 var path = (o.op === 'set' ? '_m_set/' : '_m_save/') + encodeURIComponent(o.id) + '?JSON';
-                return self.post(path, o.fields).then(function(r) {
+                return self.post(path, o.raw || o.fields).then(function(r) {
                     done += 1;
                     if (typeof onDone === 'function') onDone(done);
                     return r;
+                }, function(err) {
+                    failures.push({ message: (err && err.message != null) ? String(err.message) : String(err), opId: o.id, op: o.op });
                 });
             };
-        }), MAX_PARALLEL_WRITES).then(function() { return done; });
+        }), MAX_PARALLEL_WRITES).then(function() { return { done: done, failures: failures }; });
     }
 
     // ЕДИНАЯ ТОЧКА ОТПРАВКИ НАБОРА (функция МОДУЛЯ — метод прототипа ниже лишь её зовёт, как у
@@ -15557,12 +15591,29 @@
         }
         var list = ppBatchOps(ops);
         if (!list.length) return Promise.resolve(0);
-        var total = list.length, applied = 0, failure = null, allResults = [];
+        var total = list.length, applied = 0, failure = null, allResults = [], failures = [];
         function progress() { if (typeof o.onProgress === 'function') o.onProgress(applied, total); }
+        // Итог набора — общий для обоих транспортов: применённые плюс поимённый перечень упавших.
+        function done() {
+            if (!failure) return applied;
+            var err = new Error(failure.message);
+            err.opId = failure.opId;
+            err.applied = applied;
+            err.results = allResults;
+            // #4986: ВСЕ упавшие операции, а не только первая. Вызывающий, который разбирает
+            // отказ по КАЖДОЙ записи (per-задача softSkip #3895 в applySplitPlan), иначе не может
+            // отличить «пропала одна запись из двадцати» от «отказ записи» — а по первой ошибке
+            // пакета это решение принять нельзя: остальные операции всё равно выполнились.
+            err.failures = failures;
+            throw err;
+        }
         function singles(rest) {
             _ppBatchOff = true;
             return ppSendSingles(self, rest, function(d) { applied = total - rest.length + d; progress(); })
-                .then(function() { return applied; });
+                .then(function(r) {
+                    r.failures.forEach(function(f) { failures.push(f); if (!failure) failure = f; });
+                    return done();
+                });
         }
         if (_ppBatchOff) return singles(list);
         var chunks = [];
@@ -15573,30 +15624,35 @@
         return chunks.reduce(function(chain, chunk) {
             return chain.then(function() {
                 // Ручки нет (узнали на предыдущей пачке) — остаток уходит одиночными командами.
-                if (_ppBatchOff) return ppSendSingles(self, chunk).then(function(d) { applied += d; progress(); });
+                if (_ppBatchOff) return ppSendSingles(self, chunk).then(function(r) {
+                    applied += r.done;
+                    r.failures.forEach(function(f) { failures.push(f); if (!failure) failure = f; });
+                    progress();
+                });
                 return ppSendBatch(self, chunk).then(function(res) {
                     (res.results || []).forEach(function(r, k) {
                         var src = chunk[k] || {};
                         allResults.push(r);
                         if (r && r.ok) applied += 1;
-                        else if (!failure) failure = { message: (r && r.error) || 'запись не удалась', opId: src.id };
+                        else {
+                            var f = { message: (r && r.error) || 'запись не удалась', opId: src.id, op: src.op };
+                            failures.push(f);
+                            if (!failure) failure = f;
+                        }
                     });
                     progress();
                 }, function(err) {
                     if (!err || err.kind !== 'nobatch') throw err;
                     // Ручки нет — эта пачка и все следующие уходят одиночными командами.
                     _ppBatchOff = true;
-                    return ppSendSingles(self, chunk).then(function(d) { applied += d; progress(); });
+                    return ppSendSingles(self, chunk).then(function(r) {
+                        applied += r.done;
+                        r.failures.forEach(function(f) { failures.push(f); if (!failure) failure = f; });
+                        progress();
+                    });
                 });
             });
-        }, Promise.resolve()).then(function() {
-            if (!failure) return applied;
-            var err = new Error(failure.message);
-            err.opId = failure.opId;
-            err.applied = applied;
-            err.results = allResults;
-            throw err;
-        });
+        }, Promise.resolve()).then(done);
     }
 
     // Тот же шлюз как метод — для вызова извне (и из тестов): вся логика в postPlanOps.
@@ -24791,6 +24847,29 @@
             }
             throw err;
         }
+        // #4986: то же правило #3895 для ПАКЕТА. Отказ пакета несёт все упавшие операции
+        // (`err.failures`), и решение принимается по ним построчно, а не по первой ошибке:
+        //   ppRealFailure → ошибка, которую надо пробросить (или null, если все отказы — «записи нет»);
+        //   ppSkipMissing → {id: true} по пропущенным записям, чтобы вызывающий знал, чего нет.
+        // Отказ НЕ по операциям (сеть, 403, запрет записи при непринятом пересчёте #4402) приходит
+        // без `failures` — он пробрасывается целиком, как и при одиночной записи.
+        function ppRealFailure(err) {
+            var fails = (err && err.failures) || null;
+            if (!fails || !fails.length) return err || new Error('запись не удалась');
+            for (var i = 0; i < fails.length; i++) {
+                if (!/no such record/i.test(String(fails[i].message))) return new Error(fails[i].message);
+            }
+            return null;
+        }
+        function ppSkipMissing(err) {
+            var out = {};
+            ((err && err.failures) || []).forEach(function(f) {
+                if (!/no such record/i.test(String(f.message))) return;
+                out[String(f.opId)] = true;
+                if (typeof console !== 'undefined' && console.warn) console.warn('[pp] #3895: пропуск операции — запись не найдена (' + f.opId + ': ' + f.message + ')');
+            });
+            return out;
+        }
         // #3895: _m_del уже отсутствующей записи — не ошибка (её и хотели удалить). Глотаем
         // «No such record» НА КАЖДОЙ операции удаления, чтобы цепочка удаления (обеспечения →
         // Партии ГП → сама резка) дошла до конца и не оставила запись-фантом в очереди/Ганте.
@@ -24809,10 +24888,12 @@
         // как генерацию (#3998/#4004) и удаление (#4005/#4009). Три фазы держим БАРЬЕРАМИ
         // (updates → creates → deletes) — как было в цепочке; ВНУТРИ фазы задачи независимы (разные
         // резки / родительские цепочки / удаляемые записи), внутренние запросы задачи остаются
-        // последовательными (первая колонка _m_save→_m_set; дети продолжения по up=<bId>; удаление
-        // обеспечения→Партии ГП→резка). Per-задача softSkip (#3895) глотает «No such record» — не
-        // роняет пул; реальная ошибка реджектит пул ПЕРВОЙ ошибкой (обрыв как у прежней цепочки →
-        // терминальный catch). Счётчик splitDone (++) безопасен — JS однопоточен.
+        // последовательными (дети продолжения по up=<bId>; удаление обеспечения→Партии ГП→резка).
+        // Per-задача softSkip (#3895) глотает «No such record» — не роняет пул; реальная ошибка
+        // реджектит пул ПЕРВОЙ ошибкой (обрыв как у прежней цепочки → терминальный catch).
+        // Счётчик splitDone (++) безопасен — JS однопоточен.
+        // #4986: фаза updates пулом больше не идёт — весь её набор уходит пакетом (runUpdatePhase),
+        // то есть занимает ОДИН слот семафора вместо пяти. Барьеры между фазами прежние.
         var MAX_PARALLEL_SPLIT = MAX_PARALLEL_WRITES;   // #4477: предел один на весь модуль
 
         // 1) Обновить существующие записи (первый сегмент каждой логической резки).
@@ -24823,18 +24904,28 @@
         // сразу, для создаваемых продолжений — когда `_m_new` вернёт id (ниже, по месту).
         var planColsByCut = {};
         (ops.updates || []).forEach(function(u) { if (u && u.planCols) planColsByCut[String(u.cutId)] = u.planCols; });
-        var updateTasks = (ops.updates || []).map(function(u) {
-            return function() { return Promise.resolve().then(function() {
+        // #4986: ФАЗА updates УХОДИТ ОДНИМ ПАКЕТОМ, А НЕ ЗАПРОСОМ НА ОПЕРАЦИЮ.
+        // #4984 перевёл на `_m_batch` шлюзы стартов и колонок наладки, но разбиение осталось на
+        // одиночных командах: боевой лог переноса (ateh1, #4986) — 13 `_m_save` + 8 `_m_set`
+        // подряд, все из этой фазы. Пул по MAX_PARALLEL_SPLIT их лишь раскладывает в ~5 волн,
+        // round-trip'ов от этого не меньше — а упирается всё именно в их количество (#4979).
+        // Набор собираем ЗДЕСЬ (отсев «не изменилось» #4001/#4477 — как был, он от транспорта не
+        // зависит), отправляет его postOps. Порядок операций сохраняется: у одной резки `save`
+        // главного значения идёт перед её `set` (первая колонка — только `_m_save`, issue #775).
+        var updateCutOps = [];        // [{op,id,fields}] — правки самих резок, одним набором
+        var restoreOpsByCut = {};     // cutId → операции #4158 (зависят от того, жива ли голова)
+        (ops.updates || []).forEach(function(u) {
                 var storedCut = cutsById[String(u.cutId)];   // #4001: хранимые значения — для записи ТОЛЬКО изменившихся полей
                 var ts = Number(u.planStartTs);
                 // #4001: planStart (_m_save, главное значение = planStart #3242) — ТОЛЬКО если изменился.
                 // Раньше writeMain шёл при каждом апдейте (даже когда менялись только проходы) → лишние
                 // _m_save. DATETIME первая колонка пишется ТОЛЬКО _m_save с t{tableId} (issue #775).
                 var tsChanged = !!mainKey && isFinite(ts) && ts > 0 && (!storedCut || ts !== Number(storedCut.number));
-                var saveMain = tsChanged
-                    ? self.post('_m_save/' + u.cutId + '?JSON', (function() { var mf = {}; mf[mainKey] = String(ts); return mf; })())
-                    : Promise.resolve();
-                return saveMain.then(function() {
+                if (tsChanged) {
+                    var mf = {}; mf[mainKey] = String(ts);
+                    updateCutOps.push({ op: 'save', id: u.cutId, fields: mf });
+                }
+                {
                     var fields = {};
                     // #3923/#4001: «Очередность» не пишем — порядок задаёт planStart. «Кол-во резок
                     // план» — только если изменилось (иначе churn всех записей при упорядочивании).
@@ -24890,26 +24981,53 @@
                         var curSid = storedCut && storedCut.slitter ? String(storedCut.slitter.id) : '';
                         if (String(u.slitterId) !== curSid) fields['t' + cutReqIds.slitter] = String(u.slitterId);
                     }
-                    var setFields = Object.keys(fields).length
-                        ? self.post('_m_set/' + u.cutId + '?JSON', fields)
-                        : Promise.resolve();
+                    if (Object.keys(fields).length) updateCutOps.push({ op: 'set', id: u.cutId, fields: fields });
                     // #4158: у ГОЛОВЫ схлопнутой цепочки — вернуть в её Обеспечение долю удаляемых
                     // продолжений (консервация покрытия позиции). headSupplyRestore задан только для
                     // голов с deletes; у реюзнутых продолжений/несхлопнутых цепочек список пуст → no-op.
                     var restores = headSupplyRestore[String(u.cutId)] || [];
-                    return restores.reduce(function(chain, rs) {
-                        return chain.then(function() {
-                            var sf = buildSupplyFieldsForFinishedBatch(supMeta, {
+                    if (restores.length) {
+                        restoreOpsByCut[String(u.cutId)] = restores.map(function(rs) {
+                            return { op: 'set', id: rs.supplyId, fields: buildSupplyFieldsForFinishedBatch(supMeta, {
                                 finishedBatchId: rs.finishedBatchId,
                                 footage: rs.footage > 0 ? rs.footage : '', rolls: rs.rolls,
                                 active: '1', status: SUPPLY_STATUSES[0]
-                            });
-                            return self.post('_m_set/' + rs.supplyId + '?JSON', sf);
+                            }) };
                         });
-                    }, setFields);
-                });
-            }).then(splitBump).catch(softSkip); };
+                    }
+                }
         });
+
+        // #4986: ФАЗА updates. Два пакета, а не 20+ команд: сначала сами резки, затем доли #4158.
+        // Разделены не ради транспорта, а потому что доли зависят от того, ЖИВА ЛИ ГОЛОВА: пока
+        // фаза шла задачей-на-резку, softSkip (#3895) отбрасывал остаток задачи целиком, и у
+        // пропавшей головы её `restores` не выполнялись. Плоский пакет это различие стирает —
+        // восстановленная доля легла бы на обеспечение удалённого задания и задвоила покрытие
+        // позиции (ровно то, что #4158 и чинит). Поэтому головы, которых на сервере нет, из
+        // второго пакета вычёркиваются — граница пропуска остаётся на записи, как была.
+        function runUpdatePhase() {
+            if (!updateCutOps.length && !Object.keys(restoreOpsByCut).length) return Promise.resolve();
+            var missing = {};
+            return self.postOps(updateCutOps).catch(function(err) {
+                var real = ppRealFailure(err);
+                if (real) throw real;               // реальная ошибка реджектит фазу — как прежняя цепочка
+                missing = ppSkipMissing(err);
+            }).then(function() {
+                var restoreOps = [];
+                Object.keys(restoreOpsByCut).forEach(function(cutId) {
+                    if (missing[cutId]) return;     // головы нет — возвращать долю некуда (#4158)
+                    restoreOps = restoreOps.concat(restoreOpsByCut[cutId]);
+                });
+                if (!restoreOps.length) return null;
+                return self.postOps(restoreOps).catch(function(err) {
+                    var real = ppRealFailure(err);
+                    if (real) throw real;
+                    ppSkipMissing(err);
+                });
+            }).then(function() {
+                (ops.updates || []).forEach(function() { splitBump(); });
+            });
+        }
 
         // #4628: ДОЛЯ ОБЕСПЕЧЕНИЯ ИДЁТ ЗА ПРОХОДАМИ И ТАМ, ГДЕ ПРОДОЛЖЕНИЙ НЕ РОЖДАЕТСЯ.
         //
@@ -25004,19 +25122,20 @@
                         var wasRolls = Number(r.s.rolls) || 0, wasFootage = Number(r.s.footage) || 0;
                         if (Math.round(wasRolls) === Math.round(sh.rolls || 0)
                             && round3(wasFootage) === round3(sh.footage || 0)) return;   // уже верно — не пишем
-                        tasks.push(function() {
-                            var f = buildSupplyFieldsForFinishedBatch(supMeta, {
+                        // #4986: операция + её строка журнала. Пишутся ОДНИМ пакетом (ниже), строки
+                        // журнала копятся и уходят своим батчем (#4979) — как и у прочих событий.
+                        tasks.push({
+                            op: 'set', id: r.s.id,
+                            fields: buildSupplyFieldsForFinishedBatch(supMeta, {
                                 finishedBatchId: r.s.finishedBatchId,
                                 footage: sh.footage > 0 ? sh.footage : '', rolls: sh.rolls,
                                 active: '1', status: SUPPLY_STATUSES[0]
-                            });
-                            return self.post('_m_set/' + r.s.id + '?JSON', f).then(function() {
-                                return planJournal(self, {
-                                    event: 'SHARE_FIX', cut: r.seg, before: wasRolls, after: sh.rolls,
-                                    details: '#4628: доля обеспечения приведена к проходам звена (' +
-                                        wasRolls + ' → ' + sh.rolls + ' рулонов при ' + (runsAfter[r.seg] || 0) + ' проходах)'
-                                });
-                            });
+                            }),
+                            journal: {
+                                event: 'SHARE_FIX', cut: r.seg, before: wasRolls, after: sh.rolls,
+                                details: '#4628: доля обеспечения приведена к проходам звена (' +
+                                    wasRolls + ' → ' + sh.rolls + ' рулонов при ' + (runsAfter[r.seg] || 0) + ' проходах)'
+                            }
                         });
                     });
                 });
@@ -25057,33 +25176,38 @@
                 // Барьер между шагами оставлен намеренно: доля сегмента 0 у Обеспечения A должна
                 // быть записана до того, как появятся Обеспечения сегментов 1..N (иначе между
                 // запросами существует момент, когда покрытие позиции задвоено).
-                var aFixTasks = [];
+                // #4986: шаг 2a — ОДИН пакет на родительскую цепочку. Записи тут разные и порядка
+                // между ними нет (он и раньше задавался только пулом), а барьер перед шагом 2b
+                // сохраняется: пакет — это один промис, и он так же разрешается ДО рождения
+                // обеспечений сегментов 1..N.
+                var aFixOps = [];
                 // 2a) уменьшить Обеспечение A до доли сегмента 0.
                 shareBySupply.forEach(function(item) {
-                    aFixTasks.push(function() {
-                        var sh = item.shares[0] || { rolls: 0, footage: 0 };
-                        var f = buildSupplyFieldsForFinishedBatch(supMeta, {
-                            finishedBatchId: item.s.finishedBatchId,
-                            footage: sh.footage > 0 ? sh.footage : '', rolls: sh.rolls,
-                            active: '1', status: SUPPLY_STATUSES[0]
-                        });
-                        return self.post('_m_set/' + item.s.id + '?JSON', f);
-                    });
+                    var sh = item.shares[0] || { rolls: 0, footage: 0 };
+                    aFixOps.push({ op: 'set', id: item.s.id, fields: buildSupplyFieldsForFinishedBatch(supMeta, {
+                        finishedBatchId: item.s.finishedBatchId,
+                        footage: sh.footage > 0 ? sh.footage : '', rolls: sh.rolls,
+                        active: '1', status: SUPPLY_STATUSES[0]
+                    }) });
                 });
                 // 2a-bis) #3433: «Партии ГП» резки A пересчитать под сегмент 0 — «Кол-во
                 // план» = полосы × проходов A (aRuns), «Кол-во рулонов» = спрос сегмента 0.
                 (parentStrips || []).forEach(function(st) {
-                    aFixTasks.push(function() {
-                        var seg0 = (demandByBatchSeg[String(st.id)] || [])[0] || 0;
-                        var f = buildFinishedBatchFields(fbMeta, {
-                            planned: finishedBatchRolls(st.qty, aRuns),
-                            rolls: seg0 > 0 ? seg0 : ''
-                        });
-                        if (!Object.keys(f).length) return;
-                        return self.post('_m_set/' + st.id + '?JSON', f);
+                    var seg0 = (demandByBatchSeg[String(st.id)] || [])[0] || 0;
+                    var f = buildFinishedBatchFields(fbMeta, {
+                        planned: finishedBatchRolls(st.qty, aRuns),
+                        rolls: seg0 > 0 ? seg0 : ''
                     });
+                    if (!Object.keys(f).length) return;
+                    aFixOps.push({ op: 'set', id: st.id, fields: f });
                 });
-                var cChain = runWithConcurrency(aFixTasks, MAX_PARALLEL_WRITES);
+                // Отказ пакета приводим к ОДНОЙ ошибке — той же, что дала бы одиночная запись этой
+                // операции: per-задача softSkip (#3895) ниже читает её ровно как прежде.
+                var cChain = self.postOps(aFixOps).catch(function(err) {
+                    var real = ppRealFailure(err);
+                    if (real) throw real;
+                    ppSkipMissing(err);
+                });
                 // 2b) каждое продолжение B (сегменты 1..N) — разные записи, идут параллельно.
                 var segTasks = crs.map(function(cr, ci) {
                     var segIdx = ci + 1;
@@ -25262,7 +25386,7 @@
         // исчезала молча (боевая ateh 04.08.2026: 5 заданий, 581 шт. недобора по §15; у 658253
         // «Кол-во резок план» 1 при 6 в хранимом «Тайминге», обеспечение целое — 210 = 35×6).
         // Порядок фаз и есть лекарство: create-задача сама приводит голову в порядок (её
-        // «Обеспечения» и «Партии ГП» — `aFixTasks` выше), поэтому голова остаётся нетронутой,
+        // «Обеспечения» и «Партии ГП» — `aFixOps` выше), поэтому голова остаётся нетронутой,
         // пока её продолжение не создано. Теперь сбой оставляет ЛИШНЮЮ работу — задание целое, а
         // созданное продолжение видно оператору и на Ганте, — а не потерянную: то же
         // предпочтение, что у deviationSettlePlan («лучше оставить задание целым, чем разрезать
@@ -25291,7 +25415,7 @@
         return jBegin.then(function() {
             return runWithConcurrency(createTasks, MAX_PARALLEL_SPLIT);
         }).then(function() {
-            return runWithConcurrency(updateTasks, MAX_PARALLEL_SPLIT);
+            return runUpdatePhase();   // #4986: вся фаза — пакетом (см. runUpdatePhase)
         }).then(function() {
             return runWithConcurrency(deleteTasks, MAX_PARALLEL_SPLIT);
         }).then(function() {
@@ -25300,7 +25424,18 @@
             // цепочки (Σ рулонов позиции делится между сегментами), а update видит одну запись.
             if (!shareFixTasks.length) return null;
             console.log('[pp] 🧮 #4628: доля обеспечения приводится к проходам звена — записей:', shareFixTasks.length);
-            return runWithConcurrency(shareFixTasks, MAX_PARALLEL_SPLIT);
+            // #4986: один пакет на всю фазу — записи разные, порядок между ними не важен.
+            return self.postOps(shareFixTasks.map(function(t) {
+                return { op: t.op, id: t.id, fields: t.fields };
+            })).catch(function(err) {
+                var real = ppRealFailure(err);
+                if (real) throw real;
+                var missing = ppSkipMissing(err);
+                shareFixTasks = shareFixTasks.filter(function(t) { return !missing[String(t.id)]; });
+            }).then(function() {
+                // Журнал — только по тем долям, что действительно записаны.
+                return Promise.all(shareFixTasks.map(function(t) { return planJournal(self, t.journal); }));
+            });
         }).then(function() {
             // #4979: строки только копятся — отправит их батчем journalFlush в хвосте действия.
             return journalApplyDetails(self, jSnapshot, ops);
