@@ -83,7 +83,14 @@ function makeSelf(cuts, freezeDays) {
     self.nowMs = function () { return BASE; };
     self.prevSetupBySlitter = {};
     self.writes = [];
-    self.post = function (url, fields) { self.writes.push({ url: url, fields: fields }); return Promise.resolve({}); };
+    // #4984: план пишется пакетом `_m_batch` — стенд раскладывает его на отдельные записи
+    // и отвечает как ручка, чтобы проверки ниже читали ЗАПИСИ, а не запросы.
+    self.post = function (url, fields) {
+        if (url !== '_m_batch') { self.writes.push({ url: url, fields: fields }); return Promise.resolve({}); }
+        var ops = JSON.parse(fields.ops);
+        ops.forEach(function (o) { self.writes.push({ url: (o.op === 'set' ? '_m_set/' : '_m_save/') + o.id + '?JSON', fields: o.fields }); });
+        return Promise.resolve({ results: ops.map(function (o, n) { return { n: n, op: o.op, id: o.id, ok: true }; }), ok: ops.length, failed: 0 });
+    };
     self.reload = function () { return Promise.resolve(); };
     return self;
 }

@@ -48,14 +48,31 @@ function makeController(failCutId) {
         return { reqs: { knifeReq: KNIFE_REQ, matReq: MAT_REQ, cutTimeReq: CUTTIME_REQ }, updates: updates };
     };
 
-    var st = { inflight: 0, maxInflight: 0, posts: [] };
+    var st = { inflight: 0, maxInflight: 0, posts: [], batches: [] };
     c._st = st;
+    // #4984: колонки наладки уходят ПАКЕТОМ `_m_batch` (ядро #4981). Стенд отвечает как эта
+    // ручка и раскладывает пакет на отдельные записи — проверки ниже про ЗАПИСИ, а не про
+    // запросы. Отказ одной записи в пакете — это `ok:false` по своей операции: пакет не
+    // атомарен, соседние применяются (docs/kb/crud.md).
     c.post = function(path, fields) {
         st.inflight++;
         if (st.inflight > st.maxInflight) st.maxInflight = st.inflight;
-        st.posts.push({ path: path, fields: fields });
+        var ops = (path === '_m_batch') ? JSON.parse(fields.ops) : null;
+        if (ops) {
+            ops.forEach(function(o) { st.posts.push({ path: '_m_set/' + o.id + '?JSON', fields: o.fields }); });
+            st.batches.push(ops.length);
+        } else {
+            st.posts.push({ path: path, fields: fields });
+        }
         return delay(5).then(function() {
             st.inflight--;
+            if (ops) {
+                return { results: ops.map(function(o, n) {
+                    return (failCutId != null && String(o.id) === String(failCutId))
+                        ? { n: n, op: o.op, id: o.id, ok: false, error: 'boom' }
+                        : { n: n, op: o.op, id: o.id, ok: true };
+                }), ok: ops.length, failed: 0 };
+            }
             if (failCutId != null && path.indexOf('/' + failCutId + '?') >= 0) throw new Error('boom');
             return { obj: 'OK' };
         });
@@ -67,7 +84,7 @@ function makeController(failCutId) {
 var c = makeController(null);
 c.persistCutSetupColumns().then(function() {
     var st = c._st;
-    assertEqual(st.maxInflight, 5, '#4023: _m_set идут пулом до 5 одновременно (было бы 1 в цепочке)');
+    assertEqual(st.batches, [N], '#4023: все ' + N + ' записей уходят ОДНИМ запросом-пакетом (#4984; было ' + N + ' запросов пулом по 5)');
     assertEqual(st.posts.length, N, '#4023: ровно ' + N + ' запросов (по одному _m_set на резку)');
 
     var paths = st.posts.map(function(p) { return p.path; }).sort();

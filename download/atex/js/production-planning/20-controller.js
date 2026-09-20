@@ -512,6 +512,8 @@
 
     function ppWriteKind(path) {
         var s = String(path == null ? '' : path);
+        // #4984: пакет `_m_batch` адресуется без записи в пути — записи перечислены в теле.
+        if (/^_m_batch\b/.test(s)) return { op: 'batch', target: '' };
         var m = /_m_(\w+)\/([^?]*)/.exec(s);
         if (m) return { op: m[1], target: decodeURIComponent(m[2]) };
         // #4979: батч-загрузка `object/{tid}?JSON&import=1` — отдельная операция в трассе, иначе
@@ -551,7 +553,8 @@
             if (k === '_xsrf') return;
             if (params[k] !== undefined && params[k] !== null && params[k] !== '') fields[k] = params[k];
         });
-        var head = '[pp][WRITE#' + seq + '] ' + String(kind.op).toUpperCase() + ' t' + kind.target + (up ? ' up=' + up : '');
+        var head = '[pp][WRITE#' + seq + '] ' + String(kind.op).toUpperCase()
+            + (kind.target ? ' t' + kind.target : '') + (up ? ' up=' + up : '');
         console.log(head + '  [' + op + ']  ← ' + ppWriteCallers(8).join(' ← '), { path: path, fields: fields });
         return {
             seq: seq,
@@ -618,15 +621,15 @@
                     var result;
                     try { result = text ? JSON.parse(text) : {}; }
                     catch (e) {
-                        if (!resp.ok) { _trace.fail(resp.status, text.slice(0, 200)); throw new Error('Сервер вернул ошибку ' + resp.status + ': ' + text.slice(0, 200)); }
+                        if (!resp.ok) { _trace.fail(resp.status, text.slice(0, 200)); throw ppErr('Сервер вернул ошибку ' + resp.status + ': ' + text.slice(0, 200), resp.status, 'parse'); }
                         _trace.fail('parse', text.slice(0, 200));
-                        throw new Error('Сервер вернул не JSON: ' + text.slice(0, 200));
+                        throw ppErr('Сервер вернул не JSON: ' + text.slice(0, 200), resp.status, 'parse');
                     }
                     // #3486/#3475: отказ команды `_m_*` приходит телом `[{"error":"…"}]` (массив,
                     // my_die) с HTTP-кодом 4xx/409. Прежняя проверка `result.error` у массива не
                     // срабатывала и не смотрела статус — отказ (напр. 409 «есть ссылки» при удалении)
                     // молча считался успехом, запись оставалась, а тост рапортовал «удалено».
-                    if (!resp.ok) { _trace.fail(resp.status, extractApiError(result) || ''); throw new Error(extractApiError(result) || ('Сервер вернул ошибку ' + resp.status)); }
+                    if (!resp.ok) { _trace.fail(resp.status, extractApiError(result) || ''); throw ppErr(extractApiError(result) || ('Сервер вернул ошибку ' + resp.status), resp.status, 'server'); }
                     _trace.ok(result);
                     return result;
                 });
@@ -684,6 +687,142 @@
                 }, function(err) { _trace.fail('network', err && err.message); throw err; })
                 .then(release, releaseThrow);
         });
+    };
+
+    // #4984: ПАКЕТНАЯ ЗАПИСЬ ПЛАНА — `POST /{db}/_m_batch` (ядро issue #4981, docs/kb/crud.md).
+    // Одно перемещение задания стоило 85 `_m_save` + 17 `_m_set` (боевая ateh1, разбор #4979).
+    // Параллелить их больше нечего: семафор записи уже на MAX_PARALLEL_WRITES, браузер держит
+    // 6 соединений на домен — упирается в КОЛИЧЕСТВО round-trip'ов, а не в их одновременность.
+    // Ручка принимает те же операции, что и одиночные команды, и выполняет их ТЕМ ЖЕ кодом
+    // (ApplyMSave/ApplyMSet), поэтому набор проверок прав/уникальности/ссылок не меняется.
+    //
+    //   ops — [{ op: 'save'|'set', id, fields }]; порядок сохраняется (сервер применяет подряд).
+    //   opts.onProgress(done, total) — прогресс по факту применения, пачками.
+    // → Promise<число применённых операций>.
+    //
+    // ПАКЕТ НЕ АТОМАРЕН (транзакций в платформе нет — docs/kb/crud.md «Грабли» #4981): операции
+    // после упавшей всё равно выполняются, поэтому отказ отклоняет промис ПОСЛЕ разбора всего
+    // ответа и несёт поимённо, что упало (opId/results) и сколько применилось (applied).
+    // Вызывающий сообщает об ошибке сам — как и при одиночной записи.
+    var PP_BATCH_OPS_MAX = 500;          // ядро держит 1000 (BATCH_OPS_LIMIT); берём с запасом
+    // `index.php` едет на сервер отдельно от download/atex (docs/kb/deploy.md: update.conf его не
+    // раскладывает), поэтому установка с этим клиентом может оказаться со СТАРЫМ ядром, где
+    // `_m_batch` не существует. Тогда операции дописываются по одной, как прежде, а флаг гасит
+    // пакетный путь до перезагрузки страницы — чтобы не платить лишний запрос за каждую пачку.
+    var _ppBatchOff = false;
+
+    // Ошибка записи с разбираемой причиной: код ответа и вид отказа. Нужны ПАКЕТУ, чтобы
+    // отличить «ручки нет» от отказа записи; одиночный вызывающий читает, как и раньше, message.
+    function ppErr(msg, status, kind) {
+        var e = new Error(msg);
+        e.status = status;
+        e.kind = kind;
+        return e;
+    }
+    function ppNoBatch() { return ppErr('пакетной записи на этой установке нет', 0, 'nobatch'); }
+    // Поля пакета нормализуются ровно как у одиночного post(): пустые значения не отправляются
+    // (грабля #4366 — очистить поле этим путём нельзя, поведение общее для обоих путей).
+    function ppBatchOps(ops) {
+        var out = [];
+        (ops || []).forEach(function(o) {
+            if (!o || o.id == null || o.id === '') return;
+            var fields = {};
+            Object.keys(o.fields || {}).forEach(function(k) {
+                if (o.fields[k] !== undefined && o.fields[k] !== null && o.fields[k] !== '') fields[k] = String(o.fields[k]);
+            });
+            if (!Object.keys(fields).length) return;   // пустой набор полей ядро отвергает
+            out.push({ op: (o.op === 'set' ? 'set' : 'save'), id: o.id, fields: fields });
+        });
+        return out;
+    }
+    // Одна пачка. Ответ ручки — JSON `{results:[…],ok:N,failed:M}`; всё, что на него не похоже
+    // (404/405, HTML-страница вместо JSON), читается как «ручки нет», а не как отказ записи.
+    // Пакет уходит ТЕМ ЖЕ post() — семафор записи, XSRF, трасса #4177 и запрет на запись при
+    // непринятом пересчёте остаются в одной точке, а не разводятся по двум транспортам.
+    // Поля запроса: `ops=<массив JSON>`; `?JSON` в адресе ручке не нужен (docs/kb/crud.md).
+    function ppSendBatch(self, chunk) {
+        return self.post('_m_batch', { ops: JSON.stringify(chunk) }).then(function(result) {
+            // Ответ ручки — `{results:[…],ok:N,failed:M}`. Ядро без этой команды отвечает не им.
+            if (!result || !Array.isArray(result.results)) throw ppNoBatch();
+            return result;
+        }, function(err) {
+            // 404/405 или страница вместо JSON — ручки на этой установке нет, а не отказ записи.
+            var st = err && err.status;
+            if (st === 404 || st === 405 || st === 501 || (err && err.kind === 'parse')) throw ppNoBatch();
+            throw err;
+        });
+    }
+    // Запасной путь: те же операции одиночными командами, прежним пулом.
+    function ppSendSingles(self, ops, onDone) {
+        var done = 0;
+        return runWithConcurrency(ops.map(function(o) {
+            return function() {
+                var path = (o.op === 'set' ? '_m_set/' : '_m_save/') + encodeURIComponent(o.id) + '?JSON';
+                return self.post(path, o.fields).then(function(r) {
+                    done += 1;
+                    if (typeof onDone === 'function') onDone(done);
+                    return r;
+                });
+            };
+        }), MAX_PARALLEL_WRITES).then(function() { return done; });
+    }
+
+    // ЕДИНАЯ ТОЧКА ОТПРАВКИ НАБОРА (функция МОДУЛЯ — метод прототипа ниже лишь её зовёт, как у
+    // шлюза стартов postCutStarts): набор операций собирает вызывающий, отправку решает она.
+    function postPlanOps(self, ops, opts) {
+        var o = opts || {};
+        // #4402: тот же запрет, что у одиночной записи — при непринятом пересчёте в БД прежний
+        // план, и писать в него нечего (иначе пакет закрепил бы проекцию предпросмотра).
+        if (self._pendingPlan) {
+            return Promise.reject(new Error('Показан непринятый пересчёт «Упорядочить» — нажмите «Применить» или «Отменить»'));
+        }
+        var list = ppBatchOps(ops);
+        if (!list.length) return Promise.resolve(0);
+        var total = list.length, applied = 0, failure = null, allResults = [];
+        function progress() { if (typeof o.onProgress === 'function') o.onProgress(applied, total); }
+        function singles(rest) {
+            _ppBatchOff = true;
+            return ppSendSingles(self, rest, function(d) { applied = total - rest.length + d; progress(); })
+                .then(function() { return applied; });
+        }
+        if (_ppBatchOff) return singles(list);
+        var chunks = [];
+        for (var i = 0; i < list.length; i += PP_BATCH_OPS_MAX) chunks.push(list.slice(i, i + PP_BATCH_OPS_MAX));
+        // Пачки идут ПОСЛЕДОВАТЕЛЬНО: типовой случай — одна пачка, а при нескольких первая же
+        // отвечает, есть ли ручка на этой установке (иначе запасной путь пошёл бы вперемешку с
+        // пакетным). Выигрыш здесь — в числе запросов, а не в их одновременности.
+        return chunks.reduce(function(chain, chunk) {
+            return chain.then(function() {
+                // Ручки нет (узнали на предыдущей пачке) — остаток уходит одиночными командами.
+                if (_ppBatchOff) return ppSendSingles(self, chunk).then(function(d) { applied += d; progress(); });
+                return ppSendBatch(self, chunk).then(function(res) {
+                    (res.results || []).forEach(function(r, k) {
+                        var src = chunk[k] || {};
+                        allResults.push(r);
+                        if (r && r.ok) applied += 1;
+                        else if (!failure) failure = { message: (r && r.error) || 'запись не удалась', opId: src.id };
+                    });
+                    progress();
+                }, function(err) {
+                    if (!err || err.kind !== 'nobatch') throw err;
+                    // Ручки нет — эта пачка и все следующие уходят одиночными командами.
+                    _ppBatchOff = true;
+                    return ppSendSingles(self, chunk).then(function(d) { applied += d; progress(); });
+                });
+            });
+        }, Promise.resolve()).then(function() {
+            if (!failure) return applied;
+            var err = new Error(failure.message);
+            err.opId = failure.opId;
+            err.applied = applied;
+            err.results = allResults;
+            throw err;
+        });
+    }
+
+    // Тот же шлюз как метод — для вызова извне (и из тестов): вся логика в postPlanOps.
+    AtexProductionPlanning.prototype.postOps = function(ops, opts) {
+        return postPlanOps(this, ops, opts);
     };
 
     // ── Загрузка метаданных и справочников ──
@@ -8869,9 +9008,10 @@
     //   • НЕ ИЗМЕНИЛОСЬ — НЕ СОХРАНЯЕМ: команду даём только заданию, у которого хранимый старт
     //     отличается от нового (changedStartWrites; хранимое берём из this.cuts, если вызывающий
     //     не передал wasTs). Ноль изменений — ноль запросов, промис резолвится нулём;
-    //   • ПАРАЛЛЕЛЬНО, до MAX_PARALLEL_WRITES потоков: задания независимы (каждое — свой
-    //     _m_save/<cutId>), порядок записи в базе неважен (#4000), как сохранение/удаление/
-    //     разбиение/тайминг (#3998/#4005/#4014/#4023).
+    //   • ОДНИМ ПАКЕТОМ `_m_batch` (#4984): задания независимы, порядок записи в базе неважен
+    //     (#4000), поэтому весь набор уходит одним запросом. Прежде это был пул до
+    //     MAX_PARALLEL_WRITES одиночных `_m_save` (#4477) — сорок стартов стоили сорок
+    //     round-trip'ов (разбор #4979).
     // Первая колонка (плановое время старта, DATETIME) пишется ТОЛЬКО через _m_save с
     // t{tableId} — _m_set её не задаёт (GUIDE issue #775).
     //   items — [{ cutId, ts, wasTs? }]; opts.onWrite(done, total) — прогресс по факту записи.
@@ -8896,17 +9036,14 @@
         // на «1 из 7», когда шесть заданий отсеяны как неизменившиеся.
         if (typeof o.onPlan === 'function') o.onPlan(writes.length);
         if (!writes.length) return Promise.resolve(0);
-        var done = 0;
-        return runWithConcurrency(writes.map(function(w) {
-            return function() {
-                var fields = {}; fields[mainKey] = String(w.ts);
-                return self.post('_m_save/' + encodeURIComponent(w.cutId) + '?JSON', fields).then(function(r) {
-                    done += 1;   // счётчик безопасен: JS однопоточен
-                    if (typeof o.onWrite === 'function') o.onWrite(done, writes.length);
-                    return r;
-                });
-            };
-        }), MAX_PARALLEL_WRITES).then(function() { return writes.length; });
+        // #4984: отсеянное выше в пакет не попадает — правило «не изменилось, не сохраняем»
+        // работает ДО транспорта и от способа отправки не зависит.
+        return postPlanOps(self, writes.map(function(w) {
+            var fields = {}; fields[mainKey] = String(w.ts);
+            return { op: 'save', id: w.cutId, fields: fields };
+        }), {
+            onProgress: function(done) { if (typeof o.onWrite === 'function') o.onWrite(done, writes.length); }
+        }).then(function() { return writes.length; });
     }
 
     // Тот же шлюз как метод — для вызова извне (и из тестов): вся логика в postCutStarts.
@@ -8931,23 +9068,21 @@
         // он один решает день и нахлёст настройки (#3805, #3635 п.5). Здесь — только тайминг
         // (Наладка ножей / Сырьё-намотка / Резка и Лидер), planStart не трогаем. Пересборку стартов
         // ВНУТРИ дня по этим колонкам делает recalcSetupTiming (#4408) отдельным шагом.
-        // #4023: разные резки независимы (каждая — свой _m_set/<cutId>?JSON), а порядок в базе
-        // неважен (#4000). Раньше это был последовательный chain.then — «последний набор запросов»
-        // после «Создать»/«Упорядочить» шёл лесенкой в 1 поток (окно висело на 100%). Гоняем пулом
-        // до MAX_PARALLEL_SETUP потоков, как сохранение/удаление/разбиение (#3998/#4005/#4014).
-        var MAX_PARALLEL_SETUP = MAX_PARALLEL_WRITES;   // #4477: предел один на весь модуль
-        var tasks = updates.map(function(u) {
-            return function() {
-                var fields = setupTimingFields(reqs, u);
-                if (!Object.keys(fields).length) return;
-                return self.post('_m_set/' + u.cutId + '?JSON', fields);
-            };
+        // #4023/#4984: разные резки независимы (у каждой свой набор полей), а порядок записи в
+        // базе неважен (#4000) — поэтому весь набор уходит ОДНИМ пакетом `_m_batch`. До этого
+        // он шёл пулом одиночных `_m_set`, а ещё раньше — цепочкой в один поток, и «последний
+        // набор запросов» после «Создать»/«Упорядочить» держал окно на 100% (#4023).
+        var ops = [];
+        updates.forEach(function(u) {
+            var fields = setupTimingFields(reqs, u);
+            if (!Object.keys(fields).length) return;
+            ops.push({ op: 'set', id: u.cutId, fields: fields });
         });
         // #3778: ошибки записи тайминга больше НЕ глотаем молча — раньше тихий catch скрывал,
         // почему «Наладка ножей»/«Сырье/намотка»/«Резка и Лидер» оставались пустыми. Сохранение
-        // самой очереди (старт/очередность) идёт отдельной цепочкой — его не валим. Пул реджектится
-        // ПЕРВОЙ ошибкой (как прежняя цепочка) → единый notify.
-        return runWithConcurrency(tasks, MAX_PARALLEL_SETUP).catch(function(err) {
+        // самой очереди (старт/очередность) идёт отдельной цепочкой — его не валим. Отказ ПЕРВОЙ
+        // упавшей операции пакета → единый notify.
+        return postPlanOps(self, ops).catch(function(err) {
             self.notify('Не удалось сохранить тайминг заданий (Наладка ножей / Сырье-намотка / '
                 + 'Резка и Лидер): ' + (err && err.message || err), 'error');
         });

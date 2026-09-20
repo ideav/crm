@@ -150,7 +150,14 @@ function cardOf(queueEl, cutId) {
         busy: false, meta: { cut: { id: '1078' } },
         setBusy: function () {}, render: function () {}, _manualMoveDirty: {},
         notify: function (m, k) { notes.push({ m: m, k: k }); },
-        post: function (url, fields) { writes.push({ url: url, fields: fields }); return Promise.resolve({}); },
+        // #4984: план пишется пакетом `_m_batch` — стенд раскладывает его на отдельные записи
+        // и отвечает как ручка, чтобы проверки ниже считали ЗАПИСИ, а не запросы.
+        post: function (url, fields) {
+            if (url !== '_m_batch') { writes.push({ url: url, fields: fields }); return Promise.resolve({}); }
+            var ops = JSON.parse(fields.ops);
+            ops.forEach(function (o) { writes.push({ url: (o.op === 'set' ? '_m_set/' : '_m_save/') + o.id + '?JSON', fields: o.fields }); });
+            return Promise.resolve({ results: ops.map(function (o, n) { return { n: n, op: o.op, id: o.id, ok: true }; }), ok: ops.length, failed: 0 });
+        },
         reload: function () { return Promise.resolve(); }
     };
     return Controller.prototype.moveCutInDay.call(self, [a, b], 0, 1).then(function (res) {

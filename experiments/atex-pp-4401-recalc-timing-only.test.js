@@ -106,7 +106,14 @@ function makeController(cuts, filter) {
     c.showProgress = function() {}; c.hideProgress = function() {}; c.updateProgress = function() {};
     c._notes = []; c.notify = function(m, k) { c._notes.push({ msg: m, kind: k }); };
     c._posts = [];
-    c.post = function(path, fields) { c._posts.push({ path: path, fields: fields }); return Promise.resolve({ obj: '1' }); };
+    // #4984: план пишется пакетом `_m_batch` — стенд раскладывает его на отдельные записи
+    // и отвечает как ручка, чтобы проверки ниже читали ЗАПИСИ, а не запросы.
+    c.post = function(path, fields) {
+        if (path !== '_m_batch') { c._posts.push({ path: path, fields: fields }); return Promise.resolve({ obj: '1' }); }
+        var ops = JSON.parse(fields.ops);
+        ops.forEach(function(o) { c._posts.push({ path: (o.op === 'set' ? '_m_set/' : '_m_save/') + o.id + '?JSON', fields: o.fields }); });
+        return Promise.resolve({ results: ops.map(function(o, n) { return { n: n, op: o.op, id: o.id, ok: true }; }), ok: ops.length, failed: 0 });
+    };
     c.reload = function() { return Promise.resolve(); };
     return c;
 }
