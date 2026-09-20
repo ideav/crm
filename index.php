@@ -1856,6 +1856,8 @@ function IsOccupied($id)
 	return false;
 }
 function my_die($msg, $code=""){
+	if(InBatchOp())	# Пакетная запись: ошибка относится к одной операции, а не ко всему запросу
+		throw new IntegramOpError($msg);
 	if(isset($GLOBALS["TRACE"])){
 		print_r($GLOBALS["GRANTS"]);
 		if(isset($GLOBALS["CUR_VARS"]))
@@ -11066,6 +11068,570 @@ function updateBilling(){
 	global $connection, $z, $time_start;
 	mysqli_query($connection, "UPDATE my SET ord=ord+".min(50, max(1, floor(substr(microtime(TRUE) - $time_start, 0, 6)*50)))." WHERE t=".DATABASE." AND val='$z'");
 }
+# <m-batch-4981> Пакетная запись: _m_save и _m_set одним запросом (issue #4981)
+# Ошибка одной операции пакета.
+class IntegramOpError extends Exception {}
+
+# Предел размера пакета: каждая операция — это полноценное сохранение записи.
+define("BATCH_OPS_LIMIT", 1000);
+
+# Признак «мы внутри операции пакета»: ошибка относится к одной операции, а не ко всему запросу.
+function InBatchOp(){
+	return !empty($GLOBALS["BATCH_OP"]);
+}
+# Отказ обработчика записи. Одиночный вызов завершает запрос телом ошибки, как и раньше;
+# внутри пакета это ошибка одной операции, остальные продолжают выполняться.
+function OpFail($msg){
+	if(InBatchOp())
+		throw new IntegramOpError($msg);
+	exit($msg);
+}
+# Метаданные записи кешируются в глобалах между вызовами: GetObjectReqs обнуляет только REQS,
+# остальное накапливается. Перед каждой операцией пакета кеш надо сбросить, иначе вторая
+# запись унаследует реквизиты первой.
+function Reset_Reqs_Cache(){
+	foreach(array("REQS", "ObjectReqs", "REQ_TYPS", "REF_typs", "MULTI", "ARR_typs", "NOT_NULL", "BOOLEANS", "TABS", "warning") as $key)
+		unset($GLOBALS[$key]);
+}
+# Выполнить одну операцию записи так, как если бы она пришла отдельным запросом: помощники
+# внутри обработчиков (GetObjectReqs, Populate_Reqs, проверка NOT NULL) читают $_REQUEST
+# напрямую, поэтому на время операции суперглобал подменяется на её поля. Возвращает
+# предупреждения, накопленные операцией.
+function ApplyOp($op, $rec_id, $fields)
+{
+	$savedRequest = $_REQUEST;
+	$savedWarning = isset($GLOBALS["warning"]) ? $GLOBALS["warning"] : NULL;
+	$savedA = isset($GLOBALS["a"]) ? $GLOBALS["a"] : NULL;
+	$savedArg = isset($GLOBALS["arg"]) ? $GLOBALS["arg"] : NULL;
+	$savedObj = isset($GLOBALS["obj"]) ? $GLOBALS["obj"] : NULL;
+	Reset_Reqs_Cache();
+	$_REQUEST = $fields;
+	try{
+		if($op === "set")
+			ApplyMSet($rec_id, $fields, array());
+		else
+			ApplyMSave($rec_id, $fields, array());
+		$warnings = isset($GLOBALS["warning"]) ? $GLOBALS["warning"] : "";
+	}
+	finally{
+		$_REQUEST = $savedRequest;
+		foreach(array("a" => $savedA, "arg" => $savedArg, "obj" => $savedObj, "warning" => $savedWarning) as $key => $was)
+			if($was === NULL)
+				unset($GLOBALS[$key]);
+			else
+				$GLOBALS[$key] = $was;
+	}
+	return $warnings;
+}
+# Разобрать и выполнить пакет. Каждая операция идёт через обработчик одиночной команды,
+# поэтому проверки прав, уникальности и ссылок — те же самые. Транзакций в платформе нет,
+# откатывать применённые операции нечем, поэтому пакет доводится до конца, а состояние
+# каждой операции возвращается в ответе.
+function ApplyMBatch($payload)
+{
+	$ops = json_decode($payload, TRUE);
+	if(!is_array($ops) || !count($ops))
+		my_die(t9n("[RU]Пустой или неразобранный пакет: ожидается ops=<массив JSON>[EN]Empty or unparsable batch: expected ops=<JSON array>"));
+	if(count($ops) > BATCH_OPS_LIMIT)
+		my_die(t9n("[RU]Слишком большой пакет (максимум ".BATCH_OPS_LIMIT.")[EN]Batch too large (max ".BATCH_OPS_LIMIT.")"));
+	$results = array();
+	$done = 0;
+	$failed = 0;
+	$GLOBALS["BATCH_OP"] = TRUE;
+	foreach($ops as $n => $op){
+		$res = array("n" => (int)$n);
+		try{
+			if(!is_array($op))
+				throw new IntegramOpError(t9n("[RU]Операция должна быть объектом[EN]An operation must be an object"));
+			$kind = isset($op["op"]) ? strtolower(trim($op["op"])) : "save";
+			$rec = isset($op["id"]) ? (int)$op["id"] : 0;
+			$fields = (isset($op["fields"]) && is_array($op["fields"])) ? $op["fields"] : array();
+			$res["op"] = $kind;
+			$res["id"] = $rec;
+			if(($kind !== "save") && ($kind !== "set"))
+				throw new IntegramOpError(t9n("[RU]Неизвестная операция '$kind': допустимы save и set[EN]Unknown op '$kind': expected save or set"));
+			if($rec <= 0)
+				throw new IntegramOpError(t9n("[RU]Не указан id записи[EN]Record id is required"));
+			if(!count($fields))
+				throw new IntegramOpError(t9n("[RU]Пустой набор полей[EN]Empty set of fields"));
+			if(isset($fields["copybtn"]))
+				throw new IntegramOpError(t9n("[RU]Копия записи в пакете не поддерживается[EN]Copying a record is not supported in a batch"));
+			$warnings = ApplyOp($kind, $rec, $fields);
+			$res["ok"] = TRUE;
+			if($warnings !== "")
+				$res["warnings"] = $warnings;
+			$done++;
+		}
+		catch(IntegramOpError $e){
+			$res["ok"] = FALSE;
+			$res["error"] = $e->getMessage();
+			$failed++;
+		}
+		$results[] = $res;
+	}
+	unset($GLOBALS["BATCH_OP"]);
+	Insert_batch("", "", "", "", "Flush batch");	# Дослать отложенные вставки, если они появились
+	return array("results" => $results, "ok" => $done, "failed" => $failed);
+}
+# Тело команды _m_set. Вынесено из switch, чтобы пакетная запись выполняла ровно этот код,
+# а не его копию: иначе набор проверок у одиночного вызова и у пакета разойдётся.
+function ApplyMSet($id, $req, $files)
+{
+	global $z, $a, $arg, $obj;
+		    $t = 0;
+		    $obj = $id;
+		    $id = "";
+			foreach($req as $key => $val) # Check if we have an attribute set
+				if((substr($key, 0, 1) == "t") && ((int)substr($key, 1)!=0)){
+				    $t = (int)substr($key, 1);
+        			Check_Grant($obj, $t);
+        			# Get the Object's ID value and Type
+        			$result = Exec_sql("SELECT a.ord, a.id, a.t ref_val, a.val, def.t, req.val attrs FROM $z obj JOIN $z req ON req.up=obj.t AND req.id=$t JOIN $z def ON def.id=req.t
+        									LEFT JOIN $z a ON a.up=$obj AND (a.t=$t OR a.val='$t') WHERE obj.id=$obj ORDER BY a.ord", "Get Attr Type");
+#print_r($GLOBALS);die($obj);
+        			if($row = mysqli_fetch_array($result)){
+        				$cur_id = $row["id"];
+        				if(!isset($GLOBALS["basics"][$row["t"]])){	# Reference - its type is not a base one
+							if(FieldAttrsHasMulti($row["attrs"])){
+								$deft = $row["t"];
+        				        # Get the current set of Refs
+        				        do{
+									if($row["id"]){ 
+										$ref_list[$row["ref_val"]] = $row["id"];
+										$ref_list_ord[$row["ref_val"]] = $row["ord"];
+									}
+                			    } while($row = mysqli_fetch_array($result));
+                			    # There might be a set of Refs in an array
+        				        if(!is_array($val))
+        				            $val = explode(",", $val); # There might be comma separated IDs
+        				        foreach($val as $ref){
+                					$ref = (int)$ref;
+                					if(isset($ref_list["$ref"])){ # This Ref is already on the list
+        				                #$GLOBALS["warning"] = (isset($GLOBALS["warning"]) ? $GLOBALS["warning"] : "") . t9n("[RU] Уже есть в списке[EN] Already on the list").": $ref";
+										unset($ref_list["$ref"]);
+                					    continue;
+            				        }
+        				            if(!$ref || !checkNewRef($ref, $deft, false)){ # Skip invalid Ref
+        				                $GLOBALS["warning"] = (isset($GLOBALS["warning"]) ? $GLOBALS["warning"] : "") . t9n("[RU] Неверная ссылка[EN] Wrong Reference").": $t - $ref";
+        				                continue;
+        				            }
+            						$id = Insert($obj, GetRefOrd($obj, $t), $ref, "$t", "Insert new Ref Attr"); # A new Value
+        				        }
+        				        foreach($ref_list as $k => $ref){ # Drop those not on the incoming list - those were deleted 
+       				                Exec_sql("DELETE FROM $z WHERE id=$ref", "Drop the removed Reference Attr");
+       				                Exec_sql("UPDATE $z SET ord=ord-1 WHERE up=$obj AND val=$t AND ord>".$ref_list_ord[$k], "Move Reference peers");
+								}
+        				        if($id !== "")
+            						checkDuplicatedReqs($obj, $t);
+        				    }
+        				    else{
+                				$cur_val = $row["ref_val"];
+            					$val = (int)$val;
+            					if($val)
+            						checkNewRef($val, $row["t"]);
+            					if($cur_id){
+            						if($val){
+            						    $id = $cur_id;
+            							if($val != $cur_val)
+            								Exec_sql("UPDATE $z SET t=$val WHERE id=$cur_id", "Update Reference Attr");
+            						}
+            						else
+            							Delete($row["id"]);
+            					}
+            					elseif($val){
+            						$id = Insert($obj, 1, $val, "$t", "Insert new Ref Attr"); # A new Value
+            						checkDuplicatedReqs($obj, $t);
+            					}
+        				    }
+        				}
+        				else{
+            				$cur_val = $row["val"];
+            				trace("BuiltIn $val of ".$row["t"]." = ".BuiltIn($val));
+            				trace(" base = ".$GLOBALS["REV_BT"][$row["t"]]);
+            				if(!in_array($t, array(101, 102, 103, 132, 49)))
+            					$val = BuiltIn($val);
+        					# Format the value
+							if($t == PASSWORD) // Encrypt the password
+        						$val = hash("sha512", Salt($z, $val));
+        					elseif(($GLOBALS["REV_BT"][$row["t"]] == "NUMBER") && ($val != 0))
+        						$val = $val === "" ? "" : (int)$val;
+        					elseif(($GLOBALS["REV_BT"][$row["t"]] == "SIGNED") && ($val != 0))
+        						$val = $val === "" ? "" : (double)str_replace(",",".",$val);
+        					else
+        						$val = Format_Val($row["t"], $val);
+        					if($cur_id){ # The Req exists
+        					    $id = $cur_id;
+        						if($val==""){
+        							Delete($cur_id);
+        							if($GLOBALS["REV_BT"][$row["t"]] === "FILE") // Remove the file from the server
+        							    @RemoveDir(GetSubdir($cur_id)."/".GetFilename($cur_id).".".substr(strrchr($cur_val,'.'),1));
+        						}
+        						else{
+        							$val = Format_Val($row["t"], $val);
+        							if($val != $cur_val)
+        								Update_Val($cur_id, $val);
+        						}
+        					}
+        					elseif($val!=""){
+        						$id = Insert($obj, 1, $t, $val, "Insert new non-empty rec");
+        						checkDuplicatedReqs($obj, $t);
+        					}
+        				}
+        			}
+        			else{
+        			    # Issue #4981: t{tableId} — это главное значение записи, а не реквизит,
+        			    # и JOIN выше его не находит. Сохраняем тем же обработчиком, что и
+        			    # одиночный _m_save, — со всеми его проверками: права на запись,
+        			    # уникальность/составной ключ, запрет пустого имени объекта.
+        			    $own = mysqli_fetch_array(Exec_sql("SELECT t FROM $z WHERE id=$obj", "Get the Object's own Type"));
+        			    if($own && ((int)$own["t"] === $t)){
+        			        ApplyOp("save", $obj, array("t$t" => $val));
+        			        $id = $obj;
+        			    }
+        			}
+				}
+			foreach($files as $key => $value)
+				if(strlen($value["name"]) > 0)
+				{
+					$t = substr($key, 1); # Cut the Typ from the Var named tTyp
+					if((substr($key, 0, 1) != "t") || ($t == 0)) # Out of scope
+						continue;
+
+					if(Check_Grant($obj, $t))
+					{
+						BlackList(substr(strrchr($value["name"], '.'), 1));
+						if(!file_exists(UPLOAD_DIR))
+							mkdir(UPLOAD_DIR);
+
+            			# Get the File's ID
+            			$result = Exec_sql("SELECT req.id FROM $z req, $z def, $z base
+            			                        WHERE req.up=$obj AND base.id=def.t AND def.id=req.t AND base.t=".$GLOBALS["BT"]["FILE"]
+            			                    , "Get File attr ID");
+            			if($row = mysqli_fetch_array($result))  # The filename is not empty
+						{
+						    $req_id = $row["id"];
+							Update_Val($req_id, $value["name"]); # update the filename in the DB
+						}
+						else
+							$req_id = Insert($obj, 1, $t, $value["name"], "Insert new Filename");
+
+						$subdir = GetSubdir($req_id);
+						if(!file_exists($subdir))
+							@mkdir($subdir);
+						if(!move_uploaded_file($value['tmp_name']
+											, $subdir."/".GetFilename($req_id).".".substr(strrchr($value["name"],'.'),1)))
+							OpFail(t9n("[RU]Не удалось заменить файл[EN]File updating failed"));
+						$arg .= $subdir."/".GetFilename($req_id).".".substr(strrchr($value["name"],'.'),1);
+					}
+				}
+            if($t == 0)
+                OpFail(t9n("[RU]Нет набора атрибутов ($key) или пустое значение ($val) [EN]No attribute set ($key) or empty value ($val)"));
+			$a = "nul";
+	return $id;
+}
+# Тело команды _m_save. Вынесено из switch по той же причине.
+function ApplyMSave($id, $req, $files)
+{
+	global $z, $a, $arg, $obj, $next_act;
+			# Get the Object's ID value and Type
+			if($id === "")
+			    my_die(t9n("[RU]Неверный ID[EN]Invalid ID"));
+			$result = Exec_sql("SELECT a.val, a.t typ, a.up, a.ord, typs.t, typs.ord uniq FROM $z typs, $z a WHERE typs.id=a.t AND a.id=$id", "Get current Val and Type");
+			if($row = mysqli_fetch_array($result))
+				$cur_val = $row["val"];
+			else
+				OpFail("No such record");
+			if($row["up"]==0)
+				OpFail("Cannot update meta-data");
+			$typ = $row["typ"];
+			$base_typ = $GLOBALS["basics"][$row["t"]];
+			$unique = (int)$row["uniq"];
+			$up = $row["up"];
+			if($up > 1)
+				$arg = "F_U=$up";  # Retain this for Array elements only
+			$GLOBALS["REV_BT"][$typ] = $GLOBALS["REV_BT"][$row["t"]];
+
+			$search_str = "";
+			foreach($req as $key => $value) # Check if we have some search criteria for Ref lists
+				if((substr($key, 0, 7) == "SEARCH_") && (strlen($value)))
+					if($value != $req["PREV_$key"]){	# we have this updated
+						$search[substr($key, 7)] = $value;
+						$search_str .= "&$key=$value"; # Pass the criteria via GET - prepare the address string
+					}
+#print_r($GLOBALS); die();
+			if(isset($req["copybtn"])){ # Check if we have to make a copy of the Obj
+				Check_Grant($id);
+				$copy = TRUE;
+				if($up > 1)
+					$ord = Calc_Order($up, $typ);
+				else
+					$ord = 1;
+				# Copy the object and replace its ID
+				$old_id = $id;
+				if(strlen($req["t$typ"]))	# Get the object Val from the form - this might be updated
+					$GLOBALS["REQS"][$typ] = $cur_val = $req["t$typ"];	# and update the current Val
+				$id = Insert($up, $ord, $typ, $cur_val, "Copy the object");
+				Populate_Reqs($old_id, $id);	# Populate requisites' reqs
+            	Insert_batch("", "", "", "", "Flush Copy");
+#print_r($GLOBALS);die($block."!");
+				if(isset($GLOBALS["BOOLEANS"]))  # Clean the previous set of reqs in case we copy the Obj
+					unset($GLOBALS["BOOLEANS"]);
+			    $arg = "copied1=1&";
+			}
+			else{
+			    $arg = "saved1=1&";
+				$copy = FALSE;
+			}
+
+			$GLOBALS["REQ_TYPS"][$typ] = $id;
+			Get_Current_Values($id, $typ);
+			$GLOBALS["REQS"][$typ] = $cur_val;
+			if(!$copy){
+				$keyReqs = $unique ? array() : UniqueKeyReqs($typ);
+				$hasSubmittedKeyReqs = $unique ? false : UniqueKeyRequestHasSubmittedKeyReq($req, $keyReqs);
+				if($unique || $hasSubmittedKeyReqs){
+					$uniqueVal = $cur_val;
+					if(isset($req["t$typ"]) && !(($typ == TOKEN || $typ == XSRF || $typ == PASSWORD) && $req["t$typ"] === PASSWORDSTARS))
+						$uniqueVal = UniqueKeyNormalizeValue($typ, $req["t$typ"]);
+					CheckUniqueRecordFromRequest($typ, $id, $up, $uniqueVal, $req, (bool)$unique);
+				}
+			}
+			trace("GLOBALS[REQS] " . print_r($GLOBALS["REQS"], TRUE));
+
+			foreach($req as $key => $value){
+				trace("_REQUEST $key");
+				$t = substr($key, 1); # Cut the Typ from the Var named tTyp
+				if((substr($key, 0, 1) != "t") || ($t == 0) || !is_numeric($t)) # Out of scope or empty
+					continue;
+				$req_id = isset($GLOBALS["REQ_TYPS"][$t]) ? $GLOBALS["REQ_TYPS"][$t] : 0; # Current Requisite's ID
+				if(!in_array($t, array("101", "102", "103", "132", "49")))
+				    $value = BuiltIn($value);
+				# Format the value
+				if(!isset($GLOBALS["REF_typs"][$t]))
+				    $v = Format_Val($t, $value);
+				else
+				    $v = $value;
+				if((($t == TOKEN) || ($t == XSRF) || ($t == PASSWORD)) && ($v === PASSWORDSTARS)) // Skip hidden PWDs
+			        continue;
+
+				if(isset($req["NEW_$t"]) && isset($GLOBALS["REF_typs"][$t]))
+					if(strlen($req["NEW_$t"])) # Check if we got a new Object to create for reference
+					{
+						$value = $req["NEW_$t"];
+						if($row = mysqli_fetch_array(Exec_sql("SELECT id FROM $z WHERE val='".addslashes($req["NEW_$t"])
+																."' AND t=".$GLOBALS["REF_typs"][$t], "Check if the Ref exists")))
+							$v = $row["id"];
+						elseif(Grant_1level($GLOBALS["REF_typs"][$t]) == "WRITE")
+							$v = Insert(1, 1, $GLOBALS["REF_typs"][$t], addslashes($req["NEW_$t"]), "Insert the new Ref Obj");
+						else
+							OpFail(t9n("[RU]У вас нет прав на создание объектов этого типа (".$GLOBALS["REF_typs"][$t].").[EN]You don't have permission to create (".$GLOBALS["REF_typs"][$t].") type of object."));
+					}
+				# Check if the user tries to set a read-only Object in a report
+    		    if($base_typ == "REPORT_COLUMN")
+					if(($t == REP_COL_SET) || ($t == $typ))
+					    if((strlen($req["t".REP_COL_SET]) != 0))
+                            if(($req["t$typ"] !== $GLOBALS["REQS"][$typ]) || ($req["t".REP_COL_SET] != $GLOBALS["REQS"][REP_COL_SET]))
+        					    CheckRepColGranted($req["t$typ"], "WRITE");
+                
+			    trace("Check if the value was modified");
+				if(isset($GLOBALS["MULTI"][$t])){
+					trace("Compile the array of current refs, if any");
+					$cur_value = Array(); # Compile the array of current refs, if any
+					if(is_array($GLOBALS["ObjectReqs"][$t]["multiselect"]["val"])){
+						trace(" there are some");
+						foreach($GLOBALS["ObjectReqs"][$t]["multiselect"]["val"] as $ref){
+							$cur_value[$ref] = $ref;
+							trace("current refs - $ref");
+						}
+					}
+					$GLOBALS["REQS"][$t] = implode(",", $cur_value);
+				}
+				if($v != $GLOBALS["REQS"][$t]){	# Check if the value was modified
+				    trace(" it was");
+					if($t == $typ){
+						Check_Grant($id); # Check the grant to change the Object
+    					# Check if the user tries to set a forbidden Object - barred in their role
+            		    if($base_typ == "REPORT_COLUMN")
+            		        CheckRepColGranted((int)$v);
+    					# Check if the user tries to rename the admin
+            	        if(($typ == USER) && ($GLOBALS["REQS"][$t] === $z))
+							my_die(t9n("[RU]Нельзя изменить имя администратора, лучше создайте нового[EN]Please create another user instead of renaming the admin"));
+					}
+					elseif($t == REP_COL_SET)
+					    CheckRepColGranted($cur_val, "WRITE");
+					elseif(!Check_Grant($id, $t, "WRITE", FALSE)){ # Check the grant to change the Req
+					    trace("REQS:");
+						foreach($GLOBALS["REQS"] as $k => $v)
+						    trace(" $k => $v");
+					    trace("ObjectReqs:");
+						foreach($GLOBALS["ObjectReqs"] as $k => $v)
+						    trace(" $k => ".print_r($v, true));
+						my_die(t9n("[RU]У вас нет доступа к реквизиту объекта: $id, $t (".$GLOBALS["GRANTS"][$row["t"]]
+                    			.")[EN]The object is not granted: $id, $t (".$GLOBALS["GRANTS"][$row["t"]].")"));
+					}
+					trace("Is empty or what?");
+					if(is_array($value) || strlen($value) != 0){  # Non empty Value
+						trace("Non empty Value for $t");
+						if(isset($GLOBALS["REF_typs"][$t])){
+       				        if(!is_array($value))
+       				            $value = explode(",", $value); # There might be comma separated IDs
+							foreach($value as $ref){
+								if((int)$ref > 0){
+									if($row = mysqli_fetch_array(Exec_sql("SELECT t, val FROM $z WHERE id=".((int)$ref)." AND (t=".$GLOBALS["REF_typs"][$t]." OR ".$GLOBALS["REF_typs"][$t]."=1)", "Check Ref's Type"))){
+										if($GLOBALS["REF_typs"][$t] === "1") # Link to any table
+											$GLOBALS["REF_typs"][$t] = $row["t"];
+										Check_Val_granted($GLOBALS["REF_typs"][$t], $row["val"], (int)$ref);
+										if(isset($search[$t]))
+											unset($search[$t]); # Clean the search criteria to leave the form
+										if(isset($GLOBALS["MULTI"][$t])){
+											trace("Check the current list of refs");
+											foreach($cur_value as $cur_ref){ # Check the current list of refs
+												trace(" $cur_ref === $ref");
+												if($cur_ref === $ref){
+													trace("Ref $ref is on the list - drop as existing and continue");
+													unset($cur_value[$ref]); # The ref is on the list - drop as existing and continue
+													continue 2;
+												}
+											}
+											Insert($id, 1, (int)$ref, "$t", "Insert new Ref"); # A new Value
+											checkDuplicatedReqs($id, $t);
+										}
+										elseif($req_id == 0){
+											Insert($id, 1, (int)$ref, "$t", "Insert new Ref"); # A new Value
+											checkDuplicatedReqs($id, $t);
+											break; # Take the first one only
+										}
+										else{
+											Exec_sql("UPDATE $z SET t=".((int)$ref)." WHERE id=$req_id", "Update Reference");
+											break; # Take the first one only
+										}
+									}
+									else
+										my_die(t9n("[RU]Неверный тип объекта с ID=$v или объект не найден[EN]Invalid object type with ID=$v or the object was not found"));
+								}
+							}
+							$cleaned = FALSE;
+							if(isset($GLOBALS["MULTI"][$t])) # Clean the refs that was not found on the new list
+								foreach($cur_value as $cur_ref){
+									$cleaned = TRUE;
+       				                Exec_sql("DELETE FROM $z WHERE t=$cur_ref AND up=$id AND val='$t'", "Drop the removed Ref Attr");
+								}
+						}
+						else{
+        					if($t == PASSWORD) // Encrypt the password in case it's updated
+        						$v = hash("sha512", Salt(isset($req["t".USER]) ? trim($req["t".USER]) : $cur_val, $v)); // Salt it with the new or current user name
+            				trace("BuiltIn $v of ".$t." = ".BuiltIn($v));
+            				trace(" base = ".$GLOBALS["REV_BT"][$t]);
+        					#$v = Format_Val($t, BuiltIn($v));
+							if((int)$req_id === 0){
+								Insert($id, 1, $t, $v, "Insert new non-empty rec");
+                    			checkDuplicatedReqs($id, $t);
+							}
+							else
+								Update_Val($req_id, $v);
+						}
+					}
+					elseif(isset($GLOBALS["MULTI"][$t])){ # The multi Ref Value was cleared
+						foreach($cur_value as $cur_ref) # Clean all the refs
+							Exec_sql("DELETE FROM $z WHERE t=$cur_ref AND up=$id AND val='$t'", "Drop the removed Ref Attr");
+					}
+					else{ # The Value was cleared, and it's not a multi Ref
+					    if($req_id == 0)
+							$GLOBALS["warning"] .= t9n("[RU]Пустой тип реквизита![EN]Empty attribute type")."<br>";
+						elseif($t != $typ){
+							if($base_typ === "FILE"){ // Remove the file from the server
+								Delete($req_id);
+								@RemoveDir(GetSubdir($req_id)."/".GetFilename($req_id).".".substr(strrchr($value,'.'),1));
+							}
+							else
+								Exec_sql("DELETE FROM $z WHERE id=$req_id OR up=$req_id", "Delete Empty Obj");
+						}
+						else # We cannot clear the Object's Val (just skip the action)
+							$GLOBALS["warning"] .= t9n("[RU]Нельзя оставить пустым имя объекта![EN]Object name cannot be blank!")."<br>";
+					}
+				}
+				if($GLOBALS["REV_BT"][$t] == "BOOLEAN")  # Forget the processed boolean Req
+					unset($GLOBALS["BOOLEANS"][$t]);
+			}
+#print_r($GLOBALS); die();
+# Drop all empty Logical Object's Reqs (those not confirmed by the edit form)
+			if(isset($GLOBALS["BOOLEANS"]))
+				foreach($GLOBALS["BOOLEANS"] as $key => $value)
+					if(isset($req["b$key"]))	# The Req wasn't present in the edit form
+						if(Check_Grant($id, $key, "WRITE", FALSE))	# Don't stop in case the user has no Grant - we won't change anything
+							Exec_sql("DELETE FROM $z WHERE id=".$GLOBALS["REQ_TYPS"][$key], "Clear empty boolean Reqs");
+#print_r($GLOBALS); die();
+			foreach($files as $key => $value)
+				if(strlen($value["name"]) > 0)
+				{
+					$t = substr($key, 1); # Cut the Typ from the Var named tTyp
+					if((substr($key, 0, 1) != "t") || ($t == 0)) # Out of scope
+						continue;
+					$tmp = explode("/", $value["name"]);
+					$value["name"] = array_pop($tmp);
+
+					if(Check_Grant($id, $t))
+					{
+						BlackList(substr(strrchr($value["name"], '.'), 1));
+						if(!file_exists(UPLOAD_DIR))
+							mkdir(UPLOAD_DIR);
+
+						$req_id = $GLOBALS["REQ_TYPS"][$t]; # Current Requisite's ID
+						if((int)$req_id > 0)
+							Update_Val($req_id, $value["name"]); # update the filename in the DB
+						else  # The filename was empty
+							$req_id = Insert($id, 1, $t, $value["name"], "Insert new Filename");
+
+						$subdir = GetSubdir($req_id);
+						if(!file_exists($subdir))
+							@mkdir($subdir);
+						if(!move_uploaded_file($value['tmp_name']
+											, $subdir."/".GetFilename($req_id).".".substr(strrchr($value["name"],'.'),1)))
+							OpFail(t9n("[RU]Не удалось загрузить файл[EN]File uploading failed")." ".$value['tmp_name']."->".$subdir."/".GetFilename($req_id).".".substr(strrchr($value["name"],'.'),1));
+					}
+				}
+#print_r($GLOBALS); die();
+			if(isset($search))  # We're searching the dropdown list
+			{
+				$a = "edit_obj";
+				$arg = str_replace("%", "%25", $search_str);
+				return $id;	# Выходим из обработчика: это режим поиска по выпадающему списку
+			}
+# Check, if there are NOT NULL reqs not filled in, and stay in Edit mode, if any
+			if(isset($GLOBALS["NOT_NULL"]))
+				foreach($GLOBALS["NOT_NULL"] as $key => $value)
+					if(Check_Grant($typ, $key, "WRITE", FALSE)) # The object is NOT_NULL and we have the grant to change it
+					{
+						if((isset($req["t$key"]) ? strlen($req["t$key"]) : TRUE) // Skip not received reqs
+						  || (isset($req["NEW_$key"]) ? strlen($req["NEW_$key"]) : FALSE)
+						  || (isset($GLOBALS["ARR_typs"][$key]) && ($GLOBALS["REQS"][$key] != 0))
+						  || isset($req["copybtn"])
+						  || (isset($GLOBALS["MULTI"][$key]) && (count($GLOBALS["ObjectReqs"][$key]["multiselect"]["id"])>0)))
+							continue;
+						if(!isset($GLOBALS["warning"]))
+						    $GLOBALS["warning"] = "";
+						$GLOBALS["warning"] .= t9n("[RU]Данные сохранены. Необходимо заполнить реквизиты, выделенные красным[EN]The data are saved. The attributes marked red are mandatory")."!<br>";
+					    $next_act = ""; # Prevent redirection in case something is missing
+						
+						break;
+					}
+			if(isset($GLOBALS["warning"])) # In case we got warnings - stay in Edit mode
+			{
+    			$a = "edit_obj";
+				$arg .= (isset($req["tab"]) ? "tab=".(int)$req["tab"] : "")."&warning=".$GLOBALS["warning"];
+            	$obj = $id;
+			}
+			else
+			{
+				$arg .= "F_U=$up&F_I=$id";
+    			$a = "object"; # Show this Object after we finish editing it
+            	$obj = $id;
+            	$id = $typ;
+			}
+	return $id;
+}
+# </m-batch-4981>
+
 # ################# Start here #################
 $time_start = microtime(TRUE);
 $blocks = array();
@@ -11536,442 +12102,25 @@ if(Validate_Token())
 			break;
 
 		case "_m_set":
-		    $t = 0;
-		    $obj = $id;
-		    $id = "";
-			foreach($_REQUEST as $key => $val) # Check if we have an attribute set
-				if((substr($key, 0, 1) == "t") && ((int)substr($key, 1)!=0)){
-				    $t = (int)substr($key, 1);
-        			Check_Grant($obj, $t);
-        			# Get the Object's ID value and Type
-        			$result = Exec_sql("SELECT a.ord, a.id, a.t ref_val, a.val, def.t, req.val attrs FROM $z obj JOIN $z req ON req.up=obj.t AND req.id=$t JOIN $z def ON def.id=req.t
-        									LEFT JOIN $z a ON a.up=$obj AND (a.t=$t OR a.val='$t') WHERE obj.id=$obj ORDER BY a.ord", "Get Attr Type");
-#print_r($GLOBALS);die($obj);
-        			if($row = mysqli_fetch_array($result)){
-        				$cur_id = $row["id"];
-        				if(!isset($GLOBALS["basics"][$row["t"]])){	# Reference - its type is not a base one
-							if(FieldAttrsHasMulti($row["attrs"])){
-								$deft = $row["t"];
-        				        # Get the current set of Refs
-        				        do{
-									if($row["id"]){ 
-										$ref_list[$row["ref_val"]] = $row["id"];
-										$ref_list_ord[$row["ref_val"]] = $row["ord"];
-									}
-                			    } while($row = mysqli_fetch_array($result));
-                			    # There might be a set of Refs in an array
-        				        if(!is_array($val))
-        				            $val = explode(",", $val); # There might be comma separated IDs
-        				        foreach($val as $ref){
-                					$ref = (int)$ref;
-                					if(isset($ref_list["$ref"])){ # This Ref is already on the list
-        				                #$GLOBALS["warning"] = (isset($GLOBALS["warning"]) ? $GLOBALS["warning"] : "") . t9n("[RU] Уже есть в списке[EN] Already on the list").": $ref";
-										unset($ref_list["$ref"]);
-                					    continue;
-            				        }
-        				            if(!$ref || !checkNewRef($ref, $deft, false)){ # Skip invalid Ref
-        				                $GLOBALS["warning"] = (isset($GLOBALS["warning"]) ? $GLOBALS["warning"] : "") . t9n("[RU] Неверная ссылка[EN] Wrong Reference").": $t - $ref";
-        				                continue;
-        				            }
-            						$id = Insert($obj, GetRefOrd($obj, $t), $ref, "$t", "Insert new Ref Attr"); # A new Value
-        				        }
-        				        foreach($ref_list as $k => $ref){ # Drop those not on the incoming list - those were deleted 
-       				                Exec_sql("DELETE FROM $z WHERE id=$ref", "Drop the removed Reference Attr");
-       				                Exec_sql("UPDATE $z SET ord=ord-1 WHERE up=$obj AND val=$t AND ord>".$ref_list_ord[$k], "Move Reference peers");
-								}
-        				        if($id !== "")
-            						checkDuplicatedReqs($obj, $t);
-        				    }
-        				    else{
-                				$cur_val = $row["ref_val"];
-            					$val = (int)$val;
-            					if($val)
-            						checkNewRef($val, $row["t"]);
-            					if($cur_id){
-            						if($val){
-            						    $id = $cur_id;
-            							if($val != $cur_val)
-            								Exec_sql("UPDATE $z SET t=$val WHERE id=$cur_id", "Update Reference Attr");
-            						}
-            						else
-            							Delete($row["id"]);
-            					}
-            					elseif($val){
-            						$id = Insert($obj, 1, $val, "$t", "Insert new Ref Attr"); # A new Value
-            						checkDuplicatedReqs($obj, $t);
-            					}
-        				    }
-        				}
-        				else{
-            				$cur_val = $row["val"];
-            				trace("BuiltIn $val of ".$row["t"]." = ".BuiltIn($val));
-            				trace(" base = ".$GLOBALS["REV_BT"][$row["t"]]);
-            				if(!in_array($t, array(101, 102, 103, 132, 49)))
-            					$val = BuiltIn($val);
-        					# Format the value
-							if($t == PASSWORD) // Encrypt the password
-        						$val = hash("sha512", Salt($z, $val));
-        					elseif(($GLOBALS["REV_BT"][$row["t"]] == "NUMBER") && ($val != 0))
-        						$val = $val === "" ? "" : (int)$val;
-        					elseif(($GLOBALS["REV_BT"][$row["t"]] == "SIGNED") && ($val != 0))
-        						$val = $val === "" ? "" : (double)str_replace(",",".",$val);
-        					else
-        						$val = Format_Val($row["t"], $val);
-        					if($cur_id){ # The Req exists
-        					    $id = $cur_id;
-        						if($val==""){
-        							Delete($cur_id);
-        							if($GLOBALS["REV_BT"][$row["t"]] === "FILE") // Remove the file from the server
-        							    @RemoveDir(GetSubdir($cur_id)."/".GetFilename($cur_id).".".substr(strrchr($cur_val,'.'),1));
-        						}
-        						else{
-        							$val = Format_Val($row["t"], $val);
-        							if($val != $cur_val)
-        								Update_Val($cur_id, $val);
-        						}
-        					}
-        					elseif($val!=""){
-        						$id = Insert($obj, 1, $t, $val, "Insert new non-empty rec");
-        						checkDuplicatedReqs($obj, $t);
-        					}
-        				}
-        			}
-				}
-			foreach($_FILES as $key => $value)
-				if(strlen($value["name"]) > 0)
-				{
-					$t = substr($key, 1); # Cut the Typ from the Var named tTyp
-					if((substr($key, 0, 1) != "t") || ($t == 0)) # Out of scope
-						continue;
+			$id = ApplyMSet($id, $_REQUEST, $_FILES);
+			break;
 
-					if(Check_Grant($obj, $t))
-					{
-						BlackList(substr(strrchr($value["name"], '.'), 1));
-						if(!file_exists(UPLOAD_DIR))
-							mkdir(UPLOAD_DIR);
-
-            			# Get the File's ID
-            			$result = Exec_sql("SELECT req.id FROM $z req, $z def, $z base
-            			                        WHERE req.up=$obj AND base.id=def.t AND def.id=req.t AND base.t=".$GLOBALS["BT"]["FILE"]
-            			                    , "Get File attr ID");
-            			if($row = mysqli_fetch_array($result))  # The filename is not empty
-						{
-						    $req_id = $row["id"];
-							Update_Val($req_id, $value["name"]); # update the filename in the DB
-						}
-						else
-							$req_id = Insert($obj, 1, $t, $value["name"], "Insert new Filename");
-
-						$subdir = GetSubdir($req_id);
-						if(!file_exists($subdir))
-							@mkdir($subdir);
-						if(!move_uploaded_file($value['tmp_name']
-											, $subdir."/".GetFilename($req_id).".".substr(strrchr($value["name"],'.'),1)))
-							die (t9n("[RU]Не удалось заменить файл[EN]File updating failed"));
-						$arg .= $subdir."/".GetFilename($req_id).".".substr(strrchr($value["name"],'.'),1);
-					}
-				}
-            if($t == 0)
-                die(t9n("[RU]Нет набора атрибутов ($key) или пустое значение ($val) [EN]No attribute set ($key) or empty value ($val)"));
-			$a = "nul";
+		# Issue #4981: пакетная запись — _m_save и _m_set одним запросом.
+		# URL:  /{db}/_m_batch  (POST)
+		# Тело: _xsrf=<токен>&ops=<массив JSON>, по объекту на операцию:
+		#   [{"op":"save","id":831921,"fields":{"t1078":"1790106240"}}
+		#   ,{"op":"set", "id":824686,"fields":{"t1085":"12"}}]
+		# Ответ: {"results":[{"n":0,"op":"save","id":831921,"ok":true} ...],"ok":N,"failed":M}
+		case "_m_batch":
+			$GLOBALS["dumpAPI"] = 1;	# Ответ всегда JSON, без ?JSON в адресе
+			if($_SERVER["REQUEST_METHOD"] !== "POST")
+				my_die(t9n("[RU]Для пакетной записи используйте POST[EN]Use POST for batch write"), "405 Method Not Allowed");
+			Limit_time(300);	# Пакет — это десятки сохранений, лимит по умолчанию мал
+			api_dump(json_encode(ApplyMBatch(isset($_POST["ops"]) ? $_POST["ops"] : ""), JSON_UNESCAPED_UNICODE), "batch.json");
 			break;
 
 		case "_m_save":
-			# Get the Object's ID value and Type
-			if($id === "")
-			    my_die(t9n("[RU]Неверный ID[EN]Invalid ID"));
-			$result = Exec_sql("SELECT a.val, a.t typ, a.up, a.ord, typs.t, typs.ord uniq FROM $z typs, $z a WHERE typs.id=a.t AND a.id=$id", "Get current Val and Type");
-			if($row = mysqli_fetch_array($result))
-				$cur_val = $row["val"];
-			else
-				exit("No such record");
-			if($row["up"]==0)
-				exit("Cannot update meta-data");
-			$typ = $row["typ"];
-			$base_typ = $GLOBALS["basics"][$row["t"]];
-			$unique = (int)$row["uniq"];
-			$up = $row["up"];
-			if($up > 1)
-				$arg = "F_U=$up";  # Retain this for Array elements only
-			$GLOBALS["REV_BT"][$typ] = $GLOBALS["REV_BT"][$row["t"]];
-
-			$search_str = "";
-			foreach($_REQUEST as $key => $value) # Check if we have some search criteria for Ref lists
-				if((substr($key, 0, 7) == "SEARCH_") && (strlen($value)))
-					if($value != $_REQUEST["PREV_$key"]){	# we have this updated
-						$search[substr($key, 7)] = $value;
-						$search_str .= "&$key=$value"; # Pass the criteria via GET - prepare the address string
-					}
-#print_r($GLOBALS); die();
-			if(isset($_REQUEST["copybtn"])){ # Check if we have to make a copy of the Obj
-				Check_Grant($id);
-				$copy = TRUE;
-				if($up > 1)
-					$ord = Calc_Order($up, $typ);
-				else
-					$ord = 1;
-				# Copy the object and replace its ID
-				$old_id = $id;
-				if(strlen($_REQUEST["t$typ"]))	# Get the object Val from the form - this might be updated
-					$GLOBALS["REQS"][$typ] = $cur_val = $_REQUEST["t$typ"];	# and update the current Val
-				$id = Insert($up, $ord, $typ, $cur_val, "Copy the object");
-				Populate_Reqs($old_id, $id);	# Populate requisites' reqs
-            	Insert_batch("", "", "", "", "Flush Copy");
-#print_r($GLOBALS);die($block."!");
-				if(isset($GLOBALS["BOOLEANS"]))  # Clean the previous set of reqs in case we copy the Obj
-					unset($GLOBALS["BOOLEANS"]);
-			    $arg = "copied1=1&";
-			}
-			else{
-			    $arg = "saved1=1&";
-				$copy = FALSE;
-			}
-
-			$GLOBALS["REQ_TYPS"][$typ] = $id;
-			Get_Current_Values($id, $typ);
-			$GLOBALS["REQS"][$typ] = $cur_val;
-			if(!$copy){
-				$keyReqs = $unique ? array() : UniqueKeyReqs($typ);
-				$hasSubmittedKeyReqs = $unique ? false : UniqueKeyRequestHasSubmittedKeyReq($_REQUEST, $keyReqs);
-				if($unique || $hasSubmittedKeyReqs){
-					$uniqueVal = $cur_val;
-					if(isset($_REQUEST["t$typ"]) && !(($typ == TOKEN || $typ == XSRF || $typ == PASSWORD) && $_REQUEST["t$typ"] === PASSWORDSTARS))
-						$uniqueVal = UniqueKeyNormalizeValue($typ, $_REQUEST["t$typ"]);
-					CheckUniqueRecordFromRequest($typ, $id, $up, $uniqueVal, $_REQUEST, (bool)$unique);
-				}
-			}
-			trace("GLOBALS[REQS] " . print_r($GLOBALS["REQS"], TRUE));
-
-			foreach($_REQUEST as $key => $value){
-				trace("_REQUEST $key");
-				$t = substr($key, 1); # Cut the Typ from the Var named tTyp
-				if((substr($key, 0, 1) != "t") || ($t == 0) || !is_numeric($t)) # Out of scope or empty
-					continue;
-				$req_id = isset($GLOBALS["REQ_TYPS"][$t]) ? $GLOBALS["REQ_TYPS"][$t] : 0; # Current Requisite's ID
-				if(!in_array($t, array("101", "102", "103", "132", "49")))
-				    $value = BuiltIn($value);
-				# Format the value
-				if(!isset($GLOBALS["REF_typs"][$t]))
-				    $v = Format_Val($t, $value);
-				else
-				    $v = $value;
-				if((($t == TOKEN) || ($t == XSRF) || ($t == PASSWORD)) && ($v === PASSWORDSTARS)) // Skip hidden PWDs
-			        continue;
-
-				if(isset($_REQUEST["NEW_$t"]) && isset($GLOBALS["REF_typs"][$t]))
-					if(strlen($_REQUEST["NEW_$t"])) # Check if we got a new Object to create for reference
-					{
-						$value = $_REQUEST["NEW_$t"];
-						if($row = mysqli_fetch_array(Exec_sql("SELECT id FROM $z WHERE val='".addslashes($_REQUEST["NEW_$t"])
-																."' AND t=".$GLOBALS["REF_typs"][$t], "Check if the Ref exists")))
-							$v = $row["id"];
-						elseif(Grant_1level($GLOBALS["REF_typs"][$t]) == "WRITE")
-							$v = Insert(1, 1, $GLOBALS["REF_typs"][$t], addslashes($_REQUEST["NEW_$t"]), "Insert the new Ref Obj");
-						else
-							die(t9n("[RU]У вас нет прав на создание объектов этого типа (".$GLOBALS["REF_typs"][$t].").[EN]You don't have permission to create (".$GLOBALS["REF_typs"][$t].") type of object."));
-					}
-				# Check if the user tries to set a read-only Object in a report
-    		    if($base_typ == "REPORT_COLUMN")
-					if(($t == REP_COL_SET) || ($t == $typ))
-					    if((strlen($_REQUEST["t".REP_COL_SET]) != 0))
-                            if(($_REQUEST["t$typ"] !== $GLOBALS["REQS"][$typ]) || ($_REQUEST["t".REP_COL_SET] != $GLOBALS["REQS"][REP_COL_SET]))
-        					    CheckRepColGranted($_REQUEST["t$typ"], "WRITE");
-                
-			    trace("Check if the value was modified");
-				if(isset($GLOBALS["MULTI"][$t])){
-					trace("Compile the array of current refs, if any");
-					$cur_value = Array(); # Compile the array of current refs, if any
-					if(is_array($GLOBALS["ObjectReqs"][$t]["multiselect"]["val"])){
-						trace(" there are some");
-						foreach($GLOBALS["ObjectReqs"][$t]["multiselect"]["val"] as $ref){
-							$cur_value[$ref] = $ref;
-							trace("current refs - $ref");
-						}
-					}
-					$GLOBALS["REQS"][$t] = implode(",", $cur_value);
-				}
-				if($v != $GLOBALS["REQS"][$t]){	# Check if the value was modified
-				    trace(" it was");
-					if($t == $typ){
-						Check_Grant($id); # Check the grant to change the Object
-    					# Check if the user tries to set a forbidden Object - barred in their role
-            		    if($base_typ == "REPORT_COLUMN")
-            		        CheckRepColGranted((int)$v);
-    					# Check if the user tries to rename the admin
-            	        if(($typ == USER) && ($GLOBALS["REQS"][$t] === $z))
-							my_die(t9n("[RU]Нельзя изменить имя администратора, лучше создайте нового[EN]Please create another user instead of renaming the admin"));
-					}
-					elseif($t == REP_COL_SET)
-					    CheckRepColGranted($cur_val, "WRITE");
-					elseif(!Check_Grant($id, $t, "WRITE", FALSE)){ # Check the grant to change the Req
-					    trace("REQS:");
-						foreach($GLOBALS["REQS"] as $k => $v)
-						    trace(" $k => $v");
-					    trace("ObjectReqs:");
-						foreach($GLOBALS["ObjectReqs"] as $k => $v)
-						    trace(" $k => ".print_r($v, true));
-						my_die(t9n("[RU]У вас нет доступа к реквизиту объекта: $id, $t (".$GLOBALS["GRANTS"][$row["t"]]
-                    			.")[EN]The object is not granted: $id, $t (".$GLOBALS["GRANTS"][$row["t"]].")"));
-					}
-					trace("Is empty or what?");
-					if(is_array($value) || strlen($value) != 0){  # Non empty Value
-						trace("Non empty Value for $t");
-						if(isset($GLOBALS["REF_typs"][$t])){
-       				        if(!is_array($value))
-       				            $value = explode(",", $value); # There might be comma separated IDs
-							foreach($value as $ref){
-								if((int)$ref > 0){
-									if($row = mysqli_fetch_array(Exec_sql("SELECT t, val FROM $z WHERE id=".((int)$ref)." AND (t=".$GLOBALS["REF_typs"][$t]." OR ".$GLOBALS["REF_typs"][$t]."=1)", "Check Ref's Type"))){
-										if($GLOBALS["REF_typs"][$t] === "1") # Link to any table
-											$GLOBALS["REF_typs"][$t] = $row["t"];
-										Check_Val_granted($GLOBALS["REF_typs"][$t], $row["val"], (int)$ref);
-										if(isset($search[$t]))
-											unset($search[$t]); # Clean the search criteria to leave the form
-										if(isset($GLOBALS["MULTI"][$t])){
-											trace("Check the current list of refs");
-											foreach($cur_value as $cur_ref){ # Check the current list of refs
-												trace(" $cur_ref === $ref");
-												if($cur_ref === $ref){
-													trace("Ref $ref is on the list - drop as existing and continue");
-													unset($cur_value[$ref]); # The ref is on the list - drop as existing and continue
-													continue 2;
-												}
-											}
-											Insert($id, 1, (int)$ref, "$t", "Insert new Ref"); # A new Value
-											checkDuplicatedReqs($id, $t);
-										}
-										elseif($req_id == 0){
-											Insert($id, 1, (int)$ref, "$t", "Insert new Ref"); # A new Value
-											checkDuplicatedReqs($id, $t);
-											break; # Take the first one only
-										}
-										else{
-											Exec_sql("UPDATE $z SET t=".((int)$ref)." WHERE id=$req_id", "Update Reference");
-											break; # Take the first one only
-										}
-									}
-									else
-										my_die(t9n("[RU]Неверный тип объекта с ID=$v или объект не найден[EN]Invalid object type with ID=$v or the object was not found"));
-								}
-							}
-							$cleaned = FALSE;
-							if(isset($GLOBALS["MULTI"][$t])) # Clean the refs that was not found on the new list
-								foreach($cur_value as $cur_ref){
-									$cleaned = TRUE;
-       				                Exec_sql("DELETE FROM $z WHERE t=$cur_ref AND up=$id AND val='$t'", "Drop the removed Ref Attr");
-								}
-						}
-						else{
-        					if($t == PASSWORD) // Encrypt the password in case it's updated
-        						$v = hash("sha512", Salt(isset($_REQUEST["t".USER]) ? trim($_REQUEST["t".USER]) : $cur_val, $v)); // Salt it with the new or current user name
-            				trace("BuiltIn $v of ".$t." = ".BuiltIn($v));
-            				trace(" base = ".$GLOBALS["REV_BT"][$t]);
-        					#$v = Format_Val($t, BuiltIn($v));
-							if((int)$req_id === 0){
-								Insert($id, 1, $t, $v, "Insert new non-empty rec");
-                    			checkDuplicatedReqs($id, $t);
-							}
-							else
-								Update_Val($req_id, $v);
-						}
-					}
-					elseif(isset($GLOBALS["MULTI"][$t])){ # The multi Ref Value was cleared
-						foreach($cur_value as $cur_ref) # Clean all the refs
-							Exec_sql("DELETE FROM $z WHERE t=$cur_ref AND up=$id AND val='$t'", "Drop the removed Ref Attr");
-					}
-					else{ # The Value was cleared, and it's not a multi Ref
-					    if($req_id == 0)
-							$GLOBALS["warning"] .= t9n("[RU]Пустой тип реквизита![EN]Empty attribute type")."<br>";
-						elseif($t != $typ){
-							if($base_typ === "FILE"){ // Remove the file from the server
-								Delete($req_id);
-								@RemoveDir(GetSubdir($req_id)."/".GetFilename($req_id).".".substr(strrchr($value,'.'),1));
-							}
-							else
-								Exec_sql("DELETE FROM $z WHERE id=$req_id OR up=$req_id", "Delete Empty Obj");
-						}
-						else # We cannot clear the Object's Val (just skip the action)
-							$GLOBALS["warning"] .= t9n("[RU]Нельзя оставить пустым имя объекта![EN]Object name cannot be blank!")."<br>";
-					}
-				}
-				if($GLOBALS["REV_BT"][$t] == "BOOLEAN")  # Forget the processed boolean Req
-					unset($GLOBALS["BOOLEANS"][$t]);
-			}
-#print_r($GLOBALS); die();
-# Drop all empty Logical Object's Reqs (those not confirmed by the edit form)
-			if(isset($GLOBALS["BOOLEANS"]))
-				foreach($GLOBALS["BOOLEANS"] as $key => $value)
-					if(isset($_REQUEST["b$key"]))	# The Req wasn't present in the edit form
-						if(Check_Grant($id, $key, "WRITE", FALSE))	# Don't stop in case the user has no Grant - we won't change anything
-							Exec_sql("DELETE FROM $z WHERE id=".$GLOBALS["REQ_TYPS"][$key], "Clear empty boolean Reqs");
-#print_r($GLOBALS); die();
-			foreach($_FILES as $key => $value)
-				if(strlen($value["name"]) > 0)
-				{
-					$t = substr($key, 1); # Cut the Typ from the Var named tTyp
-					if((substr($key, 0, 1) != "t") || ($t == 0)) # Out of scope
-						continue;
-					$tmp = explode("/", $value["name"]);
-					$value["name"] = array_pop($tmp);
-
-					if(Check_Grant($id, $t))
-					{
-						BlackList(substr(strrchr($value["name"], '.'), 1));
-						if(!file_exists(UPLOAD_DIR))
-							mkdir(UPLOAD_DIR);
-
-						$req_id = $GLOBALS["REQ_TYPS"][$t]; # Current Requisite's ID
-						if((int)$req_id > 0)
-							Update_Val($req_id, $value["name"]); # update the filename in the DB
-						else  # The filename was empty
-							$req_id = Insert($id, 1, $t, $value["name"], "Insert new Filename");
-
-						$subdir = GetSubdir($req_id);
-						if(!file_exists($subdir))
-							@mkdir($subdir);
-						if(!move_uploaded_file($value['tmp_name']
-											, $subdir."/".GetFilename($req_id).".".substr(strrchr($value["name"],'.'),1)))
-							die (t9n("[RU]Не удалось загрузить файл[EN]File uploading failed")." ".$value['tmp_name']."->".$subdir."/".GetFilename($req_id).".".substr(strrchr($value["name"],'.'),1));
-					}
-				}
-#print_r($GLOBALS); die();
-			if(isset($search))  # We're searching the dropdown list
-			{
-				$a = "edit_obj";
-				$arg = str_replace("%", "%25", $search_str);
-				break;
-			}
-# Check, if there are NOT NULL reqs not filled in, and stay in Edit mode, if any
-			if(isset($GLOBALS["NOT_NULL"]))
-				foreach($GLOBALS["NOT_NULL"] as $key => $value)
-					if(Check_Grant($typ, $key, "WRITE", FALSE)) # The object is NOT_NULL and we have the grant to change it
-					{
-						if((isset($_REQUEST["t$key"]) ? strlen($_REQUEST["t$key"]) : TRUE) // Skip not received reqs
-						  || (isset($_REQUEST["NEW_$key"]) ? strlen($_REQUEST["NEW_$key"]) : FALSE)
-						  || (isset($GLOBALS["ARR_typs"][$key]) && ($GLOBALS["REQS"][$key] != 0))
-						  || isset($_REQUEST["copybtn"])
-						  || (isset($GLOBALS["MULTI"][$key]) && (count($GLOBALS["ObjectReqs"][$key]["multiselect"]["id"])>0)))
-							continue;
-						if(!isset($GLOBALS["warning"]))
-						    $GLOBALS["warning"] = "";
-						$GLOBALS["warning"] .= t9n("[RU]Данные сохранены. Необходимо заполнить реквизиты, выделенные красным[EN]The data are saved. The attributes marked red are mandatory")."!<br>";
-					    $next_act = ""; # Prevent redirection in case something is missing
-						
-						break;
-					}
-			if(isset($GLOBALS["warning"])) # In case we got warnings - stay in Edit mode
-			{
-    			$a = "edit_obj";
-				$arg .= (isset($_REQUEST["tab"]) ? "tab=".(int)$_REQUEST["tab"] : "")."&warning=".$GLOBALS["warning"];
-            	$obj = $id;
-			}
-			else
-			{
-				$arg .= "F_U=$up&F_I=$id";
-    			$a = "object"; # Show this Object after we finish editing it
-            	$obj = $id;
-            	$id = $typ;
-			}
+			$id = ApplyMSave($id, $_REQUEST, $_FILES);
 			break;
 
 		case "_m_move":
