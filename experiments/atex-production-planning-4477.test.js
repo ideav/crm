@@ -37,13 +37,26 @@ function delay(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
 var TS = function(y, m, d, hh, mm) { return Math.floor(new Date(y, m, d, hh, mm || 0, 0, 0).getTime() / 1000); };
 var TARGET_DAY = '2026-07-27';
 
+// #4984: план пишется ПАКЕТОМ `_m_batch` (ядро #4981). Стенд отвечает как эта ручка и
+// раскладывает пакет на отдельные записи: проверки ниже считают ЗАПИСИ, а не запросы, —
+// правило #4477 «неизменившееся не сохраняем» от способа отправки не зависит.
+function unbatch(st, path, fields) {
+    if (path !== '_m_batch') { st.posts.push({ path: path, fields: fields }); return { obj: 'OK' }; }
+    var ops = JSON.parse(fields.ops);
+    ops.forEach(function(o) {
+        st.posts.push({ path: (o.op === 'set' ? '_m_set/' : '_m_save/') + o.id + '?JSON', fields: o.fields });
+    });
+    st.batches.push(ops.length);
+    return { results: ops.map(function(o, n) { return { n: n, op: o.op, id: o.id, ok: true }; }), ok: ops.length, failed: 0 };
+}
 // Счётчик параллелизма: обёртка над post, считает одновременные запросы.
 function makePost(st) {
+    if (!st.batches) st.batches = [];
     return function(path, fields) {
         st.inflight++;
         if (st.inflight > st.maxInflight) st.maxInflight = st.inflight;
-        st.posts.push({ path: path, fields: fields });
-        return delay(5).then(function() { st.inflight--; return { obj: 'OK' }; });
+        var res = unbatch(st, path, fields);
+        return delay(5).then(function() { st.inflight--; return res; });
     };
 }
 function savedIds(st) {
@@ -100,8 +113,8 @@ Promise.resolve()
         // 7 заданий дня, но первое уже стои́т на 08:00 = плейсхолдер №0 → шлюз его отсеивает.
         assert(savedIds(hB.st).length === 6,
             '#4477-B: непригодные времена дня (совпали) — день перенумеровывается целиком, 6 записей из 7 (сейчас ' + savedIds(hB.st).length + ')');
-        assert(hB.st.maxInflight === 5,
-            '#4477-B: запись идёт пулом до 5 потоков одновременно (на цепочке было бы 1; сейчас ' + hB.st.maxInflight + ')');
+        assert(hB.st.batches.length === 1 && hB.st.batches[0] === 6,
+            '#4477-B: перенумерованный день уходит ОДНИМ запросом-пакетом на 6 записей (#4984; было 6 запросов пулом по 5; сейчас пакетов ' + hB.st.batches.length + ' по ' + hB.st.batches.join('+') + ')');
     })
 
     // ── C: сам шлюз saveCutStarts ────────────────────────────────────────────────────────────
@@ -119,8 +132,8 @@ Promise.resolve()
                 '#4477-C: шлюз пишет только изменившиеся — 8 из 10 (записано ' + n + ', запросов ' + st.posts.length + ')');
             assert(savedIds(st).indexOf('SAME') < 0 && savedIds(st).indexOf('SAME2') < 0,
                 '#4477-C: совпавшему с хранимым «Времени старта» команда на сохранение не даётся');
-            assert(st.maxInflight === 5,
-                '#4477-C: пул до 5 потоков (сейчас ' + st.maxInflight + ')');
+            assert(st.batches.length === 1 && st.batches[0] === 8,
+                '#4477-C: восемь изменившихся уходят ОДНИМ запросом-пакетом (#4984; было 8 запросов пулом по 5; сейчас ' + st.batches.join('+') + ')');
             assert(st.posts[0].path.indexOf('_m_save/') === 0 && st.posts[0].fields.t1078 != null,
                 '#4477-C: первая колонка пишется _m_save с t{tableId} (issue #775)');
         });
@@ -147,7 +160,7 @@ Promise.resolve()
         // Тащим последнее задание дня в голову — переставляются все восемь.
         return Controller.prototype.reorderCutInDay.call(self, dayCuts, 'D7', 'D0').then(function() {
             assert(st.posts.length === 8, '#4477-D: перетаскивание переставило 8 заданий — 8 запросов (сейчас ' + st.posts.length + ')');
-            assert(st.maxInflight === 5, '#4477-D: перетаскивание пишет пулом до 5 потоков (было 1; сейчас ' + st.maxInflight + ')');
+            assert(st.batches.length === 1 && st.batches[0] === 8, '#4477-D: перетаскивание пишет ОДНИМ запросом-пакетом на 8 записей (#4984; было 8 запросов пулом по 5; сейчас ' + st.batches.join('+') + ')');
         });
     })
 
