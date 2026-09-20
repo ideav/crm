@@ -14,7 +14,7 @@
 |---|---|---|
 | Старт: авторизация, модель данных | [00-start.md](00-start.md) | token, X-Authorization, idb_{db}, _xsrf, БД, таблица, реквизит, ссылка, подчинённая, TIME, предел времени |
 | Схема (DDL) `_d_*` | [schema.md](schema.md) | _d_new, _d_req, _d_ref, _d_alias, _d_save, _d_del, _d_del_req, типы колонок, подчинённая таблица, referenced, метаданные |
-| Данные (DML) `_m_*` | [crud.md](crud.md) | _m_new, _m_set, _m_del, t{tableId}, up=, object/, JSON_OBJ, JSON_KV, F_U, F_I, LIMIT, импорт |
+| Данные (DML) `_m_*` | [crud.md](crud.md) | _m_new, _m_set, _m_del, _m_batch, t{tableId}, up=, object/, JSON_OBJ, JSON_KV, F_U, F_I, LIMIT, импорт |
 | Запросы/отчёты `report/` | [queries.md](queries.md) | report, JSON_KV, FR_, TO_, колонка t28/t100/t104, SET-запрос, формула-фильтр |
 | Роли, права, меню | [roles.md](roles.md) | роль 42, юзер 18, меню 151, гранты 116/136, маска, объект FILE |
 | Файлы сервера `dir_admin` | [files.md](files.md) | dir_admin, del[], mkdir, touch, upload, gf, ?JSON=1, безопасность |
@@ -51,6 +51,8 @@
 | поле пустое при чтении `JSON_OBJ`, хотя значение есть | это главное значение записи (`r[0]`), реквизита с таким именем нет | [crud.md](crud.md) |
 | реквизит не очищается: галка стоит, стёртое поле возвращается | пустые значения выбрасывались из тела `_m_set` — очистка = слать `t{req}=`, булев снимать `t{req}=0` | [crud.md](crud.md) |
 | НЕУСТОЙЧИВО: перечитывание сразу после `_m_set` отдаёт старое значение (UI не обновился, F5 чинит) | read-after-write lag реплики/кеша — применять записанное value к модели поверх reload | [crud.md](crud.md) |
+| `_m_set` первой колонки отвечает `"id":""`, значение не меняется | ядро установки старше 20.09.2026 — там первая колонка только через `_m_save` | [crud.md](crud.md) |
+| в ответе `_m_batch` есть `"ok":false`, но остальное записалось | пакет не атомарен: транзакций в платформе нет — повторять поимённо по `results` | [crud.md](crud.md) |
 | `FR_` даёт 0 строк по дате/числу | нужен оператор `>`/`<` (открытый интервал) | [queries.md](queries.md) |
 | `object/…?FR_{Колонка}=` отвечает `Unknown column 'X' in 'on clause'` | имя фильтра резолвится только по имени ТИПА (`С_т`), не по псевдониму («С») — фильтруй `F_{reqId}` или читай словарь целиком | [queries.md](queries.md) |
 | дэшборд рисует только имена строк, `period=undefined` | отчёт «Дэшборд» не отдаёт `period`/`RGtype`/`RGcolumns` (колонка без «Имени в отчете» или со «Скрыть») | [dashboard.md](dashboard.md) |
