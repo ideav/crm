@@ -22,6 +22,13 @@
         // #4636: что журнал пишет по набору операций (RUNS_CHANGE / PLAN_MOVE / CHAIN_*) —
         // проверяется `experiments/atex-pp-4636-journal-blindspots.test.js` на стаб-контроллере.
         journalApplyDetails: journalApplyDetails,
+        // #4979: очередь действия и батч журнала — 30 запросов и 7 секунд на перемещение
+        // сводятся к одному `import=1` (проверяется `atex-pp-4979-journal-batch-and-reload`).
+        journalBegin: journalBegin,
+        journalFlush: journalFlush,
+        journalBatchText: journalBatchText,
+        planJournal: planJournal,
+        planJournalRows: planJournalRows,
         formatPlanAuditMessage: formatPlanAuditMessage,   // #4475: нарушение стража → фраза оператору
         formatOverfilledDaysMessage: formatOverfilledDaysMessage,   // #4531: переполненный станко-день → фраза оператору
         overfilledDaysFromCuts: overfilledDaysFromCuts,   // #4531: мерка переполнения дня (одна на тост и подсветку)
@@ -504,9 +511,14 @@
     }
 
     function ppWriteKind(path) {
-        var m = /_m_(\w+)\/([^?]*)/.exec(String(path == null ? '' : path));
+        var s = String(path == null ? '' : path);
+        var m = /_m_(\w+)\/([^?]*)/.exec(s);
         if (m) return { op: m[1], target: decodeURIComponent(m[2]) };
-        return { op: 'post', target: String(path == null ? '' : path).split('?')[0] };
+        // #4979: батч-загрузка `object/{tid}?JSON&import=1` — отдельная операция в трассе, иначе
+        // она читается как безымянный POST и по логу не видно, что запись была пакетной.
+        var im = /object\/([^?/]+)\/?\?[^#]*\bimport=1\b/.exec(s);
+        if (im) return { op: 'import', target: decodeURIComponent(im[1]) };
+        return { op: 'post', target: s.split('?')[0] };
     }
     function ppWriteUp(path) {
         var m = /[?&]up=([^&]*)/.exec(String(path == null ? '' : path));
@@ -622,6 +634,55 @@
                 _trace.fail('network', err && err.message);   // #4177: сетевой отказ fetch
                 throw err;
             }).then(release, releaseThrow);
+        });
+    };
+
+    // #4979: БАТЧ-ЗАГРУЗКА В ТАБЛИЦУ — `object/{tid}?JSON&import=1`, поле `bki_file`
+    // (docs/kb/import.md). Одним файлом вместо N команд `_m_new`: журнал одного перемещения —
+    // 30 запросов и СЕМЬ СЕКУНД на боевой ateh1 — укладывается в один запрос.
+    //
+    // Границы ручки: она умеет только create/upsert по первой колонке. Правка существующих
+    // записей по id (`_m_save`/`_m_set`) и удаление батчем в платформе отсутствуют, поэтому
+    // сюда уходит ТОЛЬКО журнал, а план пишется командами как прежде.
+    //
+    // Формат проверен на ateh1 (таблица «Журнал» 665850, 20.09.2026): по значению на колонку в
+    // порядке метаданных + ЗАВЕРШАЮЩИЙ «;» — без него движок дочитывает следующую строку и
+    // склеивает записи. Экранирование «;» внутри значения — на стороне сборщика файла.
+    AtexProductionPlanning.prototype.postImport = function(tableId, text, filename) {
+        var self = this;
+        if (this._pendingPlan) {
+            return Promise.reject(new Error('Показан непринятый пересчёт «Упорядочить» — нажмите «Применить» или «Отменить»'));
+        }
+        if (typeof FormData === 'undefined' || typeof Blob === 'undefined') {
+            return Promise.reject(new Error('батч-импорт недоступен в этом окружении'));
+        }
+        var body = String(text == null ? '' : text);
+        var rows = body ? (body.split('\n').length - 2) : 0;   // минус строка DATA и хвостовой перевод
+        var fd = new FormData();
+        var blob = new Blob([body], { type: 'text/plain' });
+        fd.append('bki_file', (typeof File === 'function') ? new File([blob], filename || 'import.bki', { type: 'text/plain' }) : blob, filename || 'import.bki');
+        fd.append('import', '1');
+        fd.append('_xsrf', (typeof window !== 'undefined' && window.xsrf) || this.root.getAttribute('data-xsrf') || '');
+        var path = 'object/' + tableId + '?JSON&import=1';
+        return ppAcquireWriteSlot().then(function() {
+            var _trace = tracePpWrite(path, { rows: rows }, self);   // #4177: батч виден в трассе как одна запись
+            function release(v) { ppReleaseWriteSlot(); return v; }
+            function releaseThrow(e) { ppReleaseWriteSlot(); throw e; }
+            // Content-Type не ставим: его с границей multipart проставляет сам fetch по FormData.
+            return fetch(self.url(path), { method: 'POST', credentials: 'same-origin', body: fd })
+                .then(function(resp) {
+                    return resp.text().then(function(txt) {
+                        if (!resp.ok) {
+                            _trace.fail(resp.status, txt.slice(0, 200));
+                            throw new Error('Сервер вернул ошибку ' + resp.status + ': ' + txt.slice(0, 200));
+                        }
+                        // Импорт отвечает платформенной ФОРМОЙ СОСТОЯНИЯ, а не результатом команды —
+                        // разбирать её нечем, успех определяется кодом ответа.
+                        _trace.ok({});
+                        return rows;
+                    });
+                }, function(err) { _trace.fail('network', err && err.message); throw err; })
+                .then(release, releaseThrow);
         });
     };
 
@@ -6677,6 +6738,7 @@
             self.notify('Проходов: ' + runs + ' (партий обновлено ' + written.batches +
                 ', обеспечений ' + written.supplies + '). Время дня разъехалось — нажмите «↻ Пересчитать наладку»', 'success');
             if (slitterId) self.warnOverfilledDays(slitterId);   // день мог перестать вмещать задание
+            journalFlush(self);   // #4979: очередь действия — в базу, без ожидания
             return true;
         }).catch(function(err) {
             console.error('[pp] ❌ #4428 смена проходов задания ' + cut.id + ' прервана (партий ' +
@@ -6684,6 +6746,7 @@
             self.setBusy(false);
             self.notify('Ошибка смены проходов: ' + (err && err.message || err) +
                 ' Записано до сбоя: партий ' + written.batches + ', обеспечений ' + written.supplies + '.', 'error');
+            journalFlush(self);   // #4979: сорвалось — накопленные строки всё равно в базу
             return self.reload().then(function() { self.render(); self.reopenStripsIfOpen(); }).catch(function() {});
         });
     };
@@ -6701,19 +6764,56 @@
         return producedRollsByPosition(this.supplies || [], this.stripsByBatch || {}, runsByCut);
     };
 
-    AtexProductionPlanning.prototype.reload = function() {
+    // #4979: ПЕРЕЧИТЫВАНИЕ РАЗДЕЛЕНО НА ДВА УРОВНЯ.
+    //
+    // Одно перемещение задания перечитывало очередь ЧЕТЫРЕ раза (боевая ateh1, 20.09.2026), и
+    // каждый раз целиком: полосы + `cut_planning` (1,06 МБ, 816 резок) + партии втулок + смены +
+    // упаковка + задачи на втулки = 24 запроса на одно действие.
+    //
+    // Записью плана инвалидируется ТОЛЬКО план: очередь и полосы (дробление копирует «Партии
+    // ГП»). Партии втулок, смены, упаковка и задачи на втулки живут в СОСЕДНИХ рабочих местах —
+    // в коде они и помечены как обновляемые «вместе с очередью» (#3340/#4596/#4774), то есть
+    // оппортунистически, а не по необходимости. Внутри одного действия они меняться не успевают,
+    // и уже загруженные данные остаются в памяти: пропуск ОБНОВЛЕНИЯ не лишает фазы этих данных.
+    //
+    // Поэтому промежуточные фазы зовут reloadPlan(), а полный reload() остаётся на ⟳ и на хвост
+    // действия. Семантика плана не меняется ни на шаг — меняется только частота обновления
+    // соседних источников.
+    AtexProductionPlanning.prototype.reloadPlan = function(opts) {
         var self = this;
         this._pendingPlan = null;     // #4402: очередь придёт из БД — проекция «Упорядочить» и её снимок неактуальны
         // Полосы перечитываем перед очередью, чтобы knifeCount/knifeWidths влились в свежие резки.
-        return this.loadCutStrips().then(function() { return self.loadPlanning(); })
-            .then(function() { return self.loadSleeveBatches(); }) // #3340: обновляем партии втулок (FIFO)
+        // strips:false — там, где цепочки не менялись (обмен стартов, пересчёт наладки).
+        var strips = !(opts && opts.strips === false);
+        return (strips ? this.loadCutStrips() : Promise.resolve())
+            .then(function() { return self.loadPlanning(); })
+            .then(function() { self.resolveCutMaterials(); });
+    };
+
+    // Соседние источники — обновляются раз в действие, а не на каждую запись.
+    AtexProductionPlanning.prototype.reloadEnvironment = function() {
+        var self = this;
+        return this.loadSleeveBatches()                        // #3340: партии втулок (FIFO)
             // #4596: смены закрываются В ТЕЧЕНИЕ дня — событие могло появиться уже после загрузки
             // страницы, поэтому карту закрытых смен обновляем вместе с очередью (⟳ и после записи).
             .then(function() { return self.loadShiftEvents(); })
             // #4774: упаковка и втулки живут в соседних рабочих местах и меняются в течение дня —
             // сигнал «Дэшборда» обновляем вместе с очередью (⟳ и после любой записи).
             .then(function() { return Promise.all([self.loadPackState(), self.loadSleeveTasks()]); })
-            .then(function() { self.resolveCutMaterials(); });
+            .then(function() { return null; });
+    };
+
+    // Точка входа ОДНА — reload(), глубину задают опции. Отдельным методом промежуточные фазы
+    // звать нельзя: `reload` — тот шов, которым подменяют перечитывание тесты (напр.
+    // `atex-production-planning-4480`), и уход мимо него увёл бы их в реальную сеть.
+    //   environment:false — не трогать соседние источники (промежуточная фаза действия);
+    //   strips:false      — не перечитывать полосы (цепочки не менялись).
+    AtexProductionPlanning.prototype.reload = function(opts) {
+        var self = this;
+        return this.reloadPlan(opts).then(function() {
+            if (opts && opts.environment === false) return null;
+            return self.reloadEnvironment();
+        });
     };
 
     // ── Встроенный редактор Полос резки (база cut-calc renderStrips/computeSummary/syncStrips) ──
@@ -8910,7 +9010,9 @@
         this.setBusy(true);
         // #4477: обмен — две независимые записи, пишем пулом через шлюз (было — одна за другой).
         return postCutStarts(self, [{ cutId: a.id, ts: tsB, wasTs: tsA }, { cutId: b.id, ts: tsA, wasTs: tsB }])
-            .then(function() { return self.reload(); })
+            // #4979: промежуточная фаза — перечитываем только план. Полосы берём: перед обменом
+            // мог отработать mergeSplitChain и снять записи-доноры цепочки.
+            .then(function() { return self.reload({ environment: false }); })
             .then(function() {
                 self.setBusy(false);
                 // #4434 п.3: ↑/↓ — обмен местами двух соседних заданий (обмен planStart выше). Наладка
@@ -10263,13 +10365,15 @@
                      planStartTs: Number(c.planDate) || 0 };
         });
         journalBegin(self, 'applySplitPlan');
+        // #4979: SESSION идёт МИМО очереди и ДО фаз — остальные строки уедут батчем уже после
+        // работы, а этой строке положено лечь в базу раньше неё (см. выше про свидетеля).
         var jBegin = planJournal(self, {
             event: 'SESSION', before: null, after: null,
             details: 'операций: updates ' + ((ops.updates || []).length) +
                 ', creates ' + ((ops.creates || []).length) +
                 ', deletes ' + ((ops.deletes || []).length) +
                 (ops.manual ? ', ручное действие' : '')
-        });
+        }, { immediate: true });
         return jBegin.then(function() {
             return runWithConcurrency(createTasks, MAX_PARALLEL_SPLIT);
         }).then(function() {
@@ -10284,8 +10388,10 @@
             console.log('[pp] 🧮 #4628: доля обеспечения приводится к проходам звена — записей:', shareFixTasks.length);
             return runWithConcurrency(shareFixTasks, MAX_PARALLEL_SPLIT);
         }).then(function() {
+            // #4979: строки только копятся — отправит их батчем journalFlush в хвосте действия.
             return journalApplyDetails(self, jSnapshot, ops);
-        }).then(function() { return self.reload(); }).then(function() {
+            // #4979: промежуточная фаза. Полосы берём — creates копируют «Партии ГП», deletes их снимают.
+        }).then(function() { return self.reload({ environment: false }); }).then(function() {
             return self.reconcileOrphanOrderSupplies();   // #4175: реюз рвёт связь заказа ЭТИМ разбиением — восстанавливаем ПОСЛЕ reload
         }).then(function() {
             return self.persistCutSetupColumns(null, planColsByCut,
@@ -10297,9 +10403,11 @@
             self.reportPlanAudit(ops && ops.audit);          // #4475: план ЗАПИСАН с отклонениями — говорим об этом здесь
             self.reportOverfilledDays(ops && ops.audit);     // #4497: день длиннее смены — по ХРАНИМЫМ минутам
             self.reportLostWorkChains(ops && ops.lostWorkChains);   // #4645: план терял проходы — задания не тронуты
+            journalFlush(self);   // #4979: журнал уходит ОДНИМ батчем и БЕЗ ожидания — работа уже закончена
             return true;
         }).catch(function(err) {
             self.hideProgress(); self.setBusy(false);
+            journalFlush(self);   // #4979: действие сорвалось — накопленные строки всё равно должны лечь в базу
             self.notify('Ошибка разбиения заданий: ' + err.message, 'error');
             return false;
         });
@@ -12294,7 +12402,9 @@
             // хранимым не пишем; recalcStartUpdates и сам отдаёт только разъехавшиеся).
             return postCutStarts(self, startOps);
         }).then(function() {
-            return self.reload();
+            // #4979: писались только колонки наладки и времена старта — цепочки не менялись,
+            // полосы перечитывать незачем.
+            return self.reload({ environment: false, strips: false });
         }).then(function() {
             self.setBusy(false); self.render();   // #4742: рамку держим до конца выравнивания
             self.updateProgress(1, 'Выравниваю дни по смене…');

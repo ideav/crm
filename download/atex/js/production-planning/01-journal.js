@@ -20,8 +20,8 @@
     // Правила поведения (нарушение любого хуже, чем отсутствие журнала):
     //   • нет таблицы «Журнал» в базе — журнал молчит и НИЧЕГО не ломает (в ateh1 её нет);
     //   • ни одна ошибка записи не доходит до действия — журнал не вправе сорвать план;
-    //   • записи идут ПОСЛЕ основной работы и по одной, чтобы не занимать пул записи
-    //     (#4477/#4480: семафор в post(), пул 5);
+    //   • записи идут ПОСЛЕ основной работы и ОДНИМ батчем, чтобы не занимать пул записи
+    //     (#4477/#4480: семафор в post(), пул 5) и не держать действие (#4979);
     //   • потолок JOURNAL_MAX_ROWS на действие — генерация на 200 заданий не должна
     //     превращаться в тысячи строк журнала.
     //
@@ -35,6 +35,98 @@
     };
     var JOURNAL_MAX_ROWS = 400;      // строк на одно действие
     var JOURNAL_DETAILS_MAX = 900;   // символов в «Детали»
+    var JOURNAL_FLUSH_MS = 3000;     // #4979: страховка, если действие не сбросило очередь само
+
+    // ── #4979: ОЧЕРЕДЬ ДЕЙСТВИЯ И БАТЧ ─────────────────────────────────────────────────────
+    // Одно перемещение задания стоило 30 запросов и СЕМЬ СЕКУНД только на журнал (боевая ateh1,
+    // 20.09.2026: метки строк сессии 1789915706 → 1789915713) — строки шли по одной.
+    // Платформа грузит таблицу ОДНИМ файлом (`object/{tid}?JSON&import=1`, поле `bki_file`,
+    // docs/kb/import.md), поэтому строки действия копятся в очереди и уходят одним запросом
+    // ПОСЛЕ работы, не занимая пул записи плана.
+    //
+    // Что при этом НЕ меняется:
+    //   • SESSION пишется сразу и мимо очереди (`{immediate:true}`) — #4618 держит её как
+    //     единственного свидетеля намерения, если действие умрёт на полпути;
+    //   • батч отбит сервером → строки дописываются по одной (#4645: молчащий журнал хуже
+    //     отсутствующего), и только полный провал доходит до `journalWriteFailed`;
+    //   • ни одна ошибка журнала не доходит до действия.
+    function journalQueue(ctx) {
+        if (!ctx._journalQueue) ctx._journalQueue = [];
+        return ctx._journalQueue;
+    }
+    // Очередь не вправе зависнуть: если действие не позвало journalFlush (ранний выход, отказ),
+    // она уходит по таймеру. `unref` — чтобы таймер не держал процесс в тестах.
+    function journalArmFlush(ctx) {
+        if (ctx._journalFlushTimer || typeof setTimeout !== 'function') return;
+        ctx._journalFlushTimer = setTimeout(function() {
+            ctx._journalFlushTimer = null;
+            journalFlush(ctx);
+        }, JOURNAL_FLUSH_MS);
+        if (ctx._journalFlushTimer && typeof ctx._journalFlushTimer.unref === 'function') ctx._journalFlushTimer.unref();
+    }
+
+    // Разделитель колонок BKI — «;». Незаэкранированная точка с запятой ВНУТРИ значения рвёт
+    // строку по колонкам: на боевой ateh1 «точка с запятой; внутри» легла в «Детали» ПЛЮС
+    // «Пользователь». Экранируем так же, как универсальный импорт (templates/upload.html).
+    // Переводы строк схлопываем — строка файла обязана остаться одной строкой.
+    function journalBkiCell(v) {
+        return String(v == null ? '' : v)
+            .replace(/[\r\n]+/g, ' ')
+            .replace(/\\/g, '\\\\')
+            .replace(/;/g, '\\;');
+    }
+
+    // Файл батча в сокращённом формате `plain data`: первая строка `DATA`, дальше по записи на
+    // строку. Порядок колонок — главное значение таблицы, затем реквизиты В ПОРЯДКЕ МЕТАДАННЫХ;
+    // завершающий «;» обязателен (без него движок дочитывает следующую строку — docs/kb/import.md).
+    //   rows — карты полей `{t<reqId>: значение}`, ровно те, что ушли бы в `_m_new`.
+    function journalBatchText(meta, rows) {
+        if (!meta || meta.id == null || !rows || !rows.length) return '';
+        var keys = ['t' + meta.id].concat((meta.reqs || []).map(function(r) { return 't' + r.id; }));
+        var out = 'DATA\r\n';
+        rows.forEach(function(f) {
+            out += keys.map(function(k) { return journalBkiCell(f && f[k]); }).join(';') + ';\r\n';
+        });
+        return out;
+    }
+
+    // Сброс очереди: один батч, при отказе — построчно. Никогда не реджектится.
+    function journalFlush(ctx) {
+        if (!ctx) return Promise.resolve(0);
+        if (ctx._journalFlushTimer) {
+            if (typeof clearTimeout === 'function') clearTimeout(ctx._journalFlushTimer);
+            ctx._journalFlushTimer = null;
+        }
+        ctx._journalDefer = false;
+        var jm = journalMeta(ctx);
+        var rows = ctx._journalQueue || [];
+        ctx._journalQueue = [];
+        if (!jm || !rows.length) return Promise.resolve(0);
+        function oneByOne() {
+            return rows.reduce(function(p, f) {
+                return p.then(function(n) {
+                    return journalPostRow(ctx, jm, f).then(function(ok) { return n + (ok ? 1 : 0); });
+                });
+            }, Promise.resolve(0));
+        }
+        var sent;
+        try {
+            sent = (typeof ctx.postImport === 'function')
+                ? ctx.postImport(jm.meta.id, journalBatchText(jm.meta, rows), 'journal.bki')
+                : null;
+        } catch (e) { sent = null; }
+        if (!sent || typeof sent.then !== 'function') return oneByOne();
+        return sent.then(function() {
+            ctx._journalWrote = true;
+            return rows.length;
+        }, function(err) {
+            if (typeof console !== 'undefined' && console.warn) {
+                console.warn('[pp] #4979 батч журнала не принят ('
+                    + ((err && err.message) || 'причина неизвестна') + ') — дописываем по одной');
+            }
+            return oneByOne();
+        });
+    }
 
     // Метаданные журнала: таблица и id колонок ПО ИМЕНАМ. Нет таблицы → null (журнал молчит).
     // Результат кэшируем на контроллере: metadata читается один раз за загрузку.
@@ -62,10 +154,19 @@
         return ctx._journalSession;
     }
     // Новое действие — новая сессия (зовём в начале действия, до первых записей).
+    // #4979: этим же открывается очередь действия — дальше строки копятся и уходят одним батчем
+    // на journalFlush. Вызовы журнала ВНЕ действия (журналBegin не звали) пишутся как прежде,
+    // по одной: их единицы, и отдельная очередь им ничего не даёт.
     function journalBegin(ctx, action) {
         if (!ctx) return '';
+        // Предыдущее действие могло не сбросить очередь (ранний выход, делегирование другому
+        // действию — splitPartiallyDoneCuts → applySplitPlan). Открыть новую очередь поверх
+        // старой значило бы ПОТЕРЯТЬ её строки, а молчащий журнал хуже отсутствующего (#4645).
+        if (ctx._journalQueue && ctx._journalQueue.length) journalFlush(ctx);
         ctx._journalSessionOp = null;
         ctx._journalSession = null;
+        ctx._journalDefer = true;
+        ctx._journalQueue = [];
         return journalSession(ctx, action);
     }
 
@@ -81,12 +182,24 @@
     }
 
     // Одна строка журнала. rec: { event, cut, order, slitter, day, before, after, details }.
+    // opts.immediate — писать СРАЗУ, мимо очереди действия (#4618: так идёт SESSION).
     // Возвращает Promise, который НИКОГДА не реджектится (журнал не вправе сорвать действие).
-    function planJournal(ctx, rec) {
+    function planJournal(ctx, rec, opts) {
         var jm = journalMeta(ctx);
         if (!jm || !rec) return Promise.resolve(false);
         if ((ctx._journalRows || 0) >= JOURNAL_MAX_ROWS) return Promise.resolve(false);
         ctx._journalRows = (ctx._journalRows || 0) + 1;
+        var f = journalFields(ctx, jm, rec);
+        if (ctx._journalDefer && !(opts && opts.immediate)) {
+            journalQueue(ctx).push(f);
+            journalArmFlush(ctx);
+            return Promise.resolve(true);
+        }
+        return journalPostRow(ctx, jm, f);
+    }
+
+    // Карта полей одной строки — ровно то, что уходит в `_m_new` или в колонку батча.
+    function journalFields(ctx, jm, rec) {
         var r = jm.reqs, f = {};
         function put(id, val) { if (id && val != null && val !== '') f['t' + id] = val; }
         put(r.session, journalSession(ctx));
@@ -100,10 +213,14 @@
         put(r.after, journalNum(rec.after));
         put(r.details, journalText(rec.details));
         put(r.user, String((ctx.user && (ctx.user.name || ctx.user.login)) || ctx.userName || ''));
-        f = addMainValueField(jm.meta, f, Math.floor(Date.now() / 1000));
+        return addMainValueField(jm.meta, f, Math.floor(Date.now() / 1000));
+    }
+
+    // Отправка одной готовой строки. Ошибка гасится здесь — действие продолжается.
+    function journalPostRow(ctx, jm, f) {
         return ctx.post('_m_new/' + jm.meta.id + '?JSON&up=1', f)
             .then(function() { ctx._journalWrote = true; return true; })
-            .catch(function(err) { journalWriteFailed(ctx, err); return false; });   // действие продолжается
+            .catch(function(err) { journalWriteFailed(ctx, err); return false; });
     }
 
     // #4645: ЖУРНАЛ, КОТОРЫЙ НЕ ПИШЕТСЯ, ХУЖЕ ОТСУТСТВУЮЩЕГО — на него рассчитывают при разборе.
@@ -142,7 +259,8 @@
         }
     }
 
-    // Пачка строк — последовательно, чтобы не занимать пул записи плана.
+    // Пачка строк. Внутри действия (после journalBegin) они лишь копятся — отправит их одним
+    // батчем journalFlush ПОСЛЕ работы; вне действия пишутся последовательно, как прежде.
     function planJournalRows(ctx, rows) {
         if (!journalMeta(ctx) || !rows || !rows.length) return Promise.resolve(0);
         var n = 0;
