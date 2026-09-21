@@ -2640,6 +2640,19 @@ function exportHeader(){
 			$head_str .= implode(";", $value).";\r\n";
 	return $head_str;
 }
+# issue #4989: выгрузка обязана ЗАВЕРШАТЬ ответ: без die() поток падал дальше по
+# index.php, и в файл выгрузки дорисовывалась HTML-страница приложения (у веток CSV
+# и JSON ответ завершается так же — die()).
+function DataExportBki($dataExport){
+	Download_send_headers("data_export.bki");
+	ob_start();
+	$GLOBALS["CSV_handler"] = fopen("php://output", 'w');
+	fwrite($GLOBALS["CSV_handler"], exportHeader());
+	fwrite($GLOBALS["CSV_handler"], "DATA\r\n".implode($dataExport));
+	fclose($GLOBALS["CSV_handler"]);
+	echo ob_get_clean();
+	die();
+}
 function exportTerms($id){
 	global $z;
     trace("REP_COLS here with $id");
@@ -7829,13 +7842,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 				die();
 			}
 			elseif(isset($GLOBALS["dataExport"])){
-				download_send_headers("data_export.bki");
-				ob_start();
-				$GLOBALS["CSV_handler"] = fopen("php://output", 'w');
-				fwrite($GLOBALS["CSV_handler"], exportHeader());
-				fwrite($GLOBALS["CSV_handler"], "DATA\r\n".implode($GLOBALS["dataExport"]));
-				fclose($GLOBALS["CSV_handler"]);
-				echo ob_get_clean();
+				DataExportBki($GLOBALS["dataExport"]);
 			}
 			if(isset($_GET["saved1"]))
 				$blocks[$block]["ending"][] = t9n("[RU]Эта запись сохранена.[EN]This record saved.");
