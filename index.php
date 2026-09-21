@@ -7836,6 +7836,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 				fwrite($GLOBALS["CSV_handler"], "DATA\r\n".implode($GLOBALS["dataExport"]));
 				fclose($GLOBALS["CSV_handler"]);
 				echo ob_get_clean();
+				die();
 			}
 			if(isset($_GET["saved1"]))
 				$blocks[$block]["ending"][] = t9n("[RU]Эта запись сохранена.[EN]This record saved.");
