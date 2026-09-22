@@ -6,8 +6,10 @@
 //      + «Брак, м» — добавляется с каждой резкой («Готовы несколько» умножает метраж);
 //   3. «Счётчик кон.» = «Счётчик нач.» − «Погонаж факт, м»;
 //   4. расходные поля участвуют в расчёте и не теряются.
-// Ограничения РМ: «Брак, м» обязателен при заполненном «Брак, шт»; без номера джамбо
-// нельзя отметить резку готовой. Партия сырья: «Остаток, м» = «Счётчик кон.».
+// Ограничения РМ: без номера джамбо нельзя отметить резку готовой. Партия сырья:
+// «Остаток, м» = «Счётчик кон.».
+// #4992: «Брак, м» при заполненном «Брак, шт» НЕ обязателен (решение заказчика):
+// брак роликов (шт) и брак сырья (м) — независимые вещи.
 //
 // RATCHET-OK: п.4 ТЗ («расходные поля очищаются при отметке, «№ джамбо» — реквизит
 // резки») заменён решением заказчика #4914: расход/списание/браки копятся В ЗАПИСЬ
@@ -134,14 +136,7 @@ assertEqual(core.counterEndFromMeterage('1000', ''), 1000,
 assertEqual(core.counterEndFromMeterage('300', 450), -150,
     '#4902: план больше рулона — показание уходит в минус (сигнал «сырья не хватило», #4321)');
 
-// ── 3) «Брак, м» обязателен при заполненном «Брак, шт» ────────────────────────────────────────
-assertEqual(core.defectMRequired('2', ''), true, '#4902: шт заполнен, м пуст — резку не отметить');
-assertEqual(core.defectMRequired('2', '0'), true, '#4902: шт заполнен, м ноль — то же (ноль метража брака не бывает)');
-assertEqual(core.defectMRequired('2', '5'), false, '#4902: оба заполнены — отметка проходит');
-assertEqual(core.defectMRequired('', ''), false, '#4902: брака нет — ограничения нет');
-assertEqual(core.defectMRequired('0', ''), false, '#4902: шт = 0 — брака нет');
-
-// ── 4) markPassDone: накопление, расход копится в запись, счётчик нач. один раз ────────────────
+// ── 3) markPassDone: накопление, расход копится в запись, счётчик нач. один раз ────────────────
 function makeInst(cut, opts) {
     var o = opts || {};
     var inst = Object.create(Controller.prototype);
@@ -171,7 +166,7 @@ function makeInst(cut, opts) {
     inst.notify = function(msg, kind) { this.notes.push({ msg: msg, kind: kind }); };
     inst.render = function() {};
     inst.advanceToNextCut = function() {};
-    inst.finishCut = function() { this.finished++; };   // по умолчанию заглушка (свой сценарий в п.5)
+    inst.finishCut = function() { this.finished++; };   // по умолчанию заглушка (свой сценарий в п.4)
     inst.isCutLocked = function() { return false; };
     inst.eventDateTime = function() { return '2026-09-07 12:00:00'; };
     return inst;
@@ -260,12 +255,11 @@ function flush() { return new Promise(function(resolve) { setTimeout(resolve, 0)
     assert(noJumbo.notes.some(function(n) { return n.msg.indexOf('Номер джамбо') >= 0; }),
         '#4902/#4914: оператору сказано, что нужен «Номер джамбо»');
 
-    var noDefectM = makeInst(withJumbo(baseCut(), { defectQty: '2', defectM: '' }));
-    noDefectM.markPassDone(false);
-    assertEqual(noDefectM.posts.length, 0,
-        '#4902: «Брак, шт» без «Брак, м» — отметка не проходит');
-    assert(noDefectM.notes.some(function(n) { return n.msg.indexOf('Брак, м') >= 0; }),
-        '#4902: оператору сказано, что нужен «Брак, м»');
+    // #4992: брак роликов (шт) и брак сырья (м) независимы — отметка проходит без «Брак, м»
+    var defectQtyOnly = makeInst(withJumbo(baseCut(), { defectQty: '2' }));
+    defectQtyOnly.markPassDone(false);
+    assertEqual(defectQtyOnly.posts.length, 1,
+        '#4992: «Брак, шт» без «Брак, м» — отметка проходит');
 
     var defectOk = makeInst(withJumbo(baseCut(), { defectQty: '2', defectM: '7' }));
     defectOk.markPassDone(false);
@@ -279,7 +273,7 @@ function flush() { return new Promise(function(resolve) { setTimeout(resolve, 0)
         '#4902/#4580: «Счётчик нач.» пуст, а из остатка партии взять нечего — записи нет');
 })();
 
-// ── 5) finishCut: номер джамбо обязателен, завершение пишет погонаж/счётчик/запись ─────────────
+// ── 4) finishCut: номер джамбо обязателен, завершение пишет погонаж/счётчик/запись ─────────────
 (async function() {
     var bad = makeInst(baseCut());
     bad.finishCut();
@@ -302,7 +296,7 @@ function flush() { return new Promise(function(resolve) { setTimeout(resolve, 0)
     assertEqual(jumboFin['t82380'], 60000 - 100 * 450, '#4860: конечная длина = счётчик кон. − расход − списание');
 })();
 
-// ── 6) syncBatchRemainder: «Остаток, м» партии = «Счётчик кон.» ───────────────────────────────
+// ── 5) syncBatchRemainder: «Остаток, м» партии = «Счётчик кон.» ───────────────────────────────
 (function() {
     var inst = Object.create(Controller.prototype);
     var batch = { id: '77', materialId: 'm', remainderM: 1000, remainder: 500, widthMm: 500, active: '1' };
@@ -330,7 +324,7 @@ function flush() { return new Promise(function(resolve) { setTimeout(resolve, 0)
         '#4902: план больше рулона — остаток уходит в минус вместе со счётчиком (сигнал, #4321)');
 })();
 
-// ── 7) cutFields: только счётчик нач. и примечания — джамбо-реквизитов у резки нет ─────────────
+// ── 6) cutFields: только счётчик нач. и примечания — джамбо-реквизитов у резки нет ─────────────
 (function() {
     var cut = baseCut();
     var fields = makeInst(cut).cutFields(cut);
@@ -340,7 +334,7 @@ function flush() { return new Promise(function(resolve) { setTimeout(resolve, 0)
         '#4902 п.3: «Счётчик кон.» вычисляемый — автосохранением по ячейке не пишется');
 })();
 
-// ── 8) подпись записи джамбо: правка расхода и номера — тоже правка ───────────────────────────
+// ── 7) подпись записи джамбо: правка расхода и номера — тоже правка ───────────────────────────
 (function() {
     var a = { jumboNo: 'J-1', spent: '', writeoff: '', defectM: '', defectQty: '',
               spentDraft: '', writeoffDraft: '', defectMDraft: '', defectQtyDraft: '' };
@@ -356,7 +350,7 @@ function flush() { return new Promise(function(resolve) { setTimeout(resolve, 0)
         '#4902/#4914: совпадающие значения — одинаковая подпись (лишней записи нет)');
 })();
 
-// ── 9) в карточке «Счётчик кон.» вычисляемый — ввода нет ──────────────────────────────────────
+// ── 8) в карточке «Счётчик кон.» вычисляемый — ввода нет ──────────────────────────────────────
 (function() {
     var inst = makeInst(withJumbo(baseCut()));
     inst.setBusy = function() {};

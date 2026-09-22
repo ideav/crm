@@ -210,13 +210,6 @@
         return round3(toNumber(start) - toNumber(meterage));
     }
 
-    // #4902: ограничение РМ — «Брак, м» должен быть заполнен, если заполнен «Брак, шт»:
-    // бракованные рулоны без метража теряют расход сырья (он не войдёт в погонаж).
-    // Ноль метража при ненулевом количестве — то же незаполненное.
-    function defectMRequired(defectQty, defectM) {
-        return toNumber(defectQty) > 0 && !(toNumber(defectM) > 0);
-    }
-
     // #4860: финальный «Счётчик кон.» с вычетом расхода джамбо. Рабочий расход
     // (протяжка перед резкой) и «К списанию» (остаток в утиль) ПРИБАВЛЯЮТСЯ к
     // разнице значений счётчика — конечная длина джамбо получается за их вычетом:
@@ -1427,7 +1420,6 @@
         meterageFromCounters: meterageFromCounters,
         meterageAccumulate: meterageAccumulate,     // #4902: накопление погонажа по отметкам
         counterEndFromMeterage: counterEndFromMeterage, // #4902: счётчик кон. = нач. − погонаж
-        defectMRequired: defectMRequired,           // #4902: «Брак, м» обязателен при «Брак, шт»
         jumboFinalCounter: jumboFinalCounter,       // #4860: счётчик кон. за вычетом расхода джамбо
         rowsToJumbos: rowsToJumbos,                 // #4914: строки отчёта task_jumbo → записи джамбо
         jumbosFromObjects: jumbosFromObjects,       // #4914: фолбэк-разбор подчинённых 82374
@@ -3154,7 +3146,6 @@
         jumboOff.addEventListener('input', function() { jumboDraft().writeoffDraft = jumboOff.value; });
         grid.appendChild(field('К списанию, м', jumboOff));
 
-        // #4914: «Брак, м» обязателен при заполненном «Брак, шт» (проверка при отметке).
         var defectM = numInput(rec ? rec.defectM : '', '0');
         defectM.addEventListener('input', function() { jumboDraft().defectMDraft = defectM.value; });
         grid.appendChild(field('Брак, м', defectM));
@@ -3588,12 +3579,6 @@
             // Дельта отметки — черновики ввода активной записи (накопленное поле не трогаем:
             // введённое к этой отметке прибавится к нему ниже и останется в поле).
             var delta = core.jumboDeltaFrom(jumboRec);
-            // «Брак, м» обязателен при заполненном «Брак, шт» — иначе метраж брака
-            // не войдёт в погонаж и расход сырья потеряется.
-            if (core.defectMRequired(delta.defectQty, delta.defectM)) {
-                self.notify('Заполните «Брак, м» — он обязателен при заполненном «Брак, шт»', 'error');
-                return;
-            }
             self.setBusy(true);
             // #4902 п.2: погонаж накапливается: прежний + метраж новых резок + расход
             // джамбо + списание + брак этой отметки. «Готовы несколько» умножает метраж
