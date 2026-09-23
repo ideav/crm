@@ -1340,6 +1340,11 @@
                     fixed: false,   // #3508: уточняется из object/ в loadPlanning (отчёт флаг не отдаёт)
                     materialId: str(row.cut_material_id),
                     materialName: str(row.cut_material),
+                    // #4996: альтернативное название Вида сырья (alt_material из cut_planning).
+                    // Отдельным полем: на materialName стоит детект фольги (isFoil) и
+                    // fallback-и, подменять его при разборе нельзя — альт применяется при
+                    // резолве (resolveCutMaterials), старше и справочника, и отчётного имени.
+                    materialAlt: str(row.alt_material),
                     batchId: '',
                     jumboRemainingM: (row.cut_jumbo_remaining == null || row.cut_jumbo_remaining === '') ? 0 : Number(row.cut_jumbo_remaining),
                     knifeCount: (row.cut_knives == null || row.cut_knives === '') ? 0 : Number(row.cut_knives),

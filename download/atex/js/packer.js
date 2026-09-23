@@ -112,6 +112,9 @@
         task: 'task', taskId: 'task_id', gpId: 'gp_id',
         orderNo: 'order_no', orderClient: 'order',
         material: 'material', width: 'cut_width', length: 'cut_length',
+        // #4996: альтернативное название Вида сырья. В `packer`/`packer_next` колонка
+        // может быть ещё не заведена — пусто, и карточка показывает обычное имя.
+        altMaterial: 'alt_material',
         wind: 'wind_direction', sleeve: 'sleeve', addSleeve: 'add_sleeve',
         qty: 'qty', qtyFact: 'qty_fact', packed: 'packed', notes: 'notes', events: 'events',
         // #4665: типоразмер упаковки, проставленный планированием, и тип сырья (для фольги).
@@ -200,6 +203,8 @@
             orderNo: str(kvVal(r[COL.orderNo])).trim(),
             orderClient: str(kvVal(r[COL.orderClient])).trim(),
             material: str(kvVal(r[COL.material])).trim(),
+            // #4996: альт-имя сырья; нет — подпись пишет обычное (describeItem).
+            altMaterial: str(kvVal(r[COL.altMaterial])).trim(),
             width: formatNumber(r[COL.width]),
             length: formatNumber(r[COL.length]),
             wind: str(kvVal(r[COL.wind])).trim(),
@@ -345,8 +350,9 @@
     function describeItem(item) {
         var it = item || {};
         var size = [it.width, it.length].filter(Boolean).join(' х ');
-        // #4799: лидер идёт в ту же строку, следом за втулкой.
-        var parts = [it.material, size, it.wind, it.sleeve, it.leader].filter(Boolean);
+        // #4799: лидер идёт в ту же строку, следом за втулкой. #4996: есть альт-имя
+        // Вида сырья — первым ставим его, обычное остаётся фолбэком.
+        var parts = [it.altMaterial || it.material, size, it.wind, it.sleeve, it.leader].filter(Boolean);
         var text = parts.join(' ');
         if (it.addSleeve) text += (text ? ' ' : '') + '+ доп. втулка: ' + it.addSleeve;
         return text;

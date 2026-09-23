@@ -2505,10 +2505,12 @@
         var byCut = materialByCut(this.cuts, this.supplies, this.genPositions);
         this.cuts.forEach(function(c) {
             var m = byCut[String(c.id)];
-            if (m) {
-                c.materialId = m;
-                c.materialName = (self.materialNameById && self.materialNameById[m]) || c.materialName || '';
-            }
+            if (m) c.materialId = m;
+            // #4996: альтернативное название Вида сырья старше всего — и имени из
+            // справочника «Вид сырья», и отчётного cut_material; нет альта — как раньше.
+            c.materialName = c.materialAlt
+                || (m && self.materialNameById && self.materialNameById[m])
+                || c.materialName || '';
         });
         // #3808: переходящие сегменты с пустым «Видом сырья» (обеспечения которых ведут на
         // НЕактивную позицию → materialByCut их не восстановил) лечим по цепочке станок|намотка|
@@ -2520,7 +2522,10 @@
         healed.forEach(function(id) {
             var c = self.cuts.filter(function(x) { return String(x.id) === String(id); })[0];
             if (c && !c.materialName) {
-                c.materialName = (self.materialNameById && self.materialNameById[String(c.materialId)]) || c.materialName || '';
+                // #4996: и в лечении цепочки альт старше имени из справочника.
+                c.materialName = c.materialAlt
+                    || (self.materialNameById && self.materialNameById[String(c.materialId)])
+                    || c.materialName || '';
             }
         });
         this.healCutBatches();   // #4452: «Партия сырья» — после «Вида сырья» (FIFO-источник опирается на него)

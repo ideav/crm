@@ -158,13 +158,13 @@ assertEqual(plan.cuts, [
     { id: '10', number: '06.05.2026', slitter: { id: '101', label: 'Станок 1' },
       materialBatch: { id: null, label: '' },
       planDate: '06.05.2026', status: 'В работе', startDate: '', endDate: '', sequence: null, fixed: false,
-      materialId: '', materialName: '', batchId: '',
+      materialId: '', materialName: '', materialAlt: '', batchId: '',
       jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, length: 0, plannedRuns: 0, actualRuns: null, duration: 0, timing: '', storedKnifeSetupMin: '', storedMaterialWindingMin: '', storedCutAndLeaderMin: '', firstPartId: '', settledFromId: '', isFoil: false,
       orderId: '', orderApprovalDate: '', leaders: [], sleeves: [] },
     { id: '20', number: '27.05.2026', slitter: { id: null, label: '' },
       materialBatch: { id: null, label: '' },
       planDate: '27.05.2026', status: 'Ожидает', startDate: '', endDate: '', sequence: null, fixed: false,
-      materialId: '', materialName: '', batchId: '',
+      materialId: '', materialName: '', materialAlt: '', batchId: '',
       jumboRemainingM: 0, knifeCount: 0, knifeWidths: [], winding: '', rollerWidth: 0, length: 0, plannedRuns: 0, actualRuns: null, duration: 0, timing: '', storedKnifeSetupMin: '', storedMaterialWindingMin: '', storedCutAndLeaderMin: '', firstPartId: '', settledFromId: '', isFoil: false,
       orderId: '', orderApprovalDate: '', leaders: [], sleeves: [] }
 ], 'rowsToPlanning dedups cuts by cut_id, slitter без id → {id:null}, #3242 number=cut_plan_date');
