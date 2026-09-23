@@ -90,6 +90,13 @@ function mkEl(tag) {
     return el;
 }
 
+function decodeEntities(s) {
+    return String(s)
+        .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+        .replace(/&amp;/g, '&');
+}
+
 function parseHTML(html) {
     const root = mkEl('#root');
     const stack = [root];
@@ -97,7 +104,7 @@ function parseHTML(html) {
     let m;
     while ((m = re.exec(html))) {
         if (m[3] !== undefined) {
-            const text = m[3];
+            const text = decodeEntities(m[3]);
             if (text.trim()) stack[stack.length - 1].text += text;
             continue;
         }
@@ -456,10 +463,20 @@ async function testRenderRunEscapes() {
         }),
     });
     await api.run('');
-    const html = document.getElementById('result').innerHTML;
-    assert(html.indexOf('<img') < 0, 'renderRun: имя сущности не даёт <img>', html.slice(0, 220));
-    assert(html.indexOf('&lt;img') >= 0, 'renderRun: имя сущности видно текстом', html.slice(0, 220));
-    assert(html.indexOf('<script>') < 0, 'renderRun: сообщение ошибки экранировано', html.slice(0, 220));
+    // поведение: экранированный вывод после разбора НЕ содержит живых тегов,
+    // имя сущности и сообщение ошибки видны как текст
+    const parsed = parseHTML('<div>' + document.getElementById('result').innerHTML + '</div>');
+    assert(parsed.querySelectorAll('img').length === 0,
+        'renderRun: в выводе нет живого <img> (экранировано)');
+    assert(parsed.querySelectorAll('script').length === 0,
+        'renderRun: в выводе нет живого <script> (экранировано)');
+    const asText = parsed.textContent;
+    assert(asText.indexOf('<img') >= 0,
+        'renderRun: имя сущности видно текстом',
+        'textContent=' + asText.slice(0, 220));
+    assert(asText.indexOf('<script>') >= 0,
+        'renderRun: сообщение ошибки видно текстом',
+        'textContent=' + asText.slice(0, 220));
 }
 
 // ============================================================
