@@ -1308,6 +1308,21 @@
         return map;
     }
 
+    // #4996: альтернативное название Вида сырья (alt_material) — из того же отчёта
+    // cut_planning, что и заказы/ширины. У задания сырьё одно, поэтому в карте одно
+    // имя на задание (первое непустое). Пустое (колонки нет / не заполнено) в карту
+    // не попадает: подписи просто показывают обычное имя, как раньше.
+    function rowsToCutAlts(rows) {
+        var map = {};
+        (rows || []).forEach(function(row) {
+            var cutId = firstField(row, ['cut_id', 'id']);
+            var alt = firstField(row, ['alt_material']);
+            if (!cutId || !alt || map[cutId]) return;
+            map[cutId] = alt;
+        });
+        return map;
+    }
+
     // #4958: счётная форма слова «резка» для подписи карточки: 1 резка, 3 резки, 11 резок.
     function runsWord(count) {
         var n = Math.abs(Math.round(toNumber(count)));
@@ -1483,6 +1498,7 @@
         rowsToCutOrders: rowsToCutOrders,   // #4606
         cutOrderLabel: cutOrderLabel,       // #4606
         rowsToCutWidths: rowsToCutWidths,   // #4958: ширина позиции из cut_planning
+        rowsToCutAlts: rowsToCutAlts,       // #4996: альт-имя сырья из cut_planning
         cutSpecLine: cutSpecLine,           // #4958: подпись позиции в карточке очереди
         isForeignWarehouse: isForeignWarehouse,
         // #3460: раскладка ножей (визуализация)
@@ -1916,16 +1932,17 @@
     AtexSlitter.prototype.loadCutOrders = function() {
         var self = this;
         var sid = this.selectedSlitterId;
-        if (!sid) { this.cutOrders = {}; this.cutWidths = {}; this.cutOrdersSlitterId = null; return Promise.resolve(); }
+        if (!sid) { this.cutOrders = {}; this.cutWidths = {}; this.cutAlts = {}; this.cutOrdersSlitterId = null; return Promise.resolve(); }
         if (this.cutOrdersSlitterId === String(sid)) return Promise.resolve();
         return this.getJson('report/cut_planning?JSON_KV&FR_cut_slitter_id=' + encodeURIComponent(sid) + '&LIMIT=0,5000')
             .then(function(rows) {
                 var list = Array.isArray(rows) ? rows : (rows && rows.rows) || [];
                 self.cutOrders = core.rowsToCutOrders(list);
                 self.cutWidths = core.rowsToCutWidths(list);   // #4958
+                self.cutAlts = core.rowsToCutAlts(list);       // #4996
                 self.cutOrdersSlitterId = String(sid);
             })
-            .catch(function() { self.cutOrders = {}; self.cutWidths = {}; self.cutOrdersSlitterId = null; });
+            .catch(function() { self.cutOrders = {}; self.cutWidths = {}; self.cutAlts = {}; self.cutOrdersSlitterId = null; });
     };
 
     // #4606: подпись заказа для задания («3738» / «3738, 3742 +1»); пусто — если
@@ -1941,8 +1958,9 @@
     AtexSlitter.prototype.cutSpecText = function(cut) {
         if (!cut) return '';
         var batch = this.findBatch(cut.batchId);
-        // #3674: cut.material приходит из отчёта slitter_cuts
-        var material = (batch && batch.materialLabel) || cut.material || cut.batch || '';
+        // #3674: cut.material приходит из отчёта slitter_cuts; #4996: альт-имя сырья
+        // из cut_planning старше и него, и имени партии.
+        var material = (this.cutAlts || {})[String(cut.id)] || (batch && batch.materialLabel) || cut.material || cut.batch || '';
         return core.cutSpecLine(cut, material, (this.cutWidths || {})[String(cut.id)]);
     };
 
@@ -2868,7 +2886,8 @@
         var cut = this.currentCut;
         var runLength = core.runLengthForCut(cut);
         var parts = [
-            cut.material || cut.materialLabel || cut.batch || '—',
+            // #4996: альт-имя сырья (из cut_planning) старше имени партии/отчёта.
+            (this.cutAlts || {})[String(cut.id)] || cut.material || cut.materialLabel || cut.batch || '—',
             runLength > 0 ? (core.round3(runLength) + ' м') : '—',
             cut.winding || '—',
             cut.leader || '—'
