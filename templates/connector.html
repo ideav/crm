@@ -1,0 +1,157 @@
+<!--
+  Рабочее место «Коннектор» (Битрикс24 / 1С → Интеграм).
+  Для отладки: templates/connector.html.
+  Пара: js/connector.js
+  Рендерится внутри оболочки main.html — токены темы наследуются, шапку/меню НЕ дублируем.
+  Открытие: https://<host>/<база>/?action=connector  (маршрут/меню заводит платформа).
+-->
+<style>
+.conn-wrap{padding:1.5rem;max-width:920px;margin:0 auto;}
+.conn-header{display:flex;align-items:center;gap:.6rem;margin-bottom:1rem;}
+.conn-header h4{margin:0;font-size:1.35rem;color:var(--text-primary);}
+.conn-badge{font-size:.75rem;padding:.1rem .5rem;border-radius:10px;background:var(--bg-secondary);border:1px solid var(--border-color);color:var(--text-secondary);}
+.conn-help{background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:6px;padding:.9rem 1.1rem;margin-bottom:1.1rem;font-size:.9rem;line-height:1.55;color:var(--text-primary);}
+.conn-form{border:1px solid var(--border-color);border-radius:8px;padding:1.25rem;background:var(--card-bg,var(--bg-primary));}
+.conn-field{margin-bottom:.85rem;}
+.conn-field label{display:block;font-size:.85rem;color:var(--text-secondary);margin-bottom:.25rem;}
+.conn-field input,.conn-field select{width:100%;box-sizing:border-box;padding:.5rem .65rem;border:1px solid var(--input-border,var(--border-color));border-radius:5px;background:var(--input-bg,var(--bg-secondary));color:var(--text-primary);font-size:.92rem;font-family:inherit;}
+.conn-field input:focus,.conn-field select:focus{outline:none;border-color:var(--color-primary,#1283da);}
+.conn-secret{position:relative;}
+.conn-secret input{padding-right:3rem;}
+.conn-secret .eye{position:absolute;top:50%;right:.4rem;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:var(--text-secondary);font-size:.95rem;}
+.conn-row{display:flex;gap:1rem;flex-wrap:wrap;}
+.conn-row .conn-field{flex:1;min-width:220px;}
+.conn-check{display:flex;align-items:center;gap:.5rem;font-size:.9rem;color:var(--text-primary);margin:.4rem 0 0;}
+.conn-actions{display:flex;gap:.6rem;margin-top:1.1rem;align-items:center;flex-wrap:wrap;}
+.btn{padding:.5rem 1rem;border:1px solid var(--border-color);border-radius:5px;background:var(--bg-secondary);color:var(--text-primary);cursor:pointer;font-size:.9rem;font-family:inherit;}
+.btn-primary{background:var(--color-primary,#1283da);color:#fff;border-color:transparent;font-weight:600;}
+.btn[hidden]{display:none;}
+.src-tabs{display:flex;gap:.4rem;margin-bottom:1rem;}
+.src-tabs button{flex:1;padding:.6rem;border:1px solid var(--border-color);border-radius:6px;background:var(--bg-secondary);color:var(--text-secondary);cursor:pointer;font-size:.92rem;font-family:inherit;}
+.src-tabs button.active{background:var(--color-primary,#1283da);color:#fff;border-color:transparent;font-weight:600;}
+.src-block{display:none;} .src-block.show{display:block;}
+.hint{color:var(--text-secondary);font-size:.8rem;margin-top:.5rem;}
+.map-head{display:flex;align-items:center;justify-content:space-between;gap:.6rem;margin:1.4rem 0 .5rem;flex-wrap:wrap;}
+.map-head h5{margin:0;font-size:1.05rem;color:var(--text-primary);}
+table.map{width:100%;border-collapse:collapse;font-size:.88rem;}
+table.map th,table.map td{border:1px solid var(--border-color);padding:.35rem .5rem;text-align:left;vertical-align:middle;}
+table.map th{background:var(--bg-secondary);color:var(--text-secondary);font-weight:600;}
+table.map td.arrow{text-align:center;color:var(--text-secondary);width:1.5rem;}
+tr.row-manual td{background:var(--color-warn-bg,#fff8e1);}
+.badge{font-size:.72rem;padding:.05rem .4rem;border-radius:9px;border:1px solid var(--border-color);color:var(--text-secondary);white-space:nowrap;}
+.badge.ok{background:var(--color-success-bg,#e8f5e9);color:var(--color-success,#16a34a);border-color:transparent;}
+.badge.warn{background:var(--color-warn-bg,#fff8e1);color:var(--color-warn,#8a6d00);border-color:var(--color-warn-border,#f5c518);}
+.cbx{position:relative;}
+.cbx input{width:100%;box-sizing:border-box;padding:.35rem .5rem;border:1px solid var(--input-border,var(--border-color));border-radius:4px;background:var(--input-bg,var(--bg-secondary));color:var(--text-primary);font-size:.86rem;font-family:inherit;}
+.cbx .list{position:absolute;left:0;right:0;top:100%;z-index:20;background:var(--input-bg,#fff);border:1px solid var(--border-color);border-radius:4px;margin-top:2px;max-height:170px;overflow:auto;box-shadow:0 8px 18px rgba(0,0,0,.15);display:none;}
+.cbx .list.show{display:block;}
+.cbx .list div{padding:.35rem .5rem;cursor:pointer;}
+.cbx .list div:hover{background:var(--bg-secondary);}
+.cbx .list div.cbx-empty{cursor:default;color:var(--text-secondary);}
+.cbx .list div.cbx-empty:hover{background:transparent;}
+.btn:disabled{opacity:.55;cursor:default;}
+.tr-sel{font-size:.8rem;color:var(--text-secondary);}
+.conn-result{margin-top:1.2rem;}
+.conn-result .bar{display:flex;align-items:center;gap:.5rem;font-size:.9rem;margin-bottom:.4rem;}
+.dot{width:.6rem;height:.6rem;border-radius:50%;background:var(--color-success,#16a34a);display:inline-block;}
+.ok{color:var(--color-success,#16a34a);font-weight:600;}
+table.res{width:100%;border-collapse:collapse;margin-top:.6rem;font-size:.88rem;}
+table.res th,table.res td{border:1px solid var(--border-color);padding:.4rem .55rem;text-align:left;}
+table.res th{background:var(--bg-secondary);color:var(--text-secondary);font-weight:600;}
+</style>
+
+<div class="conn-wrap">
+  <div class="conn-header">
+    <h4>Коннектор</h4>
+    <span class="conn-badge">Битрикс24 / 1С → Интеграм</span>
+  </div>
+
+  <div class="conn-help">
+    <b>Как это работает.</b> Выберите источник и что грузить, нажмите
+    <b>«Подобрать соответствие»</b> — колонки подставятся автоматически (можно поправить),
+    затем <b>«Проверить»</b> → <b>«Пробный»</b> → <b>«Запустить»</b>.
+  </div>
+
+  <div class="conn-form">
+    <div class="src-tabs">
+      <button id="tab-b24" class="active" data-src="b24">Битрикс24</button>
+      <button id="tab-1c" data-src="1c">1С (OData)</button>
+    </div>
+
+    <div id="src-b24" class="src-block show">
+      <div class="conn-field conn-secret">
+        <label>Адрес вебхука Битрикс24</label>
+        <input type="password" id="hook" placeholder="https://b24.<портал>/rest/<ID>/<код>/">
+        <button class="eye" data-for="hook">👁</button>
+      </div>
+      <div class="hint">Секреты хранятся в secrets.json базы; здесь поле для справки/проверки.</div>
+    </div>
+    <div id="src-1c" class="src-block">
+      <div class="conn-field"><label>Адрес OData 1С</label><input type="text" placeholder="https://1c.<хост>/base/odata/standard.odata/"></div>
+      <div class="conn-row">
+        <div class="conn-field"><label>Пользователь 1С</label><input type="text"></div>
+        <div class="conn-field conn-secret"><label>Пароль 1С</label><input type="password" id="pw1c"><button class="eye" data-for="pw1c">👁</button></div>
+      </div>
+    </div>
+
+    <div class="conn-row" style="margin-top:1rem">
+      <div class="conn-field"><label>Сущность (для подбора полей)</label>
+        <select id="entities">
+          <option value="bitrix_users">Пользователь Битрикс</option>
+          <option value="departments">Департамент</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="map-head">
+      <h5>Соответствие полей</h5>
+      <button class="btn" id="aiBtn">✨ Подобрать соответствие (AI)</button>
+    </div>
+    <table class="map">
+      <thead><tr><th style="width:34%">Поле источника</th><th class="arrow"></th><th style="width:40%">Колонка базы</th><th>Как подобрано</th></tr></thead>
+      <tbody id="mapBody"></tbody>
+    </table>
+    <div class="hint" id="mapHint">Нажмите «Подобрать соответствие» — колонки берутся из метаданных базы, подбор делает эмбеддер (через ядро).</div>
+
+    <div class="conn-actions">
+      <button class="btn act" id="checkBtn">Проверить</button>
+      <button class="btn act" id="dryBtn">Пробный прогон</button>
+      <button class="btn btn-primary act" id="runBtn">▶ Запустить</button>
+    </div>
+
+    <div class="conn-result" id="result" style="display:none"></div>
+  </div>
+</div>
+
+<script>
+  /* конфиг рабочего места (значения база-специфичны) */
+  window.CONNECTOR_DB = "{_global_.z}";                 // имя базы из оболочки
+  window.CONNECTOR_CONFIG = "sportzania-spz";           // имя конфига в templates/custom/<база>/connector/
+  window.CONNECTOR_CONNECT_ID = 0;                      /* TODO: id записи-«Коннектора» (тип CONNECT) с URL эмбеддера */
+  window.CONNECTOR_TABLES = { "bitrix_users": 969767, "departments": 2859 };
+  /* поля источника для отладки (позже — с сервера: Битрикс *.fields / 1С $metadata) */
+  window.CONNECTOR_SOURCE_FIELDS = {
+    "bitrix_users": [
+      ["LAST_NAME","Фамилия"],["NAME","Имя"],["SECOND_NAME","Отчество"],
+      ["PERSONAL_BIRTHDAY","Дата рождения"],["WORK_POSITION","Должность"],
+      ["EMAIL","E-Mail"],["PERSONAL_MOBILE","Личный мобильный"],
+      ["UF_DEPARTMENT","Подразделение"],["ID","Идентификатор"]
+    ],
+    "departments": [
+      ["NAME","Название"],["PARENT","Родительский отдел"],["UF_HEAD","Руководитель"]
+    ]
+  };
+
+  /* переключатель источника + показать пароль (простая логика формы) */
+  (function(){
+    function pick(s){
+      document.getElementById("tab-b24").classList.toggle("active",s==="b24");
+      document.getElementById("tab-1c").classList.toggle("active",s==="1c");
+      document.getElementById("src-b24").classList.toggle("show",s==="b24");
+      document.getElementById("src-1c").classList.toggle("show",s==="1c");
+    }
+    document.querySelectorAll(".src-tabs button").forEach(function(b){b.onclick=function(){pick(b.dataset.src);};});
+    document.querySelectorAll(".eye").forEach(function(b){b.onclick=function(){var i=document.getElementById(b.dataset.for);i.type=i.type==="password"?"text":"password";};});
+  })();
+</script>
+<script src="/js/connector.js?1"></script>
