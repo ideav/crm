@@ -377,6 +377,8 @@
     // #4914: автосохранение по ячейке везёт ТОЛЬКО редактируемые поля: накопленные
     // расход/списание/браки. Счётчики и длины записи ведут отметка резки
     // и завершение — их автосейв затирал бы числа цепочки.
+    // #5005: «Кол-во резок» — тоже накопительное (его кладёт отметка прохода),
+    // поэтому доезжает вместе с расходами.
     function jumboInputFields(tableMeta, record) {
         var rec = record || {};
         return jumboFieldsPut(tableMeta, function(put) {
@@ -384,6 +386,7 @@
             put(JUMBO_REQ.writeOff, rec.writeoff == null ? '' : rec.writeoff);
             put(JUMBO_REQ.defect, rec.defectM == null ? '' : rec.defectM);
             put(JUMBO_REQ.defectQty, rec.defectQty == null ? '' : rec.defectQty);
+            put(JUMBO_REQ.runs, rec.cutsCount == null ? '' : rec.cutsCount);
         });
     }
 
@@ -3494,7 +3497,16 @@
         }).then(function(active) {
             if (!active) return null;
             active.counterEnd = counterEnd;
-            active.cutsCount = core.actualRunsForCut(cut) || core.plannedRunsForCut(cut) || '';
+            // #5005: «Кол-во резок» записи копится ОТМЕТКАМИ (каждая отметка кладёт
+            // свои проходы в активную запись). Завершение сумму по записям задания
+            // СВЕРЯЕТ с фактом резки: недостача (отметки до ввода накопления)
+            // доносится в активную запись, а накопленное общим числом задания
+            // НЕ перезаписывается — иначе распределение резок по джамбо терялось.
+            var totalRuns = core.actualRunsForCut(cut) || core.plannedRunsForCut(cut);
+            var sumRuns = (cut.jumbos || []).reduce(function(s, r) {
+                return s + core.toNumber(r && r.cutsCount);
+            }, 0);
+            active.cutsCount = core.toNumber(active.cutsCount) + Math.max(0, totalRuns - sumRuns);
             return self.post('_m_set/' + active.id + '?JSON', self.jumboFields(active)).then(function() {
                 return active.id;
             });
@@ -3654,6 +3666,10 @@
                     stored.writeoff = acc.writeoff;
                     stored.defectM = acc.defectM;
                     stored.defectQty = acc.defectQty;
+                    // #5005: резки этой отметки кладутся в АКТИВНУЮ запись — по записям
+                    // джамбо видно, сколько резок с какого джамбо (на этом считает РМ
+                    // упаковщика).
+                    stored.cutsCount = core.toNumber(stored.cutsCount) + newRuns;
                     stored.spentDraft = '';
                     stored.writeoffDraft = '';
                     stored.defectMDraft = '';
