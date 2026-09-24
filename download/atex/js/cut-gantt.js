@@ -14,7 +14,8 @@
 //   • GET /{db}/report/cut_planning?JSON_KV — задания с плановой датой, фактическими
 //     стартом/финишем, станком, статусом, длительностью, лидером,
 //     заказом и материалом (ссылки резолвятся сервером — доступ к справочникам
-//     ролям не нужен, в т.ч. к «Лидер», ср. #3623).
+//     ролям не нужен, в т.ч. к «Лидер», ср. #3623); alt_material — альтернативное
+//     название Вида сырья (#4998), показывается вместо cut_material, когда заполнено.
 //   • GET /{db}/object/{slitter}/?JSON_OBJ — справочник станков для фильтра (при
 //     отсутствии прав станки берутся из самих заданий).
 //   • GET /{db}/object/Календарь/?JSON_OBJ — #3875: нерабочие дни (выходные/праздники,
@@ -1104,7 +1105,8 @@
         // #4847: заказ клиента — отдельной строкой, если отчёт его отдал.
         if (cut && cut.clientOrderNo) lines.push('Заказ клиента: ' + cut.clientOrderNo);
         if (cut && cut.slitter && cut.slitter.label) lines.push('Станок: ' + cut.slitter.label);
-        if (cut && cut.materialName) lines.push('Сырьё: ' + cut.materialName);
+        // #4998: альт-имя сырья старше обычного (как в slitter/packer, #4996).
+        if (cut && (cut.materialAlt || cut.materialName)) lines.push('Сырьё: ' + (cut.materialAlt || cut.materialName));
         if (cut && cut.leader) lines.push('Лидер: ' + cut.leader);
         // #3675 п.3: наладка перед резкой (если отчёт отдал минуты).
         var setup = cutSetupMin(cut);
@@ -1141,7 +1143,8 @@
         var client = (cut && cut.clientOrderNo) ? String(cut.clientOrderNo) : '—';   // #4847
         var head = (cut && cut.orderNo) ? String(cut.orderNo) : (formatCutNumber(cut && cut.number) || ('#' + ((cut && cut.id) || '')));
         var s = client + ' / ' + head;
-        if (cut && cut.materialName) s += ' / ' + shortMaterialName(cut.materialName);
+        // #4998: альт-имя старше обычного; обрезка до пробела — та же.
+        if (cut && (cut.materialAlt || cut.materialName)) s += ' / ' + shortMaterialName(cut.materialAlt || cut.materialName);
         if (cut && cut.winding) s += ' · ' + cut.winding;
         if (cut && cut.length > 0) {
             var runs = stripNum(cut.plannedRuns);
@@ -1196,6 +1199,10 @@
                 clientOrderNo: str(row.client_order_no),   // #4847: номер заказа клиента — первый слот подписи
                 materialId: str(row.cut_material_id),
                 materialName: str(row.cut_material),
+                // #4998: альтернативное название Вида сырья (alt_material из cut_planning,
+                // как #4996). Пустое (колонки нет / не заполнено) — подписи и тултип
+                // молчаливо показывают обычное имя.
+                materialAlt: str(row.alt_material),
                 winding: str(row.cut_winding),
                 // #3698: хранимые активности переналадки (если cut_planning их отдаёт) —
                 // attachSetupMinutes предпочтёт их пересчёту по соседям. null → не сохранено.
