@@ -27,6 +27,13 @@
 // событию «Резка»). Карточка информационная: упаковщик заранее готовит тару и
 // наклейки; отчёта на базе нет — блока просто нет.
 //
+// Данные перечитываются сами (#5003): по возврату на вкладку, по фокусу окна и раз
+// в 5 минут — страница открыта на планшете днями, а план перепланируется, и снимок
+// без обновления молча врёт (issue #5003: на двух устройствах одного места — разные
+// задания). Перечитывание не делается, пока открыт диалог, есть несохранённая правка
+// количества или предыдущая загрузка была меньше 30 секунд назад. У кнопки «Обновить»
+// стоит штамп «данные на ЧЧ:ММ».
+//
 // Отметка упаковки пишет ДВЕ записи:
 //   1) `_m_set/{gp_id}` — «Упаковано шт» (и «Примечание», если количество поправили);
 //      это состояние переживает перезагрузку и возвращается колонкой `packed`;
@@ -133,6 +140,14 @@
     // станка: упаковщик готовит под него тару и наклейки до первой резки.
     var NEXT_REPORT = 'packer_next';
     var NEXT_COL = { slitter: 'slitter', slitterId: 'slitter_id' };
+
+    // #5003: авто-обновление. Страница на планшете открыта днями, а план в течение дня
+    // перепланируется — задания исчезают из очереди, у оставшихся меняется старт, и
+    // снимок на экране устаревает молча. Перечитываем данные сами (раз в
+    // AUTO_REFRESH_MS, плюс по возврату на вкладку и фокусу окна); AUTO_REFRESH_GAP_MS
+    // не даёт нескольким срабатываниям подряд ходить в сервер чаще, чем нужно.
+    var AUTO_REFRESH_MS = 5 * 60 * 1000;
+    var AUTO_REFRESH_GAP_MS = 30 * 1000;
 
     var STORE_SHOW_PACKED = 'atex-pk-show-packed';
     // #4852: упаковочное место задаёт планшет (таблица «Планшет») — прежнего выбора
@@ -303,6 +318,27 @@
         return slitters.map(function(k) { return bySlitter[k]; }).sort(function(a, b) {
             return a.slitter < b.slitter ? -1 : (a.slitter > b.slitter ? 1 : 0);
         });
+    }
+
+    // #5003: есть ли несохранённые правки количества. У неупакованной позиции правка
+    // живёт в модели до отметки — авто-обновлению её перечитывать нельзя, оно сотрёт
+    // ввод упаковщика. У упакованной локальных правок не бывает: там уже записанное.
+    function hasUnsavedEdits(items) {
+        return (items || []).some(function(it) {
+            if (!it || isPacked(it)) return false;
+            return (it.editedQty != null && it.editedQty !== '') || str(it.editedNote).trim() !== '';
+        });
+    }
+
+    // #5003: можно ли прямо сейчас перечитать данные без участия человека. Стражи:
+    // страница видима, не идёт загрузка/запись, не открыт диалог (он остался бы висеть
+    // над чужими данными), нет несохранённых правок количества, и данные не были
+    // перечитаны только что (minGapMs — от момента последней загрузки).
+    function canAutoRefresh(state) {
+        var s = state || {};
+        if (!s.visible || s.busy || s.modalOpen || s.unsavedEdits) return false;
+        if (s.lastLoadMs && s.nowMs && (s.nowMs - s.lastLoadMs) < (s.minGapMs || 0)) return false;
+        return true;
     }
 
     // #4929: подпись времени задания: сегодняшнее — временем, иное — с датой без года.
@@ -656,6 +692,8 @@
         nextItemFromReportRow: nextItemFromReportRow,
         nextTasksPath: nextTasksPath,
         nextTaskGroups: nextTaskGroups,
+        hasUnsavedEdits: hasUnsavedEdits,
+        canAutoRefresh: canAutoRefresh,
         taskWhenLabel: taskWhenLabel,
         describeItem: describeItem,
         orderTitle: orderTitle,
@@ -720,6 +758,8 @@
         this.place = null;         // { id, label } — упаковочное место из настройки планшета (#4852)
         this.showPacked = false;
         this.busy = false;
+        this.loadedAt = null;      // #5003: момент последней успешной загрузки — штамп «данные на ЧЧ:ММ» и пауза авто-обновления
+        this.autoRefreshArmed = false;
     }
 
     AtexPacker.prototype.url = function(path) {
@@ -883,6 +923,13 @@
         var refresh = el('button', { class: 'atex-pk-btn', type: 'button', text: 'Обновить' });
         refresh.addEventListener('click', function() { self.refresh(); });
         tools.appendChild(refresh);
+
+        // #5003: насколько стары данные на экране. Ставится после каждой успешной
+        // загрузки — и ручной, и автоматической.
+        if (this.loadedAt) {
+            tools.appendChild(el('span', { class: 'atex-pk-stamp',
+                text: 'данные на ' + core.unixToLocalTime(this.loadedAt.getTime()) }));
+        }
 
         // #4852: упаковочное место задаёт планшет — плашка без клика, менять нечем.
         tools.appendChild(el('div', { class: 'atex-pk-place' }, [
@@ -1505,6 +1552,13 @@
 
     AtexPacker.prototype.refresh = function() {
         var self = this;
+        // #4681/#5003: без места отчёт не запрашивается вовсе — он фильтруется по
+        // месту, без фильтра отдал бы чужие позиции. Экран остаётся с подсказкой.
+        if (!this.hasPlace()) {
+            this.items = [];
+            this.render();
+            return Promise.resolve();
+        }
         this.setBusy(true);
         // #4914: номера джамбо перечитываем вместе со списком — по заданиям могли
         // начаться новые резки с новыми джамбо; #4929: очередь следующих заданий тоже.
@@ -1513,6 +1567,8 @@
         }).then(function() {
             return self.loadNextItems();
         }).then(function() {
+            // #5003: свежесть экрана считается от этого момента.
+            self.loadedAt = new Date();
             self.setBusy(false);
             self.render();
         }).catch(function(err) {
@@ -1521,6 +1577,35 @@
             self.items = [];
             self.render();
         });
+    };
+
+    // ── Авто-обновление (#5003) ──
+    // Планшет открыт днями, план перепланируется — снимок на экране устаревает молча
+    // (#5003: на двух устройствах одного места бывали разные списки заданий).
+    // Перечитываем сами: по возврату на вкладку, по фокусу окна и раз в
+    // AUTO_REFRESH_MS. Каждый вход проходит стражи canAutoRefresh.
+
+    AtexPacker.prototype.armAutoRefresh = function() {
+        var self = this;
+        if (this.autoRefreshArmed) return;
+        this.autoRefreshArmed = true;
+        document.addEventListener('visibilitychange', function() { self.autoRefreshTick(); });
+        window.addEventListener('focus', function() { self.autoRefreshTick(); });
+        setInterval(function() { self.autoRefreshTick(); }, AUTO_REFRESH_MS);
+    };
+
+    AtexPacker.prototype.autoRefreshTick = function() {
+        var openModal = this.root && this.root.querySelector('.atex-pk-modal-overlay');
+        var ok = core.canAutoRefresh({
+            visible: document.visibilityState !== 'hidden',
+            busy: this.busy,
+            modalOpen: !!openModal,
+            unsavedEdits: core.hasUnsavedEdits(this.items),
+            lastLoadMs: this.loadedAt ? this.loadedAt.getTime() : 0,
+            nowMs: new Date().getTime(),
+            minGapMs: AUTO_REFRESH_GAP_MS
+        });
+        if (ok) this.refresh();
     };
 
     AtexPacker.prototype.setBusy = function(on) {
@@ -1569,10 +1654,14 @@
                 // Без упаковочного места список не показываем (#4852), а отчёт без него
                 // отдал бы чужие позиции — он фильтруется по месту (#4681).
                 if (!self.hasPlace()) return null;
-                return self.loadItems().then(function() { return self.loadNextItems(); });
+                return self.loadItems().then(function() { return self.loadNextItems(); })
+                    .then(function() { self.loadedAt = new Date(); });
             })
             .then(function() {
                 self.render();
+                // #5003: дальше страница обновляет данные сама — вручную жать
+                // «Обновить» после каждой переналадки не нужно.
+                self.armAutoRefresh();
             })
             .catch(function(err) { self.fatal('Ошибка инициализации: ' + err.message); });
     };
