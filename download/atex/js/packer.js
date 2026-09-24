@@ -134,7 +134,7 @@
     };
     // #4914: номера джамбо задания — отдельный отчёт по записям «Номер джамбо».
     var JUMBO_REPORT = 'task_jumbo';
-    var JUMBO_COL = { taskId: 'task_id', jumboNo: 'jumbo_no' };
+    var JUMBO_COL = { taskId: 'task_id', jumboNo: 'jumbo_no', cuts: 'cuts_count', defect: 'defect_qty' };
     // #4929: отчёт `packer_next` — те же Партии ГП, но БЕЗ фильтра по событию
     // «Резка» и со станком задания. Из него берётся следующее задание каждого
     // станка: упаковщик готовит под него тару и наклейки до первой резки.
@@ -257,6 +257,53 @@
             (map[taskId] = map[taskId] || []).push(no);
         });
         return map;
+    }
+
+    // #5005: те же строки отчёта с количествами: «{номер, резки, брак}» на каждую
+    // запись (cuts_count/defect_qty — числа, пустое = 0). Строка без задания или
+    // номера пропускается — как в jumbosByTask.
+    function jumboStatsByTask(rows) {
+        var map = {};
+        (rows || []).forEach(function(row) {
+            var taskId = str(kvVal((row || {})[JUMBO_COL.taskId])).trim();
+            var no = str(kvVal((row || {})[JUMBO_COL.jumboNo])).trim();
+            if (!taskId || !no) return;
+            (map[taskId] = map[taskId] || []).push({
+                no: no,
+                cuts: toNumber(kvVal((row || {})[JUMBO_COL.cuts])),
+                defect: toNumber(kvVal((row || {})[JUMBO_COL.defect]))
+            });
+        });
+        return map;
+    }
+
+    // #5005: «сколько штук с какого джамбо» — строки «qqq — 39 шт» для плашки.
+    // Штук в резке = «Кол-во факт» позиции / Σ резок задания (факт = полосы × резки,
+    // значит частное — полос за проход). Доля джамбо = его резки × штук в резке по
+    // всем размерам задания; брак (он по размерам не расписан) вычитается ОДИН раз
+    // на джамбо. Считать нечего (нет резок или факта) — пустой список: плашка
+    // показывается прежним списком номеров (#4910).
+    function jumboQtyLines(items, stats) {
+        var lines = [];
+        var seen = {};
+        (items || []).forEach(function(item) {
+            var taskId = str(item && item.taskId).trim();
+            if (!taskId || seen[taskId]) return;
+            seen[taskId] = true;
+            var jumbos = (stats || {})[taskId] || [];
+            var sumCuts = 0, fact = 0;
+            jumbos.forEach(function(j) { sumCuts += toNumber(j && j.cuts); });
+            (items || []).forEach(function(it) {
+                if (str(it && it.taskId).trim() === taskId) fact += toNumber(it && it.factQty);
+            });
+            if (!(sumCuts > 0) || !(fact > 0)) return;
+            jumbos.forEach(function(j) {
+                var base = Math.round(toNumber(j && j.cuts) * fact / sumCuts);
+                var qty = Math.max(0, base - toNumber(j && j.defect));
+                lines.push(j.no + ' — ' + qty + ' шт');
+            });
+        });
+        return lines;
     }
 
     // #4929: строка отчёта `packer_next` — та же Партия ГП плюс станок задания.
@@ -689,6 +736,8 @@
         eventStamp: eventStamp,
         itemFromReportRow: itemFromReportRow,
         jumbosByTask: jumbosByTask,
+        jumboStatsByTask: jumboStatsByTask,
+        jumboQtyLines: jumboQtyLines,
         nextItemFromReportRow: nextItemFromReportRow,
         nextTasksPath: nextTasksPath,
         nextTaskGroups: nextTaskGroups,
@@ -754,6 +803,7 @@
         this.items = [];           // позиции к упаковке (строки отчёта, порядок отчёта)
         this.nextItems = [];       // #4929: очередь без фильтра по резке (отчёт packer_next)
         this.jumbos = {};          // #4914: id задания → номера джамбо (отчёт task_jumbo)
+        this.jumboStats = {};      // #5005: id задания → {номер, резки, брак} (тот же отчёт)
         this.sizes = [];           // #4665: справочник «Типоразмер» (отчёт pack_sizes)
         this.place = null;         // { id, label } — упаковочное место из настройки планшета (#4852)
         this.showPacked = false;
@@ -857,9 +907,11 @@
         var self = this;
         return this.getJson('report/' + JUMBO_REPORT + '?JSON_KV&LIMIT=0,' + REPORT_LIMIT).then(function(rows) {
             self.jumbos = core.jumbosByTask(rows);
+            self.jumboStats = core.jumboStatsByTask(rows);
         }).catch(function(err) {
             console.error('atex-packer: номера джамбо не прочитаны — ' + err.message);
             self.jumbos = {};
+            self.jumboStats = {};
         });
     };
 
@@ -1148,10 +1200,13 @@
         body.push(metaNode);
         // #4910: № джамбо — той же плашкой рядом с артикулом; #4914: номера приходят
         // из отчёта task_jumbo, на задании их бывает несколько — через «, ».
-        if (jumbos.length) {
+        // #5005: если по записям джамбо можно посчитать, плашка показывает
+        // «qqq — 39 шт» (резки × штук в резке − брак); не посчиталось — прежний список.
+        var jumboText = core.jumboQtyLines(items, this.jumboStats).join(', ') || jumbos.join(', ');
+        if (jumboText) {
             body.push(el('div', { class: 'atex-pk-jumbo' }, [
                 el('span', { class: 'atex-pk-art-label', text: 'Джамбо' }),
-                el('span', { class: 'atex-pk-art-value', text: jumbos.join(', ') })
+                el('span', { class: 'atex-pk-art-value', text: jumboText })
             ]));
         }
         card.appendChild(el('div', { class: 'atex-pk-body' }, body));
