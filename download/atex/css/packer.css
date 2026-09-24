@@ -167,6 +167,8 @@
 
 .atex-pk-body { min-width: 0; }
 .atex-pk-desc { font-size: 17px; font-weight: 600; word-break: break-word; }
+/* #4999: количество своей позиции в строке описания — тише самого описания */
+.atex-pk-desc-qty { color: var(--pk-muted); font-weight: 400; white-space: nowrap; }
 .atex-pk-meta { font-size: 13px; color: var(--pk-muted); margin-top: 2px; }
 /* #4665: в какой короб и по сколько штук укладывать. #4910: живёт В СТРОКЕ меты
    (span в хвосте), акцентом, — отдельной строкой карточка не растёт. */

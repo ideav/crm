@@ -50,9 +50,12 @@
 // и невыполненные позиции живут на одной плашке со статусом «частично». «Упаковано»
 // отмечает ВСЕ позиции заказа — каждая Партия ГП своим количеством, поэтому «Дэшборд
 // отклонений» РМ production-planning (Σ факт − Σ упак по заданию) остаётся согласованным.
-// Правка количества на плашке меняет ОБЩУЮ сумму: разница целиком уходит в последнюю
-// неупакованную позицию и может получиться отрицательной — поэтому ненулевая запись
-// «Упаковано шт», включая отрицательную, закрывает позицию.
+// В резке бывает несколько размеров, поэтому у каждой строки описания на плашке — СВОЁ
+// количество (#4999), а правка количества при нескольких неупакованных позициях идёт
+// по полям, по одной на размер. Правка ОБЩЕЙ суммы («разница целиком уходит в последнюю
+// неупакованную позицию и может получиться отрицательной») остаётся для случая одной
+// неупакованной — поэтому ненулевая запись «Упаковано шт», включая отрицательную,
+// закрывает позицию.
 // Упаковочное место запоминается в localStorage: пока оно там есть, таблицу
 // «Упаковочное место» (669269) не запрашиваем вовсе — только по клику на само место.
 // Отчёт запрашивается с фильтром `FR_packer_no={номер места}` — упаковщик видит только
@@ -503,12 +506,36 @@
 
     // Правка ОБЩЕГО количества заказа: разница с текущей суммой целиком уходит
     // в последнюю неупакованную позицию — и может получиться отрицательной
-    // (решение заказчика по #4918). Остальные позиции не трогаются.
+    // (решение заказчика по #4918). Остальные позиции не трогаются. Когда неупакованных
+    // позиций несколько, правка идёт по каждой (#4999, applySizesQty) — а это остаётся
+    // случаем одной неупакованной.
     function applyOrderQty(group, total) {
         var rest = unpackedOf(group);
         if (!rest.length) return;
         var last = rest[rest.length - 1];
         last.editedQty = currentQty(last) + (toNumber(total) - orderTotal(group));
+    }
+
+    // #4999: правка количества ПО КАЖДОЙ позиции. values — по неупакованным позициям
+    // заказа в порядке отчёта (в резке бывает несколько размеров, и упаковщику нужно
+    // управлять количеством каждого отдельно, а не разницей в последней позиции).
+    // Позиция с изменившимся количеством получает правку и примечание; совпавшее и с
+    // подсказкой отчёта, и с текущим значением ничего не меняет (возврат к подсказке
+    // при уже стоявшей правке — меняет: правка снимается, примечание ставится).
+    // Возвращает, сколько позиций изменилось.
+    function applySizesQty(group, values, note) {
+        var noteText = str(note).trim();
+        var changed = 0;
+        unpackedOf(group).forEach(function(item, i) {
+            var raw = values == null ? '' : values[i];
+            if (raw == null || str(raw).trim() === '') return;
+            var qty = toNumber(raw);
+            if (qty === baseQty(item) && qty === currentQty(item)) return;
+            item.editedQty = qty;
+            if (noteText) item.editedNote = noteText;
+            changed++;
+        });
+        return changed;
     }
 
     // Список заказов для показа: полностью упакованные скрыты до переключателя.
@@ -647,6 +674,7 @@
         orderPartial: orderPartial,
         orderTotal: orderTotal,
         applyOrderQty: applyOrderQty,
+        applySizesQty: applySizesQty,
         visibleOrders: visibleOrders,
         packedOrderCount: packedOrderCount,
         summarize: summarize,
@@ -966,10 +994,19 @@
         card.appendChild(order);
 
         // Описания роликов: разные позиции — отдельными строками, повторы схлопываются.
-        var descs = [];
+        // #4999: в резке бывает несколько размеров, и сумма на кнопке не говорит,
+        // сколько штук какого размера — у каждой строки слитой плашки своё количество
+        // (у одиночной оно и так стоит крупно, дублировать нечего). Ключ повтора —
+        // текст ВМЕСТЕ с количеством: одинаковые подписи с разными количествами не
+        // схлопываются. У упакованной позиции показывается записанное (#4918).
+        var lines = [];
+        var multi = items.length > 1;
         items.forEach(function(item) {
-            var d = core.describeItem(item) || '—';
-            if (descs.indexOf(d) === -1) descs.push(d);
+            var text = core.describeItem(item) || '—';
+            var qty = multi ? core.currentQty(item) : null;
+            var key = text + '\u0001' + (qty == null ? '' : String(qty));
+            for (var i = 0; i < lines.length; i++) if (lines[i].key === key) return;
+            lines.push({ key: key, text: text, qty: qty });
         });
 
         var edited = false;
@@ -1040,8 +1077,12 @@
                 metaNode.appendChild(el('span', { class: 'atex-pk-pack', title: p.name, text: p.label }));
             });
         }
-        var body = descs.map(function(d) {
-            return el('div', { class: 'atex-pk-desc', text: d });
+        var body = lines.map(function(line) {
+            var div = el('div', { class: 'atex-pk-desc' }, [line.text]);
+            if (line.qty != null) {
+                div.appendChild(el('span', { class: 'atex-pk-desc-qty', text: ' · ' + line.qty + ' шт' }));
+            }
+            return div;
         });
         // #4799: артикул; #4918: у слитой плашки — уникальные непустые значения через «, »;
         // #4930: плашка живёт в строке описания — хвостом последней .atex-pk-desc,
@@ -1199,8 +1240,10 @@
     // позиции правка только запоминается: в базу её унесёт кнопка «Упаковано». У
     // упакованной писать некуда откладывать — отметка уже есть, правка уходит сразу.
     // На слитой плашке (#4918) правится ОБЩАЯ сумма заказа: разница целиком уходит
-    // в последнюю неупакованную позицию. Упакованная группа правится на последней
-    // позиции — туда же по правилу #4918 уходят корректировки.
+    // в последнюю неупакованную позицию. Когда неупакованных позиций несколько
+    // (несколько размеров в резке), правка идёт по КАЖДОЙ позиции отдельно (#4999,
+    // openSizesDialog) — общая сумма отдельный размер не адресует. Упакованная группа
+    // правится на последней позиции — туда же по правилу #4918 уходят корректировки.
     AtexPacker.prototype.openQtyDialog = function(itemOrGroup) {
         var self = this;
         var group = core.toGroup(itemOrGroup);
@@ -1211,6 +1254,7 @@
         var single = items.length === 1 ? items[0] : null;
         var unpacked = items.filter(function(item) { return !core.isPacked(item); });
         var lastUnpacked = unpacked[unpacked.length - 1];
+        if (!single && unpacked.length > 1) return this.openSizesDialog(group, unpacked);
         if (this.busy) return;
         var missingGp = items.filter(function(item) { return !item.gpId; });
         if (missingGp.length) {
@@ -1270,6 +1314,75 @@
                 core.applyOrderQty(group, qty);
                 lastUnpacked.editedNote = note;
             }
+            self.renderList();
+        });
+    };
+
+    // #4999: правка количества по каждой позиции заказа. В резке бывает несколько
+    // размеров — общая сумма (#4918) не говорит, сколько штук какого размера, а правка
+    // «разницей в последнюю позицию» отдельный размер не адресует. У каждой неупакованной
+    // позиции — своё поле со своей подписью-размером и подсказкой отчёта (baseQty).
+    // Примечание общее: требуется, если хоть одно количество изменено, и уходит только
+    // изменённым позициям (applySizesQty). По-позиционные количества пишутся кнопкой
+    // «Упаковано» — каждая Партия ГП своим (#4918), запись тут не участвует.
+    AtexPacker.prototype.openSizesDialog = function(group, unpacked) {
+        var self = this;
+        var rows = unpacked.map(function(item) {
+            return {
+                item: item,
+                suggested: core.baseQty(item),
+                input: el('input', { class: 'atex-pk-input', type: 'number', min: '0', step: '1', inputmode: 'numeric', value: String(core.currentQty(item)) })
+            };
+        });
+        var noteInput = el('input', { class: 'atex-pk-input', type: 'text', value: '', placeholder: 'например: 10 шт в брак' });
+        var hint = el('div', { class: 'atex-pk-hint' });
+        var error = el('div', { class: 'atex-pk-error' });
+
+        function changedAny() {
+            for (var i = 0; i < rows.length; i++) {
+                if (core.noteRequired(rows[i].input.value, rows[i].suggested)) return true;
+            }
+            return false;
+        }
+        function syncHint() {
+            var changed = changedAny();
+            hint.textContent = changed ? 'Количество изменено — примечание обязательно' : '';
+            noteInput.classList.toggle('is-required', changed);
+        }
+        rows.forEach(function(r) {
+            r.input.addEventListener('input', function() { error.textContent = ''; syncHint(); });
+        });
+        noteInput.addEventListener('input', function() { error.textContent = ''; });
+        syncHint();
+
+        var save = el('button', { class: 'atex-pk-btn atex-pk-btn-pack', type: 'button', text: 'Сохранить' });
+        var cancel = el('button', { class: 'atex-pk-btn', type: 'button', text: 'Отмена' });
+
+        var fields = rows.map(function(r) {
+            return el('label', { class: 'atex-pk-field' }, [
+                el('span', { text: core.describeItem(r.item) || 'Позиция' }),
+                r.input
+            ]);
+        });
+        fields.push(el('label', { class: 'atex-pk-field' }, [el('span', { text: 'Примечание' }), noteInput]));
+
+        // В заголовке — тот же номер, что крупно стоит в карточке (#4688, #4912).
+        var overlay = this.modal('Количество по размерам · заказ ' + core.orderTitle(group.items[0]).main,
+            fields.concat([hint, error]), [cancel, save]);
+
+        cancel.addEventListener('click', function() { overlay.close(); });
+        save.addEventListener('click', function() {
+            for (var i = 0; i < rows.length; i++) {
+                var problem = core.validatePack({ qty: rows[i].input.value, suggested: rows[i].suggested, note: noteInput.value });
+                if (problem) {
+                    error.textContent = problem;
+                    // Пока висит ошибка, подсказку убираем — иначе одно и то же сказано дважды.
+                    hint.textContent = '';
+                    return;
+                }
+            }
+            overlay.close();
+            core.applySizesQty(group, rows.map(function(r) { return r.input.value; }), str(noteInput.value).trim());
             self.renderList();
         });
     };
