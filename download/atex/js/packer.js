@@ -315,21 +315,29 @@
         return item;
     }
 
-    // #4929: полночь сегодняшнего дня — Unix-секунды, для фильтра планового старта.
-    function startOfDayUnix(now) {
-        var d = now || new Date();
-        return Math.floor(new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() / 1000);
-    }
-
-    // #4929: адрес отчёта очереди. Место — как у основного списка; плановый старт —
-    // от полуночи СЕГОДНЯ: вчерашние так и не резанные задания кандидатами не
-    // становятся, сегодняшние опоздавшие остаются. Места нет — отчёт не запрашивается.
-    function nextTasksPath(place, now) {
+    // #4929: адрес отчёта очереди. Место — как у основного списка. Окно «сегодня
+    // и позже» держит ВНУТРЕННЯЯ граница отчёта «>= [TODAY]» по часам сервера;
+    // внешний FR_task от полуночи устройства не шлётся (#5007): он перекрывал
+    // серверную границу, и на планшете со сбитой датой в «следующие» попадали
+    // задания двухнедельной давности. Места нет — отчёт не запрашивается.
+    function nextTasksPath(place) {
         var no = str(place && place.label).trim();
         if (!no) return '';
         return 'report/' + NEXT_REPORT + '?JSON_KV&LIMIT=0,' + REPORT_LIMIT +
-            '&' + REPORT_PLACE_FILTER + '=' + encodeURIComponent(no) +
-            '&FR_task=' + encodeURIComponent('>' + startOfDayUnix(now));
+            '&' + REPORT_PLACE_FILTER + '=' + encodeURIComponent(no);
+    }
+
+    // #5007: расхождение часов устройства с сервером. Дата устройства больше не
+    // влияет на очередь, но влияет на подписи заданий («сегодня»/датой) и на время
+    // событий упаковки — при заметном расхождении об этом говорят прямо в шапке.
+    var CLOCK_SKEW_TOLERANCE_MS = 10 * 60 * 1000;
+    function clockSkewMs(deviceMs, serverMs) {
+        var d = toNumber(deviceMs), s = toNumber(serverMs);
+        if (!d || !s) return 0;
+        return d - s;
+    }
+    function isClockSkewed(deviceMs, serverMs) {
+        return Math.abs(clockSkewMs(deviceMs, serverMs)) > CLOCK_SKEW_TOLERANCE_MS;
     }
 
     // #4929: следующее задание каждого станка. Кандидаты — задания, по которым ещё
@@ -741,6 +749,8 @@
         nextItemFromReportRow: nextItemFromReportRow,
         nextTasksPath: nextTasksPath,
         nextTaskGroups: nextTaskGroups,
+        clockSkewMs: clockSkewMs,
+        isClockSkewed: isClockSkewed,
         hasUnsavedEdits: hasUnsavedEdits,
         canAutoRefresh: canAutoRefresh,
         taskWhenLabel: taskWhenLabel,
@@ -809,6 +819,7 @@
         this.showPacked = false;
         this.busy = false;
         this.loadedAt = null;      // #5003: момент последней успешной загрузки — штамп «данные на ЧЧ:ММ» и пауза авто-обновления
+        this.serverTimeMs = 0;     // #5007: серверное время из заголовка Date последнего ответа
         this.autoRefreshArmed = false;
     }
 
@@ -816,9 +827,14 @@
         return '/' + encodeURIComponent(this.db) + '/' + path;
     };
 
-    // GET → JSON. Бросает Error при сетевой/JSON-ошибке.
+    // GET → JSON. Бросает Error при сетевой/JSON-ошибке. Из каждого ответа
+    // запоминается серверное время (заголовок Date) — по нему видно, что часы
+    // устройства врут (#5007).
     AtexPacker.prototype.getJson = function(path) {
+        var self = this;
         return fetch(this.url(path), { credentials: 'same-origin' }).then(function(resp) {
+            var serverDate = new Date(resp.headers.get('Date')).getTime();
+            if (serverDate) self.serverTimeMs = serverDate;
             return resp.text().then(function(text) {
                 try { return JSON.parse(text); }
                 catch (e) { throw new Error('Некорректный JSON: ' + text.slice(0, 200)); }
@@ -890,7 +906,7 @@
     // раньше, просто без блока следующих заданий.
     AtexPacker.prototype.loadNextItems = function() {
         var self = this;
-        var path = core.nextTasksPath(this.place, new Date());
+        var path = core.nextTasksPath(this.place);
         if (!path) { this.nextItems = []; return Promise.resolve(); }
         return this.getJson(path).then(function(rows) {
             var list = Array.isArray(rows) ? rows : [];
@@ -981,6 +997,16 @@
         if (this.loadedAt) {
             tools.appendChild(el('span', { class: 'atex-pk-stamp',
                 text: 'данные на ' + core.unixToLocalTime(this.loadedAt.getTime()) }));
+        }
+
+        // #5007: часы устройства разошлись с сервером — сказать прямо. Дата на
+        // планшете не двигает очередь (её держит сервер), но врёт в подписях
+        // заданий и во времени событий упаковки.
+        if (this.serverTimeMs && core.isClockSkewed(new Date().getTime(), this.serverTimeMs)) {
+            tools.appendChild(el('span', { class: 'atex-pk-clock-warn',
+                title: 'Включите авто-дату и время на устройстве: дата на планшете ' +
+                    'не совпадает с сервером.',
+                text: 'часы устройства не совпадают с сервером' }));
         }
 
         // #4852: упаковочное место задаёт планшет — плашка без клика, менять нечем.

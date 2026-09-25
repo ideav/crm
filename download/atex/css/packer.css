@@ -73,6 +73,9 @@
 /* #5003: подпись свежести данных у кнопки «Обновить» — «данные на ЧЧ:ММ» */
 .atex-pk-stamp { color: var(--pk-muted); font-size: 13px; white-space: nowrap; }
 
+/* #5007: часы устройства разошлись с серверным временем */
+.atex-pk-clock-warn { color: var(--pk-warn); font-size: 13px; white-space: nowrap; }
+
 .atex-pk-place {
     display: flex;
     align-items: baseline;
