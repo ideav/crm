@@ -381,14 +381,13 @@ assertEqual(core.validatePack({ qty: 110, suggested: 110, note: '' }), '',
     var kv = core.nextItemFromReportRow(nextRow({ slitter: { val: 'Станок 1', id: '1279' } }));
     assertEqual(kv.slitter, 'Станок 1', 'nextItemFromReportRow: {val,id} → val');
 
-    // Адрес отчёта: своё место + плановый старт от полуночи СЕГОДНЯ — вчерашние
-    // так и не резанные задания в кандидаты не попадают, сегодняшние опоздавшие остаются.
-    var now = new Date(2026, 8, 10, 14, 30);
-    var midnight = Math.floor(new Date(2026, 8, 10).getTime() / 1000);
-    assertEqual(core.nextTasksPath({ id: '1', label: '1' }, now),
-        'report/packer_next?JSON_KV&LIMIT=0,5000&FR_packer_no=1&FR_task=' + encodeURIComponent('>' + midnight),
-        'nextTasksPath: фильтр места и полночь сегодняшнего дня');
-    assertEqual(core.nextTasksPath(null, now), '',
+    // Адрес отчёта: своё место. Окно «сегодня и позже» держит внутренняя граница
+    // отчёта «>= [TODAY]» по часам сервера — вчерашние так и не резанные задания
+    // в кандидаты не попадают, сегодняшние опоздавшие остаются (#5007).
+    assertEqual(core.nextTasksPath({ id: '1', label: '1' }),
+        'report/packer_next?JSON_KV&LIMIT=0,5000&FR_packer_no=1',
+        'nextTasksPath: фильтр места, окно даты держит сервер');
+    assertEqual(core.nextTasksPath(null), '',
         'nextTasksPath: без места отчёт не запрашивается');
 
     // Кандидаты: у станка берётся ОДНО задание — самое раннее по плановому старту
@@ -411,6 +410,7 @@ assertEqual(core.validatePack({ qty: 110, suggested: 110, note: '' }), '',
     assertEqual(core.nextTaskGroups([], {}), [], 'nextTaskGroups: пусто → пусто');
 
     // Подпись времени: сегодняшнее задание — временем, завтрашнее — с датой.
+    var now = new Date(2026, 8, 10, 14, 30);
     var todayNoon = new Date(2026, 8, 10, 12, 0);
     assertEqual(core.taskWhenLabel(Math.floor(todayNoon.getTime() / 1000), now), '12:00',
         'taskWhenLabel: сегодня — только время');
