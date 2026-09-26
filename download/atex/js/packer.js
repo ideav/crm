@@ -805,6 +805,22 @@
         return node;
     }
 
+    // #4799/#4930: плашка «Артикул» хвостом строки описания. #5022: у каждой строки —
+    // артикулы ЕЁ позиций (уникальные непустые), а не общий список у последней
+    // строки: на слитой плашке позиции разные, и артикул должен стоять напротив
+    // своей. Артикула нет — плашки нет (null).
+    function artBadge(items) {
+        var arts = [];
+        (items || []).forEach(function(item) {
+            if (item.art && arts.indexOf(item.art) === -1) arts.push(item.art);
+        });
+        if (!arts.length) return null;
+        return el('span', { class: 'atex-pk-art' }, [
+            el('span', { class: 'atex-pk-art-label', text: 'Артикул' }),
+            el('span', { class: 'atex-pk-art-value', text: arts.join(', ') })
+        ]);
+    }
+
     function AtexPacker(root) {
         this.root = root;
         this.db = window.db || root.getAttribute('data-db') || '';
@@ -1212,6 +1228,8 @@
             if (line.qty != null) {
                 div.appendChild(el('span', { class: 'atex-pk-desc-qty', text: ' · ' + line.qty + ' шт' }));
             }
+            var art = artBadge(line.items);
+            if (art) div.appendChild(art);
             // #5011: у неупакованной строки слитой плашки — своя кнопка «Упаковано»:
             // размер уезжает в свой момент, и отмечают его не дожидаясь остальных.
             // Одиночной позиции не нужно — карточная кнопка пишет её же.
@@ -1228,20 +1246,10 @@
             }
             return div;
         });
-        // #4799: артикул; #4918: у слитой плашки — уникальные непустые значения через «, »;
-        // #4930: плашка живёт в строке описания — хвостом последней .atex-pk-desc,
-        // а не отдельной строкой внизу карточки.
-        var arts = [], jumbos = [];
+        var jumbos = [];
         items.forEach(function(item) {
-            if (item.art && arts.indexOf(item.art) === -1) arts.push(item.art);
             if (item.jumbo && jumbos.indexOf(item.jumbo) === -1) jumbos.push(item.jumbo);
         });
-        if (arts.length) {
-            body[body.length - 1].appendChild(el('span', { class: 'atex-pk-art' }, [
-                el('span', { class: 'atex-pk-art-label', text: 'Артикул' }),
-                el('span', { class: 'atex-pk-art-value', text: arts.join(', ') })
-            ]));
-        }
         body.push(metaNode);
         // #4910: № джамбо — той же плашкой рядом с артикулом; #4914: номера приходят
         // из отчёта task_jumbo, на задании их бывает несколько — через «, ».
@@ -1323,26 +1331,19 @@
         });
         card.appendChild(order);
 
+        // Строки описания; артикул — как у основной карточки (#5022): хвостом
+        // каждой строки, артикулы её позиций.
         var descs = [];
         items.forEach(function(item) {
             var d = core.describeItem(item) || '—';
-            if (descs.indexOf(d) === -1) descs.push(d);
+            for (var i = 0; i < descs.length; i++) {
+                if (descs[i].text === d) { descs[i].items.push(item); return; }
+            }
+            descs.push({ text: d, items: [item] });
         });
         var body = descs.map(function(d) {
-            return el('div', { class: 'atex-pk-desc', text: d });
+            return el('div', { class: 'atex-pk-desc' }, [d.text, artBadge(d.items)]);
         });
-
-        // Артикул — как у основной карточки (#4930): хвостом последней строки описания.
-        var arts = [];
-        items.forEach(function(item) {
-            if (item.art && arts.indexOf(item.art) === -1) arts.push(item.art);
-        });
-        if (arts.length) {
-            body[body.length - 1].appendChild(el('span', { class: 'atex-pk-art' }, [
-                el('span', { class: 'atex-pk-art-label', text: 'Артикул' }),
-                el('span', { class: 'atex-pk-art-value', text: arts.join(', ') })
-            ]));
-        }
 
         // Мета: станок, время задания, Σ план — резки ещё не было, факта нет.
         var meta = [];
