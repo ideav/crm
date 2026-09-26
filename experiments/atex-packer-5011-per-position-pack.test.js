@@ -6,6 +6,9 @@
 //   • у каждой неупакованной строки-описания слитой плашки — СВОЯ кнопка
 //     «Упаковано», пишущая только эту Партию ГП (и событие смены только по ней);
 //   • карточная кнопка остаётся «упаковать всё остатком» (#4918 не сломан);
+//   • полные дубликаты-строки (тот же размер и то же количество) схлопнуты в одну,
+//     но кнопка пакует их по ОДНОМУ за клик — первого неупакованного, кнопка живёт,
+//     пока строка не кончится;
 //   • частично упакованная плашка получает бейдж «частично» уже после
 //     по-позиционной отметки — упакованная строка своей кнопки больше не имеет.
 //
@@ -263,6 +266,61 @@ section('#5011: карточная кнопка по-прежнему пишет
     });
 });
 
+// ── 2б) схлопнутые дубликаты — по одному за клик ──
+section('#5011: дубликаты строк — кнопка пакует по одному за клик', function() {
+    var inst = makeList([
+        item({ gp_id: 'a', task_id: '1', cut_width: '64.00', qty: '12', qty_fact: '12' }),
+        item({ gp_id: 'b', task_id: '2', cut_width: '64.00', qty: '12', qty_fact: '12' })
+    ]);
+    var written = writtenFor(inst);
+    inst.notify = function() {};
+    inst.renderList();
+    assertEqual(inst.listEl.querySelectorAll('.atex-pk-desc').length, 1,
+        '#5011: полные дубликаты схлопнуты в одну строку');
+    assertEqual(inst.listEl.querySelectorAll('.atex-pk-btn-line').length, 1,
+        '#5011: у строки один «Упаковано»');
+    var btn = inst.listEl.querySelectorAll('.atex-pk-btn-line')[0];
+    if (btn) btn.click();
+    setImmediate(function() {
+        assertEqual(written, [{ gpId: 'a', qty: 12, note: '' }],
+            '#5011: первый клик пакует первого дубликата своим количеством');
+        inst.renderList();
+        assertEqual(inst.listEl.querySelectorAll('.atex-pk-btn-line').length, 1,
+            '#5011: кнопка осталась — второй дубликат ещё не упакован');
+        var btn2 = inst.listEl.querySelectorAll('.atex-pk-btn-line')[0];
+        if (btn2) btn2.click();
+        setImmediate(function() {
+            assertEqual(written, [
+                { gpId: 'a', qty: 12, note: '' },
+                { gpId: 'b', qty: 12, note: '' }
+            ], '#5011: второй клик пакует следующего дубликата');
+            inst.renderList();
+            assertEqual(inst.listEl.querySelectorAll('.atex-pk-btn-line').length, 0,
+                '#5011: когда дубликаты кончились — кнопки нет');
+            done();
+        });
+    });
+});
+
+section('#5011: дубликаты — при упакованном первом кнопка пакует следующего', function() {
+    var inst = makeList([
+        item({ gp_id: 'a', task_id: '1', cut_width: '64.00', qty: '12', qty_fact: '12', packed: '12' }),
+        item({ gp_id: 'b', task_id: '2', cut_width: '64.00', qty: '12', qty_fact: '12' })
+    ]);
+    var written = writtenFor(inst);
+    inst.notify = function() {};
+    inst.renderList();
+    assertEqual(inst.listEl.querySelectorAll('.atex-pk-btn-line').length, 1,
+        '#5011: один дубликат уже упакован, у строки ещё есть кнопка');
+    var btn = inst.listEl.querySelectorAll('.atex-pk-btn-line')[0];
+    if (btn) btn.click();
+    setImmediate(function() {
+        assertEqual(written, [{ gpId: 'b', qty: 12, note: '' }],
+            '#5011: записан следующий неупакованный дубликат, не упакованный');
+        done();
+    });
+});
+
 // ── 3) неизвестное количество строки — правка, записи нет ──
 section('#5011: строка без количества — сообщение и правка, записи нет', function() {
     var inst = makeList([
@@ -287,7 +345,7 @@ section('#5011: строка без количества — сообщение 
 });
 
 // Асинхронные секции — ждём все перед итоговой строкой.
-var asyncLeft = 4;
+var asyncLeft = 6;
 function done() {
     if (--asyncLeft) return;
     console.log('\n' + passed + '/' + total + ' assertions passed');
