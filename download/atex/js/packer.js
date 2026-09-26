@@ -1130,8 +1130,10 @@
             var text = core.describeItem(item) || '—';
             var qty = multi ? core.currentQty(item) : null;
             var key = text + '\u0001' + (qty == null ? '' : String(qty));
-            for (var i = 0; i < lines.length; i++) if (lines[i].key === key) return;
-            lines.push({ key: key, text: text, qty: qty });
+            for (var i = 0; i < lines.length; i++) {
+                if (lines[i].key === key) { lines[i].list.push(item); return; }
+            }
+            lines.push({ key: key, text: text, qty: qty, list: [item] });
         });
 
         var edited = false;
@@ -1206,6 +1208,24 @@
             var div = el('div', { class: 'atex-pk-desc' }, [line.text]);
             if (line.qty != null) {
                 div.appendChild(el('span', { class: 'atex-pk-desc-qty', text: ' · ' + line.qty + ' шт' }));
+            }
+            // #5011: «Упаковано» на каждую позицию — кнопка строки пакует ТОЛЬКО её
+            // (первым неупакованным из схлопнутых дубликатов), своим количеством, в
+            // её Партию ГП; у упакованной строки кнопки нет. Одиночной плашке не нужно:
+            // «Упаковано» карточки и есть эта позиция (#4680).
+            if (multi && line.list.some(function(it) { return !core.isPacked(it); })) {
+                var lineBtn = el('button', {
+                    class: 'atex-pk-line-pack', type: 'button', title: 'Упаковать эту позицию'
+                }, ['Упаковать']);
+                lineBtn.addEventListener('click', function() {
+                    var target = null;
+                    line.list.some(function(it) {
+                        if (!core.isPacked(it)) { target = it; return true; }
+                        return false;
+                    });
+                    if (target) self.markPacked(target, core.currentQty(target), str(target.editedNote).trim());
+                });
+                div.appendChild(lineBtn);
             }
             return div;
         });
