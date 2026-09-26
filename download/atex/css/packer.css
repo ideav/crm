@@ -175,6 +175,9 @@
 .atex-pk-desc { font-size: 17px; font-weight: 600; word-break: break-word; }
 /* #4999: количество своей позиции в строке описания — тише самого описания */
 .atex-pk-desc-qty { color: var(--pk-muted); font-weight: 400; white-space: nowrap; }
+/* #5011: «Упаковано» на строке позиции — компактная вторичная кнопка в хвосте строки. */
+.atex-pk-line-pack { margin-left: 8px; padding: 1px 10px; font-size: 12px; font-weight: 600; color: var(--pk-accent, #144a8f); background: transparent; border: 1px solid currentColor; border-radius: 12px; cursor: pointer; white-space: nowrap; vertical-align: 2px; }
+.atex-pk-line-pack:hover { background: rgba(20, 74, 143, 0.08); }
 .atex-pk-meta { font-size: 13px; color: var(--pk-muted); margin-top: 2px; }
 /* #4665: в какой короб и по сколько штук укладывать. #4910: живёт В СТРОКЕ меты
    (span в хвосте), акцентом, — отдельной строкой карточка не растёт. */
