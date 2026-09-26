@@ -1131,7 +1131,9 @@
             var qty = multi ? core.currentQty(item) : null;
             var key = text + '\u0001' + (qty == null ? '' : String(qty));
             for (var i = 0; i < lines.length; i++) if (lines[i].key === key) return;
-            lines.push({ key: key, text: text, qty: qty });
+            // #5011: строка помнит свою позицию — её пишет по-позиционная кнопка.
+            // Полные повторы схлопнуты, их остаток дописывает карточная кнопка.
+            lines.push({ key: key, text: text, qty: qty, items: [item] });
         });
 
         var edited = false;
@@ -1206,6 +1208,20 @@
             var div = el('div', { class: 'atex-pk-desc' }, [line.text]);
             if (line.qty != null) {
                 div.appendChild(el('span', { class: 'atex-pk-desc-qty', text: ' · ' + line.qty + ' шт' }));
+            }
+            // #5011: у неупакованной строки слитой плашки — своя кнопка «Упаковано»:
+            // размер уезжает в свой момент, и отмечают его не дожидаясь остальных.
+            // Одиночной позиции не нужно — карточная кнопка пишет её же.
+            var lineRest = line.items.filter(function(item) { return !core.isPacked(item); });
+            if (multi && lineRest.length) {
+                div.classList.add('has-pack');
+                var lineBtn = el('button', {
+                    class: 'atex-pk-btn atex-pk-btn-pack atex-pk-btn-line',
+                    type: 'button',
+                    text: 'Упаковано'
+                });
+                lineBtn.addEventListener('click', function() { self.packLineNow(line); });
+                div.appendChild(lineBtn);
             }
             return div;
         });
@@ -1550,14 +1566,16 @@
         this.packOrderNow(group);
     };
 
-    // Отметка всех неупакованных позиций заказа (#4918). Одна позиция — прежний путь
-    // через markPacked. Несколько — цепочкой промисов: у записи busy-страж, N
-    // параллельных вызовов он бы отрезёк. Запись по-прежнему идёт в КАЖДУЮ Партию ГП
-    // своим количеством — «Дэшборд отклонений» (Σ факт − Σ упак по заданию) остаётся
-    // согласованным; примечание правки уезжает с той позицией, где стоит.
-    AtexPacker.prototype.packOrderNow = function(group) {
+    // Отметка списка неупакованных позиций (#5011) — общий примитив: карточная кнопка
+    // передаёт весь остаток заказа (#4918), по-позиционная — позиции своей строки.
+    // Одна позиция — прежний путь через markPacked. Несколько — цепочкой промисов:
+    // у записи busy-страж, N параллельных вызовов он бы отрезёк. Запись по-прежнему
+    // идёт в КАЖДУЮ Партию ГП своим количеством — «Дэшборд отклонений» (Σ факт − Σ упак
+    // по заданию) остаётся согласованным; примечание правки уезжает с той позицией,
+    // где стоит.
+    AtexPacker.prototype.packScopeNow = function(items) {
         var self = this;
-        var rest = group.items.filter(function(item) { return !core.isPacked(item); });
+        var rest = (items || []).filter(function(item) { return !core.isPacked(item); });
         if (!rest.length) return;
         if (rest.length === 1) {
             var it = rest[0];
@@ -1590,9 +1608,30 @@
         });
     };
 
+    // Отметка всех неупакованных позиций заказа (#4918).
+    AtexPacker.prototype.packOrderNow = function(group) {
+        return this.packScopeNow(group.items);
+    };
+
+    // #5011: отметка ОДНОЙ строки слитой плашки — той Партией ГП, что в ней стоит.
+    // Количество неизвестно — как у карточной кнопки (#4680): сообщение и правка
+    // количества, записи нет. Строка адресует одну позицию — диалог правки обычный,
+    // не «по размерам».
+    AtexPacker.prototype.packLineNow = function(line) {
+        var rest = (line.items || []).filter(function(item) { return !core.isPacked(item); });
+        var total = rest.reduce(function(sum, item) { return sum + core.currentQty(item); }, 0);
+        if (!(total > 0)) {
+            this.notify('Количество неизвестно — укажите его', 'error');
+            if (rest.length === 1) this.openQtyDialog(rest[0]);
+            else this.openSizesDialog(core.toGroup(rest[0]), rest);
+            return;
+        }
+        this.packScopeNow(rest);
+    };
+
     // Ядро записи отметки одной позиции: «Упаковано шт» (+ «Примечание») в Партию ГП
     // и событие смены «Упаковка». Возвращает промис всей цепочки; локальную модель
-    // обновляет вызывающий (markPacked — одна позиция, packOrderNow — серия).
+    // обновляет вызывающий (markPacked — одна позиция, packScopeNow — серия).
     AtexPacker.prototype._writePack = function(item, qty, note) {
         var self = this;
         var gpFields = core.gpPackFields(this.meta.gp, { qty: qty, note: note });

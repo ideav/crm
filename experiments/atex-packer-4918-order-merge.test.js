@@ -251,7 +251,10 @@ section('#4918: Упаковано на плашке заказа', function() {
     inst.renderList();
     var cards = inst.listEl.querySelectorAll('.atex-pk-card');
     assertEqual(cards.length, 1, '#4918: один заказ из двух заданий — одна плашка');
-    var btn = cards[0].querySelectorAll('button').filter(function(b) { return b.textContent === 'Упаковано'; })[0];
+    // #5011: у строк слитой плашки появились свои кнопки «Упаковано» — карточная
+    // живёт в правом блоке (.atex-pk-side), ищем именно её.
+    var side = cards[0].querySelector('.atex-pk-side');
+    var btn = side && side.querySelectorAll('button').filter(function(b) { return b.textContent === 'Упаковано'; })[0];
     assert(!!btn, '#4918: на плашке заказа одна кнопка «Упаковано»');
     if (btn) btn.click();
     setImmediate(function() {
