@@ -73,6 +73,10 @@
 /* #5003: подпись свежести данных у кнопки «Обновить» — «данные на ЧЧ:ММ» */
 .atex-pk-stamp { color: var(--pk-muted); font-size: 13px; white-space: nowrap; }
 
+/* #5016: последняя попытка загрузки не удалась — данные на экране прежние, и
+   штамп говорит об этом: «данные на ЧЧ:ММ · нет связи». */
+.atex-pk-stamp.is-stale { color: var(--pk-warn); }
+
 /* #5007: часы устройства разошлись с серверным временем */
 .atex-pk-clock-warn { color: var(--pk-warn); font-size: 13px; white-space: nowrap; }
 
