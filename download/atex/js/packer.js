@@ -1130,9 +1130,12 @@
             var text = core.describeItem(item) || '—';
             var qty = multi ? core.currentQty(item) : null;
             var key = text + '\u0001' + (qty == null ? '' : String(qty));
-            for (var i = 0; i < lines.length; i++) if (lines[i].key === key) return;
-            // #5011: строка помнит свою позицию — её пишет по-позиционная кнопка.
-            // Полные повторы схлопнуты, их остаток дописывает карточная кнопка.
+            for (var i = 0; i < lines.length; i++) {
+                if (lines[i].key === key) { lines[i].items.push(item); return; }
+            }
+            // #5011: строка помнит СВОИ позиции — по-позиционная кнопка пакует их по
+            // одной за клик (первого неупакованного), кнопка живёт, пока строка не
+            // кончится.
             lines.push({ key: key, text: text, qty: qty, items: [item] });
         });
 
@@ -1614,19 +1617,24 @@
     };
 
     // #5011: отметка ОДНОЙ строки слитой плашки — той Партией ГП, что в ней стоит.
-    // Количество неизвестно — как у карточной кнопки (#4680): сообщение и правка
-    // количества, записи нет. Строка адресует одну позицию — диалог правки обычный,
-    // не «по размерам».
+    // Дубликаты (тот же размер и то же количество) строка помнит все, но клик пакует
+    // ровно одного — первого неупакованного; после записи кнопка остаётся для
+    // следующего. Количество неизвестно — как у карточной кнопки (#4680): сообщение
+    // и правка количества, записи нет. Строка адресует одну позицию — диалог правки
+    // обычный, не «по размерам».
     AtexPacker.prototype.packLineNow = function(line) {
-        var rest = (line.items || []).filter(function(item) { return !core.isPacked(item); });
-        var total = rest.reduce(function(sum, item) { return sum + core.currentQty(item); }, 0);
-        if (!(total > 0)) {
+        var target = null;
+        (line.items || []).some(function(item) {
+            if (!core.isPacked(item)) { target = item; return true; }
+            return false;
+        });
+        if (!target) return;
+        if (!(core.currentQty(target) > 0)) {
             this.notify('Количество неизвестно — укажите его', 'error');
-            if (rest.length === 1) this.openQtyDialog(rest[0]);
-            else this.openSizesDialog(core.toGroup(rest[0]), rest);
+            this.openQtyDialog(target);
             return;
         }
-        this.packScopeNow(rest);
+        this.packScopeNow([target]);
     };
 
     // Ядро записи отметки одной позиции: «Упаковано шт» (+ «Примечание») в Партию ГП
