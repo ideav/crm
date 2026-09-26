@@ -307,7 +307,7 @@
         return fact;
     }
 
-    // #5005: строки «qqq — 39 шт» одного задания; не посчиталось — пустой список.
+    // #5005: строки «qqq — 39 шт (брак 1)» одного задания; не посчиталось — пустой список.
     // Штук в резке = «Кол-во факт» позиций карточки / Σ резок задания (факт = полосы ×
     // резки, значит частное — полос за проход). Доля джамбо = его резки × штук в резке.
     // Брак джамбо (по размерам не расписан) — на всё задание; #5017: карточке достаётся
@@ -321,9 +321,12 @@
         var fact = factOfTask(items, taskId);
         if (!(sumCuts > 0) || !(fact > 0)) return [];
         var taskFact = Math.max(fact, factOfTask(allItems, taskId));
+        // #5025: вычтенный брак подписан — «592 шт (брак 2)», шт + брак = доля факта.
         return jumbos.map(function(j) {
-            var share = toNumber(j && j.cuts) * fact / sumCuts - toNumber(j && j.defect) * fact / taskFact;
-            return j.no + ' — ' + Math.max(0, Math.round(share)) + ' шт';
+            var gross = toNumber(j && j.cuts) * fact / sumCuts;
+            var qty = Math.max(0, Math.round(gross - toNumber(j && j.defect) * fact / taskFact));
+            var defect = Math.round(gross) - qty;
+            return j.no + ' — ' + qty + ' шт' + (defect > 0 ? ' (брак ' + defect + ')' : '');
         });
     }
 

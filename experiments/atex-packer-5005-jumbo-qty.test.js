@@ -99,7 +99,7 @@ assertEqual(core.jumboStatsByTask([
 (function() {
     var items = [core.itemFromReportRow(row({}))];   // факт 80, резок 10 → 8 шт в резке
     assertEqual(core.jumboQtyLines(items, core.jumboStatsByTask(ISSUE_ROWS)),
-        ['qqq — 39 шт', 'www — 37 шт'],
+        ['qqq — 39 шт (брак 1)', 'www — 37 шт (брак 3)'],
         '#5005: 5×8−1=39 с qqq, 5×8−3=37 с www');
 })();
 
@@ -126,7 +126,7 @@ assertEqual(core.jumboQtyLines([core.itemFromReportRow(row({}))], {}), [],
         core.itemFromReportRow(row({ gp_id: 'b', qty_fact: '40' }))
     ];
     assertEqual(core.jumboQtyLines(items, core.jumboStatsByTask(ISSUE_ROWS)),
-        ['qqq — 39 шт', 'www — 37 шт'],
+        ['qqq — 39 шт (брак 1)', 'www — 37 шт (брак 3)'],
         '#5005: два размера по 40 (4+4 полос) — тот же ответ, брак не задваивается');
 })();
 
@@ -134,7 +134,7 @@ assertEqual(core.jumboQtyLines([core.itemFromReportRow(row({}))], {}), [],
 assertEqual(core.jumboQtyLines(
     [core.itemFromReportRow(row({}) )],
     { '666355': [{ no: 'qqq', cuts: 10, defect: 100 }] }),
-    ['qqq — 0 шт'], '#5005: брак больше нарезанного (80) — 0, не минус');
+    ['qqq — 0 шт (брак 80)'], '#5005: брак больше нарезанного (80) — 0, не минус');
 
 // ── 7) слитая плашка двух заданий: линии обоих, по порядку заданий ──
 (function() {
@@ -147,7 +147,7 @@ assertEqual(core.jumboQtyLines(
         '777777': [{ no: 'J-9', cuts: 10, defect: 4 }]
     };
     assertEqual(core.jumboQtyLines(items, stats),
-        ['qqq — 39 шт', 'www — 37 шт', 'J-9 — 96 шт'],
+        ['qqq — 39 шт (брак 1)', 'www — 37 шт (брак 3)', 'J-9 — 96 шт (брак 4)'],
         '#5005: задания идут по порядку позиций, внутри — порядок отчёта');
 })();
 
@@ -165,7 +165,7 @@ function render(over, jumbos, stats) {
     var plaque = render({}, { '666355': ['qqq', 'www'] }, core.jumboStatsByTask(ISSUE_ROWS))
         .querySelectorAll('.atex-pk-jumbo')[0];
     var value = plaque ? plaque.querySelectorAll('.atex-pk-art-value')[0] : null;
-    assertEqual(value ? value.textContent : null, 'qqq — 39 шт, www — 37 шт',
+    assertEqual(value ? value.textContent : null, 'qqq — 39 шт (брак 1), www — 37 шт (брак 3)',
         '#5005: в плашке «N шт» по каждому джамбо');
     var plain = render({}, { '666355': ['qqq', 'www'] }, {})
         .querySelectorAll('.atex-pk-jumbo')[0];
