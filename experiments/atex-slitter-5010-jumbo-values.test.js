@@ -212,21 +212,26 @@ function step3() {
 }
 
 function step4() {
-    // ── 4) завершение: свой кон. сохраняется, пустое начало наследует резку ──
+    // ── 4) завершение: кон. записи сходится с ЕЁ резками (не заданиевый),
+    //      пустое начало наследует пару счётчиков резки ──
     (function() {
         var c = makeController();
-        var rec = jumboRecord('910005', 'Z41316', { counterStart: '20000', counterEnd: '15800', cutsCount: '10' });
-        c.currentCut = baseCut({ meterage: String(10 * 450), actualRuns: '10', jumbos: [rec] });
+        // два джамбо: 4 резки на первом, 6 на втором (доводка #5005); погонаж
+        // задания 10×450, заданиевый кон. 15500 — записи получают СВОИ числа.
+        var recA = jumboRecord('910005', 'Z41316', { counterStart: '20000', counterEnd: '18200', cutsCount: '4' });
+        var recB = jumboRecord('910006', 'Z41321', { counterStart: '18200', cutsCount: '' });
+        c.currentCut = baseCut({ meterage: String(10 * 450), actualRuns: '10', jumbos: [recA, recB], jumboActive: 1 });
         c.finishCut();
         setImmediate(function() {
-            assertEqual(rec.counterEnd, '15800', '#5010: завершение не перетирает кон. записи заданиевым (20000−10×450=15500 был бы перетерт)');
+            assertEqual(recA.counterEnd, '18200', '#5010: финал — кон. первой записи из её резок (4×450), не заданиевый 15500');
+            assertEqual(recB.counterEnd, 15500, '#5010: финал — кон. активной записи доведён недостачей резок и началом первой');
             var c2 = makeController();
-            var rec2 = jumboRecord('910006', 'Z41316');
+            var rec2 = jumboRecord('910007', 'Z41316');
             c2.currentCut = baseCut({ meterage: String(10 * 450), actualRuns: '10', jumbos: [rec2] });
             c2.finishCut();
             setImmediate(function() {
                 assertEqual(rec2.counterStart, '20000', '#5010: финал — пустое начало записи наследует счётчик резки');
-                assertEqual(rec2.counterEnd, '15500', '#5010: финал — кон. доведён по резкам записи');
+                assertEqual(rec2.counterEnd, '15500', '#5010: финал — кон. доведён по резкам записи (записи до #5010)');
                 step5();
             });
         });
@@ -271,16 +276,19 @@ function step6() {
 }
 
 function step7() {
-    // ── 7) остаток партии сводится с концом АКТИВНОЙ записи ──
+    // ── 7) остаток партии — величина ПАРТИИ: сводится со «Счётчиком кон.»
+    //      ЗАДАНИЯ (#4902), погонаж которого копит все джамбо; разрыв цепочки
+    //      записи (отметки до #5010) не уводит партию мимо ──
     (function() {
         var c = makeController();
-        var rec = jumboRecord('910010', 'Z41316');
-        c.currentCut = baseCut({ jumbos: [rec] });
-        c.markPassDone(false);
+        var rec = jumboRecord('910010', 'Z41316');   // начало пусто: отметок записи не было
+        // 8 резок по 450 были отмечены ДО ведения счётчиков записи (заданиевые факт 3600)
+        c.currentCut = baseCut({ actualRuns: '8', meterage: String(8 * 450), jumbos: [rec] });
+        c.markPassDone(false);   // +1 резка: 20000 − (3600 + 450) = 15950
         setImmediate(function() {
             assertEqual(c.syncs.length >= 1, true, '#5010: отметка сводит остаток партии');
-            assertEqual(c.syncs[c.syncs.length - 1].counterEnd, 19550,
-                '#5010: остаток партии сводится с кон. записи, а не с заданиевым нач.−погонаж задания');
+            assertEqual(c.syncs[c.syncs.length - 1].counterEnd, 15950,
+                '#5010: остаток партии сводится со «Счётчиком кон.» задания (весь погонаж партии), не с кон. записи');
             run();
         });
     })();

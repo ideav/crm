@@ -354,10 +354,12 @@
         return { counterStart: String(newStart == null ? '' : newStart), counterEnd: end };
     }
 
-    // #5010: финальные счётчики записи при завершении задания. Свои числа ведут
-    // отметки; пустое начало наследует счётчик резки (первое джамбо задания),
-    // тогда кон. — показание резки (записи, заведённые до #5010). Записи с началом,
-    // но без кон. (отметки старого пульта) доводятся по её резкам и вводу.
+    // #5010: финальные счётчики записи при завершении задания. Пустое начало
+    // наследует пару счётчиков резки (первое джамбо; записи, заведённые до
+    // #5010). Иначе кон. записи всегда сходится с ЕЁ резками и вводом: отметки
+    // ведут его теми же числами, а доведённая недостача резок (#5005) входит
+    // через «Кол-во резок» — у записи одного джамбо совпадает со счётчиком
+    // резки, при нескольких джамбо каждый рулон получает своё показание.
     function jumboFinalCounters(record, cutCounterStart, cutCounterEnd, runLength) {
         var rec = record || {};
         var start = String(rec.counterStart == null ? '' : rec.counterStart).trim();
@@ -367,8 +369,6 @@
                 counterEnd: cutCounterEnd == null ? '' : String(cutCounterEnd)
             };
         }
-        var end = String(rec.counterEnd == null ? '' : rec.counterEnd).trim();
-        if (end !== '') return { counterStart: rec.counterStart, counterEnd: rec.counterEnd };
         var consumed = round3(Math.max(0, toNumber(rec.cutsCount)) * toNumber(runLength)
             + toNumber(rec.spent) + toNumber(rec.writeoff) + toNumber(rec.defectM));
         return { counterStart: rec.counterStart, counterEnd: counterEndFromMeterage(start, consumed) };
@@ -3590,14 +3590,6 @@
             return active;
         }).then(function(active) {
             if (!active) return null;
-            // #5010: счётчики записи — ЕЁ собственные (их ведут отметки). Числом
-            // резки (нач. − погонаж задания) запись больше не перетирается: при
-            // нескольких джамбо оно не про этот рулон. Пустое начало наследует
-            // счётчик резки, тогда кон. — показание резки (записи до #5010).
-            var finals = core.jumboFinalCounters(active, cut.counterStart, counterEnd,
-                core.runLengthForCut(cut));
-            active.counterStart = finals.counterStart;
-            active.counterEnd = finals.counterEnd;
             // #5005: «Кол-во резок» записи копится ОТМЕТКАМИ (каждая отметка кладёт
             // свои проходы в активную запись). Завершение сумму по записям задания
             // СВЕРЯЕТ с фактом резки: недостача (отметки до ввода накопления)
@@ -3608,6 +3600,15 @@
                 return s + core.toNumber(r && r.cutsCount);
             }, 0);
             active.cutsCount = core.toNumber(active.cutsCount) + Math.max(0, totalRuns - sumRuns);
+            // #5010: счётчики записи — ЕЁ собственные (их ведут отметки): заданиевым
+            // числом (нач. − погонаж задания) запись больше не перетирается. Сначала
+            // доводка резок (выше), потом счётчики: пустое начало записи наследует
+            // счётчик резки, пустой кон. доводится по резкам и вводу записи — у
+            // записи с одним джамбо и полным накоплением совпадает с резкой (#4914).
+            var finals = core.jumboFinalCounters(active, cut.counterStart, counterEnd,
+                core.runLengthForCut(cut));
+            active.counterStart = finals.counterStart;
+            active.counterEnd = finals.counterEnd;
             return self.post('_m_set/' + active.id + '?JSON', self.jumboFields(active)).then(function() {
                 return active.id;
             });
@@ -3781,30 +3782,16 @@
                         stored.counterStart = String(cut.counterStart == null ? '' : cut.counterStart).trim();
                     }
                     var counters = core.jumboCountersAfterMark(stored, newRuns, runLength, delta);
-                    var recEnd = '';
                     if (counters) {
                         stored.counterStart = counters.counterStart;
                         stored.counterEnd = counters.counterEnd;
-                        recEnd = counters.counterEnd;
                     }
-                    return self.saveJumboRecord(stored, { quiet: true, full: true })
-                        .then(function() { return recEnd; });
+                    return self.saveJumboRecord(stored, { quiet: true, full: true });
                 });
             } : function() { return Promise.resolve(null); };
             self.post('_m_set/' + cut.id + '?JSON', fields)
                 .then(function() { return accumulateJumbo(); })
-                .then(function(recEnd) {
-                    // #5010: остаток партии сводится с кон. АКТИВНОЙ записи джамбо —
-                    // при нескольких джамбо заданиевый «нач. − погонаж» уходит мимо
-                    // рулона (например в минус); пусто — считаем по-старому, от резки.
-                    return (recEnd != null && recEnd !== '')
-                        ? recEnd
-                        : counterEnd;
-                })
-                .then(function(syncEnd) {
-                    return self.createEvent({ type: EV.pass, value: String(target) }, cut.id)
-                        .then(function() { return syncEnd; });
-                })
+                .then(function() { return self.createEvent({ type: EV.pass, value: String(target) }, cut.id); })
                 // #4902: «Остаток, м» партии = «Счётчик кон.» после каждой отметки. На
                 // последнем проходе — finishMode (снять «В работе» у исчерпанной партии).
                 // #4938: отказ записи ПАРТИИ не роняет цепочку — отметка к этому моменту
@@ -3813,8 +3800,8 @@
                 // «Ошибку отметки прохода», finishCut не наступал, а каждое следующее
                 // «Готово» упиралось в «Все проходы уже отмечены». Отказ склада ОРЁТ
                 // отдельной ошибкой, но завершение и перерисовка идут дальше.
-                .then(function(syncEnd) {
-                    return self.syncBatchRemainder(cut, syncEnd, target >= total).catch(function(err) {
+                .then(function() {
+                    return self.syncBatchRemainder(cut, counterEnd, target >= total).catch(function(err) {
                         var reason = err && err.message ? err.message : String(err);
                         console.error('[slitter] #4938: остаток партии не сведён со счётчиком — ' + reason);
                         self.notify('Остаток партии не сведён: ' + reason, 'error');
