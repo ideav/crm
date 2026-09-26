@@ -102,7 +102,7 @@ function render(items, jumbos, stats, allItems) {
         '(а) старая разметка из трёх записей (пусто/0/всё) — номера без количеств');
     // Новая разметка с одним джамбо — по-прежнему считается.
     assertEqual(core.jumboQtyLines(items, { '666355': [{ no: 'qqq', cuts: 10, defect: 2 }] }),
-        ['qqq — 78 шт'], '(а) одно джамбо — считается как раньше');
+        ['qqq — 78 шт (брак 2)'], '(а) одно джамбо — считается как раньше');
 })();
 
 // ── (б) слитая плашка из двух заданий, у одного нет факта ──
@@ -114,11 +114,11 @@ function render(items, jumbos, stats, allItems) {
         '777777': [{ no: 'J-9', cuts: 10, defect: 0 }]
     };
     var text = render([a, b], { '666355': ['qqq', 'www'], '777777': ['J-9'] }, stats);
-    assertEqual(text, 'qqq — 39 шт, www — 37 шт, J-9',
+    assertEqual(text, 'qqq — 39 шт (брак 1), www — 37 шт (брак 3), J-9',
         '(б) номера джамбо обоих заданий: у задания без факта — без количества');
     var c = core.itemFromReportRow(row({ task_id: '888888', gp_id: 'c', qty_fact: '50' }));
     assertEqual(render([a, c], { '666355': ['qqq', 'www'], '888888': ['Z-1', 'Z-2'] }, stats),
-        'qqq — 39 шт, www — 37 шт, Z-1, Z-2',
+        'qqq — 39 шт (брак 1), www — 37 шт (брак 3), Z-1, Z-2',
         '(б) у второго задания нет записей в task_jumbo — его номера из task_jumbo-списка');
 })();
 
@@ -135,8 +135,8 @@ function render(items, jumbos, stats, allItems) {
     var l2 = core.jumboQtyLines([o2], stats, all);
     assertEqual(total(l1) + total(l2), 80 - 6,
         '(в) сумма по карточкам = факт 80 − брак 6: ' + JSON.stringify(l1) + ' + ' + JSON.stringify(l2));
-    assertEqual(l1, ['qqq — 19 шт', 'www — 18 шт'], '(в) карточка заказа 4619: брак в доле факта');
-    assertEqual(render([o1], { '666355': ['qqq', 'www'] }, stats, all), 'qqq — 19 шт, www — 18 шт',
+    assertEqual(l1, ['qqq — 19 шт (брак 1)', 'www — 18 шт (брак 2)'], '(в) карточка заказа 4619: брак в доле факта');
+    assertEqual(render([o1], { '666355': ['qqq', 'www'] }, stats, all), 'qqq — 19 шт (брак 1), www — 18 шт (брак 2)',
         '(в) плашка карточки делит брак с другим заказом задания');
 })();
 
