@@ -378,10 +378,12 @@
     // #5003: есть ли несохранённые правки количества. У неупакованной позиции правка
     // живёт в модели до отметки — авто-обновлению её перечитывать нельзя, оно сотрёт
     // ввод упаковщика. У упакованной локальных правок не бывает: там уже записанное.
+    // #5016: правка, совпавшая с подсказкой отчёта, правкой не считается — иначе
+    // возврат количества к подсказке навсегда блокировал бы авто-обновление.
     function hasUnsavedEdits(items) {
         return (items || []).some(function(it) {
             if (!it || isPacked(it)) return false;
-            return (it.editedQty != null && it.editedQty !== '') || str(it.editedNote).trim() !== '';
+            return isEdited(it) || str(it.editedNote).trim() !== '';
         });
     }
 
@@ -394,6 +396,26 @@
         if (!s.visible || s.busy || s.modalOpen || s.unsavedEdits) return false;
         if (s.lastLoadMs && s.nowMs && (s.nowMs - s.lastLoadMs) < (s.minGapMs || 0)) return false;
         return true;
+    }
+
+    // #5016: можно ли прямо сейчас начинать запись отметки. Фоновое обновление (#5003)
+    // подменяет список позиций новыми объектами — цепочка записей, начатая поверх него,
+    // достаётся отвязанным позициям, и экран показывает их неупакованными; повторный
+    // тап пишет «Упаковано шт» второй раз. Тап при занятости не теряется молча: он
+    // получает видимый ответ, почему отметки сейчас нет.
+    function writeGuard(state) {
+        var s = state || {};
+        if (s.writing) return { ok: false, message: 'Идёт запись предыдущей отметки — подождите' };
+        if (s.loading) return { ok: false, message: 'Обновляю данные — повторите отметку' };
+        return { ok: true, message: '' };
+    }
+
+    // #5016: подпись свежести данных у кнопки «Обновить». Сбой связи больше не стирает
+    // экран — он меняет подпись: видно и КОГДА данные, и что новых пока нет.
+    function freshnessLabel(loadedAtMs, offline) {
+        var stamp = loadedAtMs ? 'данные на ' + unixToLocalTime(loadedAtMs) : '';
+        if (!offline) return stamp;
+        return stamp ? stamp + ' · нет связи' : 'нет связи';
     }
 
     // #4929: подпись времени задания: сегодняшнее — временем, иное — с датой без года.
@@ -623,7 +645,12 @@
             var qty = toNumber(raw);
             if (qty === baseQty(item) && qty === currentQty(item)) return;
             item.editedQty = qty;
+            // #5016: примечание живёт вместе с расхождением. Вернули количество к
+            // подсказке отчёта и нового примечания не написали — старое «1 шт в брак»
+            // снимается: иначе оно уедет в «Примечание» Партии ГП к неправленому
+            // количеству и навсегда заблокирует авто-обновление (hasUnsavedEdits).
             if (noteText) item.editedNote = noteText;
+            else if (qty === baseQty(item)) item.editedNote = '';
             changed++;
         });
         return changed;
@@ -753,6 +780,8 @@
         isClockSkewed: isClockSkewed,
         hasUnsavedEdits: hasUnsavedEdits,
         canAutoRefresh: canAutoRefresh,
+        writeGuard: writeGuard,
+        freshnessLabel: freshnessLabel,
         taskWhenLabel: taskWhenLabel,
         describeItem: describeItem,
         orderTitle: orderTitle,
@@ -817,9 +846,18 @@
         this.sizes = [];           // #4665: справочник «Типоразмер» (отчёт pack_sizes)
         this.place = null;         // { id, label } — упаковочное место из настройки планшета (#4852)
         this.showPacked = false;
+        // #5016: «занят» — это ДВА разных состояния. Загрузка подменяет позиции,
+        // запись их дописывает; раньше один флаг busy позволял загрузке снять
+        // занятость, поставленную записью. Теперь busy — производное от обоих.
         this.busy = false;
+        this.loading = false;
+        this.writing = false;
+        this.refreshQueued = false; // #5016: обновление, отложенное на время записи
+        this.offline = false;       // #5016: последняя попытка загрузки не удалась
+        this.written = {};          // #5016: id Партии ГП → записанное, пока отчёт не подтвердит
         this.loadedAt = null;      // #5003: момент последней успешной загрузки — штамп «данные на ЧЧ:ММ» и пауза авто-обновления
         this.serverTimeMs = 0;     // #5007: серверное время из заголовка Date последнего ответа
+        this.clientTimeAtFetch = 0; // #5016: время устройства в момент ТОГО ЖЕ ответа
         this.autoRefreshArmed = false;
     }
 
@@ -834,7 +872,14 @@
         var self = this;
         return fetch(this.url(path), { credentials: 'same-origin' }).then(function(resp) {
             var serverDate = new Date(resp.headers.get('Date')).getTime();
-            if (serverDate) self.serverTimeMs = serverDate;
+            // #5016: часы устройства сравниваются с серверными ПО ОДНОМУ моменту.
+            // Раньше запоминалось только серверное время, а шапка сличала его
+            // с текущим — планшет без связи 15 минут получал ложное «часы не
+            // совпадают» просто потому, что снимок состарился.
+            if (serverDate) {
+                self.serverTimeMs = serverDate;
+                self.clientTimeAtFetch = new Date().getTime();
+            }
             return resp.text().then(function(text) {
                 try { return JSON.parse(text); }
                 catch (e) { throw new Error('Некорректный JSON: ' + text.slice(0, 200)); }
@@ -897,6 +942,7 @@
         return this.getJson(core.itemsPath(this.place)).then(function(rows) {
             var list = Array.isArray(rows) ? rows : [];
             self.items = list.map(function(row) { return core.itemFromReportRow(row); });
+            self.applyPendingWrites();
             self.applyJumbos();
         });
     };
@@ -994,15 +1040,20 @@
 
         // #5003: насколько стары данные на экране. Ставится после каждой успешной
         // загрузки — и ручной, и автоматической.
-        if (this.loadedAt) {
-            tools.appendChild(el('span', { class: 'atex-pk-stamp',
-                text: 'данные на ' + core.unixToLocalTime(this.loadedAt.getTime()) }));
+        // #5016: сбой связи не стирает список — он виден здесь, в штампе свежести.
+        var stamp = core.freshnessLabel(this.loadedAt ? this.loadedAt.getTime() : 0, this.offline);
+        if (stamp) {
+            tools.appendChild(el('span', { class: 'atex-pk-stamp' + (this.offline ? ' is-stale' : ''),
+                text: stamp }));
         }
 
         // #5007: часы устройства разошлись с сервером — сказать прямо. Дата на
         // планшете не двигает очередь (её держит сервер), но врёт в подписях
         // заданий и во времени событий упаковки.
-        if (this.serverTimeMs && core.isClockSkewed(new Date().getTime(), this.serverTimeMs)) {
+        // #5016: сличаются два значения ОДНОГО момента — время устройства и время
+        // сервера из того же ответа, а не возраст снимка.
+        if (this.serverTimeMs && this.clientTimeAtFetch &&
+            core.isClockSkewed(this.clientTimeAtFetch, this.serverTimeMs)) {
             tools.appendChild(el('span', { class: 'atex-pk-clock-warn',
                 title: 'Включите авто-дату и время на устройстве: дата на планшете ' +
                     'не совпадает с сервером.',
@@ -1402,7 +1453,7 @@
         var unpacked = items.filter(function(item) { return !core.isPacked(item); });
         var lastUnpacked = unpacked[unpacked.length - 1];
         if (!single && unpacked.length > 1) return this.openSizesDialog(group, unpacked);
-        if (this.busy) return;
+        if (this.busy && !this.allowWrite()) return;
         var missingGp = items.filter(function(item) { return !item.gpId; });
         if (missingGp.length) {
             this.notify('В отчёте нет gp_id — отметить упаковку нечему', 'error');
@@ -1580,11 +1631,12 @@
         var self = this;
         var rest = (items || []).filter(function(item) { return !core.isPacked(item); });
         if (!rest.length) return;
+        if (!this.allowWrite()) return;
         if (rest.length === 1) {
             var it = rest[0];
             return this.markPacked(it, core.currentQty(it), str(it.editedNote).trim());
         }
-        this.setBusy(true);
+        this.setWriting(true);
         var writes = rest.map(function(item) {
             return { item: item, qty: core.currentQty(item), note: str(item.editedNote).trim() };
         });
@@ -1596,18 +1648,16 @@
             var sum = 0;
             writes.forEach(function(w) {
                 sum += w.qty;
-                w.item.packedQty = w.qty;
-                if (w.note) w.item.notes = w.note;
-                // Правка доехала до базы — дальше карточка живёт записанным значением.
-                w.item.editedQty = null;
-                w.item.editedNote = '';
+                self.applyWritten(w.item, w.qty, w.note);
             });
-            self.setBusy(false);
+            self.setWriting(false);
             self.notify('Упаковано: ' + sum + ' шт (' + writes.length + ' поз.)', 'success');
             self.renderList();
+            self.runQueuedRefresh();
         }).catch(function(err) {
-            self.setBusy(false);
+            self.setWriting(false);
             self.notify('Ошибка сохранения: ' + err.message, 'error');
+            self.runQueuedRefresh();
         });
     };
 
@@ -1629,6 +1679,7 @@
             return false;
         });
         if (!target) return;
+        if (!this.allowWrite()) return;
         if (!(core.currentQty(target) > 0)) {
             this.notify('Количество неизвестно — укажите его', 'error');
             this.openQtyDialog(target);
@@ -1659,27 +1710,93 @@
     // отчёт: сразу после записи он может отдать ещё старое значение (read-after-write).
     AtexPacker.prototype.markPacked = function(item, qty, note) {
         var self = this;
-        if (this.busy) return;
-        this.setBusy(true);
+        if (!this.allowWrite()) return;
+        this.setWriting(true);
         self._writePack(item, qty, note).then(function() {
-            item.packedQty = qty;
-            if (note) item.notes = note;
-            // Правка доехала до базы — дальше карточка живёт записанным значением.
-            item.editedQty = null;
-            item.editedNote = '';
-            self.setBusy(false);
+            self.applyWritten(item, qty, note);
+            self.setWriting(false);
             self.notify('Упаковано: ' + qty + ' шт', 'success');
             self.renderList();
+            self.runQueuedRefresh();
         }).catch(function(err) {
-            self.setBusy(false);
+            self.setWriting(false);
             self.notify('Ошибка сохранения: ' + err.message, 'error');
+            self.runQueuedRefresh();
         });
+    };
+
+    // #5016: страж записи. Нельзя — упаковщик видит, почему отметки нет: тап не
+    // должен пропадать молча, иначе его повторяют и получают двойную запись.
+    AtexPacker.prototype.allowWrite = function() {
+        var verdict = core.writeGuard({ writing: this.writing, loading: this.loading });
+        if (!verdict.ok) this.notify(verdict.message, 'info');
+        return verdict.ok;
+    };
+
+    // #5016: позиция в АКТУАЛЬНОМ списке под тем же id Партии ГП. Ссылка, взятая до
+    // записи, могла остаться от прошлого снимка — фоновое обновление (#5003) подменяет
+    // объекты целиком.
+    AtexPacker.prototype.itemById = function(gpId) {
+        var id = str(gpId);
+        if (!id) return null;
+        var found = null;
+        (this.items || []).forEach(function(it) { if (!found && str(it.gpId) === id) found = it; });
+        return found;
+    };
+
+    // #5016: записанное значение кладётся и в ту позицию, по которой шла запись, и
+    // в живую позицию того же id — иначе экран показал бы уже записанную позицию
+    // неупакованной. Запись помнится до подтверждения отчётом (applyPendingWrites).
+    AtexPacker.prototype.applyWritten = function(item, qty, note) {
+        var targets = [item];
+        var live = this.itemById(item && item.gpId);
+        if (live && live !== item) targets.push(live);
+        targets.forEach(function(it) {
+            if (!it) return;
+            it.packedQty = qty;
+            if (note) it.notes = note;
+            // Правка доехала до базы — дальше карточка живёт записанным значением.
+            it.editedQty = null;
+            it.editedNote = '';
+        });
+        var id = str(item && item.gpId);
+        if (id) { this.written = this.written || {}; this.written[id] = { qty: qty, note: note }; }
+    };
+
+    // #5016: отчёт, прочитанный сразу после записи, успевает отдать ещё старое
+    // «Упаковано шт» (read-after-write). Пока он не подтвердил запись, экран держит
+    // записанное значение — иначе позиция вернулась бы «неупакованной» и упаковщик
+    // отметил бы её второй раз.
+    AtexPacker.prototype.applyPendingWrites = function() {
+        var self = this;
+        var written = this.written || {};
+        Object.keys(written).forEach(function(id) {
+            var live = self.itemById(id);
+            // Позиции нет в отчёте или отчёт уже подтвердил запись — помнить нечего.
+            if (!live || core.isPacked(live)) { delete written[id]; return; }
+            live.packedQty = written[id].qty;
+            if (written[id].note) live.notes = written[id].note;
+        });
+    };
+
+    // #5016: обновление, отложенное на время записи, — ровно одно догоняющее.
+    AtexPacker.prototype.runQueuedRefresh = function() {
+        if (!this.refreshQueued) return;
+        this.refreshQueued = false;
+        return this.refresh({ background: true });
     };
 
     // ── Служебное ──
 
-    AtexPacker.prototype.refresh = function() {
+    // opts.background — обновление без участия человека (#5003). Оно молчит при сбое
+    // и не спорит с записью: пока идёт цепочка записей, обновление откладывается.
+    AtexPacker.prototype.refresh = function(opts) {
         var self = this;
+        var background = !!(opts && opts.background);
+        // #5016: загрузка подменяет this.items новыми объектами. Поверх идущей записи
+        // этого делать нельзя — один догоняющий refresh пойдёт сразу после неё.
+        if (this.writing) { this.refreshQueued = true; return Promise.resolve(); }
+        if (this.loading) return Promise.resolve();
         // #4681/#5003: без места отчёт не запрашивается вовсе — он фильтруется по
         // месту, без фильтра отдал бы чужие позиции. Экран остаётся с подсказкой.
         if (!this.hasPlace()) {
@@ -1687,7 +1804,7 @@
             this.render();
             return Promise.resolve();
         }
-        this.setBusy(true);
+        this.setLoading(true);
         // #4914: номера джамбо перечитываем вместе со списком — по заданиям могли
         // начаться новые резки с новыми джамбо; #4929: очередь следующих заданий тоже.
         return this.loadJumbos().then(function() {
@@ -1697,12 +1814,16 @@
         }).then(function() {
             // #5003: свежесть экрана считается от этого момента.
             self.loadedAt = new Date();
-            self.setBusy(false);
+            self.offline = false;
+            self.setLoading(false);
             self.render();
         }).catch(function(err) {
-            self.setBusy(false);
-            self.notify('Ошибка загрузки заданий: ' + err.message, 'error');
-            self.items = [];
+            self.setLoading(false);
+            // #5016: сбой сети больше НЕ стирает список. Фоновая попытка вдобавок
+            // молчит: модалка раз в пять минут висела бы на планшете, за которым
+            // никто не следит. Что данные не обновились, видно по штампу свежести.
+            self.offline = true;
+            if (!background) self.notify('Ошибка загрузки заданий: ' + err.message, 'error');
             self.render();
         });
     };
@@ -1723,6 +1844,9 @@
     };
 
     AtexPacker.prototype.autoRefreshTick = function() {
+        // #5016: срок подошёл во время записи — обновление не отменяется, а ждёт её
+        // конца. Иначе отложенный тик просто пропал бы, и экран жил бы старым снимком.
+        if (this.writing) { this.refreshQueued = true; return; }
         var openModal = this.root && this.root.querySelector('.atex-pk-modal-overlay');
         var ok = core.canAutoRefresh({
             visible: document.visibilityState !== 'hidden',
@@ -1733,12 +1857,23 @@
             nowMs: new Date().getTime(),
             minGapMs: AUTO_REFRESH_GAP_MS
         });
-        if (ok) this.refresh();
+        if (ok) this.refresh({ background: true });
     };
 
-    AtexPacker.prototype.setBusy = function(on) {
-        this.busy = on;
-        if (this.root) this.root.classList.toggle('is-busy', !!on);
+    // #5016: «идёт загрузка» и «идёт запись» — разные состояния и разные владельцы.
+    // busy остаётся производным: его читают стражи авто-обновления (#5003) и класс
+    // пульта. Загрузка больше не снимает занятость, поставленную записью.
+    AtexPacker.prototype.setLoading = function(on) {
+        this.loading = !!on;
+        this.syncBusy();
+    };
+    AtexPacker.prototype.setWriting = function(on) {
+        this.writing = !!on;
+        this.syncBusy();
+    };
+    AtexPacker.prototype.syncBusy = function() {
+        this.busy = !!(this.loading || this.writing);
+        if (this.root) this.root.classList.toggle('is-busy', this.busy);
     };
 
     AtexPacker.prototype.notify = function(message, kind) {
