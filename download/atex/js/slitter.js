@@ -318,6 +318,62 @@
         return v === '' ? '' : v;
     }
 
+    // #5010: погонаж записи джамбо — те же счётчики, что у резки (#4321):
+    // «нач.» − «кон.»; счётчик мотает назад, погонаж записи всегда неотрицательный.
+    function jumboMeterage(record) {
+        return meterageFromCounters(record && record.counterStart, record && record.counterEnd);
+    }
+
+    // #5010: счётчики записи после отметки резки. Погонаж записи копится отметками
+    // (резки × метраж + рабочий расход + списание + брак отметки) и хранится сам
+    // парой счётчиков: кон. = нач. − накопленный погонаж записи. Пустое начало
+    // не считаем — его наследует создание записи (ensureJumboRecord/addJumbo).
+    function jumboCountersAfterMark(record, newRuns, runLength, delta) {
+        var rec = record || {};
+        var start = String(rec.counterStart == null ? '' : rec.counterStart).trim();
+        if (start === '') return null;
+        var d = delta || {};
+        // накопленный погонаж записи: кон. ещё пуст — отметок не было, 0.
+        var doneBefore = String(rec.counterEnd == null ? '' : rec.counterEnd).trim() === ''
+            ? 0
+            : jumboMeterage(rec);
+        var consumed = round3(doneBefore
+            + Math.max(0, toNumber(newRuns)) * toNumber(runLength)
+            + toNumber(d.spent) + toNumber(d.writeoff) + toNumber(d.defectM));
+        return { counterStart: rec.counterStart, counterEnd: counterEndFromMeterage(start, consumed) };
+    }
+
+    // #5010: правка «Счётчика нач.» записи с панели. Кон. смещается на ту же
+    // дельту: правкой начала оператор правит показание, а не погонаж записи.
+    function jumboCountersAfterStartEdit(record, newStart) {
+        var rec = record || {};
+        var shift = round3(toNumber(newStart) - toNumber(rec.counterStart));
+        var end = rec.counterEnd == null || String(rec.counterEnd).trim() === ''
+            ? ''
+            : round3(toNumber(rec.counterEnd) + shift);
+        return { counterStart: String(newStart == null ? '' : newStart), counterEnd: end };
+    }
+
+    // #5010: финальные счётчики записи при завершении задания. Пустое начало
+    // наследует пару счётчиков резки (первое джамбо; записи, заведённые до
+    // #5010). Иначе кон. записи всегда сходится с ЕЁ резками и вводом: отметки
+    // ведут его теми же числами, а доведённая недостача резок (#5005) входит
+    // через «Кол-во резок» — у записи одного джамбо совпадает со счётчиком
+    // резки, при нескольких джамбо каждый рулон получает своё показание.
+    function jumboFinalCounters(record, cutCounterStart, cutCounterEnd, runLength) {
+        var rec = record || {};
+        var start = String(rec.counterStart == null ? '' : rec.counterStart).trim();
+        if (start === '') {
+            return {
+                counterStart: cutCounterStart == null ? '' : String(cutCounterStart),
+                counterEnd: cutCounterEnd == null ? '' : String(cutCounterEnd)
+            };
+        }
+        var consumed = round3(Math.max(0, toNumber(rec.cutsCount)) * toNumber(runLength)
+            + toNumber(rec.spent) + toNumber(rec.writeoff) + toNumber(rec.defectM));
+        return { counterStart: rec.counterStart, counterEnd: counterEndFromMeterage(start, consumed) };
+    }
+
     // #4914: подпись редактируемых полей записи джамбо — накопленное + черновики ввода.
     // По ней автосохранение отличает выход из нетронутой ячейки от настоящей правки
     // (та же схема, что у показаний — readingsSignature, #4783 п.10).
@@ -1438,6 +1494,10 @@
         meterageFromCounters: meterageFromCounters,
         meterageAccumulate: meterageAccumulate,     // #4902: накопление погонажа по отметкам
         counterEndFromMeterage: counterEndFromMeterage, // #4902: счётчик кон. = нач. − погонаж
+        jumboMeterage: jumboMeterage,                   // #5010: погонаж записи джамбо = нач. − кон.
+        jumboCountersAfterMark: jumboCountersAfterMark, // #5010: счётчики записи после отметки
+        jumboCountersAfterStartEdit: jumboCountersAfterStartEdit, // #5010: правка начала записи
+        jumboFinalCounters: jumboFinalCounters,         // #5010: финальные счётчики записи
         jumboFinalCounter: jumboFinalCounter,       // #4860: счётчик кон. за вычетом расхода джамбо
         rowsToJumbos: rowsToJumbos,                 // #4914: строки отчёта task_jumbo → записи джамбо
         jumbosFromObjects: jumbosFromObjects,       // #4914: фолбэк-разбор подчинённых 82374
@@ -3110,11 +3170,35 @@
         // Корешки и панель — одна конструкция (#4916): панель — вкладка активного корешка.
         var wrap = el('div', { class: 'atex-sl-readings' }, [tabs, section]);
 
-        // Счётчик нач. — заполняется из остатка партии (batch.remainderM) при открытии резки;
-        // #4902 п.1: при отметке резки пишется в задание ТОЛЬКО если был пустой.
-        var cStart = numInput(cut.counterStart, '0');
-        cStart.addEventListener('input', function() { cut.counterStart = cStart.value; refreshMeterage(); });
-        autosave(cStart);
+        // #5010: панель показаний — значения АКТИВНОЙ записи джамбо: у каждой
+        // записи свои счётчики и свой погонаж (закладки над панелью). Записи ещё
+        // нет (черновик) — поля показывают и ведут счётчик резки, из него же
+        // отметкой рождается первая запись.
+        var storedRec = active && active.id ? active : null;
+        // «Счётчик нач.» записи: первый ставит отметка (из остатка партии),
+        // следующий за ним — «+ Джамбо» («Счётчик кон.» предыдущей, #4914).
+        var cStart = numInput(storedRec ? storedRec.counterStart : cut.counterStart, '0');
+        cStart.addEventListener('input', function() {
+            if (storedRec) {
+                // #5010: правка начала записи — кон. смещается на ту же дельту,
+                // погонаж записи правкой начала не меняется.
+                var shifted = core.jumboCountersAfterStartEdit(storedRec, cStart.value);
+                storedRec.counterStart = shifted.counterStart;
+                storedRec.counterEnd = shifted.counterEnd;
+            } else {
+                cut.counterStart = cStart.value;
+            }
+            refreshMeterage();
+        });
+        if (storedRec) {
+            // #5010: числа цепочки записи не идут через автосейв показаний резки
+            // (тот пишет задание) — правка начала уезжает целиком, при изменении.
+            cStart.addEventListener('change', function() {
+                self.saveJumboRecord(storedRec, { quiet: true, full: true });
+            });
+        } else {
+            autosave(cStart);
+        }
         // #4785 п.3: подсказки «(остаток партии: N м)» под полем нет — остаток партии
         // виден строкой партии внизу; значение поля по-прежнему подставляется из неё.
         grid.appendChild(field('Счётчик нач.', cStart));
@@ -3203,12 +3287,22 @@
         refreshMeterage();
         return wrap;
 
-        // #4902 п.2/п.3: оба вычисляемых поля выводят накопленное состояние резки;
-        // «Счётчик кон.» пересчитывается на лету от правимого «Счётчика нач.».
-        // Режут эти числа отметки резки, а не ввод оператора.
+        // #4902 п.2/п.3 → #5010: оба вычисляемых поля выводят состояние АКТИВНОЙ
+        // записи джамбо («Погонаж» = нач. − кон. записи, «Счётчик кон.» — её
+        // записанное число); записи нет — состояние резки, как раньше.
         function refreshMeterage() {
-            meterageDisplay.value = cut.meterage == null ? '' : cut.meterage;
-            cEnd.value = core.counterEndFromMeterage(cut.counterStart, cut.meterage);
+            var shownMeterage;
+            if (storedRec) {
+                var hasCounters = String(storedRec.counterStart == null ? '' : storedRec.counterStart).trim() !== ''
+                    && String(storedRec.counterEnd == null ? '' : storedRec.counterEnd).trim() !== '';
+                shownMeterage = hasCounters ? core.jumboMeterage(storedRec) : '';
+            } else {
+                shownMeterage = cut.meterage;
+            }
+            meterageDisplay.value = shownMeterage == null ? '' : shownMeterage;
+            cEnd.value = storedRec
+                ? String(storedRec.counterEnd == null ? '' : storedRec.counterEnd)
+                : core.counterEndFromMeterage(cut.counterStart, cut.meterage);
         }
     };
 
@@ -3496,7 +3590,6 @@
             return active;
         }).then(function(active) {
             if (!active) return null;
-            active.counterEnd = counterEnd;
             // #5005: «Кол-во резок» записи копится ОТМЕТКАМИ (каждая отметка кладёт
             // свои проходы в активную запись). Завершение сумму по записям задания
             // СВЕРЯЕТ с фактом резки: недостача (отметки до ввода накопления)
@@ -3507,6 +3600,15 @@
                 return s + core.toNumber(r && r.cutsCount);
             }, 0);
             active.cutsCount = core.toNumber(active.cutsCount) + Math.max(0, totalRuns - sumRuns);
+            // #5010: счётчики записи — ЕЁ собственные (их ведут отметки): заданиевым
+            // числом (нач. − погонаж задания) запись больше не перетирается. Сначала
+            // доводка резок (выше), потом счётчики: пустое начало записи наследует
+            // счётчик резки, пустой кон. доводится по резкам и вводу записи — у
+            // записи с одним джамбо и полным накоплением совпадает с резкой (#4914).
+            var finals = core.jumboFinalCounters(active, cut.counterStart, counterEnd,
+                core.runLengthForCut(cut));
+            active.counterStart = finals.counterStart;
+            active.counterEnd = finals.counterEnd;
             return self.post('_m_set/' + active.id + '?JSON', self.jumboFields(active)).then(function() {
                 return active.id;
             });
@@ -3674,7 +3776,17 @@
                     stored.writeoffDraft = '';
                     stored.defectMDraft = '';
                     stored.defectQtyDraft = '';
-                    return self.saveJumboRecord(stored, { quiet: true });
+                    // #5010: счётчики АКТИВНОЙ записи ведутся отметками: пустое начало
+                    // наследует счётчик резки (остаток партии), кон. — по погонажу записи.
+                    if (String(stored.counterStart == null ? '' : stored.counterStart).trim() === '') {
+                        stored.counterStart = String(cut.counterStart == null ? '' : cut.counterStart).trim();
+                    }
+                    var counters = core.jumboCountersAfterMark(stored, newRuns, runLength, delta);
+                    if (counters) {
+                        stored.counterStart = counters.counterStart;
+                        stored.counterEnd = counters.counterEnd;
+                    }
+                    return self.saveJumboRecord(stored, { quiet: true, full: true });
                 });
             } : function() { return Promise.resolve(null); };
             self.post('_m_set/' + cut.id + '?JSON', fields)
@@ -3974,7 +4086,9 @@
         // записи без номера не бывает — см. ensureJumboRecord (#4925: номер в поля
         // `_m_set` больше не кладётся, проверяем его на самой записи)
         if (String(rec.jumboNo == null ? '' : rec.jumboNo).trim() === '') return Promise.resolve(null);
-        var fields = this.jumboInputFieldsOf(rec);
+        // #5010: full — вся запись (счётчики, длины): отметка резки и правка
+        // «Счётчика нач.» ведут числа цепочки; автосейв ячеек — без full, как был.
+        var fields = opts.full ? this.jumboFields(rec) : this.jumboInputFieldsOf(rec);
         return this.post('_m_set/' + rec.id + '?JSON', fields).then(function() {
             if (!opts.quiet) self.notify('Расход джамбо сохранён', 'success');
             return rec.id;
