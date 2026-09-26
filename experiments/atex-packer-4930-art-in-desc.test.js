@@ -4,7 +4,7 @@
 // строке, что описание ролика), а не отдельной строкой внизу тела карточки:
 //   • span.atex-pk-art — потомок последней .atex-pk-desc, после текста описания;
 //   • прямого ребёнка .atex-pk-art у .atex-pk-body больше нет;
-//   • на слитой плашке (#4918) — уникальные артикулы через «, » там же;
+//   • на слитой плашке (#4918) — у каждой строки описания свой артикул (#5022);
 //   • плашка «Джамбо» (#4910) остаётся отдельной строкой внизу — её не трогаем.
 //
 // Run with: node experiments/atex-packer-4930-art-in-desc.test.js
@@ -127,21 +127,23 @@ function render(overs, jumbos) {
         '#4930: описание без артикула — чистый текст, без пустых узлов');
 })();
 
-// Слитая плашка заказа (#4918): уникальные артикулы через «, » в последней строке описания.
+// Слитая плашка заказа (#4918): артикул — хвостом строки описания своей позиции
+// (#5022), повторы артикула в одной строке схлопываются.
 (function() {
     var card = render([
         { gp_id: 'a', art: 'A-1' },
         { gp_id: 'b', cut_width: '110.00', art: 'B-2' },
         { gp_id: 'c', cut_width: '110.00', art: 'B-2' }
     ]);
-    var art = card.querySelectorAll('.atex-pk-art');
-    assertEqual(art.length, 1, '#4930/#4918: на слитой плашке плашка артикула одна');
-    var value = art.length ? art[0].querySelectorAll('.atex-pk-art-value')[0] : null;
-    assertEqual(value ? value.textContent : null, 'A-1, B-2',
-        '#4930/#4918: уникальные артикулы через «, »');
     var descs = card.querySelectorAll('.atex-pk-desc');
-    assert(art.length && art[0].parentNode === descs[descs.length - 1],
-        '#4930/#4918: и на слитой плашке артикул — в последней строке описания');
+    var perLine = descs.map(function(d) {
+        return d.querySelectorAll('.atex-pk-art-value').map(function(v) { return v.textContent; });
+    });
+    assertEqual(perLine, [['A-1'], ['B-2']],
+        '#4930/#5022: на слитой плашке у каждой строки описания — артикул её позиций');
+    var body = card.querySelector('.atex-pk-body');
+    var artLines = body ? body.childNodes.filter(function(n) { return n.classList.contains('atex-pk-art'); }) : [];
+    assertEqual(artLines.length, 0, '#4930/#4918: и на слитой плашке артикул — в строке описания');
 })();
 
 // Джамбо (#4910) остаётся отдельной плашкой в теле карточки — её #4930 не трогает.
