@@ -277,33 +277,88 @@
         return map;
     }
 
-    // #5005: «сколько штук с какого джамбо» — строки «qqq — 39 шт» для плашки.
-    // Штук в резке = «Кол-во факт» позиции / Σ резок задания (факт = полосы × резки,
-    // значит частное — полос за проход). Доля джамбо = его резки × штук в резке по
-    // всем размерам задания; брак (он по размерам не расписан) вычитается ОДИН раз
-    // на джамбо. Считать нечего (нет резок или факта) — пустой список: плашка
-    // показывается прежним списком номеров (#4910).
-    function jumboQtyLines(items, stats) {
-        var lines = [];
-        var seen = {};
+    // #5017: разметка резок задания, записанная до #5005: всё количество — в
+    // ПОСЛЕДНЕЙ записи джамбо, у остальных резки пустые/нулевые. Делить по ней
+    // нельзя (выйдет «qqq — 0 шт, www — всё»), такие задания считаются нерасчётными.
+    function isLegacyJumboCuts(jumbos) {
+        var list = jumbos || [];
+        if (list.length < 2) return false;
+        for (var i = 0; i < list.length - 1; i++) {
+            if (toNumber(list[i] && list[i].cuts) > 0) return false;
+        }
+        return toNumber(list[list.length - 1] && list[list.length - 1].cuts) > 0;
+    }
+
+    // Уникальные id заданий позиций — в порядке позиций.
+    function taskIdsOf(items) {
+        var ids = [];
         (items || []).forEach(function(item) {
             var taskId = str(item && item.taskId).trim();
-            if (!taskId || seen[taskId]) return;
-            seen[taskId] = true;
-            var jumbos = (stats || {})[taskId] || [];
-            var sumCuts = 0, fact = 0;
-            jumbos.forEach(function(j) { sumCuts += toNumber(j && j.cuts); });
-            (items || []).forEach(function(it) {
-                if (str(it && it.taskId).trim() === taskId) fact += toNumber(it && it.factQty);
-            });
-            if (!(sumCuts > 0) || !(fact > 0)) return;
-            jumbos.forEach(function(j) {
-                var base = Math.round(toNumber(j && j.cuts) * fact / sumCuts);
-                var qty = Math.max(0, base - toNumber(j && j.defect));
-                lines.push(j.no + ' — ' + qty + ' шт');
-            });
+            if (taskId && ids.indexOf(taskId) === -1) ids.push(taskId);
+        });
+        return ids;
+    }
+
+    function factOfTask(items, taskId) {
+        var fact = 0;
+        (items || []).forEach(function(it) {
+            if (str(it && it.taskId).trim() === taskId) fact += toNumber(it && it.factQty);
+        });
+        return fact;
+    }
+
+    // #5005: строки «qqq — 39 шт» одного задания; не посчиталось — пустой список.
+    // Штук в резке = «Кол-во факт» позиций карточки / Σ резок задания (факт = полосы ×
+    // резки, значит частное — полос за проход). Доля джамбо = его резки × штук в резке.
+    // Брак джамбо (по размерам не расписан) — на всё задание; #5017: карточке достаётся
+    // его доля «факт карточки / факт задания по всем позициям `allItems`», так что по
+    // карточкам разных заказов одного задания брак вычитается в сумме один раз.
+    function taskJumboQtyLines(items, stats, allItems, taskId) {
+        var jumbos = (stats || {})[taskId] || [];
+        if (isLegacyJumboCuts(jumbos)) return [];
+        var sumCuts = 0;
+        jumbos.forEach(function(j) { sumCuts += toNumber(j && j.cuts); });
+        var fact = factOfTask(items, taskId);
+        if (!(sumCuts > 0) || !(fact > 0)) return [];
+        var taskFact = Math.max(fact, factOfTask(allItems, taskId));
+        return jumbos.map(function(j) {
+            var share = toNumber(j && j.cuts) * fact / sumCuts - toNumber(j && j.defect) * fact / taskFact;
+            return j.no + ' — ' + Math.max(0, Math.round(share)) + ' шт';
+        });
+    }
+
+    // #5005: «сколько штук с какого джамбо» — строки «qqq — 39 шт» по всем заданиям
+    // позиций (по порядку позиций, внутри — порядок отчёта). `allItems` — все
+    // позиции списка (для доли брака, #5017); не передан — карточка считается всем
+    // заданием. Нерасчётные задания (нет резок/факта, старая разметка) пропускаются.
+    function jumboQtyLines(items, stats, allItems) {
+        var lines = [];
+        taskIdsOf(items).forEach(function(taskId) {
+            lines = lines.concat(taskJumboQtyLines(items, stats, allItems, taskId));
         });
         return lines;
+    }
+
+    // #5017: текст плашки «Джамбо» — по КАЖДОМУ заданию: посчиталось — «N шт с
+    // джамбо», нет — номера джамбо этого задания без количеств (#4910): из записей
+    // task_jumbo, а если их нет — из `item.jumbo`. Строки заданий — через «, ».
+    function jumboPlateText(items, stats, allItems) {
+        var parts = [];
+        function add(value) {
+            value = str(value).trim();
+            if (value && parts.indexOf(value) === -1) parts.push(value);
+        }
+        taskIdsOf(items).forEach(function(taskId) {
+            var lines = taskJumboQtyLines(items, stats, allItems, taskId);
+            if (lines.length) { lines.forEach(add); return; }
+            var records = (stats || {})[taskId] || [];
+            if (records.length) { records.forEach(function(j) { add(j && j.no); }); return; }
+            (items || []).forEach(function(it) {
+                if (str(it && it.taskId).trim() !== taskId) return;
+                str(it && it.jumbo).split(',').forEach(add);
+            });
+        });
+        return parts.join(', ');
     }
 
     // #4929: строка отчёта `packer_next` — та же Партия ГП плюс станок задания.
@@ -746,6 +801,8 @@
         jumbosByTask: jumbosByTask,
         jumboStatsByTask: jumboStatsByTask,
         jumboQtyLines: jumboQtyLines,
+        jumboPlateText: jumboPlateText,
+        isLegacyJumboCuts: isLegacyJumboCuts,
         nextItemFromReportRow: nextItemFromReportRow,
         nextTasksPath: nextTasksPath,
         nextTaskGroups: nextTaskGroups,
@@ -1246,8 +1303,9 @@
         // #4910: № джамбо — той же плашкой рядом с артикулом; #4914: номера приходят
         // из отчёта task_jumbo, на задании их бывает несколько — через «, ».
         // #5005: если по записям джамбо можно посчитать, плашка показывает
-        // «qqq — 39 шт» (резки × штук в резке − брак); не посчиталось — прежний список.
-        var jumboText = core.jumboQtyLines(items, this.jumboStats).join(', ') || jumbos.join(', ');
+        // «qqq — 39 шт» (резки × штук в резке − доля брака); #5017: задание, по которому
+        // не посчиталось, — своими номерами без количеств.
+        var jumboText = core.jumboPlateText(items, this.jumboStats, this.items) || jumbos.join(', ');
         if (jumboText) {
             body.push(el('div', { class: 'atex-pk-jumbo' }, [
                 el('span', { class: 'atex-pk-art-label', text: 'Джамбо' }),
