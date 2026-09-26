@@ -184,6 +184,8 @@ function makeDOM() {
     byId.checkBtn.id = 'checkBtn';
     byId.dryBtn = parseHTML('<button id="dryBtn"></button>').children[0];
     byId.dryBtn.id = 'dryBtn';
+    byId.saveBtn = parseHTML('<button id="saveBtn"></button>').children[0];
+    byId.saveBtn.id = 'saveBtn';
 
     const document = {
         getElementById(id) { return byId[id] || null; },
@@ -212,6 +214,16 @@ function flush(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms || 40));
 }
 
+class FakeBlob {
+    constructor(parts) { this.text = parts.join(''); }
+}
+class FakeFormData {
+    constructor() { this.entries = []; }
+    append(k, v, name) { this.entries.push({ k, v, name }); }
+    get(k) { const e = this.entries.filter((x) => x.k === k)[0]; return e ? e.v : null; }
+    fileName(k) { const e = this.entries.filter((x) => x.k === k)[0]; return e ? e.name : null; }
+}
+
 function loadConnector(opts) {
     const document = opts.document;
     const src = fs.readFileSync(opts.jsPath || JS_PATH, 'utf8');
@@ -226,19 +238,24 @@ function loadConnector(opts) {
         return fetchImpl(String(url), o);
     }
     const winit = opts.windowInit || {};
+    // ключ, явно переданный как undefined, — «шаблон его не задаёт» (#5015)
+    const pick = (k, dflt) => (k in winit ? winit[k] : dflt);
     const win = {
         CONNECTOR_DB: winit.CONNECTOR_DB || 'spz',
-        CONNECTOR_CONFIG: winit.CONNECTOR_CONFIG || 'test-cfg',
-        CONNECTOR_CONNECT_ID: winit.CONNECTOR_CONNECT_ID !== undefined ? winit.CONNECTOR_CONNECT_ID : 77,
-        CONNECTOR_TABLES: winit.CONNECTOR_TABLES || { users: 1, deps: 2 },
-        CONNECTOR_SOURCE_FIELDS: winit.CONNECTOR_SOURCE_FIELDS || {
+        CONNECTOR_XSRF: pick('CONNECTOR_XSRF', 'xs1'),
+        CONNECTOR_CONFIG: pick('CONNECTOR_CONFIG', 'test-cfg'),
+        CONNECTOR_CONNECT_ID: pick('CONNECTOR_CONNECT_ID', 77),
+        CONNECTOR_TABLES: pick('CONNECTOR_TABLES', { users: 1, deps: 2 }),
+        CONNECTOR_SOURCE_FIELDS: pick('CONNECTOR_SOURCE_FIELDS', {
             users: [['ID', 'Идентификатор'], ['NAME', 'Имя'], ['EMAIL', 'Почта']],
-        },
+        }),
     };
     const sandbox = {
         window: win,
         document,
         fetch,
+        FormData: FakeFormData,
+        Blob: FakeBlob,
         Promise, JSON, Math, Object, Array, String, Number, Boolean, Error, Date, RegExp,
         btoa: (s) => Buffer.from(s, 'binary').toString('base64'),
         unescape,
@@ -597,6 +614,229 @@ async function testBusyLock() {
         'disabled=' + document.getElementById('runBtn').disabled);
 }
 
+// ============================================================
+// 13+. #5015: всё база-специфичное — из конфига базы, правка доходит до запуска
+// ============================================================
+const ACME_CFG = {
+    version: 1,
+    project: 'acme',
+    ui: { connect_id: 91 },
+    entities: {
+        users: {
+            target: { table: 'Юзеры', table_id: 55, key: '@name' },
+            fields: {
+                ID: { column: '@name' },
+                NAME: { column: 'Имя', transform: 'trim' },
+                'NAME@x': { column: 'X', from: 'NAME' },
+                DEPT: { column: 'Отдел', ref: { entity: 'deps', by: 'key', missing: 'skip' } },
+            },
+        },
+        deps: { target: { table: 'Отделы', table_id: 66, key: '@name' }, fields: { NAME: { column: '@name' } } },
+    },
+};
+
+// Сервер: dir_admin (листинг, gf, upload), метаданные, _connect, b24ig.php.
+function fakeServer(o) {
+    o = o || {};
+    const st = { uploads: [], cfgText: JSON.stringify(ACME_CFG, null, 2) };
+    const text = (t, ok) => Promise.resolve({
+        ok: ok !== false, status: ok === false ? 500 : 200,
+        text: () => Promise.resolve(t), json: () => Promise.resolve(JSON.parse(t)),
+    });
+    st.fetch = (url, opt) => {
+        if (url.indexOf('/dir_admin/') >= 0 && opt && opt.method === 'POST') {
+            const fd = opt.body;
+            if (o.uploadFails) return text('Недостаточно прав для загрузки файлов');
+            st.uploads.push({
+                name: fd.fileName('userfile'), body: fd.get('userfile').text,
+                rewrite: fd.get('rewrite'), xsrf: fd.get('_xsrf'), addPath: fd.get('add_path'),
+            });
+            if (fd.fileName('userfile') === 'acme.json') st.cfgText = fd.get('userfile').text;
+            return text('{"ok":true,"action":"upload"}');
+        }
+        if (url.indexOf('/dir_admin/') >= 0 && url.indexOf('gf=acme.json') >= 0) return text(st.cfgText);
+        if (url.indexOf('/dir_admin/') >= 0) {
+            return text('<table>' +
+                '<tr><td><a href="/spz/dir_admin/?templates=1&add_path=/connector&gf=acme.json">acme.json</a></td></tr>' +
+                '<tr><td><a href="/spz/dir_admin/?templates=1&add_path=/connector&gf=secrets.json">secrets.json</a></td></tr>' +
+                '<tr><td><a href="/spz/dir_admin/?templates=1&add_path=/connector&gf=run.log">run.log</a></td></tr>' +
+                '</table>');
+        }
+        if (url.indexOf('/metadata/') >= 0) {
+            return Promise.resolve(metaOk([
+                { val: 'Имя', attrs: '', ref: 0 },
+                { val: 'Почта', attrs: '', ref: 0 },
+                { val: 'Отдел', attrs: '', ref: 1 },
+                { val: 'Руководитель', attrs: '', ref: 1 },
+            ]));
+        }
+        if (url.indexOf('/_connect/') >= 0) {
+            return text(JSON.stringify({ matches: o.matches || [] }));
+        }
+        if (url.indexOf('/b24ig.php') >= 0) return text('{"ok":true,"entities":{},"errors":[]}');
+        return text('{}');
+    };
+    return st;
+}
+
+function loadFromConfig(srv) {
+    const document = makeDOM();
+    const r = loadConnector({
+        document,
+        windowInit: {
+            CONNECTOR_CONFIG: undefined, CONNECTOR_TABLES: undefined,
+            CONNECTOR_SOURCE_FIELDS: undefined, CONNECTOR_CONNECT_ID: undefined,
+        },
+        fetch: srv.fetch,
+    });
+    return r;
+}
+
+function rowsByName(document) {
+    const by = {};
+    document.querySelectorAll('#mapBody tr').forEach((tr) => { by[tr.dataset.name] = tr; });
+    return by;
+}
+
+function typeInto(tr, text) {
+    if (!tr) return;
+    const inp = tr.querySelector('input[role=combobox]');
+    inp.value = text;
+    (inp._handlers.input || []).forEach((fn) => fn());
+}
+
+async function testConfigFromBase() {
+    const srv = fakeServer({ matches: [{ field: 'NAME', column: 'Имя', score: 0.97, method: 'точное' }] });
+    const { document, fetchLog } = loadFromConfig(srv);
+    await flush(60);
+    assert(fetchLog.some((f) => /dir_admin\/\?templates=1&add_path=\/connector&gf=acme\.json/.test(f.url)),
+        '#5015: конфиг читается из templates/custom/<база>/connector через dir_admin',
+        fetchLog.map((f) => f.url).join(' | '));
+    const opts = document.getElementById('entities').querySelectorAll('option').map((x) => x.attrs.value);
+    assert(opts.join(',') === 'users,deps', '#5015: сущности — из конфига', 'options=' + opts.join(','));
+
+    document.getElementById('aiBtn').onclick();
+    await flush(60);
+    assert(fetchLog.some((f) => f.url.indexOf('/spz/metadata/55') >= 0),
+        '#5015: table_id — из конфига (55)', fetchLog.map((f) => f.url).join(' | '));
+    assert(fetchLog.some((f) => f.url.indexOf('/spz/_connect/91?') >= 0),
+        '#5015: id «Коннектора» — ui.connect_id из конфига', fetchLog.map((f) => f.url).join(' | '));
+    const by = rowsByName(document);
+    assert(Object.keys(by).join(',') === 'ID,NAME,DEPT',
+        '#5015: поля источника — ключи fields без производных X@y', Object.keys(by).join(','));
+    assert(by.DEPT && by.DEPT.querySelector('.val').value === 'Отдел',
+        '#5015: без подсказки AI остаётся колонка из конфига',
+        'DEPT=' + (by.DEPT && by.DEPT.querySelector('.val').value));
+}
+
+async function testEditReachesRun() {
+    const srv = fakeServer();
+    const { document, fetchLog } = loadFromConfig(srv);
+    await flush(60);
+    document.getElementById('aiBtn').onclick();
+    await flush(60);
+    typeInto(rowsByName(document).NAME, 'Почта');
+    document.getElementById('runBtn').onclick();
+    await flush(60);
+
+    const cfgUp = srv.uploads.filter((u) => u.name === 'acme.json')[0];
+    assert(!!cfgUp, '#5015: «Запустить» после правки сначала сохраняет конфиг',
+        'uploads=' + srv.uploads.map((u) => u.name).join(','));
+    if (!cfgUp) return;
+    const saved = JSON.parse(cfgUp.body);
+    const f = saved.entities.users.fields;
+    assert(f.NAME.column === 'Почта', '#5015: в конфиг ушла поправленная колонка', JSON.stringify(f.NAME));
+    assert(f.NAME.transform === 'trim', '#5015: transform существующего поля сохранён', JSON.stringify(f.NAME));
+    assert(f['NAME@x'] && f['NAME@x'].from === 'NAME', '#5015: производное поле X@y не тронуто');
+    assert(f.DEPT.ref && f.DEPT.ref.entity === 'deps', '#5015: ref существующего поля сохранён');
+    assert(saved.entities.deps.fields.NAME.column === '@name', '#5015: другие сущности не тронуты');
+    assert(cfgUp.rewrite === '1' && cfgUp.xsrf === 'xs1' && cfgUp.addPath === '/connector',
+        '#5015: заливка — rewrite + _xsrf в каталог connector', JSON.stringify(cfgUp));
+    const bak = srv.uploads[0];
+    assert(bak && /^acme\.json\..+\.bak$/.test(bak.name) && bak.body === JSON.stringify(ACME_CFG, null, 2),
+        '#5015: перед перезаписью — копия прежнего конфига', bak && bak.name);
+    const upIdx = fetchLog.findIndex((x) => x.o && x.o.method === 'POST');
+    const runIdx = fetchLog.findIndex((x) => x.url.indexOf('/b24ig.php') >= 0);
+    assert(upIdx >= 0 && runIdx > upIdx, '#5015: запуск идёт после сохранения', 'up=' + upIdx + ' run=' + runIdx);
+    assert(runIdx >= 0 && fetchLog[runIdx].url.indexOf('config=acme') >= 0, '#5015: запуск — по этому конфигу',
+        runIdx >= 0 ? fetchLog[runIdx].url : '');
+}
+
+async function testSaveFailureBlocksRun() {
+    const srv = fakeServer({ uploadFails: true });
+    const { document, fetchLog } = loadFromConfig(srv);
+    await flush(60);
+    document.getElementById('aiBtn').onclick();
+    await flush(60);
+    typeInto(rowsByName(document).NAME, 'Почта');
+    document.getElementById('runBtn').onclick();
+    await flush(60);
+    assert(!fetchLog.some((x) => x.url.indexOf('/b24ig.php') >= 0),
+        '#5015: сохранение не удалось — запуска старого конфига нет');
+    assert(/Недостаточно прав/.test(document.getElementById('result').textContent),
+        '#5015: причина отказа видна', document.getElementById('result').textContent);
+}
+
+async function testRefWithoutEntityBlocksSave() {
+    const srv = fakeServer();
+    const { document } = loadFromConfig(srv);
+    await flush(60);
+    document.getElementById('aiBtn').onclick();
+    await flush(60);
+    typeInto(rowsByName(document).NAME, 'Руководитель');   // ref-колонка, сущность не известна
+    document.getElementById('saveBtn').onclick();
+    await flush(60);
+    assert(srv.uploads.length === 0, '#5015: ref-колонка без сущности не пишется заглушкой',
+        'uploads=' + srv.uploads.map((u) => u.name).join(','));
+    assert(/Руководитель/.test(document.getElementById('mapHint').textContent),
+        '#5015: подсказка называет колонку', document.getElementById('mapHint').textContent);
+}
+
+async function testComboboxTypedAndManualLow() {
+    const srv = fakeServer({ matches: [{ field: 'NAME', column: 'Почта', score: 0.4, method: 'модель' }] });
+    const { document } = loadFromConfig(srv);
+    await flush(60);
+    document.getElementById('aiBtn').onclick();
+    await flush(60);
+    const tr = rowsByName(document).NAME;
+    if (!tr) { assert(false, 'combobox: строка NAME есть'); return; }
+    assert(tr.dataset.low === '1', 'combobox: низкий score помечен');
+    // ручной выбор из списка снимает «низкий»
+    const inp = tr.querySelector('input[role=combobox]');
+    (inp._handlers.focus || []).forEach((fn) => fn());
+    const item = tr.querySelector('.list').querySelectorAll('div').filter((d) => d.textContent === 'Почта')[0];
+    item.click();
+    assert(tr.dataset.low !== '1' && !tr.classList.contains('row-manual'),
+        'combobox: ручной выбор подтверждает строку', 'low=' + tr.dataset.low + ' class=' + tr.className);
+    // точное имя, набранное руками, принимается
+    typeInto(tr, 'Имя');
+    assert(tr.querySelector('.val').value === 'Имя', 'combobox: набранное точное имя колонки принято',
+        'val=' + tr.querySelector('.val').value);
+    typeInto(tr, 'Им');
+    assert(tr.querySelector('.val').value === '', 'combobox: неполное имя не принимается');
+}
+
+function testTemplateHasNoBaseSpecifics() {
+    // исполняем инлайн-скрипт шаблона и смотрим, что он кладёт в window
+    const html = fs.readFileSync(HTML_PATH, 'utf8');
+    const inline = (html.match(/<script>([\s\S]*?)<\/script>/g) || [])
+        .map((s) => s.replace(/^<script>|<\/script>$/g, '')).join('\n');
+    const win = {};
+    const stub = { classList: { toggle() {} }, dataset: {}, set onclick(v) {} };
+    const sandbox = {
+        window: win,
+        document: { getElementById: () => stub, querySelectorAll: () => [] },
+    };
+    vm.createContext(sandbox);
+    vm.runInContext(inline, sandbox);
+    assert(win.CONNECTOR_DB === '{_global_.z}', 'шаблон: имя базы — из оболочки');
+    assert(win.CONNECTOR_XSRF === '{_global_.xsrf}', 'шаблон: XSRF — из оболочки');
+    const baked = ['CONNECTOR_CONFIG', 'CONNECTOR_TABLES', 'CONNECTOR_SOURCE_FIELDS', 'CONNECTOR_CONNECT_ID']
+        .filter((k) => win[k] !== undefined);
+    assert(baked.length === 0, '#5015: шаблон не зашивает конфиг/таблицы/поля/CONNECT_ID одной базы',
+        'заданы: ' + baked.join(','));
+}
+
 (async function main() {
     await testTruthyRef();
     await testAliases();
@@ -608,6 +848,12 @@ async function testBusyLock() {
     await testEmptyDropdownNotSelectable();
     await testMarkManualAfterRender();
     await testBusyLock();
+    await testConfigFromBase();
+    await testEditReachesRun();
+    await testSaveFailureBlocksRun();
+    await testRefWithoutEntityBlocksSave();
+    await testComboboxTypedAndManualLow();
+    testTemplateHasNoBaseSpecifics();
 
     console.log('\n' + (failed ? 'FAIL' : 'OK') + ': ' + passed + '/' + total + ' проверок');
     process.exit(failed ? 1 : 0);

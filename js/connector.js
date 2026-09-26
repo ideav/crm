@@ -1,32 +1,53 @@
 /*
  * connector.js — рабочее место «Коннектор» (Битрикс24 / 1С → Интеграм).
  * Развёртывание: js/connector.js, подключается из templates/connector.html:
- *     <script src="/js/connector.js?1"></script>
+ *     <script src="/js/connector.js?2"></script>
  *
  * Путь «П»: подбор соответствия полей идёт браузер → ядро (_connect) → эмбеддер на 104.
  * Браузер напрямую на 104 не ходит (CORS не нужен, 104 закрыт для браузеров).
  *
- * Ожидает в шаблоне (инжектится ядром / заданы в connector.html):
- *   window.CONNECTOR_DB        — имя базы ({_global_.z})
- *   window.CONNECTOR_CONNECT_ID— id записи-«Коннектора» (тип CONNECT) с URL эмбеддера
- *   window.CONNECTOR_TABLES     — { "<ключ сущности>": <table_id>, ... }
- *   (опц.) window.CONNECTOR_SOURCE_FIELDS — { "<сущность>": [[name,label],...] } если поля
- *          источника уже получены на сервере; иначе задайте getSourceFields().
+ * Всё, что зависит от базы, берётся из конфига базы (#5015) —
+ * templates/custom/<база>/connector/<имя>.json, того же файла, что читает b24ig.php:
+ *   имя конфига   — ?config=<имя> в URL; иначе листинг connector/ (один — берём, несколько — выбор);
+ *   сущности      — entities.<имя>.target.table_id / target.table;
+ *   поля источника— ключи entities.<имя>.fields (производные «X@y» не показываем);
+ *   id записи-«Коннектора» (тип CONNECT) — ui.connect_id.
+ * Конфиг читается и сохраняется через dir_admin (сессия + _xsrf, право WRITE на файлы).
+ * «Проверить / Пробный / Запустить» при несохранённых правках сначала сохраняют конфиг.
  *
- * DOM (как в connector.html): #entities (select), #aiBtn, #mapBody (tbody), #mapHint.
+ * Шаблон задаёт (инжектится ядром):
+ *   window.CONNECTOR_DB   — имя базы ({_global_.z})
+ *   window.CONNECTOR_XSRF — XSRF-токен ({_global_.xsrf})
+ * Необязательные переопределения (отладка): CONNECTOR_CONFIG, CONNECTOR_CONNECT_ID,
+ *   CONNECTOR_TABLES { "<сущность>": <table_id> }, CONNECTOR_SOURCE_FIELDS { "<сущность>": [[name,label],...] }.
+ *
+ * DOM (как в connector.html): #configSel, #entities, #aiBtn, #saveBtn, #mapBody, #mapHint,
+ *   #checkBtn, #dryBtn, #runBtn, #result.
  */
 (function (w, d) {
   "use strict";
 
   var DB = w.CONNECTOR_DB || "";
-  var CONFIG = w.CONNECTOR_CONFIG || "";        // имя конфига в базе (без .json)
-  var CONNECT_ID = w.CONNECTOR_CONNECT_ID || 0;
+  var XSRF = w.CONNECTOR_XSRF || "";
+  var CONFIG = urlParam("config") || w.CONNECTOR_CONFIG || "";   // имя конфига в базе (без .json)
+  var CONNECT_ID = +w.CONNECTOR_CONNECT_ID || 0;
   var TABLES = w.CONNECTOR_TABLES || {};
+  var TABLES_FROM_CFG = !w.CONNECTOR_TABLES;
+  var CFG_DIR = "/connector";                   // каталог конфигов в templates/custom/<база>
   var MANUAL = 0.60;                            // порог: score ниже — просить подтверждение
   var FETCH_TIMEOUT = 30000;
   var OK_METHODS = { "точное": 1, "словарь": 1, "exact": 1, "dict": 1, "dictionary": 1 };
 
+  var CFG = null;        // разобранный конфиг базы
+  var CFG_TEXT = "";     // его исходный текст (для резервной копии)
+
   // ---- утилиты ----
+  function urlParam(name) {
+    try {
+      var m = new RegExp("[?&]" + name + "=([^&#]*)").exec(w.location.search);
+      return m ? decodeURIComponent(m[1].replace(/\+/g, " ")) : "";
+    } catch (e) { return ""; }
+  }
   function b64url(obj) {
     var s = btoa(unescape(encodeURIComponent(JSON.stringify(obj))));
     return s.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -52,6 +73,17 @@
     var s = String(v).toLowerCase();
     return s !== "false" && s !== "null" && s !== "undefined" && s !== "0";
   }
+  function setHint(t) {
+    var hint = d.getElementById("mapHint");
+    if (hint) hint.textContent = t;
+  }
+  function plainText(html) {
+    return String(html || "").replace(/<[^>]*>/g, " ").replace(/\[(RU|EN)\]/g, " ").replace(/\s+/g, " ").trim();
+  }
+  function stamp() {
+    var t = new Date(), p = function (n) { return (n < 10 ? "0" : "") + n; };
+    return t.getFullYear() + p(t.getMonth() + 1) + p(t.getDate()) + "-" + p(t.getHours()) + p(t.getMinutes()) + p(t.getSeconds());
+  }
 
   function fetchTO(url) {
     var opts = { credentials: "same-origin" };
@@ -69,6 +101,113 @@
       if (e && e.name === "AbortError") throw new Error("таймаут " + (FETCH_TIMEOUT / 1000) + " с");
       throw e;
     });
+  }
+
+  // ---- конфиг базы через dir_admin ----
+  function dirAdminUrl(extra) {
+    return "/" + DB + "/dir_admin/?templates=1&add_path=" + CFG_DIR + (extra || "");
+  }
+
+  // Листинг connector/: ссылки «…&add_path=/connector&gf=<имя>» (разметка templates/dir_admin.html).
+  // Если каталога нет, dir_admin показывает корень — там add_path пустой, и такие ссылки не берём.
+  function listConfigs() {
+    return fetchTO(dirAdminUrl(""))
+      .then(function (r) { if (!r.ok) throw new Error("листинг конфигов: HTTP " + r.status); return r.text(); })
+      .then(function (html) {
+        var out = [], re = /add_path=\/connector&(?:amp;)?gf=([^"'&<>\s]+)/g, m;
+        while ((m = re.exec(String(html)))) {
+          var name = decodeURIComponent(m[1]);
+          if (!/\.json$/i.test(name) || /^secrets\.json$/i.test(name)) continue;
+          name = name.replace(/\.json$/i, "");
+          if (out.indexOf(name) < 0) out.push(name);
+        }
+        return out;
+      });
+  }
+
+  function readConfig(name) {
+    return fetchTO(dirAdminUrl("&gf=" + encodeURIComponent(name + ".json")))
+      .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.text(); })
+      .then(function (t) {
+        var cfg;
+        try { cfg = JSON.parse(t); } catch (e) { throw new Error(plainText(t).slice(0, 160) || "не JSON"); }
+        if (!cfg || typeof cfg !== "object") throw new Error("не объект");
+        return { cfg: cfg, text: t };
+      })
+      .catch(function (e) { throw new Error("конфиг «" + name + "» не прочитан: " + errMsg(e)); });
+  }
+
+  function uploadConfigFile(fileName, text, rewrite) {
+    var fd = new FormData();
+    fd.append("_xsrf", XSRF);
+    fd.append("templates", "1");
+    fd.append("add_path", CFG_DIR);
+    fd.append("upload", "1");
+    if (rewrite) fd.append("rewrite", "1");
+    fd.append("userfile", new Blob([text], { type: "application/json" }), fileName);
+    return fetch("/" + DB + "/dir_admin/?JSON=1", { method: "POST", credentials: "same-origin", body: fd })
+      .then(function (r) { return r.text(); })
+      .then(function (t) {
+        var j = null;
+        try { j = JSON.parse(t); } catch (e) {}
+        if (!j || !j.ok) throw new Error("«" + fileName + "» не сохранён: " + (plainText(t).slice(0, 200) || "пустой ответ"));
+      });
+  }
+
+  function cfgEntity(name) {
+    return CFG && CFG.entities && CFG.entities[name] || null;
+  }
+
+  function applyConfig(cfg) {
+    CFG = cfg;
+    if (TABLES_FROM_CFG) {
+      TABLES = {};
+      Object.keys(cfg.entities || {}).forEach(function (k) {
+        var t = cfg.entities[k] && cfg.entities[k].target;
+        if (t && t.table_id) TABLES[k] = t.table_id;
+      });
+      var sel = d.getElementById("entities");
+      if (sel) {
+        sel.innerHTML = Object.keys(TABLES).map(function (k) {
+          var label = (cfg.entities[k].target && cfg.entities[k].target.table) || k;
+          return '<option value="' + esc(k) + '">' + esc(label) + "</option>";
+        }).join("");
+        sel.value = Object.keys(TABLES)[0] || "";
+      }
+    }
+    if (!CONNECT_ID) CONNECT_ID = +(cfg.ui && cfg.ui.connect_id) || 0;
+  }
+
+  function fillConfigSelect(names) {
+    var sel = d.getElementById("configSel");
+    if (!sel) return;
+    sel.innerHTML = names.map(function (n) {
+      return '<option value="' + esc(n) + '">' + esc(n) + "</option>";
+    }).join("");
+    sel.value = CONFIG;
+    var box = d.getElementById("configBox");
+    if (box) box.style.display = names.length > 1 ? "" : "none";
+  }
+
+  function loadConfig(name) {
+    CONFIG = name;
+    return readConfig(name).then(function (r) {
+      CFG_TEXT = r.text;
+      applyConfig(r.cfg);
+      setHint("Конфиг «" + name + "». Выберите сущность и нажмите «Подобрать соответствие».");
+    });
+  }
+
+  function initConfig() {
+    var names = CONFIG ? Promise.resolve([CONFIG]) : listConfigs();
+    return names
+      .then(function (list) {
+        if (!list.length) throw new Error("в templates/custom/" + DB + "/connector/ нет конфига (*.json) — положите его через «Файлы сервера»");
+        if (!CONFIG) CONFIG = list[0];
+        fillConfigSelect(list);
+        return loadConfig(CONFIG);
+      })
+      .catch(function (e) { setHint("Конфиг: " + errMsg(e)); });
   }
 
   // ---- колонки целевой таблицы из метаданных базы (ядро, по сессии-куке) ----
@@ -93,17 +232,30 @@
   }
 
   // ---- поля источника: [[name,label],...] ----
-  // По умолчанию берём из window.CONNECTOR_SOURCE_FIELDS (получены на сервере). Переопределяемо.
+  // Переопределение window.CONNECTOR_SOURCE_FIELDS; иначе — ключи fields сущности из конфига.
   function getSourceFields(entity) {
     var sf = w.CONNECTOR_SOURCE_FIELDS || {};
     if (sf[entity]) return Promise.resolve(sf[entity]);
-    return Promise.reject(new Error("нет полей источника для «" + entity + "» — получите их на сервере (Битрикс *.fields / 1С $metadata)"));
+    var ent = cfgEntity(entity);
+    if (ent && ent.fields) {
+      var list = Object.keys(ent.fields).filter(function (k) { return k.indexOf("@") < 0; })
+        .map(function (k) { return [k, ent.fields[k].label || ""]; });
+      if (list.length) return Promise.resolve(list);
+    }
+    return Promise.reject(new Error("нет полей источника для «" + entity + "» — опишите их в fields конфига"));
+  }
+
+  // текущая колонка поля по конфигу
+  function configColumn(entity, field) {
+    var ent = cfgEntity(entity);
+    var f = ent && ent.fields && ent.fields[field];
+    return f && f.column ? String(f.column) : "";
   }
 
   // ---- вызов эмбеддера ЧЕРЕЗ ЯДРО (_connect) ----
   // Ядро подставит URL из записи-«Коннектора» и токен, дописав наш ?q=...
   function suggest(source, columns) {
-    if (!CONNECT_ID) return Promise.reject(new Error("не задан CONNECTOR_CONNECT_ID (запись-«Коннектор»)"));
+    if (!CONNECT_ID) return Promise.reject(new Error("не задан id записи-«Коннектора» — укажите ui.connect_id в конфиге"));
     var q = b64url({ source: source, target: columns });
     return fetchTO("/" + DB + "/_connect/" + CONNECT_ID + "?q=" + q)
       .then(function (r) {
@@ -128,13 +280,19 @@
     if (!box || !box.contains(e.target)) closeList();
   });
 
-  function buildCombobox(td, cols, value) {
+  function buildCombobox(tr, td, cols, value) {
     td.innerHTML =
       '<div class="cbx"><input type="text" role="combobox" autocomplete="off" value="' + esc(value || "") +
       '" placeholder="колонка базы…"><input type="hidden" class="val" value="' + esc(value || "") +
       '"><div class="list"></div></div>';
     var box = td.querySelector(".cbx"), inp = box.querySelector("input[role=combobox]"),
         hid = box.querySelector(".val"), list = box.querySelector(".list");
+    // выбор человеком подтверждает строку: пометка «низкий» снимается
+    function choose(col) {
+      hid.value = col;
+      tr.dataset.low = "";
+      markManual();
+    }
     function render(qs) {
       qs = (qs || "").toLowerCase();
       var items = cols.filter(function (c) { return c.toLowerCase().indexOf(qs) >= 0; });
@@ -145,13 +303,18 @@
       list.innerHTML = items.map(function (c) { return "<div>" + esc(c) + "</div>"; }).join("");
       Array.prototype.forEach.call(list.querySelectorAll("div"), function (el) {
         el.onclick = function () {
-          inp.value = el.textContent; hid.value = el.textContent;
-          closeList(); markManual();
+          inp.value = el.textContent;
+          closeList(); choose(el.textContent);
         };
       });
     }
     inp.addEventListener("focus", function () { closeList(); render(inp.value); list.classList.add("show"); openList = list; });
-    inp.addEventListener("input", function () { render(inp.value); list.classList.add("show"); openList = list; hid.value = ""; });
+    inp.addEventListener("input", function () {
+      render(inp.value); list.classList.add("show"); openList = list;
+      var typed = String(inp.value).trim();
+      if (cols.indexOf(typed) >= 0) choose(typed);   // точное имя колонки, набранное руками
+      else { hid.value = ""; markManual(); }
+    });
   }
 
   function markManual() {
@@ -163,15 +326,19 @@
     });
   }
 
-  function renderRows(source, cols) {
+  // current: { поле: колонка } — что стоит в конфиге сейчас
+  function renderRows(source, cols, current) {
     var body = d.getElementById("mapBody"); body.innerHTML = "";
+    current = current || {};
     source.forEach(function (f) {
       var tr = d.createElement("tr");
       tr.dataset.name = f[0];
-      tr.innerHTML = '<td><b>' + esc(f[0]) + '</b><div class="tr-sel">«' + esc(f[1]) +
-        '»</div></td><td class="arrow">→</td><td class="col"></td><td class="how"><span class="badge warn">ручное</span></td>';
+      var col = current[f[0]] || "";
+      tr.innerHTML = '<td><b>' + esc(f[0]) + '</b>' + (f[1] ? '<div class="tr-sel">«' + esc(f[1]) + '»</div>' : "") +
+        '</td><td class="arrow">→</td><td class="col"></td><td class="how">' +
+        (col ? '<span class="badge">из конфига</span>' : '<span class="badge warn">ручное</span>') + "</td>";
       body.appendChild(tr);
-      buildCombobox(tr.querySelector(".col"), cols, "");
+      buildCombobox(tr, tr.querySelector(".col"), cols, col);
     });
     markManual();
   }
@@ -181,12 +348,15 @@
     Array.prototype.forEach.call(d.querySelectorAll("#mapBody tr"), function (tr) {
       var how = tr.querySelector(".how");
       var m = byName[tr.dataset.name];
+      var keep = configColumn(CURRENT.entity, tr.dataset.name);   // без подсказки остаётся колонка из конфига
+      function setCol(v) {
+        tr.querySelector(".val").value = v;
+        tr.querySelector("input[role=combobox]").value = v;
+      }
       if (!m) {
         tr.dataset.low = "";
-        var hid0 = tr.querySelector(".val"), inp0 = tr.querySelector("input[role=combobox]");
-        if (hid0) hid0.value = "";
-        if (inp0) inp0.value = "";
-        how.innerHTML = '<span class="badge warn">ручное</span>';
+        setCol(keep);
+        how.innerHTML = keep ? '<span class="badge">из конфига</span>' : '<span class="badge warn">ручное</span>';
         return;
       }
       var col = m.column || "";
@@ -194,13 +364,11 @@
       var scoreTxt = score.toFixed(2);
       if (col && cols && cols.indexOf(col) < 0) {
         tr.dataset.low = "";
-        tr.querySelector(".val").value = "";
-        tr.querySelector("input[role=combobox]").value = "";
+        setCol(keep);
         how.innerHTML = '<span class="badge warn">нет колонки «' + esc(col) + '» · ' + scoreTxt + '</span>';
         return;
       }
-      tr.querySelector(".val").value = col;
-      tr.querySelector("input[role=combobox]").value = col;
+      setCol(col || keep);
       if (!col) {
         tr.dataset.low = "";
         how.innerHTML = '<span class="badge warn">ручное · ' + scoreTxt + "</span>";
@@ -239,41 +407,112 @@
     return { fields: fields, manual: manual, needsRef: needsRef };
   }
 
+  // ---- таблица на экране → fields сущности в конфиге ----
+  // Существующие поля правятся на месте: transform/ref/прочие ключи сохраняются, производные «X@y»
+  // не трогаются. Пустая колонка — поле не грузится (ключ удаляется). Ref-колонка без известной
+  // сущности (ref.entity) в конфиг не пишется: она попадает в blocked.
+  function mergeFields(entity) {
+    var ent = cfgEntity(entity);
+    if (!ent) return null;
+    var old = ent.fields || {};
+    var next = JSON.parse(JSON.stringify(old)), blocked = [];
+    Array.prototype.forEach.call(d.querySelectorAll("#mapBody tr"), function (tr) {
+      var name = tr.dataset.name, col = (tr.querySelector(".val") || {}).value || "";
+      if (!col) { delete next[name]; return; }
+      var spec = next[name] || {};
+      spec.column = col;
+      if (CURRENT.refCols[col] && !(spec.ref && spec.ref.entity)) blocked.push(name + " → " + col);
+      next[name] = spec;
+    });
+    return { fields: next, blocked: blocked, changed: JSON.stringify(next) !== JSON.stringify(old) };
+  }
+
+  // Сохранить соответствие в конфиг базы. → true (сохранено) | false (нечего сохранять)
+  function saveMapping() {
+    if (!CFG) return Promise.reject(new Error("конфиг базы не загружен"));
+    var m = mergeFields(CURRENT.entity);
+    if (!m) return Promise.resolve(false);
+    if (m.blocked.length) {
+      return Promise.reject(new Error("ссылочные колонки без сущности: " + m.blocked.join(", ") +
+        " — пропишите ref.entity у этих полей в конфиге"));
+    }
+    if (!m.changed) return Promise.resolve(false);
+    var next = JSON.parse(JSON.stringify(CFG));
+    next.entities[CURRENT.entity].fields = m.fields;
+    var text = JSON.stringify(next, null, 2) + "\n";
+    return uploadConfigFile(CONFIG + ".json." + stamp() + ".bak", CFG_TEXT, false)
+      .then(function () { return uploadConfigFile(CONFIG + ".json", text, true); })
+      .then(function () { CFG = next; CFG_TEXT = text; return true; });
+  }
+
   // ---- блокировка кнопок на время запроса ----
   var busy = false;
   function setBusy(on) {
     busy = on;
-    ["aiBtn", "runBtn", "checkBtn", "dryBtn"].forEach(function (id) {
+    ["aiBtn", "saveBtn", "runBtn", "checkBtn", "dryBtn"].forEach(function (id) {
       var b = d.getElementById(id);
       if (b) b.disabled = !!on;
     });
   }
 
+  // ---- таблица соответствия сущности: колонки базы + поля источника ----
+  var CURRENT = { entity: "", cols: [], refCols: {} };
+  function prepareRows(entity) {
+    var tableId = TABLES[entity];
+    if (!tableId) return Promise.reject(new Error("не задан table_id для «" + entity + "»"));
+    var meta;
+    return loadColumns(tableId)
+      .then(function (m) { meta = m; return getSourceFields(entity); })
+      .then(function (source) {
+        CURRENT = { entity: entity, cols: meta.names, refCols: meta.refCols };
+        var current = {};
+        source.forEach(function (f) { current[f[0]] = configColumn(entity, f[0]); });
+        // «@name» — главное значение записи: выбирается вручную, в подбор не идёт
+        var cols = CFG ? ["@name"].concat(meta.names) : meta.names;
+        renderRows(source, cols, current);
+        return { source: source, meta: meta };
+      });
+  }
+
+  function showCurrent(entity) {
+    if (busy || !CFG) return;
+    setHint("Читаю колонки базы…");
+    setBusy(true);
+    prepareRows(entity)
+      .then(function () { setHint("Соответствие из конфига «" + CONFIG + "». Поправьте или подберите AI."); })
+      .catch(function (e) { setHint("Ошибка: " + errMsg(e)); })
+      .then(function () { setBusy(false); });
+  }
+
   // ---- главный обработчик кнопки «Подобрать соответствие» ----
-  var CURRENT = { cols: [], refCols: {} };
   function runSuggest(entity) {
     if (busy) return;
-    var hint = d.getElementById("mapHint");
-    var tableId = TABLES[entity];
-    if (!tableId) { if (hint) hint.textContent = "не задан table_id для «" + entity + "»"; return; }
-    if (hint) hint.textContent = "Читаю колонки базы и подбираю соответствие…";
+    if (!TABLES[entity]) { setHint("не задан table_id для «" + entity + "»"); return; }
+    setHint("Читаю колонки базы и подбираю соответствие…");
     setBusy(true);
-    var meta;
-    loadColumns(tableId)
-      .then(function (m) { meta = m; CURRENT = { cols: m.names, refCols: m.refCols }; return getSourceFields(entity); })
-      .then(function (source) {
-        renderRows(source, meta.names);
-        return suggest(source, meta.names).then(function (res) {
-          applyMatches(res.matches, meta.refCols, meta.names);
+    prepareRows(entity)
+      .then(function (p) {
+        return suggest(p.source, p.meta.names).then(function (res) {
+          applyMatches(res.matches, p.meta.refCols, p.meta.names);
         });
       })
-      .then(function () { if (hint) hint.textContent = "Подобрано. Проверьте жёлтые строки, поправьте комбобоксом и запускайте."; })
-      .catch(function (e) { if (hint) hint.textContent = "Ошибка: " + errMsg(e); })
+      .then(function () { setHint("Подобрано. Проверьте жёлтые строки, поправьте комбобоксом и сохраните."); })
+      .catch(function (e) { setHint("Ошибка: " + errMsg(e)); })
+      .then(function () { setBusy(false); });
+  }
+
+  function runSave() {
+    if (busy) return;
+    setBusy(true);
+    return saveMapping()
+      .then(function (saved) { setHint(saved ? "Соответствие сохранено в конфиг «" + CONFIG + "»." : "Изменений нет."); })
+      .catch(function (e) { setHint("Не сохранено: " + errMsg(e)); })
       .then(function () { setBusy(false); });
   }
 
   // ---- запуск коннектора через b24ig.php (тот же домен, CORS не нужен) ----
   // mode: "" (рабочий) | "check" (проверка схем) | "dry_run" (пробный)
+  // Несохранённое соответствие сначала уходит в конфиг: запуск идёт по тому, что на экране.
   function run(mode) {
     if (busy) return;
     var out = d.getElementById("result");
@@ -281,7 +520,9 @@
       "&JSON" + (mode ? "&" + mode : "");
     if (out) { out.style.display = "block"; out.innerHTML = '<div class="bar">Запуск…</div>'; }
     setBusy(true);
-    return fetchTO(url)
+    var pre = CFG && cfgEntity(CURRENT.entity) ? saveMapping() : Promise.resolve(false);
+    return pre
+      .then(function () { return fetchTO(url); })
       .then(function (r) {
         if (!r.ok) throw new Error("HTTP " + r.status);
         return r.json();
@@ -316,6 +557,7 @@
   w.Connector = {
     runSuggest: runSuggest,
     run: run,
+    save: runSave,
     buildConfigFields: function () { return buildConfigFields(CURRENT.refCols); },
     loadColumns: loadColumns,
     suggest: suggest
@@ -326,8 +568,18 @@
     function ent() { return sel ? sel.value : (Object.keys(TABLES)[0] || ""); }
     var b;
     if ((b = d.getElementById("aiBtn"))) b.onclick = function () { runSuggest(ent()); };
+    if ((b = d.getElementById("saveBtn"))) b.onclick = function () { runSave(); };
     if ((b = d.getElementById("runBtn"))) b.onclick = function () { run(""); };
     if ((b = d.getElementById("checkBtn"))) b.onclick = function () { run("check"); };
     if ((b = d.getElementById("dryBtn"))) b.onclick = function () { run("dry_run"); };
+    if (sel) sel.onchange = function () { showCurrent(ent()); };
+    var cs = d.getElementById("configSel");
+    if (cs) cs.onchange = function () {
+      if (busy) return;
+      CFG = null;
+      d.getElementById("mapBody").innerHTML = "";
+      loadConfig(cs.value).catch(function (e) { setHint("Конфиг: " + errMsg(e)); });
+    };
+    initConfig();
   });
 })(window, document);
