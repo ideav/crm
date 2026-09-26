@@ -69,7 +69,8 @@ table.res th{background:var(--bg-secondary);color:var(--text-secondary);font-wei
   <div class="conn-help">
     <b>Как это работает.</b> Выберите источник и что грузить, нажмите
     <b>«Подобрать соответствие»</b> — колонки подставятся автоматически (можно поправить),
-    затем <b>«Проверить»</b> → <b>«Пробный»</b> → <b>«Запустить»</b>.
+    затем <b>«Проверить»</b> → <b>«Пробный»</b> → <b>«Запустить»</b>. Поправленное соответствие
+    сохраняется в конфиг базы (<code>templates/custom/&lt;база&gt;/connector/</code>) перед запуском.
   </div>
 
   <div class="conn-form">
@@ -95,23 +96,26 @@ table.res th{background:var(--bg-secondary);color:var(--text-secondary);font-wei
     </div>
 
     <div class="conn-row" style="margin-top:1rem">
+      <div class="conn-field" id="configBox" style="display:none"><label>Конфиг (templates/custom/&lt;база&gt;/connector)</label>
+        <select id="configSel"></select>
+      </div>
       <div class="conn-field"><label>Сущность (для подбора полей)</label>
-        <select id="entities">
-          <option value="bitrix_users">Пользователь Битрикс</option>
-          <option value="departments">Департамент</option>
-        </select>
+        <select id="entities"></select>
       </div>
     </div>
 
     <div class="map-head">
       <h5>Соответствие полей</h5>
-      <button class="btn" id="aiBtn">✨ Подобрать соответствие (AI)</button>
+      <span>
+        <button class="btn" id="aiBtn">✨ Подобрать соответствие (AI)</button>
+        <button class="btn" id="saveBtn">Сохранить соответствие</button>
+      </span>
     </div>
     <table class="map">
       <thead><tr><th style="width:34%">Поле источника</th><th class="arrow"></th><th style="width:40%">Колонка базы</th><th>Как подобрано</th></tr></thead>
       <tbody id="mapBody"></tbody>
     </table>
-    <div class="hint" id="mapHint">Нажмите «Подобрать соответствие» — колонки берутся из метаданных базы, подбор делает эмбеддер (через ядро).</div>
+    <div class="hint" id="mapHint">Читаю конфиг коннектора базы…</div>
 
     <div class="conn-actions">
       <button class="btn act" id="checkBtn">Проверить</button>
@@ -124,23 +128,9 @@ table.res th{background:var(--bg-secondary);color:var(--text-secondary);font-wei
 </div>
 
 <script>
-  /* конфиг рабочего места (значения база-специфичны) */
+  /* всё база-специфичное (конфиг, таблицы, поля, id «Коннектора») читается из конфига базы — js/connector.js */
   window.CONNECTOR_DB = "{_global_.z}";                 // имя базы из оболочки
-  window.CONNECTOR_CONFIG = "sportzania-spz";           // имя конфига в templates/custom/<база>/connector/
-  window.CONNECTOR_CONNECT_ID = 0;                      /* TODO: id записи-«Коннектора» (тип CONNECT) с URL эмбеддера */
-  window.CONNECTOR_TABLES = { "bitrix_users": 969767, "departments": 2859 };
-  /* поля источника для отладки (позже — с сервера: Битрикс *.fields / 1С $metadata) */
-  window.CONNECTOR_SOURCE_FIELDS = {
-    "bitrix_users": [
-      ["LAST_NAME","Фамилия"],["NAME","Имя"],["SECOND_NAME","Отчество"],
-      ["PERSONAL_BIRTHDAY","Дата рождения"],["WORK_POSITION","Должность"],
-      ["EMAIL","E-Mail"],["PERSONAL_MOBILE","Личный мобильный"],
-      ["UF_DEPARTMENT","Подразделение"],["ID","Идентификатор"]
-    ],
-    "departments": [
-      ["NAME","Название"],["PARENT","Родительский отдел"],["UF_HEAD","Руководитель"]
-    ]
-  };
+  window.CONNECTOR_XSRF = "{_global_.xsrf}";            // для сохранения конфига через dir_admin
 
   /* переключатель источника + показать пароль (простая логика формы) */
   (function(){
@@ -154,4 +144,4 @@ table.res th{background:var(--bg-secondary);color:var(--text-secondary);font-wei
     document.querySelectorAll(".eye").forEach(function(b){b.onclick=function(){var i=document.getElementById(b.dataset.for);i.type=i.type==="password"?"text":"password";};});
   })();
 </script>
-<script src="/js/connector.js?1"></script>
+<script src="/js/connector.js?2"></script>
