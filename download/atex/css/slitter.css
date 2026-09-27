@@ -409,6 +409,12 @@
 .atex-sl-jumbo-add:hover { color: var(--sl-accent); border-color: var(--sl-accent); }
 /* Панель показаний — вкладка активного корешка: левый верхний угол раскрыт. */
 .atex-sl-readings .atex-sl-section { border-top-left-radius: 0; }
+/* #5029: поля панели стоят слитно — промежутка между ячейками нет, соседние рамки
+   перекрываются (сдвиг на 1px), скругления нет; перенос по ширине (auto-fit) прежний.
+   Поле в фокусе поднято, чтобы его рамку не закрывал сосед. */
+.atex-sl-readings .atex-sl-grid { gap: 0; }
+.atex-sl-readings .atex-sl-input { border-radius: 0; margin-right: -1px; }
+.atex-sl-readings .atex-sl-input:focus { position: relative; z-index: 1; }
 /* #4914 п.3: «Фото брака» и «Примечания» — одна строка сетки: фото занимает первую
    колонку ряда, примечания тянутся до его конца. На совсем узких экранах (меньше двух
    колонок) примечания просто уходят на всю ширину. */

@@ -354,6 +354,27 @@
         return { counterStart: String(newStart == null ? '' : newStart), counterEnd: end };
     }
 
+    // #5029: ввод «Проходов» записи джамбо — целое ≥ 0 (пусто = 0); иначе null.
+    function jumboRunsFromInput(value) {
+        var s = String(value == null ? '' : value).trim();
+        if (s === '') return 0;
+        if (!/^\d+$/.test(s)) return null;
+        return parseInt(s, 10);
+    }
+
+    // #5029: правка «Проходов» (Кол-во резок) записи с панели. Погонаж записи
+    // меняется на Δпроходов × метраж: кон. = кон. − Δ × метраж (пустой кон. —
+    // от начала). Пустое начало — счётчиков нет, кон. не выдумываем.
+    function jumboCountersAfterRunsEdit(record, newRuns, runLength) {
+        var rec = record || {};
+        var start = String(rec.counterStart == null ? '' : rec.counterStart).trim();
+        if (start === '') return { cutsCount: newRuns, counterEnd: rec.counterEnd == null ? '' : rec.counterEnd };
+        var end = String(rec.counterEnd == null ? '' : rec.counterEnd).trim();
+        var base = end === '' ? toNumber(start) : toNumber(end);
+        var delta = toNumber(newRuns) - toNumber(rec.cutsCount);
+        return { cutsCount: newRuns, counterEnd: round3(base - delta * toNumber(runLength)) };
+    }
+
     // #5010: финальные счётчики записи при завершении задания. Пустое начало
     // наследует пару счётчиков резки (первое джамбо; записи, заведённые до
     // #5010). Иначе кон. записи всегда сходится с ЕЁ резками и вводом: отметки
@@ -1497,6 +1518,8 @@
         jumboMeterage: jumboMeterage,                   // #5010: погонаж записи джамбо = нач. − кон.
         jumboCountersAfterMark: jumboCountersAfterMark, // #5010: счётчики записи после отметки
         jumboCountersAfterStartEdit: jumboCountersAfterStartEdit, // #5010: правка начала записи
+        jumboRunsFromInput: jumboRunsFromInput,                   // #5029: ввод «Проходов»
+        jumboCountersAfterRunsEdit: jumboCountersAfterRunsEdit,   // #5029: правка проходов записи
         jumboFinalCounters: jumboFinalCounters,         // #5010: финальные счётчики записи
         jumboFinalCounter: jumboFinalCounter,       // #4860: счётчик кон. за вычетом расхода джамбо
         rowsToJumbos: rowsToJumbos,                 // #4914: строки отчёта task_jumbo → записи джамбо
@@ -3222,6 +3245,31 @@
         });
         var meterField = field('Погонаж факт, м', meterageDisplay);   // #4321: без « (расчёт)» — подпись ломала вёрстку
         grid.appendChild(meterField);
+
+        // #5029: «Проходов» — «Кол-во резок» АКТИВНОЙ записи: проход пишется
+        // выбранному корешку. Правится оператором (запись с кон. и числом уходит
+        // целиком при изменении); у черновика — только показ, проходы кладёт отметка.
+        var runsInput = el('input', {
+            class: 'atex-sl-input', type: 'number', min: '0', step: '1', placeholder: '0',
+            readonly: storedRec ? null : 'readonly',
+            style: storedRec ? null : 'background:#f0f0f0;cursor:default'
+        });
+        runsInput.value = storedRec && storedRec.cutsCount != null ? String(storedRec.cutsCount) : '';
+        if (storedRec) {
+            runsInput.addEventListener('change', function() {
+                var runs = core.jumboRunsFromInput(runsInput.value);
+                var prev = storedRec.cutsCount == null ? '' : String(storedRec.cutsCount);
+                if (runs === null) { runsInput.value = prev; return; }
+                if (String(runs) === (prev.trim() === '' ? '0' : prev.trim())) return;
+                var next = core.jumboCountersAfterRunsEdit(storedRec, runs, core.runLengthForCut(cut));
+                storedRec.cutsCount = next.cutsCount;
+                storedRec.counterEnd = next.counterEnd;
+                runsInput.value = String(runs);
+                refreshMeterage();
+                self.saveJumboRecord(storedRec, { quiet: true, full: true });
+            });
+        }
+        grid.appendChild(field('Проходов', runsInput));
 
         // ── Поля АКТИВНОЙ записи джамбо (#4914) ──
         // Раньше это были реквизиты самой резки (787042/787043/787045 и браки с фото) —
