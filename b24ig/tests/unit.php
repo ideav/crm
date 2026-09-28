@@ -296,5 +296,71 @@ throws('start + период → ошибка', function () use ($startSrc) {
         array('period' => array('field' => 'DATE', 'from' => '2026-01-01')), array(), function () {});
 }, 'не поддерживает период');
 
+// --- action=match: подбор полей через b24ig.php, адрес эмбеддера — matcher.url конфига, токен — EMBED_TOKEN
+$mSite = sys_get_temp_dir() . '/b24ig-match-' . getmypid();
+$mDir = "$mSite/templates/custom/spz/connector";
+@mkdir($mDir, 0777, true);
+$mCfg = array('version' => 1, 'project' => 'm', 'sources' => array('b' => array('type' => 'mock')),
+    'target' => array('type' => 'integram'), 'order' => array('a'), 'entities' => array('a' => array('fields' => array())),
+    'matcher' => array('url' => 'http://emb.test:8077/match'));
+file_put_contents("$mDir/m.json", json_encode($mCfg));
+file_put_contents("$mDir/secrets.json", json_encode(array('EMBED_TOKEN' => 'SEKRET')));
+$mBody = json_encode(array('source' => array(array('LAST_NAME', 'Фамилия'), array('X')), 'target' => array('Фамилия', 'Имя')));
+$mCall = null;
+$mHttp = function ($code, $body) use (&$mCall) {
+    return function ($method, $url, $headers, $payload) use (&$mCall, $code, $body) {
+        $mCall = array('method' => $method, 'url' => $url, 'headers' => $headers, 'payload' => json_decode($payload, true));
+        return array('code' => $code, 'body' => $body, 'error' => '');
+    };
+};
+$mGet = array('db' => 'spz', 'config' => 'm');
+
+list($c, $o) = Runner::match($mGet, $mBody, $mHttp(200, '{"matches":[{"field":"LAST_NAME","column":"Фамилия","score":0.99}],"fields":{},"manual":["X"],"debug":1}'), $mSite);
+eq('match: 200 и ok', array($c, $o['ok']), array(200, true));
+eq('match: ответ — matches/fields/manual эмбеддера, лишнее отброшено', array_keys($o), array('ok', 'matches', 'fields', 'manual'));
+eq('match: адрес эмбеддера — matcher.url конфига', array($mCall['method'], $mCall['url']), array('POST', 'http://emb.test:8077/match'));
+eq('match: токен — EMBED_TOKEN из secrets.json', in_array('Authorization: Bearer SEKRET', $mCall['headers'], true), true);
+eq('match: эмбеддеру уходят source и target', $mCall['payload'], array('source' => array(array('LAST_NAME', 'Фамилия'), array('X', '')), 'target' => array('Фамилия', 'Имя')));
+
+list($c, $o) = Runner::match($mGet, $mBody, $mHttp(401, 'bad token'), $mSite);
+eq('match: отказ эмбеддера → 502 с кодом', array($c, $o['error']), array(502, 'эмбеддер: HTTP 401'));
+eq('match: адрес и токен не попадают в ответ', strpos(json_encode($o), 'SEKRET') === false && strpos(json_encode($o), 'emb.test') === false, true);
+list($c, $o) = Runner::match($mGet, $mBody, $mHttp(200, '<html>'), $mSite);
+eq('match: не-JSON эмбеддера → 502', array($c, $o['error']), array(502, 'эмбеддер: неожиданный ответ'));
+
+$mCall = null;
+list($c, $o) = Runner::match(array('db' => 'spz'), $mBody, $mHttp(200, '{}'), $mSite);
+eq('match: без config → 400', array($c, $o['error']), array(400, 'нужны параметры db и config'));
+list($c, $o) = Runner::match($mGet, '{"source":[]}', $mHttp(200, '{}'), $mSite);
+eq('match: пустые source/target → 400', $c, 400);
+list($c, $o) = Runner::match(array('db' => 'spz', 'config' => 'nope'), $mBody, $mHttp(200, '{}'), $mSite);
+eq('match: нет конфига → 404', $c, 404);
+list($c, $o) = Runner::match(array('db' => 'spz', 'config' => '../m'), $mBody, $mHttp(200, '{}'), $mSite);
+eq('match: имя конфига с .. → 400', $c, 400);
+eq('match: при ошибках запроса эмбеддер не вызывается', $mCall, null);
+
+unset($mCfg['matcher']);
+file_put_contents("$mDir/m.json", json_encode($mCfg));
+list($c, $o) = Runner::match($mGet, $mBody, $mHttp(200, '{}'), $mSite);
+eq('match: без matcher.url → 503 с подсказкой', array($c, strpos($o['error'], 'matcher.url') !== false), array(503, true));
+
+$mCfg['matcher'] = array('url' => '${EMBED_URL}');
+$mCfg['target']['db'] = 'other';
+file_put_contents("$mDir/m.json", json_encode($mCfg));
+list($c, $o) = Runner::match($mGet, $mBody, $mHttp(200, '{}'), $mSite);
+eq('match: target.db чужой базы → 400', $c, 400);
+
+unset($mCfg['target']['db']);
+file_put_contents("$mDir/m.json", json_encode($mCfg));
+file_put_contents("$mDir/secrets.json", json_encode(array('EMBED_URL' => 'http://emb2.test/match')));
+list($c, $o) = Runner::match($mGet, $mBody, $mHttp(200, '{"matches":[]}'), $mSite);
+eq('match: matcher.url через ${EMBED_URL} из secrets.json', array($c, $mCall['url']), array(200, 'http://emb2.test/match'));
+eq('match: без EMBED_TOKEN заголовка Authorization нет', preg_grep('/^Authorization:/', $mCall['headers']), array());
+exec('rm -rf ' . escapeshellarg($mSite));
+ob_start();
+$mRc = Runner::web(array('action' => 'match', 'db' => 'spz', 'config' => 'm'));   // тело пустое (CLI)
+$mOut = json_decode(ob_get_clean(), true);
+eq('web: action=match → подбор, а не запуск коннектора', array($mRc, $mOut), array(2, array('ok' => false, 'error' => 'в теле POST нужны source [[поле, подпись], …] и target [колонка, …]')));
+
 echo ($failed ? "ПРОВАЛЕНО $failed из $total\n" : "OK: $total проверок\n");
 exit($failed ? 1 : 0);

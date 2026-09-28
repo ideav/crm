@@ -23,6 +23,9 @@
     "max_rows_per_file": 5000,
     "request_time_sec": 120
   },
+  "matcher": {
+    "url": "http://104.128.137.21:8077/match"
+  },
   "runtime": {
     "timezone": "Europe/Moscow",
     "state_dir": "state/sportzania-spz",
