@@ -285,6 +285,7 @@ eq('проектный режим: путь не запирается', $ctxProj
 $ctxDb = new Context($cfgBase, sys_get_temp_dir() . '/b24ig-db-' . getmypid(), array('db' => 'spz'), sys_get_temp_dir());
 throws('dataFile: .. отклонён', function () use ($ctxDb) { $ctxDb->dataFile('../x', 'тест'); }, 'внутри папки базы');
 throws('dataFile: абсолютный отклонён', function () use ($ctxDb) { $ctxDb->dataFile('/etc/passwd', 'тест'); }, 'внутри папки базы');
+throws('dataFile: путь попадает в текст ошибки', function () use ($ctxDb) { $ctxDb->dataFile('../x', 'тест'); }, '«../x»');
 eq('dataFile: обычное имя внутри папки базы', $ctxDb->dataFile('maps.json', 'тест'), $ctxDb->root . '/maps.json');
 exec('rm -rf ' . escapeshellarg($ctxProj->root) . ' ' . escapeshellarg($ctxDb->root));
 
