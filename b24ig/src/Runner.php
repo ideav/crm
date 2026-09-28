@@ -46,7 +46,7 @@ class Context
     {
         $rel = (string)$rel;
         if ($rel === '' || $rel[0] === '/' || $rel[0] === '\\' || preg_match('~(^|[/\\\\])\.\.([/\\\\]|$)~', $rel)) {
-            throw new ConnectorException("$what: путь «$rel» должен быть внутри папки базы, без .. и абсолютных путей");
+            throw new ConnectorException("$what: путь «{$rel}» должен быть внутри папки базы, без .. и абсолютных путей");
         }
         return $this->root . '/' . $rel;
     }
@@ -433,7 +433,7 @@ TXT;
     {
         if ($confine) {
             if ($p === '' || $p[0] === '/' || $p[0] === '\\' || preg_match('~(^|[/\\\\])\.\.([/\\\\]|$)~', $p)) {
-                throw new ConnectorException("путь «$p» должен быть внутри папки базы, без .. и абсолютных путей");
+                throw new ConnectorException("путь «{$p}» должен быть внутри папки базы, без .. и абсолютных путей");
             }
             return $root . '/' . $p;
         }

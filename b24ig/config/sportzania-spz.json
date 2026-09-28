@@ -125,21 +125,26 @@
       },
       "fields": {
         "ID": {
+          "label": "ID",
           "column": "ID Битрикс",
           "transform": "number"
         },
         "NAME": {
+          "label": "Название подразделения",
           "column": "@name"
         },
         "SORT": {
+          "label": "Порядок сортировки",
           "column": "Сортировка",
           "transform": "number"
         },
         "UF_HEAD": {
+          "label": "Руководитель",
           "column": "Руководитель (ID)",
           "transform": "number"
         },
         "PARENT": {
+          "label": "Вышестоящее подразделение",
           "column": "Родительский",
           "ref": {
             "entity": "departments",
@@ -166,18 +171,23 @@
       },
       "fields": {
         "ID": {
+          "label": "ID",
           "column": "@name"
         },
         "LAST_NAME": {
+          "label": "Фамилия",
           "column": "Фамилия"
         },
         "NAME": {
+          "label": "Имя",
           "column": "Имя"
         },
         "SECOND_NAME": {
+          "label": "Отчество",
           "column": "Отчество"
         },
         "FIO": {
+          "label": "ФИО",
           "column": "ФИО",
           "transform": "template",
           "template": "{LAST_NAME} {NAME} {SECOND_NAME}"
@@ -212,6 +222,7 @@
       },
       "fields": {
         "ID": {
+          "label": "ID",
           "column": "@name"
         },
         "ID@tabel": {
@@ -224,31 +235,40 @@
           }
         },
         "ACTIVE": {
+          "label": "Активность",
           "column": "Активен",
           "transform": "yn"
         },
         "LAST_NAME": {
+          "label": "Фамилия",
           "column": "Фамилия"
         },
         "NAME": {
+          "label": "Имя",
           "column": "Имя"
         },
         "SECOND_NAME": {
+          "label": "Отчество",
           "column": "Отчество"
         },
         "EMAIL": {
+          "label": "E-Mail",
           "column": "Email"
         },
         "WORK_PHONE": {
+          "label": "Телефон компании",
           "column": "Рабочий телефон"
         },
         "PERSONAL_MOBILE": {
+          "label": "Личный мобильный",
           "column": "Мобильный"
         },
         "WORK_POSITION": {
+          "label": "Должность",
           "column": "Должность"
         },
         "UF_DEPARTMENT": {
+          "label": "Подразделения",
           "column": "Департаменты (ID)",
           "transform": "join"
         },
@@ -263,10 +283,12 @@
           }
         },
         "LAST_LOGIN": {
+          "label": "Последняя авторизация",
           "column": "Последний вход",
           "transform": "datetime"
         },
         "DATE_REGISTER": {
+          "label": "Дата регистрации",
           "column": "Дата регистрации",
           "transform": "datetime"
         }
@@ -306,32 +328,41 @@
       },
       "fields": {
         "ID": {
+          "label": "ID",
           "column": "@name"
         },
         "DATE_CREATE": {
+          "label": "Дата создания",
           "column": "Дата создания",
           "transform": "datetime"
         },
         "DATE_MODIFY": {
+          "label": "Дата изменения",
           "column": "Дата изменения",
           "transform": "datetime"
         },
         "TITLE": {
+          "label": "Название лида",
           "column": "Название"
         },
         "NAME": {
+          "label": "Имя",
           "column": "Имя"
         },
         "SECOND_NAME": {
+          "label": "Отчество",
           "column": "Отчество"
         },
         "LAST_NAME": {
+          "label": "Фамилия",
           "column": "Фамилия"
         },
         "COMPANY_TITLE": {
+          "label": "Название компании",
           "column": "Компания"
         },
         "SOURCE_ID": {
+          "label": "Источник",
           "column": "Источник лида",
           "transform": "dict:lead_source",
           "ref": {
@@ -340,9 +371,11 @@
           }
         },
         "SOURCE_DESCRIPTION": {
+          "label": "Дополнительно об источнике",
           "column": "Описание источника"
         },
         "STATUS_ID": {
+          "label": "Стадия",
           "column": "Статус",
           "ref": {
             "by": "name",
@@ -350,36 +383,45 @@
           }
         },
         "STATUS_SEMANTIC_ID": {
+          "label": "Семантика стадии",
           "column": "Семантика статуса"
         },
         "OPPORTUNITY": {
+          "label": "Сумма",
           "column": "Сумма",
           "transform": "money"
         },
         "IS_MANUAL_OPPORTUNITY": {
+          "label": "Сумма введена вручную",
           "column": "Ручная сумма",
           "transform": "yn"
         },
         "OPENED": {
+          "label": "Доступен для всех",
           "column": "Открыт",
           "transform": "yn"
         },
         "COMMENTS": {
+          "label": "Комментарий",
           "column": "Комментарий"
         },
         "HAS_PHONE": {
+          "label": "Есть телефон",
           "column": "Есть телефон",
           "transform": "yn"
         },
         "HAS_EMAIL": {
+          "label": "Есть e-mail",
           "column": "Есть почта",
           "transform": "yn"
         },
         "HAS_IMOL": {
+          "label": "Есть открытая линия",
           "column": "Есть чат",
           "transform": "yn"
         },
         "ASSIGNED_BY_ID": {
+          "label": "Ответственный",
           "column": "Табельный",
           "ref": {
             "entity": "tabel",
@@ -388,22 +430,27 @@
           }
         },
         "CREATED_BY_ID": {
+          "label": "Кем создан",
           "column": "Создал (ID)",
           "transform": "number"
         },
         "MODIFY_BY_ID": {
+          "label": "Кем изменён",
           "column": "Изменил (ID)",
           "transform": "number"
         },
         "MOVED_BY_ID": {
+          "label": "Кем перемещён",
           "column": "Переместил (ID)",
           "transform": "number"
         },
         "CONTACT_ID": {
+          "label": "Контакт",
           "column": "Контакт",
           "transform": "number"
         },
         "IS_RETURN_CUSTOMER": {
+          "label": "Повторный лид",
           "column": "Повторный",
           "transform": "yn",
           "ref": {
@@ -412,9 +459,11 @@
           }
         },
         "ORIGINATOR_ID": {
+          "label": "Внешний источник",
           "column": "Инициатор"
         },
         "ORIGIN_ID": {
+          "label": "Идентификатор во внешнем источнике",
           "column": "Источник происхождения",
           "ref": {
             "by": "name",
@@ -422,49 +471,62 @@
           }
         },
         "UTM_SOURCE": {
+          "label": "Рекламная система",
           "column": "UTM источник"
         },
         "UTM_MEDIUM": {
+          "label": "Тип трафика",
           "column": "UTM канал"
         },
         "UTM_CAMPAIGN": {
+          "label": "Обозначение рекламной кампании",
           "column": "UTM кампания"
         },
         "UTM_CONTENT": {
+          "label": "Содержание кампании",
           "column": "UTM контент"
         },
         "UTM_TERM": {
+          "label": "Условие поиска кампании",
           "column": "UTM ключ"
         },
         "LAST_ACTIVITY_BY": {
+          "label": "Автор последней активности",
           "column": "Активность",
           "transform": "number"
         },
         "LAST_COMMUNICATION_TIME": {
+          "label": "Время последней коммуникации",
           "column": "Последняя связь",
           "transform": "datetime"
         },
         "PHONE": {
+          "label": "Телефон",
           "column": "Телефоны",
           "transform": "multifield"
         },
         "EMAIL": {
+          "label": "E-mail",
           "column": "Почта",
           "transform": "multifield"
         },
         "WEB": {
+          "label": "Сайт",
           "column": "Сайты",
           "transform": "multifield"
         },
         "IM": {
+          "label": "Мессенджер",
           "column": "Мессенджеры",
           "transform": "multifield"
         },
         "UF_CRM_1648027063964": {
+          "label": "Направление",
           "column": "Направление",
           "transform": "dict:lead_direction"
         },
         "LINK": {
+          "label": "Ссылка",
           "column": "Ссылка",
           "transform": "number",
           "optional": true
@@ -505,12 +567,15 @@
       },
       "fields": {
         "ID": {
+          "label": "ID",
           "column": "@name"
         },
         "TITLE": {
+          "label": "Название сделки",
           "column": "Название"
         },
         "LEAD_ID": {
+          "label": "Лид",
           "column": "Лид",
           "ref": {
             "entity": "leads",
@@ -519,6 +584,7 @@
           }
         },
         "STAGE_ID": {
+          "label": "Стадия сделки",
           "column": "Стадия",
           "transform": "dict:deal_stage",
           "ref": {
@@ -527,21 +593,26 @@
           }
         },
         "OPPORTUNITY": {
+          "label": "Сумма",
           "column": "Сумма",
           "transform": "money"
         },
         "CURRENCY_ID": {
+          "label": "Валюта",
           "column": "Валюта"
         },
         "DATE_CREATE": {
+          "label": "Дата создания",
           "column": "Дата создания",
           "transform": "datetime"
         },
         "DATE_MODIFY": {
+          "label": "Дата изменения",
           "column": "Дата изменения",
           "transform": "datetime"
         },
         "ASSIGNED_BY_ID": {
+          "label": "Ответственный",
           "column": "Табельный",
           "ref": {
             "entity": "tabel",
@@ -550,10 +621,12 @@
           }
         },
         "CLOSED": {
+          "label": "Закрыта",
           "column": "Закрыта",
           "transform": "yn"
         },
         "COMMENTS": {
+          "label": "Комментарий",
           "column": "Комментарий"
         }
       },
@@ -593,15 +666,19 @@
       },
       "fields": {
         "ID": {
+          "label": "ID",
           "column": "@name"
         },
         "TITLE": {
+          "label": "Название",
           "column": "Название"
         },
         "DESCRIPTION": {
+          "label": "Описание",
           "column": "Описание"
         },
         "STATUS": {
+          "label": "Статус",
           "column": "Статус задачи",
           "transform": "dict:task_status",
           "ref": {
@@ -610,6 +687,7 @@
           }
         },
         "PRIORITY": {
+          "label": "Важность",
           "column": "Приоритет",
           "ref": {
             "by": "name",
@@ -617,6 +695,7 @@
           }
         },
         "RESPONSIBLE_ID": {
+          "label": "Исполнитель",
           "column": "Исполнитель",
           "ref": {
             "entity": "tabel",
@@ -625,6 +704,7 @@
           }
         },
         "CREATED_BY": {
+          "label": "Постановщик",
           "column": "Автор",
           "ref": {
             "entity": "tabel",
@@ -633,34 +713,42 @@
           }
         },
         "DEADLINE": {
+          "label": "Крайний срок",
           "column": "Крайний срок",
           "transform": "datetime"
         },
         "CREATED_DATE": {
+          "label": "Дата создания",
           "column": "Дата создания",
           "transform": "datetime"
         },
         "CHANGED_DATE": {
+          "label": "Дата изменения",
           "column": "Дата изменения",
           "transform": "datetime"
         },
         "CLOSED_DATE": {
+          "label": "Дата закрытия",
           "column": "Дата закрытия",
           "transform": "datetime"
         },
         "GROUP_ID": {
+          "label": "Группа",
           "column": "Группа ID",
           "transform": "number"
         },
         "PARENT_ID": {
+          "label": "Базовая задача",
           "column": "Родительская задача",
           "transform": "number"
         },
         "TIME_ESTIMATE": {
+          "label": "Плановые трудозатраты",
           "column": "Оценка времени",
           "transform": "number"
         },
         "ALLOW_CHANGE_DEADLINE": {
+          "label": "Разрешить менять сроки",
           "column": "Можно менять срок",
           "transform": "yn"
         }
