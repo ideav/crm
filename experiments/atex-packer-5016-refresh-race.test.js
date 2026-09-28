@@ -288,10 +288,10 @@ steps.push(function() {
         written.push({ gpId: pos.gpId, qty: qty, note: note });
         return new Promise(function(res) { gates.push(res); });
     };
-    // Стабится только транспорт: loadJumbos/loadItems/loadNextItems работают
-    // настоящие — они и подменяют позиции НОВЫМИ объектами, в чём была гонка.
+    // Стабится только транспорт: loadItems работает
+    // настоящий — они и подменяют позиции НОВЫМИ объектами, в чём была гонка.
     inst.getJson = function(path) {
-        if (path.indexOf('report/packer?') === 0) { loads++; return Promise.resolve([row({ gp_id: 'a', task_id: '1', cut_width: '110.00', qty: '2', qty_fact: '2' }), row({ gp_id: 'b', task_id: '2', cut_width: '64.00', qty: '12', qty_fact: '12' })]); }
+        if (path.indexOf('report/packers?') === 0) { loads++; return Promise.resolve([row({ gp_id: 'a', task_id: '1', cut_width: '110.00', qty: '2', qty_fact: '2' }), row({ gp_id: 'b', task_id: '2', cut_width: '64.00', qty: '12', qty_fact: '12' })]); }
         return Promise.resolve([]);
     };
 
