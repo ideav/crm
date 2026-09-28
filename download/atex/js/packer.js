@@ -356,8 +356,19 @@
     // его доля «факт карточки / факт задания по всем позициям `allItems`», так что по
     // карточкам разных заказов одного задания брак вычитается в сумме один раз.
     function taskJumboQtyLines(items, stats, allItems, taskId) {
-        var jumbos = (stats || {})[taskId] || [];
-        if (isLegacyJumboCuts(jumbos)) return [];
+        var records = (stats || {})[taskId] || [];
+        if (isLegacyJumboCuts(records)) return [];
+        // #5037: один джамбо бывает записан в задании дважды — на плашке он одной
+        // строкой, резки и брак записей складываются.
+        var jumbos = [];
+        records.forEach(function(j) {
+            var no = str(j && j.no).trim();
+            var same = null;
+            jumbos.forEach(function(m) { if (m.no === no) same = m; });
+            if (!same) { same = { no: no, cuts: 0, defect: 0 }; jumbos.push(same); }
+            same.cuts += toNumber(j && j.cuts);
+            same.defect += toNumber(j && j.defect);
+        });
         var sumCuts = 0;
         jumbos.forEach(function(j) { sumCuts += toNumber(j && j.cuts); });
         var fact = factOfTask(items, taskId);
@@ -387,23 +398,43 @@
     // #5017: текст плашки «Джамбо» — по КАЖДОМУ заданию: посчиталось — «N шт с
     // джамбо», нет — номера джамбо этого задания без количеств (#4910): из записей
     // колонки jumbos, а если их нет — из `item.jumbo`. Строки заданий — через «, ».
+    // #5037: у заданий слитой плашки с РАЗНЫМ временем старта номера идут группами
+    // «05:13: … · 01:00: …» — один джамбо переходит из задания в задание, и в плоской
+    // строке его номер выглядел повтором. Одно задание или совпавшее время — строка
+    // плоская, как прежде.
     function jumboPlateText(items, stats, allItems) {
-        var parts = [];
-        function add(value) {
-            value = str(value).trim();
-            if (value && parts.indexOf(value) === -1) parts.push(value);
-        }
-        taskIdsOf(items).forEach(function(taskId) {
-            var lines = taskJumboQtyLines(items, stats, allItems, taskId);
-            if (lines.length) { lines.forEach(add); return; }
-            var records = (stats || {})[taskId] || [];
-            if (records.length) { records.forEach(function(j) { add(j && j.no); }); return; }
+        var groups = taskIdsOf(items).map(function(taskId) {
+            var parts = [];
+            function add(value) {
+                value = str(value).trim();
+                if (value && parts.indexOf(value) === -1) parts.push(value);
+            }
+            var time = '';
             (items || []).forEach(function(it) {
-                if (str(it && it.taskId).trim() !== taskId) return;
-                str(it && it.jumbo).split(',').forEach(add);
+                if (!time && str(it && it.taskId).trim() === taskId) time = unixToLocalTime(it.taskUnix);
             });
+            var lines = taskJumboQtyLines(items, stats, allItems, taskId);
+            var records = (stats || {})[taskId] || [];
+            if (lines.length) lines.forEach(add);
+            else if (records.length) records.forEach(function(j) { add(j && j.no); });
+            else {
+                (items || []).forEach(function(it) {
+                    if (str(it && it.taskId).trim() !== taskId) return;
+                    str(it && it.jumbo).split(',').forEach(add);
+                });
+            }
+            return { time: time, parts: parts };
+        }).filter(function(g) { return g.parts.length; });
+        var times = groups.map(function(g) { return g.time; });
+        var byTask = groups.length > 1 && times.every(function(t, i) { return t && times.indexOf(t) === i; });
+        if (byTask) {
+            return groups.map(function(g) { return g.time + ': ' + g.parts.join(', '); }).join(' · ');
+        }
+        var flat = [];
+        groups.forEach(function(g) {
+            g.parts.forEach(function(p) { if (flat.indexOf(p) === -1) flat.push(p); });
         });
-        return parts.join(', ');
+        return flat.join(', ');
     }
 
     // #4929: строка-кандидат «следующего задания» — та же Партия ГП плюс станок задания.
@@ -1392,8 +1423,16 @@
             // #5011: у неупакованной строки слитой плашки — своя кнопка «Упаковано»:
             // размер уезжает в свой момент, и отмечают его не дожидаясь остальных.
             // Одиночной позиции не нужно — карточная кнопка пишет её же.
+            // #5037: пока неупакованная позиция на плашке одна, строковая кнопка
+            // пишет то же, что карточная, — второй одинаковой кнопки не рисуем.
             var lineRest = line.items.filter(function(item) { return !core.isPacked(item); });
-            if (multi && lineRest.length) {
+            if (multi && !lineRest.length) {
+                // #5037: упакованная строка слитой плашки — с меткой, иначе её не
+                // отличить от неупакованной (у той просто есть кнопка).
+                div.classList.add('is-packed');
+                div.appendChild(el('span', { class: 'atex-pk-line-done', text: '✓ упаковано' }));
+            }
+            if (multi && lineRest.length && rest.length > 1) {
                 div.classList.add('has-pack');
                 var lineBtn = el('button', {
                     class: 'atex-pk-btn atex-pk-btn-pack atex-pk-btn-line',

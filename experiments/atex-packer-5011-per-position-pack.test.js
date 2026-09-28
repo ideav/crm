@@ -156,11 +156,12 @@ section('#5011: частично упакованный заказ — кноп�
     ]);
     inst.renderList();
     var card = inst.listEl.querySelectorAll('.atex-pk-card')[0];
-    assertEqual(inst.listEl.querySelectorAll('.atex-pk-btn-line').length, 1,
+    // #5037: неупакованная позиция одна — её пишет карточная кнопка, строковой нет.
+    assertEqual(inst.listEl.querySelectorAll('.atex-pk-btn-line').length, 0,
         '#5011: упакованная строка без своей кнопки');
-    var line64 = lineByWidth(card, '64 х 600');
-    assert(!!line64 && !!line64.querySelector('.atex-pk-btn-line'),
-        '#5011: кнопка — у неупакованной строки');
+    var side = card.querySelector('.atex-pk-side');
+    assert(!!side && !!side.querySelectorAll('button').filter(function(b) { return b.textContent === 'Упаковано'; })[0],
+        '#5011: неупакованную строку пишет карточная кнопка');
 });
 
 section('#5011: одиночная позиция — без строковой кнопки', function() {
@@ -236,8 +237,9 @@ section('#5011: после по-позиционной отметки — «ча
         inst.renderList();
         card = inst.listEl.querySelectorAll('.atex-pk-card')[0];
         assert(!!card.querySelector('.atex-pk-badge.is-partial'), '#5011: плашка помечена «частично»');
-        assertEqual(inst.listEl.querySelectorAll('.atex-pk-btn-line').length, 1,
-            '#5011: кнопка осталась только у неупакованной строки');
+        // #5037: осталась одна неупакованная позиция — строковой кнопки нет.
+        assertEqual(inst.listEl.querySelectorAll('.atex-pk-btn-line').length, 0,
+            '#5011: у упакованной строки кнопки нет, у последней неупакованной — карточная');
         var qty = card.querySelector('.atex-pk-qty-value');
         assertEqual(qty ? qty.textContent : null, '2', '#5011: крупно — остаток по неупакованным');
         var side = card.querySelector('.atex-pk-side');
@@ -285,9 +287,11 @@ section('#5011: дубликаты строк — кнопка пакует по
         assertEqual(written, [{ gpId: 'a', qty: 12, note: '' }],
             '#5011: первый клик пакует первого дубликата своим количеством');
         inst.renderList();
-        assertEqual(inst.listEl.querySelectorAll('.atex-pk-btn-line').length, 1,
-            '#5011: кнопка осталась — второй дубликат ещё не упакован');
-        var btn2 = inst.listEl.querySelectorAll('.atex-pk-btn-line')[0];
+        // #5037: второй дубликат — последняя неупакованная позиция, его пишет карточная кнопка.
+        assertEqual(inst.listEl.querySelectorAll('.atex-pk-btn-line').length, 0,
+            '#5011: второй дубликат ещё не упакован — его пишет карточная кнопка');
+        var side2 = inst.listEl.querySelectorAll('.atex-pk-side')[0];
+        var btn2 = side2 && side2.querySelectorAll('button').filter(function(b) { return b.textContent === 'Упаковано'; })[0];
         if (btn2) btn2.click();
         setImmediate(function() {
             assertEqual(written, [
@@ -303,9 +307,11 @@ section('#5011: дубликаты строк — кнопка пакует по
 });
 
 section('#5011: дубликаты — при упакованном первом кнопка пакует следующего', function() {
+    // #5037: неупакованных дубликатов два — у последнего строковой кнопки не было бы.
     var inst = makeList([
         item({ gp_id: 'a', task_id: '1', cut_width: '64.00', qty: '12', qty_fact: '12', packed: '12' }),
-        item({ gp_id: 'b', task_id: '2', cut_width: '64.00', qty: '12', qty_fact: '12' })
+        item({ gp_id: 'b', task_id: '2', cut_width: '64.00', qty: '12', qty_fact: '12' }),
+        item({ gp_id: 'c', task_id: '3', cut_width: '64.00', qty: '12', qty_fact: '12' })
     ]);
     var written = writtenFor(inst);
     inst.notify = function() {};

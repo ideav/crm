@@ -191,6 +191,9 @@
     font-size: 15px;
     border-radius: 8px;
 }
+/* #5037: упакованная строка слитой плашки — приглушена и подписана. */
+.atex-pk-desc.is-packed { color: var(--pk-muted); font-weight: 500; }
+.atex-pk-line-done { margin-left: 8px; font-size: 13px; font-weight: 600; color: var(--pk-ok); white-space: nowrap; }
 .atex-pk-meta { font-size: 13px; color: var(--pk-muted); margin-top: 2px; }
 /* #4665: в какой короб и по сколько штук укладывать. #4910: живёт В СТРОКЕ меты
    (span в хвосте), акцентом, — отдельной строкой карточка не растёт. */
