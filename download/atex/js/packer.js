@@ -131,7 +131,9 @@
         // #4665: типоразмер упаковки, проставленный планированием, и тип сырья (для фольги).
         tipo: 'tipo', tipoId: 'tipo_id', materialType: 'material_type',
         // #4799: артикул (плашка внизу карточки) и лидер (в подписи ролика).
-        art: 'art', leader: 'leader'
+        art: 'art', leader: 'leader',
+        // #5041: вес коробки с заказанным количеством («Заказанное количество -> Вес»).
+        packKg: 'pack_kg'
     };
     // #4914: номера джамбо задания. Колонка `jumbos` раскладывается в записи вида
     // {task_id, jumbo_no, cuts_count, defect_qty} — по одной на джамбо (jumboRowsFromReport).
@@ -240,6 +242,8 @@
             // #4799: обе колонки бывают пустыми — карточка тогда просто без них.
             art: str(kvVal(r[COL.art])).trim(),
             leader: str(kvVal(r[COL.leader])).trim(),
+            // #5041: вес коробки, кг; пусто или 0 — веса нет, строка без скобок.
+            packKg: toNumber(kvVal(r[COL.packKg])) > 0 ? formatNumber(r[COL.packKg]) : '',
             // #4914: номера джамбо задания подставляет applyJumbos() после загрузки
             // (карточка без них просто без плашки).
             jumbo: ''
@@ -1335,14 +1339,16 @@
         items.forEach(function(item) {
             var text = core.describeItem(item) || '—';
             var qty = multi ? core.currentQty(item) : null;
-            var key = text + '\u0001' + (qty == null ? '' : String(qty));
+            // #5041: вес — тоже часть ключа: строки с разным весом — разные коробки.
+            var kg = str(item.packKg);
+            var key = text + '\u0001' + (qty == null ? '' : String(qty)) + '\u0001' + kg;
             for (var i = 0; i < lines.length; i++) {
                 if (lines[i].key === key) { lines[i].items.push(item); return; }
             }
             // #5011: строка помнит СВОИ позиции — по-позиционная кнопка пакует их по
             // одной за клик (первого неупакованного), кнопка живёт, пока строка не
             // кончится.
-            lines.push({ key: key, text: text, qty: qty, items: [item] });
+            lines.push({ key: key, text: text, qty: qty, kg: kg, items: [item] });
         });
 
         var edited = false;
@@ -1416,7 +1422,10 @@
         var body = lines.map(function(line) {
             var div = el('div', { class: 'atex-pk-desc' }, [line.text]);
             if (line.qty != null) {
-                div.appendChild(el('span', { class: 'atex-pk-desc-qty', text: ' · ' + line.qty + ' шт' }));
+                div.appendChild(el('span', { class: 'atex-pk-desc-qty', text: ' · ' + line.qty + ' шт' + (line.kg ? ' (' + line.kg + ' кг)' : '') }));
+            } else if (line.kg) {
+                // #5041: у одиночной позиции количества в строке нет — вес сам по себе.
+                div.appendChild(el('span', { class: 'atex-pk-desc-kg', text: ' (' + line.kg + ' кг)' }));
             }
             var art = artBadge(line.items);
             if (art) div.appendChild(art);

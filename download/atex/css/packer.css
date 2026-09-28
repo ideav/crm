@@ -178,7 +178,7 @@
 .atex-pk-body { min-width: 0; }
 .atex-pk-desc { font-size: 17px; font-weight: 600; word-break: break-word; }
 /* #4999: количество своей позиции в строке описания — тише самого описания */
-.atex-pk-desc-qty { color: var(--pk-muted); font-weight: 400; white-space: nowrap; }
+.atex-pk-desc-qty, .atex-pk-desc-kg { color: var(--pk-muted); font-weight: 400; white-space: nowrap; }
 /* #5011: «Упаковано» у строки-позиции слитой плашки — прибита к правому краю
    строки, под неё зарезервирован столбец, чтобы текст не заходил под кнопку. */
 .atex-pk-desc.has-pack { position: relative; padding-right: 122px; }
