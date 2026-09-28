@@ -1,7 +1,7 @@
 /*
  * connector.js — рабочее место «Коннектор» (Битрикс24 / 1С → Интеграм).
  * Развёртывание: js/connector.js, подключается из templates/connector.html:
- *     <script src="/js/connector.js?2"></script>
+ *     <script src="/js/connector.js?3"></script>
  *
  * Подбор соответствия полей: браузер → b24ig.php?action=match (тот же домен) → эмбеддер.
  * Эмбеддер один на все базы: адрес и токен — в include/b24ig/embedder.json на сервере; в браузер
