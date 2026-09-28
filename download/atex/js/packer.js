@@ -1340,7 +1340,7 @@
             var text = core.describeItem(item) || '—';
             var qty = multi ? core.currentQty(item) : null;
             // #5041: вес — тоже часть ключа: строки с разным весом — разные коробки.
-            var kg = multi ? str(item.packKg) : '';
+            var kg = str(item.packKg);
             var key = text + '\u0001' + (qty == null ? '' : String(qty)) + '\u0001' + kg;
             for (var i = 0; i < lines.length; i++) {
                 if (lines[i].key === key) { lines[i].items.push(item); return; }
@@ -1423,6 +1423,9 @@
             var div = el('div', { class: 'atex-pk-desc' }, [line.text]);
             if (line.qty != null) {
                 div.appendChild(el('span', { class: 'atex-pk-desc-qty', text: ' · ' + line.qty + ' шт' + (line.kg ? ' (' + line.kg + ' кг)' : '') }));
+            } else if (line.kg) {
+                // #5041: у одиночной позиции количества в строке нет — вес сам по себе.
+                div.appendChild(el('span', { class: 'atex-pk-desc-kg', text: ' (' + line.kg + ' кг)' }));
             }
             var art = artBadge(line.items);
             if (art) div.appendChild(art);

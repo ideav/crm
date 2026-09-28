@@ -129,4 +129,27 @@ section('#5041: одинаковые строки с разным весом н�
     assertEqual(descQty(card), [' · 594 шт (1 кг)', ' · 594 шт (2 кг)'], 'вес входит в ключ повтора');
 });
 
+function descKg(card) {
+    return card.querySelectorAll('.atex-pk-desc-kg').map(function(n) { return n.textContent; });
+}
+
+section('#5041: одиночная позиция — вес в строке описания', function() {
+    var card = renderCard([item({ pack_kg: '3.562' })]);
+    assertEqual(descQty(card), [], 'подготовка: у одиночной позиции нет количества в строке');
+    assertEqual(descKg(card), [' (3.562 кг)'], 'вес в скобках в конце строки');
+});
+
+section('#5041: одиночная позиция без веса — без скобок', function() {
+    assertEqual(descKg(renderCard([item({})])), [], 'пусто — ничего');
+    assertEqual(descKg(renderCard([item({ pack_kg: '0' })])), [], 'ноль — ничего');
+});
+
+section('#5041: слитая плашка — вес только в количестве, без второго span', function() {
+    var card = renderCard([
+        item({ pack_kg: '3.562' }),
+        item({ task: '1790557200', task_id: 'T0100', gp_id: 'g2', qty_fact: '918', packed: '918', cut_width: '64.00', pack_kg: '4' })
+    ]);
+    assertEqual(descKg(card), [], 'на слитой плашке вес стоит в .atex-pk-desc-qty');
+});
+
 console.log('\n' + passed + '/' + total + ' assertions passed');
