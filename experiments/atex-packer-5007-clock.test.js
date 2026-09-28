@@ -28,18 +28,21 @@ function assertEqual(actual, expected, name) {
 
 var MINUTE = 60 * 1000;
 
-// ── nextTasksPath: окно очереди не зависит от часов устройства ──
+// ── Окно очереди не зависит от часов устройства (#5035: делит клиент по часам сервера) ──
 
-assertEqual(core.nextTasksPath({ id: '1', label: '1' }),
-    'report/packer_next?JSON_KV&LIMIT=0,5000&FR_packer_no=1',
-    'nextTasksPath: фильтр места, без фильтра даты от устройства');
-assertEqual(core.nextTasksPath({ id: '1', label: '1' }).indexOf('FR_task'), -1,
-    'nextTasksPath: внешнего FR_task нет — окно держит серверная граница «>= [TODAY]»');
-assertEqual(core.nextTasksPath(null), '',
-    'nextTasksPath: без места отчёт не запрашивается');
-assertEqual(core.nextTasksPath({ id: '2', label: 'Особое место' }),
-    'report/packer_next?JSON_KV&LIMIT=0,5000&FR_packer_no=' + encodeURIComponent('Особое место'),
-    'nextTasksPath: место подставляется как значение фильтра');
+assertEqual(core.itemsPath({ id: '1', label: '1' }).indexOf('FR_task'), -1,
+    'itemsPath: внешнего FR_task от часов устройства нет');
+(function() {
+    var sec = function(d) { return String(Math.floor(d.getTime() / 1000)); };
+    var rows = [
+        { gp_id: 'old', task_id: '1', events: '', task: sec(new Date(2026, 8, 8, 8, 0)) },
+        { gp_id: 'today', task_id: '2', events: '', task: sec(new Date(2026, 8, 22, 8, 0)) }
+    ];
+    // Сервер: 22.09. Планшет может считать хоть 08.09 — функция его часов не читает.
+    var next = core.splitReportRows(rows, new Date(2026, 8, 22, 12, 0).getTime()).nextItems;
+    assertEqual(next.map(function(it) { return it.gpId; }), ['today'],
+        'splitReportRows: в «следующие» не попадают задания двухнедельной давности — окно по серверу');
+})();
 
 // ── clockSkewMs / isClockSkewed: расхождение часов устройства с сервером ──
 

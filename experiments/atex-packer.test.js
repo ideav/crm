@@ -122,14 +122,14 @@ assertEqual(core.packQtyFor(core.itemFromReportRow(row({ qty: '', qty_fact: '' }
 
 // ── Отчёт фильтруется по упаковочному месту (#4681) ──
 assertEqual(core.itemsPath({ id: '669275', label: '2' }),
-    'report/packer?JSON_KV&LIMIT=0,5000&FR_packer_no=2',
+    'report/packers?JSON_KV&LIMIT=0,5000&FR_packer_no=2',
     'itemsPath: место выбрано → FR_packer_no с его НОМЕРОМ, а не с id записи');
-assertEqual(core.itemsPath(null), 'report/packer?JSON_KV&LIMIT=0,5000',
+assertEqual(core.itemsPath(null), 'report/packers?JSON_KV&LIMIT=0,5000',
     'itemsPath: места нет → фильтра нет');
-assertEqual(core.itemsPath({ id: '669272', label: ' ' }), 'report/packer?JSON_KV&LIMIT=0,5000',
+assertEqual(core.itemsPath({ id: '669272', label: ' ' }), 'report/packers?JSON_KV&LIMIT=0,5000',
     'itemsPath: пустой номер не превращается в FR_packer_no=');
 assertEqual(core.itemsPath({ id: '1', label: 'Цех №1' }),
-    'report/packer?JSON_KV&LIMIT=0,5000&FR_packer_no=%D0%A6%D0%B5%D1%85%20%E2%84%961',
+    'report/packers?JSON_KV&LIMIT=0,5000&FR_packer_no=%D0%A6%D0%B5%D1%85%20%E2%84%961',
     'itemsPath: номер уезжает в URL закодированным');
 
 // ── Признак упаковки — из «Упаковано шт» отчёта ──
@@ -381,14 +381,16 @@ assertEqual(core.validatePack({ qty: 110, suggested: 110, note: '' }), '',
     var kv = core.nextItemFromReportRow(nextRow({ slitter: { val: 'Станок 1', id: '1279' } }));
     assertEqual(kv.slitter, 'Станок 1', 'nextItemFromReportRow: {val,id} → val');
 
-    // Адрес отчёта: своё место. Окно «сегодня и позже» держит внутренняя граница
-    // отчёта «>= [TODAY]» по часам сервера — вчерашние так и не резанные задания
-    // в кандидаты не попадают, сегодняшние опоздавшие остаются (#5007).
-    assertEqual(core.nextTasksPath({ id: '1', label: '1' }),
-        'report/packer_next?JSON_KV&LIMIT=0,5000&FR_packer_no=1',
-        'nextTasksPath: фильтр места, окно даты держит сервер');
-    assertEqual(core.nextTasksPath(null), '',
-        'nextTasksPath: без места отчёт не запрашивается');
+    // Окно «сегодня и позже» по часам сервера (#5007, #5035): вчерашние так и не
+    // резанные задания в кандидаты не попадают, сегодняшние опоздавшие остаются.
+    var serverNow = new Date(2026, 8, 10, 14, 30).getTime();
+    var sec = function(d) { return String(Math.floor(d.getTime() / 1000)); };
+    var cand = core.splitReportRows([
+        nextRow({ gp_id: 'yesterday', events: '', task: sec(new Date(2026, 8, 9, 8, 0)) }),
+        nextRow({ gp_id: 'today-late', events: '', task: sec(new Date(2026, 8, 10, 8, 0)) })
+    ], serverNow).nextItems;
+    assertEqual(cand.map(function(it) { return it.gpId; }), ['today-late'],
+        'splitReportRows: кандидаты — сегодня и позже, окно по часам сервера');
 
     // Кандидаты: у станка берётся ОДНО задание — самое раннее по плановому старту
     // из тех, по которым ещё нет резки (задания основного списка исключаются).

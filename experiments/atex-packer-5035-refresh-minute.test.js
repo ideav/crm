@@ -4,7 +4,7 @@
 // 5 минут — новый джамбо появлялся на плашке с задержкой до пяти минут.
 //
 // Проверяется поведение: какой период получает таймер, и что его срабатывание через
-// минуту после загрузки действительно перечитывает отчёт task_jumbo и обновляет плашку.
+// минуту после загрузки действительно перечитывает отчёт packers и обновляет плашку.
 //
 // Run with: node experiments/atex-packer-5035-refresh-minute.test.js
 
@@ -31,8 +31,13 @@ global.window = { addEventListener: function() {} };
 var realSetInterval = global.setInterval;
 global.setInterval = function(fn, ms) { timers.push({ fn: fn, ms: ms }); return timers.length; };
 
-// Контроллер без DOM: сеть — заглушка, отдающая текущий ответ отчёта task_jumbo.
-var jumboRows = [{ task_id: '666355', jumbo_no: 'J-100', cuts_count: '', defect_qty: '' }];
+// Контроллер без DOM: сеть — заглушка, отдающая текущий ответ отчёта packers
+// (строка задания с резкой; номера джамбо — в колонке jumbos).
+function packersRows(jumbos) {
+    return [{ task: String(Math.round(new Date().getTime() / 1000)), task_id: '666355',
+        gp_id: '666392', events: '901', qty: '110', jumbos: jumbos }];
+}
+var jumbosField = '"J-100"::';
 var requested = [];
 var c = Object.create(Controller.prototype);
 c.root = null;
@@ -46,10 +51,9 @@ c.loading = false;
 c.hasPlace = function() { return true; };
 c.getJson = function(path) {
     requested.push(path);
-    return Promise.resolve(path.indexOf('report/task_jumbo') === 0 ? jumboRows : []);
+    return Promise.resolve(path.indexOf('report/packers?') === 0 ? packersRows(jumbosField) : []);
 };
-c.loadItems = function() { return Promise.resolve(); };
-c.loadNextItems = function() { return Promise.resolve(); };
+c.applyPendingWrites = function() {};
 c.render = function() {};
 
 c.armAutoRefresh();
@@ -63,15 +67,12 @@ assertEqual(periodic.length && periodic[0].ms, 60 * 1000,
 // Прошла минута с последней загрузки; оператор ввёл новый джамбо J-101.
 c.jumbos = { '666355': ['J-100'] };
 c.loadedAt = new Date(new Date().getTime() - 60 * 1000);
-jumboRows = [
-    { task_id: '666355', jumbo_no: 'J-100', cuts_count: '', defect_qty: '' },
-    { task_id: '666355', jumbo_no: 'J-101', cuts_count: '', defect_qty: '' }
-];
+jumbosField = '"J-100"::,"J-101"::';
 periodic[0].fn();
 
 setTimeout(function() {
-    assertEqual(requested.some(function(p) { return p.indexOf('report/task_jumbo') === 0; }), true,
-        '#5035: минутный тик перечитывает отчёт task_jumbo');
+    assertEqual(requested.some(function(p) { return p.indexOf('report/packers?') === 0; }), true,
+        '#5035: минутный тик перечитывает отчёт packers');
     assertEqual(c.jumbos['666355'], ['J-100', 'J-101'],
         '#5035: новый номер джамбо попадает в данные упаковщика через минуту');
     console.log('\n' + passed + ' passed');

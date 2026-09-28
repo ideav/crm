@@ -4,8 +4,9 @@
 // отмечает их упакованными. Решение ideav/crm#4658. Правила разработки рабочих мест —
 // docs/WORKSPACE_DEVELOPMENT_GUIDE.md, карта рабочих мест — docs/atex_workplaces.md §3.13.
 //
-// БОЕВАЯ СХЕМА (live ateh). Строка отчёта `packer` — это ПАРТИЯ ГП (1081) внутри
-// задания («Задание в производство», 1078), с позицией заказа и заказом сбоку:
+// БОЕВАЯ СХЕМА (live ateh). Все данные рабочего места — ОДИН отчёт `packers` (#5035).
+// Его строка — это ПАРТИЯ ГП (1081) внутри задания («Задание в производство», 1078),
+// с позицией заказа и заказом сбоку:
 //   task/task_id — плановый старт задания (Unix) и его id;
 //   gp_id        — id Партии ГП, по нему и пишется отметка;
 //   order_no     — номер заказа, order — «Заказ клиента» (текст, может быть пуст);
@@ -13,22 +14,22 @@
 //   art          — артикул (#4799), плашкой внизу карточки; бывает пустым;
 //   qty/qty_fact — «Кол-во рулонов» и «Кол-во факт» Партии ГП;
 //   packed/notes — «Упаковано шт» (673786) и «Примечание» (673789) Партии ГП;
-//   events       — счётчик событий смены задания.
-// Номера джамбо с #4914 живут записями «Номер джамбо» (82374, подчинена заданию) и
-// приходят отдельным отчётом `task_jumbo` (task_id → jumbo_no, по записи на каждое
-// джамбо): грузятся одним запросом, в карточку идут все номера задания через «, »
-// (плашка «Джамбо», #4910).
-// Отчёт отфильтрован по наличию события «Резка» у задания, поэтому упаковщик видит
-// задание, как только по нему сделана первая резка, и весь его объём — независимо от
-// того, сколько проходов уже отмечено. Порядок строк — как пришёл из отчёта.
-// С #4929 ниже списка стоит блок «Следующие задания»: по одному на станок — самое
-// раннее задание сегодняшнего дня и позже, по которому ещё нет ни одной резки
-// (отчёт `packer_next` — те же колонки плюс slitter/slitter_id, без фильтра по
-// событию «Резка»). Карточка информационная: упаковщик заранее готовит тару и
-// наклейки; отчёта на базе нет — блока просто нет.
+//   events       — id одного из событий «Резка» задания; пусто — резок ещё не было;
+//   slitter/slitter_id — станок задания;
+//   jumbos       — номера джамбо задания (записи «Номер джамбо», 82374) одной строкой:
+//                  `"J-100":12:0,"J-101":3:1` — номер:«Кол-во резок»:«Брак, шт»;
+//                  в карточку идут все номера задания через «, » (плашка «Джамбо», #4910).
+// Отчёт отдаёт задания места за последнюю неделю и вперёд; делит их клиент
+// (splitReportRows). Задание с резкой — в список упаковки: упаковщик видит его, как
+// только сделана первая резка, и весь объём — независимо от числа отмеченных проходов.
+// Глубина списка — сегодня и ОДИН предыдущий день, в котором у места есть порезанные
+// позиции (после выходных это пятница). Порядок строк — как пришёл из отчёта.
+// Задание без резки — кандидат блока «Следующие задания» (#4929): по одному на станок —
+// самое раннее задание сегодняшнего дня и позже. Карточка информационная: упаковщик
+// заранее готовит тару и наклейки. «Сегодня» считается по часам сервера (#5007).
 //
 // Данные перечитываются сами (#5003): по возврату на вкладку, по фокусу окна и раз
-// в 5 минут — страница открыта на планшете днями, а план перепланируется, и снимок
+// в минуту (#5035) — страница открыта на планшете днями, а план перепланируется, и снимок
 // без обновления молча врёт (issue #5003: на двух устройствах одного места — разные
 // задания). Перечитывание не делается, пока открыт диалог, есть несохранённая правка
 // количества или предыдущая загрузка была меньше 30 секунд назад. У кнопки «Обновить»
@@ -115,15 +116,15 @@
 
     // Отчёт с заданиями упаковщика и имена его колонок. Фильтр `FR_packer_no` оставляет
     // в отчёте только позиции выбранного упаковочного места (#4681).
-    var REPORT = 'packer';
+    var REPORT = 'packers';
     var REPORT_LIMIT = 5000;
     var REPORT_PLACE_FILTER = 'FR_packer_no';
     var COL = {
         task: 'task', taskId: 'task_id', gpId: 'gp_id',
         orderNo: 'order_no', orderClient: 'order',
         material: 'material', width: 'cut_width', length: 'cut_length',
-        // #4996: альтернативное название Вида сырья. В `packer`/`packer_next` колонка
-        // может быть ещё не заведена — пусто, и карточка показывает обычное имя.
+        // #4996: альтернативное название Вида сырья. Пусто — карточка показывает
+        // обычное имя.
         altMaterial: 'alt_material',
         wind: 'wind_direction', sleeve: 'sleeve', addSleeve: 'add_sleeve',
         qty: 'qty', qtyFact: 'qty_fact', packed: 'packed', notes: 'notes', events: 'events',
@@ -132,13 +133,11 @@
         // #4799: артикул (плашка внизу карточки) и лидер (в подписи ролика).
         art: 'art', leader: 'leader'
     };
-    // #4914: номера джамбо задания — отдельный отчёт по записям «Номер джамбо».
-    var JUMBO_REPORT = 'task_jumbo';
+    // #4914: номера джамбо задания. Колонка `jumbos` раскладывается в записи вида
+    // {task_id, jumbo_no, cuts_count, defect_qty} — по одной на джамбо (jumboRowsFromReport).
+    var JUMBOS_COL = 'jumbos';
     var JUMBO_COL = { taskId: 'task_id', jumboNo: 'jumbo_no', cuts: 'cuts_count', defect: 'defect_qty' };
-    // #4929: отчёт `packer_next` — те же Партии ГП, но БЕЗ фильтра по событию
-    // «Резка» и со станком задания. Из него берётся следующее задание каждого
-    // станка: упаковщик готовит под него тару и наклейки до первой резки.
-    var NEXT_REPORT = 'packer_next';
+    // #4929: станок задания — для блока «Следующие задания».
     var NEXT_COL = { slitter: 'slitter', slitterId: 'slitter_id' };
 
     // #5003: авто-обновление. Страница на планшете открыта днями, а план в течение дня
@@ -241,14 +240,14 @@
             // #4799: обе колонки бывают пустыми — карточка тогда просто без них.
             art: str(kvVal(r[COL.art])).trim(),
             leader: str(kvVal(r[COL.leader])).trim(),
-            // #4914: номера джамбо прилетают отдельным отчётом task_jumbo — их
-            // подставляет applyJumbos() после загрузки (карточка без них просто без плашки).
+            // #4914: номера джамбо задания подставляет applyJumbos() после загрузки
+            // (карточка без них просто без плашки).
             jumbo: ''
         };
         return item;
     }
 
-    // #4914: строки отчёта task_jumbo → карта «id задания → номера джамбо» (по записи
+    // #4914: записи джамбо (jumboRowsFromReport) → карта «id задания → номера джамбо» (по записи
     // на каждое джамбо, порядок отчёта сохраняется; строки без задания пропускаем).
     function jumbosByTask(rows) {
         var map = {};
@@ -259,6 +258,47 @@
             (map[taskId] = map[taskId] || []).push(no);
         });
         return map;
+    }
+
+    // #5035: колонка `jumbos` → записи джамбо задания. Формат `"J-100":12:0,"J-101":3:1`,
+    // резки и брак бывают пустыми. Номер вводит оператор руками, и в нём встречаются
+    // запятые и кавычки (на боевой базе есть номер `,hg`), поэтому элемент выделяется по
+    // структуре: номер в кавычках — до `":число:число`, за которым идёт `,"` или конец
+    // строки. Экранирование `\"` и `\\` внутри номера снимается, если отчёт его делает.
+    function parseJumbosField(value) {
+        var text = str(kvVal(value));
+        var re = /"(.*?)":([^:,"]*):([^:,"]*)(?=,"|\s*$)/g;
+        var list = [];
+        var m;
+        while ((m = re.exec(text))) {
+            var no = m[1].replace(/\\(["\\])/g, '$1').trim();
+            if (!no) continue;
+            list.push({ no: no, cuts: m[2].trim(), defect: m[3].trim() });
+        }
+        return list;
+    }
+
+    // #5035: строки отчёта `packers` → записи джамбо в разложенном виде
+    // {task_id, jumbo_no, cuts_count, defect_qty}. Колонка повторяется у каждой Партии
+    // ГП задания — берётся первая строка задания.
+    function jumboRowsFromReport(rows) {
+        var seen = {};
+        var out = [];
+        (rows || []).forEach(function(row) {
+            var r = row || {};
+            var taskId = str(kvVal(r[COL.taskId])).trim();
+            if (!taskId || seen[taskId]) return;
+            seen[taskId] = true;
+            parseJumbosField(r[JUMBOS_COL]).forEach(function(j) {
+                var rec = {};
+                rec[JUMBO_COL.taskId] = taskId;
+                rec[JUMBO_COL.jumboNo] = j.no;
+                rec[JUMBO_COL.cuts] = j.cuts;
+                rec[JUMBO_COL.defect] = j.defect;
+                out.push(rec);
+            });
+        });
+        return out;
     }
 
     // #5005: те же строки отчёта с количествами: «{номер, резки, брак}» на каждую
@@ -346,7 +386,7 @@
 
     // #5017: текст плашки «Джамбо» — по КАЖДОМУ заданию: посчиталось — «N шт с
     // джамбо», нет — номера джамбо этого задания без количеств (#4910): из записей
-    // task_jumbo, а если их нет — из `item.jumbo`. Строки заданий — через «, ».
+    // колонки jumbos, а если их нет — из `item.jumbo`. Строки заданий — через «, ».
     function jumboPlateText(items, stats, allItems) {
         var parts = [];
         function add(value) {
@@ -366,7 +406,7 @@
         return parts.join(', ');
     }
 
-    // #4929: строка отчёта `packer_next` — та же Партия ГП плюс станок задания.
+    // #4929: строка-кандидат «следующего задания» — та же Партия ГП плюс станок задания.
     function nextItemFromReportRow(row) {
         var item = itemFromReportRow(row);
         var r = row || {};
@@ -375,16 +415,41 @@
         return item;
     }
 
-    // #4929: адрес отчёта очереди. Место — как у основного списка. Окно «сегодня
-    // и позже» держит ВНУТРЕННЯЯ граница отчёта «>= [TODAY]» по часам сервера;
-    // внешний FR_task от полуночи устройства не шлётся (#5007): он перекрывал
-    // серверную границу, и на планшете со сбитой датой в «следующие» попадали
-    // задания двухнедельной давности. Места нет — отчёт не запрашивается.
-    function nextTasksPath(place) {
-        var no = str(place && place.label).trim();
-        if (!no) return '';
-        return 'report/' + NEXT_REPORT + '?JSON_KV&LIMIT=0,' + REPORT_LIMIT +
-            '&' + REPORT_PLACE_FILTER + '=' + encodeURIComponent(no);
+    // Календарный день момента (Unix-сек или мс) — число ГГГГММДД по местному времени.
+    function dayKeyOf(value) {
+        var ms = unixToMs(value);
+        if (!ms) return 0;
+        var d = new Date(ms);
+        return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+    }
+
+    // #5035: строки отчёта `packers` → список упаковки и кандидаты «следующих заданий».
+    // nowMs — ВРЕМЯ СЕРВЕРА (заголовок Date, #5007): сбитые часы планшета не сдвигают
+    // ни глубину списка, ни окно очереди.
+    //   • есть резка (events не пуст) — в список упаковки, если день задания не раньше
+    //     ПРЕДЫДУЩЕГО ДНЯ С РЕЗКАМИ: самого позднего дня до сегодняшнего, в котором у
+    //     места есть порезанные позиции (упакованные или нет). После выходных это
+    //     пятница; глубже — ничего, даже неупакованного;
+    //   • резки нет — кандидат «следующего задания», если задание сегодня или позже.
+    function splitReportRows(rows, nowMs) {
+        var today = dayKeyOf(nowMs);
+        var cut = [];
+        var next = [];
+        (rows || []).forEach(function(row) {
+            var hasCut = str(kvVal((row || {})[COL.events])).trim() !== '';
+            (hasCut ? cut : next).push(nextItemFromReportRow(row));
+        });
+        var floor = 0;
+        cut.forEach(function(item) {
+            var day = dayKeyOf(item.taskUnix);
+            if (day && day < today && day > floor) floor = day;
+        });
+        var from = floor || today;
+        return {
+            // Задание без даты старта не прячется: отбросить его по дню нечем.
+            items: cut.filter(function(item) { var d = dayKeyOf(item.taskUnix); return !today || !d || d >= from; }),
+            nextItems: next.filter(function(item) { var d = dayKeyOf(item.taskUnix); return !today || !d || d >= today; })
+        };
     }
 
     // #5007: расхождение часов устройства с сервером. Дата устройства больше не
@@ -836,7 +901,10 @@
         jumboPlateText: jumboPlateText,
         isLegacyJumboCuts: isLegacyJumboCuts,
         nextItemFromReportRow: nextItemFromReportRow,
-        nextTasksPath: nextTasksPath,
+        parseJumbosField: parseJumbosField,
+        jumboRowsFromReport: jumboRowsFromReport,
+        dayKeyOf: dayKeyOf,
+        splitReportRows: splitReportRows,
         nextTaskGroups: nextTaskGroups,
         clockSkewMs: clockSkewMs,
         isClockSkewed: isClockSkewed,
@@ -918,9 +986,9 @@
         this.userId = root.getAttribute('data-user-id') || (typeof window !== 'undefined' ? window.user_id : '') || '';
         this.meta = { gp: null, event: null };
         this.items = [];           // позиции к упаковке (строки отчёта, порядок отчёта)
-        this.nextItems = [];       // #4929: очередь без фильтра по резке (отчёт packer_next)
-        this.jumbos = {};          // #4914: id задания → номера джамбо (отчёт task_jumbo)
-        this.jumboStats = {};      // #5005: id задания → {номер, резки, брак} (тот же отчёт)
+        this.nextItems = [];       // #4929: задания без резки — кандидаты «следующих»
+        this.jumbos = {};          // #4914: id задания → номера джамбо (колонка jumbos)
+        this.jumboStats = {};      // #5005: id задания → {номер, резки, брак} (та же колонка)
         this.sizes = [];           // #4665: справочник «Типоразмер» (отчёт pack_sizes)
         this.place = null;         // { id, label } — упаковочное место из настройки планшета (#4852)
         this.showPacked = false;
@@ -1015,43 +1083,21 @@
         });
     };
 
+    // #5035: всё рабочее место — один запрос `packers`: список упаковки, кандидаты
+    // «следующих заданий» (#4929) и номера джамбо (#4914) приходят одними строками.
+    // «Сегодня» — по времени сервера из ответа этого же запроса (#5007).
     AtexPacker.prototype.loadItems = function() {
         var self = this;
         return this.getJson(core.itemsPath(this.place)).then(function(rows) {
             var list = Array.isArray(rows) ? rows : [];
-            self.items = list.map(function(row) { return core.itemFromReportRow(row); });
+            var jumboRows = core.jumboRowsFromReport(list);
+            self.jumbos = core.jumbosByTask(jumboRows);
+            self.jumboStats = core.jumboStatsByTask(jumboRows);
+            var split = core.splitReportRows(list, self.serverTimeMs || new Date().getTime());
+            self.items = split.items;
+            self.nextItems = split.nextItems;
             self.applyPendingWrites();
             self.applyJumbos();
-        });
-    };
-
-    // #4929: очередь заданий без фильтра по резке — кандидаты «следующего задания»
-    // станков. Отчёта на базе нет или он не прочитался — рабочее место живёт как
-    // раньше, просто без блока следующих заданий.
-    AtexPacker.prototype.loadNextItems = function() {
-        var self = this;
-        var path = core.nextTasksPath(this.place);
-        if (!path) { this.nextItems = []; return Promise.resolve(); }
-        return this.getJson(path).then(function(rows) {
-            var list = Array.isArray(rows) ? rows : [];
-            self.nextItems = list.map(function(row) { return core.nextItemFromReportRow(row); });
-        }).catch(function(err) {
-            console.error('atex-packer: очередь заданий не прочитана — ' + err.message);
-            self.nextItems = [];
-        });
-    };
-
-    // #4914: номера джамбо грузятся одним запросом (запись на каждое джамбо — на
-    // задании их бывает несколько). Не прочитались — карточки остаются без плашки.
-    AtexPacker.prototype.loadJumbos = function() {
-        var self = this;
-        return this.getJson('report/' + JUMBO_REPORT + '?JSON_KV&LIMIT=0,' + REPORT_LIMIT).then(function(rows) {
-            self.jumbos = core.jumbosByTask(rows);
-            self.jumboStats = core.jumboStatsByTask(rows);
-        }).catch(function(err) {
-            console.error('atex-packer: номера джамбо не прочитаны — ' + err.message);
-            self.jumbos = {};
-            self.jumboStats = {};
         });
     };
 
@@ -1365,7 +1411,7 @@
         });
         body.push(metaNode);
         // #4910: № джамбо — той же плашкой рядом с артикулом; #4914: номера приходят
-        // из отчёта task_jumbo, на задании их бывает несколько — через «, ».
+        // из колонки jumbos, на задании их бывает несколько — через «, ».
         // #5005: если по записям джамбо можно посчитать, плашка показывает
         // «qqq — 39 шт» (резки × штук в резке − доля брака); #5017: задание, по которому
         // не посчиталось, — своими номерами без количеств.
@@ -1869,13 +1915,9 @@
             return Promise.resolve();
         }
         this.setLoading(true);
-        // #4914: номера джамбо перечитываем вместе со списком — по заданиям могли
-        // начаться новые резки с новыми джамбо; #4929: очередь следующих заданий тоже.
-        return this.loadJumbos().then(function() {
-            return self.loadItems();
-        }).then(function() {
-            return self.loadNextItems();
-        }).then(function() {
+        // #5035: один запрос — список, очередь следующих заданий и номера джамбо
+        // (по заданиям могли начаться новые резки с новыми джамбо).
+        return this.loadItems().then(function() {
             // #5003: свежесть экрана считается от этого момента.
             self.loadedAt = new Date();
             self.offline = false;
@@ -1976,13 +2018,11 @@
 
         return this.loadMetadata()
             .then(function() { return self.loadSizes(); })
-            .then(function() { return self.loadJumbos(); })
             .then(function() {
                 // Без упаковочного места список не показываем (#4852), а отчёт без него
                 // отдал бы чужие позиции — он фильтруется по месту (#4681).
                 if (!self.hasPlace()) return null;
-                return self.loadItems().then(function() { return self.loadNextItems(); })
-                    .then(function() { self.loadedAt = new Date(); });
+                return self.loadItems().then(function() { self.loadedAt = new Date(); });
             })
             .then(function() {
                 self.render();
