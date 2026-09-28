@@ -182,3 +182,17 @@ function FieldAttrsJsString($value)
 		(string)$value
 	);
 }
+
+/**
+ * Адрес для _connect: значение по умолчанию столбца типа CONNECT (_d_attrs хранит настройки как
+ * JSON {"default":"<адрес>"}), в старом формате — val как есть; параметры запроса дописываются.
+ */
+function ConnectUrl($attrs, $get)
+{
+	$parsed = FieldAttrsParse($attrs);
+	$base = strlen((string)$parsed["default"]) ? (string)$parsed["default"] : (string)$attrs;
+	$query = "";
+	foreach($get as $k => $v)
+		$query .= "&$k=$v";
+	return $base . (strpos($base, "?") ? "&" : "?") . substr($query, 1);
+}

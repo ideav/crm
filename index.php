@@ -13523,9 +13523,7 @@ if(Validate_Token())
 			if($row = mysqli_fetch_array(Exec_sql($sql, "Get the connector")))
 			{
 			    trace("Got connector: ".$row["val"]);
-				foreach($_GET as $k => $v)
-					$url .= "&$k=$v";
-				$url = $row["val"] . (strpos($row["val"],"?") ? "&" : "?") . substr($url, 1);
+				$url = ConnectUrl($row["val"], $_GET); # адрес — default столбца CONNECT (JSON из _d_attrs или val как есть)
 			    trace("url: $url");
 				$ch = curl_init();
 				curl_setopt($ch, CURLOPT_HEADER, 0);
