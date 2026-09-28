@@ -218,8 +218,9 @@ TXT;
 
     /**
      * Подбор соответствия полей (рабочее место «Коннектор»): браузер → b24ig.php → эмбеддер.
-     * Адрес эмбеддера — matcher.url в конфиге базы, токен — EMBED_TOKEN в secrets.json базы;
-     * в браузер не отдаются и в БД не хранятся. Тело POST: {"source":[[поле, подпись],…],"target":[колонка,…]}.
+     * Эмбеддер один на все базы: адрес и токен — в include/b24ig/embedder.json на сервере
+     * ({"url": "...", "token": "..."}, в git не хранится, include/ закрыт от веб-доступа); в браузер
+     * не отдаются и в БД не хранятся. Тело POST: {"source":[[поле, подпись],…],"target":[колонка,…]}.
      * $http, $siteRoot — только для тестов: подмена HTTP-вызова (сигнатура Http::request) и корня сайта.
      * @return array [HTTP-код, ответ]; ответ — {ok:true, matches, fields, manual} или {ok:false, error}
      */
@@ -257,11 +258,14 @@ TXT;
         $td = (string)arr_get($cfg, 'target.db');
         if ($td !== '' && $td !== $db) return $fail(400, 'target.db конфига не совпадает с текущей базой');
 
-        $url = trim((string)arr_get($cfg, 'matcher.url', ''));
-        if ($url === '') return $fail(503, 'эмбеддер не настроен: задайте matcher.url в конфиге базы');
+        $embFile = $siteRoot . '/include/b24ig/embedder.json';
+        $emb = is_file($embFile) ? json_decode(file_get_contents($embFile), true) : array();
+        if (!is_array($emb)) return $fail(500, 'include/b24ig/embedder.json: ошибка JSON');
+        $url = isset($emb['url']) && is_string($emb['url']) ? trim($emb['url']) : '';
+        if ($url === '') return $fail(503, 'эмбеддер не настроен: нет адреса (url) в include/b24ig/embedder.json');
         $headers = array('Content-Type: application/json');
-        if (isset($secrets['EMBED_TOKEN']) && (string)$secrets['EMBED_TOKEN'] !== '') {
-            $headers[] = 'Authorization: Bearer ' . $secrets['EMBED_TOKEN'];
+        if (isset($emb['token']) && is_string($emb['token']) && $emb['token'] !== '') {
+            $headers[] = 'Authorization: Bearer ' . $emb['token'];
         }
         $payload = json_encode(array('source' => $source, 'target' => $target), JSON_UNESCAPED_UNICODE);
         $r = $http ? call_user_func($http, 'POST', $url, $headers, $payload, 40)

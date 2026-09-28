@@ -359,18 +359,18 @@ async function testSuggestErrors() {
         assert(err && /down/.test(err.message), 'suggest: m.error пробрасывается', 'got: ' + (err && err.message));
     }
     {
-        // отказ b24ig.php (эмбеддер не настроен в конфиге базы) — пользователь видит причину, а не только код
+        // отказ b24ig.php (эмбеддер не настроен на сервере) — пользователь видит причину, а не только код
         const document = makeDOM();
         const { api } = loadConnector({
             document,
             fetch: () => Promise.resolve({
                 ok: false, status: 503,
-                text: () => Promise.resolve('{"ok":false,"error":"эмбеддер не настроен: задайте matcher.url в конфиге базы"}'),
+                text: () => Promise.resolve('{"ok":false,"error":"эмбеддер не настроен: нет адреса (url) в include/b24ig/embedder.json"}'),
             }),
         });
         let err = null;
         try { await api.suggest([['A', 'a']], ['x']); } catch (e) { err = e; }
-        assert(err && /HTTP 503/.test(err.message) && /matcher\.url/.test(err.message),
+        assert(err && /HTTP 503/.test(err.message) && /embedder\.json/.test(err.message),
             'suggest: отказ сервера → код и причина', 'got: ' + (err && err.message));
     }
 }
