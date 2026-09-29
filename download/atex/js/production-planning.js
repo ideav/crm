@@ -16807,8 +16807,11 @@
         // (полезная ширина реза после кромки, напр. 891) — иначе правило j=910 не срабатывает.
         var nomIdx = columnIndex(meta, 'Номинальная ширина');
         var tolIdx = columnIndex(meta, 'Допуск, мм');   // #3120: допуск по виду сырья (иначе дефолт)
+        // #5044: «Тип сырья» (ссылка, JSON_OBJ отдаёт «84634:Фольга») — по нему задание,
+        // загруженное из cut_planning, опознаётся как фольга (resolveCutMaterials).
+        var typeIdx = columnIndex(meta, 'Тип сырья');
         return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,5000').then(function(rows) {
-            var map = {}, nom = {}, tol = {}, names = {};
+            var map = {}, nom = {}, tol = {}, names = {}, types = {};
             (rows || []).forEach(function(rec) {
                 var r = rec.r || [];
                 var w = widthIdx >= 0 ? (Number(r[widthIdx]) || 0) : 0;
@@ -16820,11 +16823,13 @@
                 // сырое значение допуска (пустое — если не задано): resolveTolerance даст дефолт
                 tol[String(rec.i)] = tolIdx >= 0 ? r[tolIdx] : '';
                 names[String(rec.i)] = r[0] == null ? '' : String(r[0]);   // имя вида сырья (для подписи)
+                types[String(rec.i)] = typeIdx >= 0 && r[typeIdx] != null ? String(r[typeIdx]) : '';   // #5044
             });
             self.jumboWidthByMaterial = map;
             self.nominalWidthByMaterial = nom;   // #3686
             self.toleranceByMaterial = tol;
             self.materialNameById = names;
+            self.materialTypeById = types;   // #5044
         });
     };
 
@@ -17287,6 +17292,14 @@
         var self = this;
         if (!this.cuts) return;
         var byCut = materialByCut(this.cuts, this.supplies, this.genPositions);
+        // #5044: фольга — «Тип сырья» вида сырья задания, а не слово в названии (у MB имя
+        // «MB», тип «Фольга»). От isFoil зависят норма намотки (windPointsForCut → WIND_FOIL_*)
+        // и «фольга в конец дня» (#3717). Тип не задан — прежний признак по имени не снимаем.
+        function markFoilByMaterialType(c) {
+            var type = (self.materialTypeById && self.materialTypeById[String(c.materialId)]) || '';
+            if (type) c.materialType = type;
+            if (packing().isFoilType(type)) c.isFoil = true;
+        }
         this.cuts.forEach(function(c) {
             var m = byCut[String(c.id)];
             if (m) c.materialId = m;
@@ -17295,6 +17308,7 @@
             c.materialName = c.materialAlt
                 || (m && self.materialNameById && self.materialNameById[m])
                 || c.materialName || '';
+            markFoilByMaterialType(c);
         });
         // #3808: переходящие сегменты с пустым «Видом сырья» (обеспечения которых ведут на
         // НЕактивную позицию → materialByCut их не восстановил) лечим по цепочке станок|намотка|
@@ -17311,6 +17325,7 @@
                     || (self.materialNameById && self.materialNameById[String(c.materialId)])
                     || c.materialName || '';
             }
+            if (c) markFoilByMaterialType(c);   // #5044: materialId мог появиться только здесь
         });
         this.healCutBatches();   // #4452: «Партия сырья» — после «Вида сырья» (FIFO-источник опирается на него)
     };
