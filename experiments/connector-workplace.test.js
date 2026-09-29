@@ -479,6 +479,31 @@ async function testNoListenerLeak() {
 // ============================================================
 // 8. renderRun: HTML в данных экранируется
 // ============================================================
+// Запуск по URL не чаще min_interval_sec (решение Алексея 29.09): внутри интервала сервер отдаёт
+// последний результат со штампом — пользователь должен видеть, что это повтор и когда будет новый запуск.
+async function testRenderRunStamp() {
+    const at = '2026-09-29T07:15:00Z', next = '2026-09-29T07:30:00Z';
+    const local = (iso) => { const t = new Date(iso), p = (n) => (n < 10 ? '0' : '') + n; return p(t.getHours()) + ':' + p(t.getMinutes()); };
+    const show = async (rep) => {
+        const document = makeDOM();
+        const { api } = loadConnector({
+            document,
+            fetch: () => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(rep) }),
+        });
+        await api.run('');
+        return parseHTML('<div>' + document.getElementById('result').innerHTML + '</div>').textContent;
+    };
+    const base = { ok: true, entities: {}, errors: [] };
+    let t = await show(Object.assign({}, base, { cached: true, result_at: at, next_run_after: next }));
+    assert(t.indexOf('результат от ' + local(at)) >= 0 && t.indexOf('повтор') >= 0 && t.indexOf(local(next)) >= 0,
+        'штамп: повтор — время результата и следующего запуска', t);
+    t = await show(Object.assign({}, base, { cached: false, result_at: at, next_run_after: next }));
+    assert(t.indexOf('результат от ' + local(at)) >= 0 && t.indexOf('повтор') < 0,
+        'штамп: свежий запуск — время без «повтора»', t);
+    t = await show(base);
+    assert(t.indexOf('результат от') < 0, 'штамп: без интервала в конфиге штампа нет', t);
+}
+
 async function testRenderRunEscapes() {
     const document = makeDOM();
     const { api } = loadConnector({
@@ -868,6 +893,7 @@ function testTemplateHasNoBaseSpecifics() {
     await testRunSuggestFlow();
     await testNoListenerLeak();
     await testRenderRunEscapes();
+    await testRenderRunStamp();
     testHtmlButtonOrder();
     await testEmptyDropdownNotSelectable();
     await testMarkManualAfterRender();

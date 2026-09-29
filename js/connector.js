@@ -1,7 +1,7 @@
 /*
  * connector.js — рабочее место «Коннектор» (Битрикс24 / 1С → Интеграм).
  * Развёртывание: js/connector.js, подключается из templates/connector.html:
- *     <script src="/js/connector.js?3"></script>
+ *     <script src="/js/connector.js?4"></script>
  *
  * Подбор соответствия полей: браузер → b24ig.php?action=match (тот же домен) → эмбеддер.
  * Эмбеддер один на все базы: адрес и токен — в include/b24ig/embedder.json на сервере; в браузер
@@ -531,6 +531,14 @@
       .then(function () { setBusy(false); });
   }
 
+  // время из ответа сервера (ISO, UTC) — в местное ЧЧ:ММ
+  function hhmm(iso) {
+    var t = new Date(iso);
+    if (isNaN(t.getTime())) return String(iso || "");
+    var p = function (n) { return (n < 10 ? "0" : "") + n; };
+    return p(t.getHours()) + ":" + p(t.getMinutes());
+  }
+
   function renderRun(rep, mode) {
     var out = d.getElementById("result"); if (!out) return;
     var ok = rep.ok && (!rep.errors || !rep.errors.length);
@@ -547,8 +555,11 @@
     var errs = (rep.errors || []).map(function (er) {
       return '<div style="color:var(--color-error)">ОШИБКА [' + esc(er.kind || "") + "] " + esc(er.entity || "") + ": " + esc(er.message || "") + "</div>";
     }).join("");
+    // запуск по URL не чаще min_interval_sec: внутри интервала сервер отдаёт последний результат со штампом
+    var stamp = rep.result_at ? ' <span class="badge' + (rep.cached ? " warn" : "") + '">результат от ' + esc(hhmm(rep.result_at)) +
+      (rep.cached ? " — повтор, новый запуск после " + esc(hhmm(rep.next_run_after)) : "") + "</span>" : "";
     out.innerHTML = '<div class="bar"><span class="dot"></span>' + head +
-      (mode ? ' <span class="badge">' + esc(mode) + "</span>" : "") + "</div>" +
+      (mode ? ' <span class="badge">' + esc(mode) + "</span>" : "") + stamp + "</div>" +
       (rows ? '<table class="res"><tr><th>Таблица</th><th>Загружено</th><th>Связи</th></tr>' + rows + "</table>" : "") + errs;
   }
 

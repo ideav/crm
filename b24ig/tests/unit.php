@@ -360,5 +360,60 @@ $mRc = Runner::web(array('action' => 'match', 'db' => 'spz', 'config' => 'm')); 
 $mOut = json_decode(ob_get_clean(), true);
 eq('web: action=match → подбор, а не запуск коннектора', array($mRc, $mOut), array(2, array('ok' => false, 'error' => 'в теле POST нужны source [[поле, подпись], …] и target [колонка, …]')));
 
+// --- по URL: не чаще runtime.min_interval_sec — внутри интервала последний результат со штампом (решение Алексея 29.09)
+$wSite = sys_get_temp_dir() . '/b24ig-web-' . getmypid();
+$wDir = "$wSite/templates/custom/spz/connector";
+@mkdir($wDir, 0777, true);
+$wCfg = array('version' => 1, 'project' => 'w', 'sources' => array('b' => array('type' => 'mock')),
+    'target' => array('type' => 'integram'), 'order' => array('a'), 'entities' => array('a' => array('fields' => array())),
+    'runtime' => array('min_interval_sec' => 600));
+file_put_contents("$wDir/w.json", json_encode($wCfg));
+$wCalls = 0;
+$wCode = 0;
+$wRunner = function ($opts, &$report) use (&$wCalls, &$wCode) {
+    $wCalls++;
+    $report = array('project' => 'w', 'entities' => array('a' => array('fetched' => $wCalls, 'rows' => 1, 'new' => 0,
+        'existing' => 1, 'unchanged' => 0, 'files' => 0, 'refs_set' => 0, 'bound' => 0, 'manual_binding' => array(),
+        'warnings' => array())), 'errors' => array());
+    return $wCode;
+};
+$wOpts = array('db' => 'spz', 'config' => 'w', 'web' => true);
+$t0 = 1790000000;
+
+list($c, $s, $st) = Runner::runWeb($wOpts, $wSite, $wRunner, $t0);
+eq('web: первый вызов — реальный запуск', array($c, $wCalls, $st['cached'], $st['result_at'], $st['next_run_after']), array(0, 1, false, $t0, $t0 + 600));
+list($c, $s, $st) = Runner::runWeb($wOpts, $wSite, $wRunner, $t0 + 599);
+eq('web: внутри интервала — последний результат, запуска нет', array($c, $wCalls, $st['cached'], $st['result_at'], $s['entities']['a']['fetched']), array(0, 1, true, $t0, 1));
+list($c, $s, $st) = Runner::runWeb($wOpts, $wSite, $wRunner, $t0 + 600);
+eq('web: штамп протух — реальный запуск, новый штамп', array($wCalls, $st['cached'], $st['result_at'], $s['entities']['a']['fetched']), array(2, false, $t0 + 600, 2));
+
+list($c, $s, $st) = Runner::runWeb($wOpts + array('dry_run' => true), $wSite, $wRunner, $t0 + 601);
+eq('web: у пробного прогона свой штамп', array($wCalls, $st['cached']), array(3, false));
+list($c, $s, $st) = Runner::runWeb($wOpts + array('only' => 'a'), $wSite, $wRunner, $t0 + 601);
+eq('web: у запуска с only свой штамп', array($wCalls, $st['cached']), array(4, false));
+
+$wCfg['entities']['a']['fields'] = array('X' => array('column' => 'Икс'));
+file_put_contents("$wDir/w.json", json_encode($wCfg));
+list($c, $s, $st) = Runner::runWeb($wOpts, $wSite, $wRunner, $t0 + 602);
+eq('web: конфиг изменён (сохранили соответствие) — реальный запуск', array($wCalls, $st['cached']), array(5, false));
+
+$wCode = 3;
+list($c, $s, $st) = Runner::runWeb($wOpts + array('check' => true), $wSite, $wRunner, $t0 + 700);
+list($c2, $s2, $st2) = Runner::runWeb($wOpts + array('check' => true), $wSite, $wRunner, $t0 + 701);
+eq('web: «уже выполняется» не запоминается', array($c, $c2, $wCalls), array(3, 3, 7));
+$wCode = 1;
+Runner::runWeb($wOpts, $wSite, $wRunner, $t0 + 1300);
+list($c, $s, $st) = Runner::runWeb($wOpts, $wSite, $wRunner, $t0 + 1301);
+eq('web: результат с ошибками тоже отдаётся до конца интервала', array($c, $wCalls, $st['cached']), array(1, 8, true));
+
+unset($wCfg['runtime']);
+file_put_contents("$wDir/w.json", json_encode($wCfg));
+list($c, $s, $st) = Runner::runWeb($wOpts, $wSite, $wRunner, $t0 + 1302);
+list($c, $s, $st) = Runner::runWeb($wOpts, $wSite, $wRunner, $t0 + 1303);
+eq('web: без min_interval_sec — каждый вызов реальный, штампа нет', array($wCalls, $st), array(10, null));
+list($c, $s, $st) = Runner::runWeb(array('db' => 'spz', 'config' => 'nope', 'web' => true), $wSite, $wRunner, $t0);
+eq('web: нет конфига — запуск сам сообщит об ошибке', array($wCalls, $st), array(11, null));
+exec('rm -rf ' . escapeshellarg($wSite));
+
 echo ($failed ? "ПРОВАЛЕНО $failed из $total\n" : "OK: $total проверок\n");
 exit($failed ? 1 : 0);

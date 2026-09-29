@@ -30,7 +30,8 @@
     "log_keep_days": 30,
     "lock_file": "state/sportzania-spz/run.lock",
     "schedule_hint": "0 * * * *",
-    "dry_run": false
+    "dry_run": false,
+    "min_interval_sec": 900
   },
   "safety": {
     "on_schema_drift": "stop",
