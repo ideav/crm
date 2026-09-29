@@ -181,6 +181,9 @@ class Context
 
 class Runner
 {
+    /** Предел сна перед отдачей повтора по URL, секунд (см. runWeb). */
+    const WEB_REPEAT_SLEEP_MAX = 7;
+
     const USAGE = <<<TXT
 Коннектор источников (Битрикс24, 1С OData) → Интеграм
 
@@ -328,20 +331,90 @@ TXT;
         }
         if (isset($get['only']) && preg_match('/^[A-Za-z0-9_,-]{1,256}$/', (string)$get['only'])) $opts['only'] = (string)$get['only'];
 
-        $report = null;
+        $stamp = null;
         if ($opts['db'] === '' || $opts['config'] === '') {
             $code = 2;
-            $report = array('errors' => array(array('entity' => null, 'kind' => 'bad_request', 'message' => 'нужны параметры db и config')));
-            Log::error($report['errors'][0]['message']);
+            $summary = self::webReport(array('errors' => array(array('entity' => null, 'kind' => 'bad_request', 'message' => 'нужны параметры db и config'))));
+            Log::error('нужны параметры db и config');
         } else {
-            $code = self::run($opts, $report);
+            $codeRoot = defined('B24IG_ROOT') ? B24IG_ROOT : dirname(__DIR__);
+            list($code, $summary, $stamp) = self::runWeb($opts, $codeRoot, function ($o, &$r) { return Runner::run($o, $r); });
         }
         $status = array(0 => 200, 1 => 500, 2 => 400, 3 => 409);
         http_response_code($status[$code]);
-        $summary = self::webReport(is_array($report) ? $report : array());
+        if ($stamp) {
+            $summary['cached'] = $stamp['cached'];
+            // UTC: у повтора пояс конфига не выставлялся (run() не вызывался) — время должно совпадать у обоих ответов
+            $summary['result_at'] = gmdate('Y-m-d\TH:i:s\Z', $stamp['result_at']);
+            $summary['next_run_after'] = gmdate('Y-m-d\TH:i:s\Z', $stamp['next_run_after']);
+        }
         echo $json ? json_encode($summary, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) : self::webText($summary, $code);
         ob_end_flush();
         return $code;
+    }
+
+    /**
+     * Запуск по URL не чаще runtime.min_interval_sec конфига базы (решение Алексея 29.09): URL открыт, поэтому
+     * внутри интервала отдаётся последний результат того же режима (запуск / check / dry_run, с учётом only)
+     * со штампом времени, а реального запуска нет. Штамп протух — результат удаляется, идёт реальный запуск.
+     * Правка конфига (например, «Сохранить соответствие») меняет хэш файла и сбрасывает запомненный результат.
+     * «Уже выполняется» (код 3) и неверный запрос (код 2) не запоминаются. Без min_interval_sec — как раньше.
+     * Повтор отдаётся не сразу: спит столько, сколько шёл последний реальный запуск (длительность хранится со
+     * штампом), но не больше WEB_REPEAT_SLEEP_MAX секунд (Алексей 29.09) — по времени ответа повтор не отличить.
+     * $runner(opts, &report) → код run(); $now, $sleep(секунды) — только для тестов.
+     * @return array [код, сводка webReport, штамп {cached, result_at, next_run_after, seconds} или null]
+     */
+    public static function runWeb(array $opts, $siteRoot, $runner, $now = null, $sleep = null)
+    {
+        $now = $now === null ? time() : (int)$now;
+        $cache = self::webCache($opts, $siteRoot);
+        if ($cache) {
+            list($file, $interval, $hash) = $cache;
+            $last = is_file($file) ? json_decode((string)file_get_contents($file), true) : null;
+            if (is_array($last) && isset($last['at'], $last['code'], $last['summary'], $last['hash']) && $last['hash'] === $hash
+                && $now >= (int)$last['at'] && $now - (int)$last['at'] < $interval) {
+                $sec = isset($last['seconds']) ? max(0.0, (float)$last['seconds']) : 0.0;
+                $pause = min((float)self::WEB_REPEAT_SLEEP_MAX, $sec);
+                if ($pause > 0) {
+                    if ($sleep) call_user_func($sleep, $pause);
+                    else usleep((int)round($pause * 1000000));
+                }
+                return array((int)$last['code'], $last['summary'], array('cached' => true, 'result_at' => (int)$last['at'],
+                    'next_run_after' => (int)$last['at'] + $interval, 'seconds' => $sec));
+            }
+            if (is_file($file)) @unlink($file);   // штамп протух или конфиг изменён — прежний результат удаляется
+        }
+        $report = null;
+        $t = microtime(true);
+        $code = call_user_func_array($runner, array($opts, &$report));
+        $sec = round(microtime(true) - $t, 3);
+        $summary = self::webReport(is_array($report) ? $report : array());
+        if (!$cache || ($code !== 0 && $code !== 1)) return array($code, $summary, null);
+        if (!is_dir(dirname($file))) @mkdir(dirname($file), 0775, true);
+        @file_put_contents($file, json_encode(array('at' => $now, 'code' => $code, 'hash' => $hash, 'seconds' => $sec,
+            'summary' => $summary), JSON_UNESCAPED_UNICODE));
+        return array($code, $summary, array('cached' => false, 'result_at' => $now, 'next_run_after' => $now + $interval,
+            'seconds' => $sec));
+    }
+
+    /** Файл последнего результата, интервал и хэш конфига; null — интервал не задан или конфиг не читается. */
+    private static function webCache(array $opts, $siteRoot)
+    {
+        try {
+            $p = self::dbPaths($siteRoot, $opts['db'], $opts['config']);
+            if (!is_file($p['config'])) return null;
+            $text = (string)file_get_contents($p['config']);
+            $secrets = is_file($p['secrets']) ? json_decode(file_get_contents($p['secrets']), true) : array();
+            $cfg = self::loadConfig($p['config'], is_array($secrets) ? $secrets : array());
+            $interval = (int)arr_get($cfg, 'runtime.min_interval_sec', 0);
+            if ($interval <= 0) return null;
+            $dir = self::dataPath($p['data_root'], arr_get($cfg, 'runtime.state_dir', 'state/' . $cfg['project']), true);
+        } catch (Exception $e) {
+            return null;   // конфиг с ошибкой — запуск сам о ней сообщит
+        }
+        $mode = !empty($opts['check']) ? 'check' : (!empty($opts['dry_run']) ? 'dry_run' : 'run');
+        if (!empty($opts['only'])) $mode .= '-' . preg_replace('/[^A-Za-z0-9_-]/', '_', (string)$opts['only']);
+        return array("$dir/web-last-$mode.json", $interval, sha1($text));
     }
 
     /** Сводка для ответа по URL: счётчики и ошибки без построчных данных (предупреждения и привязки — числами). */
@@ -370,6 +443,10 @@ TXT;
     {
         $out = 'project: ' . ($s['project'] === null ? '-' : $s['project']) . "\n";
         $out .= 'status: ' . ($code === 0 ? 'ok' : ($code === 3 ? 'busy' : 'errors')) . "\n";
+        if (isset($s['result_at'])) {
+            $out .= 'результат от ' . $s['result_at'] . (empty($s['cached']) ? '' : ' (повтор последнего запуска)')
+                . ', следующий реальный запуск — после ' . $s['next_run_after'] . "\n";
+        }
         foreach ($s['entities'] as $name => $e) {
             $out .= "$name: получено {$e['fetched']}, строк {$e['rows']} (новых {$e['new']}, существующих {$e['existing']}, без изменений {$e['unchanged']}), ссылок {$e['refs_set']}, файлов {$e['files']}\n";
         }
