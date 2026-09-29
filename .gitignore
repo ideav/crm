@@ -1,5 +1,6 @@
 /credentials.json
 /include/credentials.json
+/include/b24ig/embedder.json
 /google_sheets_sync.bki
 /logs/google_sheets_sync.bki
 /.env

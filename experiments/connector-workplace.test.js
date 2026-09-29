@@ -358,6 +358,21 @@ async function testSuggestErrors() {
         try { await api.suggest([['A', 'a']], ['x']); } catch (e) { err = e; }
         assert(err && /down/.test(err.message), 'suggest: m.error пробрасывается', 'got: ' + (err && err.message));
     }
+    {
+        // отказ b24ig.php (эмбеддер не настроен на сервере) — пользователь видит причину, а не только код
+        const document = makeDOM();
+        const { api } = loadConnector({
+            document,
+            fetch: () => Promise.resolve({
+                ok: false, status: 503,
+                text: () => Promise.resolve('{"ok":false,"error":"эмбеддер не настроен: нет адреса (url) в include/b24ig/embedder.json"}'),
+            }),
+        });
+        let err = null;
+        try { await api.suggest([['A', 'a']], ['x']); } catch (e) { err = e; }
+        assert(err && /HTTP 503/.test(err.message) && /embedder\.json/.test(err.message),
+            'suggest: отказ сервера → код и причина', 'got: ' + (err && err.message));
+    }
 }
 
 // ============================================================
@@ -620,7 +635,6 @@ async function testBusyLock() {
 const ACME_CFG = {
     version: 1,
     project: 'acme',
-    ui: { connect_id: 91 },
     entities: {
         users: {
             target: { table: 'Юзеры', table_id: 55, key: '@name' },
@@ -635,7 +649,7 @@ const ACME_CFG = {
     },
 };
 
-// Сервер: dir_admin (листинг, gf, upload), метаданные, _connect, b24ig.php.
+// Сервер: dir_admin (листинг, gf, upload), метаданные, b24ig.php (подбор action=match и запуск).
 function fakeServer(o) {
     o = o || {};
     const st = { uploads: [], cfgText: JSON.stringify(ACME_CFG, null, 2) };
@@ -670,8 +684,8 @@ function fakeServer(o) {
                 { val: 'Руководитель', attrs: '', ref: 1 },
             ]));
         }
-        if (url.indexOf('/_connect/') >= 0) {
-            return text(JSON.stringify({ matches: o.matches || [] }));
+        if (url.indexOf('/b24ig.php?action=match') >= 0) {
+            return text(JSON.stringify({ ok: true, matches: o.matches || [] }));
         }
         if (url.indexOf('/b24ig.php') >= 0) return text('{"ok":true,"entities":{},"errors":[]}');
         return text('{}');
@@ -690,6 +704,11 @@ function loadFromConfig(srv) {
         fetch: srv.fetch,
     });
     return r;
+}
+
+// запуск коннектора — b24ig.php без action=match (подбор полей идёт туда же, но это не запуск)
+function isRun(x) {
+    return x.url.indexOf('/b24ig.php') >= 0 && x.url.indexOf('action=match') < 0;
 }
 
 function rowsByName(document) {
@@ -719,8 +738,13 @@ async function testConfigFromBase() {
     await flush(60);
     assert(fetchLog.some((f) => f.url.indexOf('/spz/metadata/55') >= 0),
         '#5015: table_id — из конфига (55)', fetchLog.map((f) => f.url).join(' | '));
-    assert(fetchLog.some((f) => f.url.indexOf('/spz/_connect/91?') >= 0),
-        '#5015: id «Коннектора» — ui.connect_id из конфига', fetchLog.map((f) => f.url).join(' | '));
+    // подбор — через b24ig.php: адрес эмбеддера в конфиге базы на сервере, id записи-«Коннектора» не нужен
+    const m = fetchLog.find((f) => f.url === '/b24ig.php?action=match&db=spz&config=acme');
+    const body = m && m.o && m.o.method === 'POST' ? JSON.parse(m.o.body) : null;
+    assert(body && body.target.join(',') === 'Имя,Почта,Отдел,Руководитель' &&
+        body.source.map((x) => x[0]).join(',') === 'ID,NAME,DEPT',
+        'подбор: POST b24ig.php?action=match базы и конфига, source — поля конфига, target — колонки таблицы',
+        fetchLog.map((f) => f.url).join(' | '));
     const by = rowsByName(document);
     assert(Object.keys(by).join(',') === 'ID,NAME,DEPT',
         '#5015: поля источника — ключи fields без производных X@y', Object.keys(by).join(','));
@@ -755,8 +779,8 @@ async function testEditReachesRun() {
     const bak = srv.uploads[0];
     assert(bak && /^acme\.json\..+\.bak$/.test(bak.name) && bak.body === JSON.stringify(ACME_CFG, null, 2),
         '#5015: перед перезаписью — копия прежнего конфига', bak && bak.name);
-    const upIdx = fetchLog.findIndex((x) => x.o && x.o.method === 'POST');
-    const runIdx = fetchLog.findIndex((x) => x.url.indexOf('/b24ig.php') >= 0);
+    const upIdx = fetchLog.findIndex((x) => x.o && x.o.method === 'POST' && x.url.indexOf('/dir_admin/') >= 0);
+    const runIdx = fetchLog.findIndex(isRun);
     assert(upIdx >= 0 && runIdx > upIdx, '#5015: запуск идёт после сохранения', 'up=' + upIdx + ' run=' + runIdx);
     assert(runIdx >= 0 && fetchLog[runIdx].url.indexOf('config=acme') >= 0, '#5015: запуск — по этому конфигу',
         runIdx >= 0 ? fetchLog[runIdx].url : '');
@@ -771,7 +795,7 @@ async function testSaveFailureBlocksRun() {
     typeInto(rowsByName(document).NAME, 'Почта');
     document.getElementById('runBtn').onclick();
     await flush(60);
-    assert(!fetchLog.some((x) => x.url.indexOf('/b24ig.php') >= 0),
+    assert(!fetchLog.some(isRun),
         '#5015: сохранение не удалось — запуска старого конфига нет');
     assert(/Недостаточно прав/.test(document.getElementById('result').textContent),
         '#5015: причина отказа видна', document.getElementById('result').textContent);

@@ -1,24 +1,24 @@
 /*
  * connector.js — рабочее место «Коннектор» (Битрикс24 / 1С → Интеграм).
  * Развёртывание: js/connector.js, подключается из templates/connector.html:
- *     <script src="/js/connector.js?2"></script>
+ *     <script src="/js/connector.js?3"></script>
  *
- * Путь «П»: подбор соответствия полей идёт браузер → ядро (_connect) → эмбеддер на 104.
- * Браузер напрямую на 104 не ходит (CORS не нужен, 104 закрыт для браузеров).
+ * Подбор соответствия полей: браузер → b24ig.php?action=match (тот же домен) → эмбеддер.
+ * Эмбеддер один на все базы: адрес и токен — в include/b24ig/embedder.json на сервере; в браузер
+ * не отдаются, в БД не хранятся. Браузер напрямую к эмбеддеру не ходит (CORS не нужен).
  *
  * Всё, что зависит от базы, берётся из конфига базы (#5015) —
  * templates/custom/<база>/connector/<имя>.json, того же файла, что читает b24ig.php:
  *   имя конфига   — ?config=<имя> в URL; иначе листинг connector/ (один — берём, несколько — выбор);
  *   сущности      — entities.<имя>.target.table_id / target.table;
- *   поля источника— ключи entities.<имя>.fields (производные «X@y» не показываем);
- *   id записи-«Коннектора» (тип CONNECT) — ui.connect_id.
+ *   поля источника— ключи entities.<имя>.fields (производные «X@y» не показываем).
  * Конфиг читается и сохраняется через dir_admin (сессия + _xsrf, право WRITE на файлы).
  * «Проверить / Пробный / Запустить» при несохранённых правках сначала сохраняют конфиг.
  *
  * Шаблон задаёт (инжектится ядром):
  *   window.CONNECTOR_DB   — имя базы ({_global_.z})
  *   window.CONNECTOR_XSRF — XSRF-токен ({_global_.xsrf})
- * Необязательные переопределения (отладка): CONNECTOR_CONFIG, CONNECTOR_CONNECT_ID,
+ * Необязательные переопределения (отладка): CONNECTOR_CONFIG,
  *   CONNECTOR_TABLES { "<сущность>": <table_id> }, CONNECTOR_SOURCE_FIELDS { "<сущность>": [[name,label],...] }.
  *
  * DOM (как в connector.html): #configSel, #entities, #aiBtn, #saveBtn, #mapBody, #mapHint,
@@ -30,7 +30,6 @@
   var DB = w.CONNECTOR_DB || "";
   var XSRF = w.CONNECTOR_XSRF || "";
   var CONFIG = urlParam("config") || w.CONNECTOR_CONFIG || "";   // имя конфига в базе (без .json)
-  var CONNECT_ID = +w.CONNECTOR_CONNECT_ID || 0;
   var TABLES = w.CONNECTOR_TABLES || {};
   var TABLES_FROM_CFG = !w.CONNECTOR_TABLES;
   var CFG_DIR = "/connector";                   // каталог конфигов в templates/custom/<база>
@@ -47,10 +46,6 @@
       var m = new RegExp("[?&]" + name + "=([^&#]*)").exec(w.location.search);
       return m ? decodeURIComponent(m[1].replace(/\+/g, " ")) : "";
     } catch (e) { return ""; }
-  }
-  function b64url(obj) {
-    var s = btoa(unescape(encodeURIComponent(JSON.stringify(obj))));
-    return s.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
   }
   function esc(s) {
     return String(s).replace(/[&<>"]/g, function (c) {
@@ -85,8 +80,9 @@
     return t.getFullYear() + p(t.getMonth() + 1) + p(t.getDate()) + "-" + p(t.getHours()) + p(t.getMinutes()) + p(t.getSeconds());
   }
 
-  function fetchTO(url) {
+  function fetchTO(url, extra) {
     var opts = { credentials: "same-origin" };
+    for (var k in extra || {}) opts[k] = extra[k];
     var timer = null;
     if (typeof AbortController !== "undefined") {
       var ctl = new AbortController();
@@ -175,7 +171,6 @@
         sel.value = Object.keys(TABLES)[0] || "";
       }
     }
-    if (!CONNECT_ID) CONNECT_ID = +(cfg.ui && cfg.ui.connect_id) || 0;
   }
 
   function fillConfigSelect(names) {
@@ -252,20 +247,24 @@
     return f && f.column ? String(f.column) : "";
   }
 
-  // ---- вызов эмбеддера ЧЕРЕЗ ЯДРО (_connect) ----
-  // Ядро подставит URL из записи-«Коннектора» и токен, дописав наш ?q=...
+  // ---- вызов эмбеддера через b24ig.php (адрес и токен — в конфиге/secrets базы на сервере) ----
   function suggest(source, columns) {
-    if (!CONNECT_ID) return Promise.reject(new Error("не задан id записи-«Коннектора» — укажите ui.connect_id в конфиге"));
-    var q = b64url({ source: source, target: columns });
-    return fetchTO("/" + DB + "/_connect/" + CONNECT_ID + "?q=" + q)
+    if (!CONFIG) return Promise.reject(new Error("не выбран конфиг коннектора"));
+    var url = "/b24ig.php?action=match&db=" + encodeURIComponent(DB) + "&config=" + encodeURIComponent(CONFIG);
+    return fetchTO(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source: source, target: columns })
+    })
       .then(function (r) {
-        if (!r.ok) throw new Error("эмбеддер: HTTP " + r.status);
-        return r.text();
-      })
-      .then(function (t) {
-        var m; try { m = JSON.parse(t); } catch (e) { throw new Error("эмбеддер: неожиданный ответ"); }
-        if (m.error) throw new Error("эмбеддер: " + m.error);
-        return m; // {matches, fields, manual}
+        return r.text().then(function (t) {
+          var m = null;
+          try { m = JSON.parse(t); } catch (e) {}
+          if (!r.ok) throw new Error("эмбеддер: HTTP " + r.status + (m && m.error ? " — " + m.error : ""));
+          if (!m) throw new Error("эмбеддер: неожиданный ответ");
+          if (m.error) throw new Error("эмбеддер: " + m.error);
+          return m; // {matches, fields, manual}
+        });
       });
   }
 

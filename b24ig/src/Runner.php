@@ -190,6 +190,8 @@ class Runner
     php b24ig.php --db=<база> --config=<имя> [опции]
   По URL (из опций доступны только only, dry_run, check; JSON — отчёт в JSON):
     https://<сервер>/b24ig.php?db=<база>&config=<имя>[&only=a,b][&dry_run][&check][&JSON]
+  Подбор соответствия полей (рабочее место «Коннектор»), POST {"source":[[поле,подпись],…],"target":[колонка,…]}:
+    https://<сервер>/b24ig.php?action=match&db=<база>&config=<имя>
 
   --only=a,b            загрузить только эти сущности (порядок из конфига сохраняется)
   --dry-run             ничего не записывать в Интеграм и состояние
@@ -214,6 +216,71 @@ TXT;
         return array('data_root' => $dir, 'config' => "$dir/$config.json", 'secrets' => "$dir/secrets.json");
     }
 
+    /**
+     * Подбор соответствия полей (рабочее место «Коннектор»): браузер → b24ig.php → эмбеддер.
+     * Эмбеддер один на все базы: адрес и токен — в include/b24ig/embedder.json на сервере
+     * ({"url": "...", "token": "..."}, в git не хранится, include/ закрыт от веб-доступа); в браузер
+     * не отдаются и в БД не хранятся. Тело POST: {"source":[[поле, подпись],…],"target":[колонка,…]}.
+     * $http, $siteRoot — только для тестов: подмена HTTP-вызова (сигнатура Http::request) и корня сайта.
+     * @return array [HTTP-код, ответ]; ответ — {ok:true, matches, fields, manual} или {ok:false, error}
+     */
+    public static function match(array $get, $body, $http = null, $siteRoot = null)
+    {
+        $fail = function ($code, $msg) { return array($code, array('ok' => false, 'error' => $msg)); };
+        $db = isset($get['db']) ? (string)$get['db'] : '';
+        $config = isset($get['config']) ? (string)$get['config'] : '';
+        if ($db === '' || $config === '') return $fail(400, 'нужны параметры db и config');
+
+        $in = json_decode((string)$body, true);
+        $source = array();
+        $target = array();
+        foreach (is_array($in) && isset($in['source']) && is_array($in['source']) ? $in['source'] : array() as $f) {
+            if (is_array($f) && isset($f[0]) && is_scalar($f[0]) && (string)$f[0] !== '') {
+                $source[] = array((string)$f[0], isset($f[1]) && is_scalar($f[1]) ? (string)$f[1] : '');
+            }
+        }
+        foreach (is_array($in) && isset($in['target']) && is_array($in['target']) ? $in['target'] : array() as $c) {
+            if (is_scalar($c) && (string)$c !== '') $target[] = (string)$c;
+        }
+        if (!$source || !$target) return $fail(400, 'в теле POST нужны source [[поле, подпись], …] и target [колонка, …]');
+        if (count($source) > 500 || count($target) > 500) return $fail(400, 'слишком много полей или колонок (не больше 500)');
+
+        try {
+            if ($siteRoot === null) $siteRoot = defined('B24IG_ROOT') ? B24IG_ROOT : dirname(__DIR__);
+            $p = self::dbPaths($siteRoot, $db, $config);
+            if (!is_file($p['config'])) return $fail(404, "конфиг «{$config}» базы «{$db}» не найден");
+            $secrets = is_file($p['secrets']) ? json_decode(file_get_contents($p['secrets']), true) : array();
+            if (!is_array($secrets)) return $fail(500, 'secrets.json базы: ошибка JSON');
+            $cfg = self::loadConfig($p['config'], $secrets);
+        } catch (ConnectorException $e) {
+            return $fail(400, $e->getMessage());
+        }
+        $td = (string)arr_get($cfg, 'target.db');
+        if ($td !== '' && $td !== $db) return $fail(400, 'target.db конфига не совпадает с текущей базой');
+
+        $embFile = $siteRoot . '/include/b24ig/embedder.json';
+        $emb = is_file($embFile) ? json_decode(file_get_contents($embFile), true) : array();
+        if (!is_array($emb)) return $fail(500, 'include/b24ig/embedder.json: ошибка JSON');
+        $url = isset($emb['url']) && is_string($emb['url']) ? trim($emb['url']) : '';
+        if ($url === '') return $fail(503, 'эмбеддер не настроен: нет адреса (url) в include/b24ig/embedder.json');
+        $headers = array('Content-Type: application/json');
+        if (isset($emb['token']) && is_string($emb['token']) && $emb['token'] !== '') {
+            $headers[] = 'Authorization: Bearer ' . $emb['token'];
+        }
+        $payload = json_encode(array('source' => $source, 'target' => $target), JSON_UNESCAPED_UNICODE);
+        $r = $http ? call_user_func($http, 'POST', $url, $headers, $payload, 40)
+                   : Http::request('POST', $url, $headers, $payload, 40);
+        // адрес и токен в текст ошибки не попадают
+        if ($r['code'] !== 200) return $fail(502, 'эмбеддер: ' . ($r['code'] ? 'HTTP ' . $r['code'] : 'нет связи'));
+        $m = json_decode($r['body'], true);
+        if (!is_array($m) || !isset($m['matches'])) return $fail(502, 'эмбеддер: неожиданный ответ');
+        $out = array('ok' => true);
+        foreach (array('matches', 'fields', 'manual') as $k) {
+            if (isset($m[$k])) $out[$k] = $m[$k];
+        }
+        return array(200, $out);
+    }
+
     public static function cli(array $argv)
     {
         $opts = array();
@@ -235,6 +302,14 @@ TXT;
     /** Запуск по URL. Параметры, способные навредить (массовое создание, сброс, пути), не принимаются. */
     public static function web(array $get)
     {
+        // подбор соответствия полей для рабочего места «Коннектор» — отдельный короткий JSON-ответ
+        if (isset($get['action']) && $get['action'] === 'match') {
+            list($code, $out) = self::match($get, (string)file_get_contents('php://input'));
+            http_response_code($code);
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode($out, JSON_UNESCAPED_UNICODE);
+            return $code === 200 ? 0 : 2;
+        }
         ignore_user_abort(true);
         @set_time_limit(0);
         $json = isset($get['JSON']);
