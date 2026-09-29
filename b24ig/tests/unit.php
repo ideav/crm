@@ -413,6 +413,24 @@ list($c, $s, $st) = Runner::runWeb($wOpts, $wSite, $wRunner, $t0 + 1303);
 eq('web: без min_interval_sec — каждый вызов реальный, штампа нет', array($wCalls, $st), array(10, null));
 list($c, $s, $st) = Runner::runWeb(array('db' => 'spz', 'config' => 'nope', 'web' => true), $wSite, $wRunner, $t0);
 eq('web: нет конфига — запуск сам сообщит об ошибке', array($wCalls, $st), array(11, null));
+// повтор отдаётся не сразу: спит столько, сколько шёл последний реальный запуск, но не больше 7 с (Алексей 29.09)
+$wCfg['runtime'] = array('min_interval_sec' => 600);
+file_put_contents("$wDir/w.json", json_encode($wCfg));
+$wCode = 0;
+$wSlept = array();
+$wSleep = function ($sec) use (&$wSlept) { $wSlept[] = $sec; };
+$wSlow = function ($opts, &$report) use ($wRunner) { usleep(300000); return $wRunner($opts, $report); };   // «Битрикс» отвечал 0,3 с
+list($c, $s, $st) = Runner::runWeb($wOpts, $wSite, $wSlow, $t0 + 5000, $wSleep);
+eq('web: реальный запуск не спит, длительность запомнена', array($wSlept, $st['seconds'] >= 0.3 && $st['seconds'] < 2), array(array(), true));
+list($c, $s, $st) = Runner::runWeb($wOpts, $wSite, $wSlow, $t0 + 5001, $wSleep);
+eq('web: повтор спит длительность последнего запуска', count($wSlept) === 1 && $wSlept[0] >= 0.3 && $wSlept[0] < 2 && $st['cached'], true);
+$wF = glob("$wDir/state/w/web-last-run.json");
+$wLast = json_decode(file_get_contents($wF[0]), true);
+$wLast['seconds'] = 42.5;   // долгий запуск — повтор всё равно не дольше 7 с
+file_put_contents($wF[0], json_encode($wLast));
+$wSlept = array();
+Runner::runWeb($wOpts, $wSite, $wSlow, $t0 + 5002, $wSleep);
+eq('web: сон повтора не больше 7 с', $wSlept, array(7.0));
 exec('rm -rf ' . escapeshellarg($wSite));
 
 echo ($failed ? "ПРОВАЛЕНО $failed из $total\n" : "OK: $total проверок\n");

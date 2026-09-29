@@ -181,6 +181,9 @@ class Context
 
 class Runner
 {
+    /** Предел сна перед отдачей повтора по URL, секунд (см. runWeb). */
+    const WEB_REPEAT_SLEEP_MAX = 7;
+
     const USAGE = <<<TXT
 Коннектор источников (Битрикс24, 1С OData) → Интеграм
 
@@ -356,10 +359,12 @@ TXT;
      * со штампом времени, а реального запуска нет. Штамп протух — результат удаляется, идёт реальный запуск.
      * Правка конфига (например, «Сохранить соответствие») меняет хэш файла и сбрасывает запомненный результат.
      * «Уже выполняется» (код 3) и неверный запрос (код 2) не запоминаются. Без min_interval_sec — как раньше.
-     * $runner(opts, &report) → код run(); $now — только для тестов.
-     * @return array [код, сводка webReport, штамп {cached, result_at, next_run_after} или null]
+     * Повтор отдаётся не сразу: спит столько, сколько шёл последний реальный запуск (длительность хранится со
+     * штампом), но не больше WEB_REPEAT_SLEEP_MAX секунд (Алексей 29.09) — по времени ответа повтор не отличить.
+     * $runner(opts, &report) → код run(); $now, $sleep(секунды) — только для тестов.
+     * @return array [код, сводка webReport, штамп {cached, result_at, next_run_after, seconds} или null]
      */
-    public static function runWeb(array $opts, $siteRoot, $runner, $now = null)
+    public static function runWeb(array $opts, $siteRoot, $runner, $now = null, $sleep = null)
     {
         $now = $now === null ? time() : (int)$now;
         $cache = self::webCache($opts, $siteRoot);
@@ -368,19 +373,28 @@ TXT;
             $last = is_file($file) ? json_decode((string)file_get_contents($file), true) : null;
             if (is_array($last) && isset($last['at'], $last['code'], $last['summary'], $last['hash']) && $last['hash'] === $hash
                 && $now >= (int)$last['at'] && $now - (int)$last['at'] < $interval) {
-                return array((int)$last['code'], $last['summary'],
-                    array('cached' => true, 'result_at' => (int)$last['at'], 'next_run_after' => (int)$last['at'] + $interval));
+                $sec = isset($last['seconds']) ? max(0.0, (float)$last['seconds']) : 0.0;
+                $pause = min((float)self::WEB_REPEAT_SLEEP_MAX, $sec);
+                if ($pause > 0) {
+                    if ($sleep) call_user_func($sleep, $pause);
+                    else usleep((int)round($pause * 1000000));
+                }
+                return array((int)$last['code'], $last['summary'], array('cached' => true, 'result_at' => (int)$last['at'],
+                    'next_run_after' => (int)$last['at'] + $interval, 'seconds' => $sec));
             }
             if (is_file($file)) @unlink($file);   // штамп протух или конфиг изменён — прежний результат удаляется
         }
         $report = null;
+        $t = microtime(true);
         $code = call_user_func_array($runner, array($opts, &$report));
+        $sec = round(microtime(true) - $t, 3);
         $summary = self::webReport(is_array($report) ? $report : array());
         if (!$cache || ($code !== 0 && $code !== 1)) return array($code, $summary, null);
         if (!is_dir(dirname($file))) @mkdir(dirname($file), 0775, true);
-        @file_put_contents($file, json_encode(array('at' => $now, 'code' => $code, 'hash' => $hash, 'summary' => $summary),
-            JSON_UNESCAPED_UNICODE));
-        return array($code, $summary, array('cached' => false, 'result_at' => $now, 'next_run_after' => $now + $interval));
+        @file_put_contents($file, json_encode(array('at' => $now, 'code' => $code, 'hash' => $hash, 'seconds' => $sec,
+            'summary' => $summary), JSON_UNESCAPED_UNICODE));
+        return array($code, $summary, array('cached' => false, 'result_at' => $now, 'next_run_after' => $now + $interval,
+            'seconds' => $sec));
     }
 
     /** Файл последнего результата, интервал и хэш конфига; null — интервал не задан или конфиг не читается. */
