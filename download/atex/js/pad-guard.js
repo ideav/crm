@@ -320,9 +320,24 @@
             '&F_' + encodeURIComponent(tableId) + '=' + encodeURIComponent(token);
     }
 
-    // #4944: содержимое «Планшет-кандидата» целиком — записей в нём одна.
+    // #4944: содержимое «Планшет-кандидата» целиком — записей в нём одна. #5046: читаем
+    // с запасом — лишние строки (дубли) надо увидеть, чтобы удалить.
     function candidateListPath(tableId) {
-        return 'object/' + encodeURIComponent(tableId) + '/?JSON_OBJ&LIMIT=0,2';
+        return 'object/' + encodeURIComponent(tableId) + '/?JSON_OBJ&LIMIT=0,50';
+    }
+
+    // #5046: строки кандидата [{ id, token }] — или null, если ответ вовсе не список
+    // (массив JSON_OBJ или обёртка { object: [...] }); null нельзя считать пустой таблицей.
+    function candidateRows(rows) {
+        var list = Array.isArray(rows) ? rows : (rows && Array.isArray(rows.object) ? rows.object : null);
+        if (!list) return null;
+        var out = [];
+        for (var i = 0; i < list.length; i++) {
+            var row = list[i] || {};
+            var id = String(row.i == null ? '' : row.i);
+            if (id) out.push({ id: id, token: trimText((row.r || [])[0]) });
+        }
+        return out;
     }
 
     // #4944: запись кандидата — id и записанный в ней код (первая колонка).
@@ -643,10 +658,22 @@
         var inflight = root.atexPadCandidateInflight;
         if (inflight && inflight.token === token) return inflight.promise;
         var promise = getJson(ctx, candidateListPath(table.id)).then(function(rows) {
-            var plan = candidateWrite(table, candidateFromRows(rows), token);
-            if (!plan) return { saved: true, reason: 'same' };
-            return post(ctx, plan.path, plan.params).then(function() {
-                return { saved: true, reason: plan.mode };
+            // #5046: ответ — не список строк (сервер отдал пустоту при сломанном шаблоне
+            // main.html) — это не «пустая таблица»: создав строку, мы плодили дубли.
+            var list = candidateRows(rows);
+            if (!list) throw new Error('сервер не отдал список «' + CANDIDATE_TABLE + '»');
+            // #5046: строка в таблице одна всегда — лишние удаляем ДО перезаписи первой:
+            // поле уникальное, дубль нового кода в лишней строке не дал бы её сохранить.
+            var extras = list.slice(1);
+            var cleaned = extras.reduce(function(chain, row) {
+                return chain.then(function() { return post(ctx, '_m_del/' + encodeURIComponent(row.id) + '?JSON', {}); });
+            }, Promise.resolve());
+            return cleaned.then(function() {
+                var plan = candidateWrite(table, list[0] || null, token);
+                if (!plan) return { saved: true, reason: 'same' };
+                return post(ctx, plan.path, plan.params).then(function() {
+                    return { saved: true, reason: plan.mode };
+                });
             });
         });
         var done = function() {
@@ -806,6 +833,7 @@
         findCandidateTable: findCandidateTable, // #4944
         candidateListPath: candidateListPath,   // #4944
         candidateFromRows: candidateFromRows,   // #4944
+        candidateRows: candidateRows,           // #5046: строки кандидата или null (не список)
         candidateWrite: candidateWrite,         // #4944
         publishCandidate: publishCandidate,     // #4944: код планшета — администратору
         DEVICE_DENIED_TEXT: DEVICE_DENIED_TEXT, // #5046
