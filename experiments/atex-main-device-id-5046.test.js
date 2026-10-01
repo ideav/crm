@@ -1,11 +1,14 @@
-// #5046 — ID устройства серым в самом низу левого меню (templates/atex/main.html).
+// #5051 (развитие #5046) — ID устройства в правом верхнем меню (templates/atex/main.html):
+// последняя строка меню пользователя — метка «ID:» и ОТДЕЛЬНО значение. Выбирается кликом
+// только номер (user-select:all стоит на значении), метка в выделение не попадает: прежде
+// строка «ID устройства: …» выделялась и копировалась целиком.
 //
-// Это тот код, который администратор вписывает в «Планшеты» пользователя: localStorage
-// `atehPad`, 32 hex-символа (pad-guard.ensureToken). Кода нет — он генерируется и
-// запоминается, иначе показывать нечего.
+// Код тот же, что у сторожа планшета (#5046): localStorage `atehPad`, 32 hex-символа
+// (pad-guard.ensureToken). Кода нет — он генерируется и запоминается, иначе показывать нечего.
 //
-// Проверяем ПОВЕДЕНИЕ: inline-скрипт, который заполняет #sidebar-device-id, берётся из
-// шаблона и выполняется на заглушках DOM / localStorage / crypto.
+// Проверяем ПОВЕДЕНИЕ: inline-скрипт, который заполняет #device-id-value, берётся из шаблона
+// и выполняется на заглушках DOM / localStorage / crypto. Размещение строки в меню и
+// user-select на значении — по разметке: поведением это не выразить (как в #5046 для левого меню).
 //
 // Run with: node experiments/atex-main-device-id-5046.test.js
 
@@ -23,19 +26,27 @@ function assertEqual(actual, expected, name) {
 
 var html = fs.readFileSync(path.join(__dirname, '..', 'templates', 'atex', 'main.html'), 'utf8');
 var scripts = html.match(/<script>[\s\S]*?<\/script>/g) || [];
-var source = scripts.filter(function(s) { return s.indexOf("getElementById('sidebar-device-id')") !== -1; })[0] || '';
+var source = scripts.filter(function(s) { return s.indexOf("getElementById('device-id-value')") !== -1; })[0] || '';
 source = source.replace(/^<script>/, '').replace(/<\/script>$/, '');
 
-// Узел #sidebar-device-id стоит в разметке левого меню (aside.app-sidebar).
-var aside = (html.match(/<aside class="app-sidebar"[\s\S]*?<\/aside>/) || [''])[0];
-assertEqual(/id="sidebar-device-id"/.test(aside), true, '#5046 место под ID устройства — в левом меню');
+// Строка ID — в правом верхнем меню (navbar-right), в левом меню (aside) её быть не должно.
+var navbarBlock = (html.match(/<div class="navbar-right">[\s\S]*?<\/nav>/) || [''])[0];
+var asideBlock = (html.match(/<aside class="app-sidebar"[\s\S]*?<\/aside>/) || [''])[0];
+assertEqual(navbarBlock.indexOf('id="user-menu-device-id"') !== -1, true, '#5051 строка ID — в правом верхнем меню');
+assertEqual(navbarBlock.indexOf('<span>ID:</span>') !== -1, true, '#5051 метка «ID:» — отдельный узел');
+assertEqual(asideBlock.indexOf('device-id') === -1, true, '#5051 в левом меню ID больше нет');
+
+// user-select:all — на значении, не на всей строке: клик выделяет только номер.
+var menuStyles = (html.match(/<style>[\s\S]*?<\/style>/) || [''])[0];
+assertEqual(/\.user-menu-device-id \.device-id-value \{ user-select: all; \}/.test(menuStyles), true,
+    '#5051 user-select:all стоит на значении — выбирается только номер');
 
 function run(stored, cryptoOk) {
     var node = { textContent: '' };
     var data = {};
     if (stored) data.atehPad = stored;
     var sandbox = {
-        document: { getElementById: function(id) { return id === 'sidebar-device-id' ? node : null; } },
+        document: { getElementById: function(id) { return id === 'device-id-value' ? node : null; } },
         localStorage: {
             getItem: function(k) { return data[k] == null ? null : data[k]; },
             setItem: function(k, v) { data[k] = String(v); }
@@ -49,16 +60,16 @@ function run(stored, cryptoOk) {
 
 var TOKEN = 'aaaa0000bbbb1111cccc2222dddd3333';
 var r1 = source ? run(TOKEN) : { text: '' };
-assertEqual(r1.text, 'ID устройства: ' + TOKEN, '#5046 код устройства есть — он и показан');
+assertEqual(r1.text, TOKEN, '#5051 в узле значения ТОЛЬКО номер — метка «ID:» в него не входит');
 
 var r2 = source ? run('') : { text: '', stored: '' };
-assertEqual(/^[a-f0-9]{32}$/.test(r2.stored || ''), true, '#5046 кода нет — генерируется 32 hex и запоминается');
-assertEqual(r2.text, 'ID устройства: ' + r2.stored, '#5046 показан именно запомненный код');
+assertEqual(/^[a-f0-9]{32}$/.test(r2.stored || ''), true, '#5051 кода нет — генерируется 32 hex и запоминается');
+assertEqual(r2.text, r2.stored, '#5051 показан именно запомненный код');
 
 var r3 = source ? run('мусор') : { stored: '' };
-assertEqual(/^[a-f0-9]{32}$/.test(r3.stored || ''), true, '#5046 мусор вместо кода заменяется настоящим кодом');
+assertEqual(/^[a-f0-9]{32}$/.test(r3.stored || ''), true, '#5051 мусор вместо кода заменяется настоящим кодом');
 
 var r4 = source ? run('', false) : { text: 'x' };
-assertEqual(r4.text, '', '#5046 без crypto код не выдумывается — строки нет, страница не падает');
+assertEqual(r4.text, '', '#5051 без crypto код не выдумывается — значения нет, страница не падает');
 
 console.log('\n' + passed + '/' + total + ' passed');
