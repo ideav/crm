@@ -176,8 +176,10 @@
     <script type="text/plain" id="atex-user-pads"><!-- Begin: MyPads -->{pads}<!-- End: MyPads --></script>
     <script>
         // #5046: «Планшеты» заполнены — страница скрыта, пока сторож планшета не сверит
-        // код устройства (ниже, pad-guard.checkUserPads). Плейсхолдер `{pads}` — отчёта
-        // в базе нет, ограничения тоже.
+        // код устройства (ниже, pad-guard.checkUserPads). Отчёта в базе нет или поле
+        // пусто — блок выпадает, ограничения нет. ВНЕ блока плейсхолдер со скобками
+        // не писать даже в комментарии: шаблонизатор, не найдя ему значения, выбросит
+        // всю страницу (index.php, Parse_block).
         var atexUserPads = (function() {
             var node = document.getElementById('atex-user-pads');
             var text = node ? String(node.textContent || '').trim() : '';
