@@ -17,6 +17,18 @@
     <link rel="stylesheet" href="/css/ai-chat.css">
     <style>
         html { font-size: .82rem; }
+        /* #5046: ID устройства — серым в самом низу левого меню; в свёрнутом меню не помещается. */
+        .sidebar-device-id {
+            padding: 0 .75rem .6rem;
+            font-family: monospace;
+            font-size: .72rem;
+            line-height: 1.3;
+            color: var(--text-secondary, #94a3b8);
+            opacity: .75;
+            word-break: break-all;
+            user-select: all;
+        }
+        .app-sidebar.collapsed .sidebar-device-id { display: none; }
         /* Brand background */
         body.brand-bg-on::before {
             content: '';
@@ -464,6 +476,26 @@
                 <!-- Menu will be built from menuData by JavaScript -->
             </nav>
             <button id="sidebar-settings" class="sidebar-settings" type="button" title="Редактировать меню" aria-label="Edit menu"><i class="pi pi-cog"></i></button>
+            <!-- #5046: ID этого устройства (localStorage atehPad) — его вписывают в «Планшеты» пользователя. -->
+            <div id="sidebar-device-id" class="sidebar-device-id" title="ID устройства — его вписывают в «Планшеты» пользователя"></div>
+            <script>
+                (function() {
+                    // #5046: код тот же, что у сторожа планшета (pad-guard.ensureToken): 32 hex,
+                    // нет — генерируем и запоминаем, иначе показывать нечего.
+                    var node = document.getElementById('sidebar-device-id');
+                    if (!node) return;
+                    var code = '';
+                    try {
+                        code = String(localStorage.getItem('atehPad') || '').trim();
+                        if (!/^[a-f0-9]{8,64}$/.test(code)) {
+                            var bytes = window.crypto.getRandomValues(new Uint8Array(16));
+                            code = Array.prototype.map.call(bytes, function(b) { return (b + 256).toString(16).slice(1); }).join('');
+                            localStorage.setItem('atehPad', code);
+                        }
+                    } catch (e) { code = ''; }
+                    if (code) node.textContent = 'ID устройства: ' + code;
+                })();
+            </script>
             <div class="sidebar-resize-handle"></div>
         </aside>
 
