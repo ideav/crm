@@ -169,6 +169,27 @@
         var PAD_ROLE_IDS = ['1621'];
         var isPadRole = PAD_ROLE_IDS.indexOf(String(roleId)) !== -1;
     </script>
+    <!-- #5046: реквизит «Планшеты» вошедшего — коды устройств, с которых ему можно
+         работать. Отдаёт отчёт MyPads (Пользователь → Планшеты, фильтр [USER_ID]):
+         отчёт из шаблона строится без проверки грантов, таблица «Пользователь» ролям
+         не открыта. -->
+    <script type="text/plain" id="atex-user-pads"><!-- Begin: MyPads -->{pads}<!-- End: MyPads --></script>
+    <script>
+        // #5046: «Планшеты» заполнены — страница скрыта, пока сторож планшета не сверит
+        // код устройства (ниже, pad-guard.checkUserPads). Плейсхолдер `{pads}` — отчёта
+        // в базе нет, ограничения тоже.
+        var atexUserPads = (function() {
+            var node = document.getElementById('atex-user-pads');
+            var text = node ? String(node.textContent || '').trim() : '';
+            return /^\{[^{}]*\}$/.test(text) ? '' : text;
+        })();
+        if (atexUserPads) {
+            var padsHide = document.createElement('style');
+            padsHide.id = 'atex-user-pads-hide';
+            padsHide.textContent = '.app-layout{visibility:hidden!important;}';
+            document.head.appendChild(padsHide);
+        }
+    </script>
     <script>
         (function() {
             var dbName = '{_global_.z}' || 'default';
@@ -265,11 +286,25 @@
             // гасит цикл, когда открытая страница и есть пульт этого планшета. Скрипты
             // грузим только для роли планшета: остальным они не нужны. Сторож планшета
             // идёт первым — pad-home.js пользуется его разбором таблицы.
-            if (!isPadRole) return;
+            // #5046: «Планшеты» пользователя заполнены — сторож нужен любой роли: сначала
+            // он сверяет код устройства со списком, и только потом страница показывается.
+            if (!isPadRole && !atexUserPads) return;
             var base = '/download/' + db + '/js/';
+            var padCss = '/download/' + db + '/css/atex-brand.css?{_global_.version}.4';
             var guard = document.createElement('script');
-            guard.src = base + 'pad-guard.js?{_global_.version}.3';
+            guard.src = base + 'pad-guard.js?{_global_.version}.5';
             guard.onload = function() {
+                if (atexUserPads) {
+                    var link = document.createElement('link');
+                    link.rel = 'stylesheet';
+                    link.href = padCss;
+                    document.head.appendChild(link);
+                    // Не из списка — экран отказа уже на странице, сама страница скрыта.
+                    if (!window.AtexPadGuard.checkUserPads({ pads: atexUserPads, db: db, xsrf: xsrf })) return;
+                    var hide = document.getElementById('atex-user-pads-hide');
+                    if (hide && hide.parentNode) hide.parentNode.removeChild(hide);
+                }
+                if (!isPadRole) return;
                 var home = document.createElement('script');
                 home.src = base + 'pad-home.js?{_global_.version}.3';
                 home.setAttribute('data-pad-roles', PAD_ROLE_IDS.join(','));
@@ -279,7 +314,7 @@
                 // #4944: код незарегистрированного планшета уходит в «Планшет-кандидат» —
                 // это POST, ему нужен токен XSRF страницы.
                 home.setAttribute('data-pad-xsrf', xsrf);
-                home.setAttribute('data-pad-css', '/download/' + db + '/css/atex-brand.css?{_global_.version}.3');
+                home.setAttribute('data-pad-css', padCss);
                 document.head.appendChild(home);
             };
             document.head.appendChild(guard);

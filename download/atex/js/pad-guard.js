@@ -39,6 +39,12 @@
  * запись: код ложится поверх прежнего, а если записи нет — она создаётся. Диктовать
  * 32 символа голосом больше не нужно, на экране код остаётся как запасной путь.
  *
+ * #5046: у пользователя есть реквизит «Планшеты» — коды устройств, с которых ему можно
+ * работать. Заполнен — код этого устройства ищется в нём подстрокой; нет совпадения —
+ * ни пульт, ни любая другая страница базы не открываются: экран с кодом устройства и
+ * ошибкой, код уходит в «Планшет-кандидат». Значение отдаёт шаблон main.html
+ * (отчёт MyPads) в `window.atexUserPads`.
+ *
  * Чистая часть (разбор метаданных, строк, сборка запросов, генерация токена)
  * экспортируется через module.exports для тестов
  * (experiments/atex-pad-guard.test.js).
@@ -63,6 +69,9 @@
     // открыта на запись, в ней одна запись — сам код (первая колонка, реквизитов нет).
     var CANDIDATE_TABLE = 'Планшет-кандидат';
     var NAME_REQ = 'Наименование';
+    // #5046: отказ устройству, которого нет в реквизите «Планшеты» пользователя.
+    var DEVICE_DENIED_TEXT = 'Устройство не найдено среди разрешенных для этого рабочего места';
+    var DEVICE_TOKEN_LABEL = 'Код этого устройства (его вписывают в «Планшеты» пользователя)';
     var TOKEN_BYTES = 16;   // 32 hex-символа
     // #4789: колонки настройки планшета. Имена — как в таблице «Планшет» (ateh).
     var CONFIG_REQS = {
@@ -288,6 +297,23 @@
         return /^[a-f0-9]{8,64}$/.test(trimText(value));
     }
 
+    // #5046: реквизит «Планшеты» пользователя — коды устройств, с которых ему можно
+    // работать (через запятую). Пусто — ограничения нет. Отчёта MyPads в базе нет —
+    // шаблон оставляет плейсхолдер `{pads}`, это тоже «пусто».
+    function userPadsText(value) {
+        var text = trimText(value);
+        return /^\{[^{}]*\}$/.test(text) ? '' : text;
+    }
+
+    // #5046: код устройства ищется в «Планшетах» подстрокой, без учёта регистра.
+    // Список заполнен, а кода у устройства нет — устройство не опознано.
+    function isDeviceAllowed(padsText, token) {
+        var list = userPadsText(padsText).toLowerCase();
+        if (!list) return true;
+        var code = trimText(token).toLowerCase();
+        return isToken(code) && list.indexOf(code) !== -1;
+    }
+
     // Фильтр по ПЕРВОЙ колонке: её ключ — id самой таблицы (docs/kb/crud.md).
     function buildLookupPath(tableId, token) {
         return 'object/' + encodeURIComponent(tableId) + '/?JSON_OBJ&LIMIT=0,2' +
@@ -458,7 +484,8 @@
         // (первая колонка «Планшета»), даже если у вошедшего нет прав на запись.
         var padToken = ensureToken(root.localStorage, root.crypto);
         if (padToken) {
-            card.appendChild(el('div', { class: 'atex-pad-label', text: 'Код этого планшета (первая колонка таблицы «' + TABLE_NAME + '»)' }));
+            card.appendChild(el('div', { class: 'atex-pad-label', text: (opts && opts.tokenLabel)
+                || 'Код этого планшета (первая колонка таблицы «' + TABLE_NAME + '»)' }));
             card.appendChild(el('div', { class: 'atex-pad-token', text: padToken }));
         } else {
             card.appendChild(el('div', { class: 'atex-pad-error', text: 'Код устройства не сгенерировать: браузер не умеет crypto.getRandomValues' }));
@@ -610,13 +637,25 @@
         var table = findCandidateTable(metadata);
         if (!table) return Promise.resolve({ saved: false, reason: 'no-table' });
         if (!isToken(token)) return Promise.resolve({ saved: false, reason: 'no-token' });
-        return getJson(ctx, candidateListPath(table.id)).then(function(rows) {
+        // #5046: на одной странице код публикуют сразу двое — проверка страницы (main.html)
+        // и сторож пульта (сторож грузится обоими, у каждого свой экземпляр модуля). Пока
+        // запись этого кода в пути, второй ждёт её же, а не создаёт вторую запись.
+        var inflight = root.atexPadCandidateInflight;
+        if (inflight && inflight.token === token) return inflight.promise;
+        var promise = getJson(ctx, candidateListPath(table.id)).then(function(rows) {
             var plan = candidateWrite(table, candidateFromRows(rows), token);
             if (!plan) return { saved: true, reason: 'same' };
             return post(ctx, plan.path, plan.params).then(function() {
                 return { saved: true, reason: plan.mode };
             });
         });
+        var done = function() {
+            if (root.atexPadCandidateInflight && root.atexPadCandidateInflight.promise === promise)
+                root.atexPadCandidateInflight = null;
+        };
+        root.atexPadCandidateInflight = { token: token, promise: promise };
+        promise.then(done, done);
+        return promise;
     }
 
     // Имя планшета — в шапку рабочего места. #4783: пульт слиттера дописывает к нему дату
@@ -631,6 +670,48 @@
         root.atexPad = pad;
         var slot = root.document.querySelector('.navbar-workspace');
         if (slot && pad.name) slot.textContent = pad.name;
+    }
+
+    // #5046: «Планшеты» заполнены — сверяем код ЭТОГО устройства; кода ещё нет —
+    // генерируем и запоминаем (его покажет экран отказа). Пусто — устройство не трогаем.
+    function deviceAllowedHere(padsText) {
+        if (!userPadsText(padsText)) return true;
+        return isDeviceAllowed(padsText, ensureToken(root.localStorage, root.crypto));
+    }
+
+    // #5046: устройство не из «Планшетов» пользователя — экран отказа с кодом устройства,
+    // код уходит в «Планшет-кандидат». Метаданные нужны только чтобы найти эту таблицу:
+    // не прочитались — экран всё равно показываем, код на нём остаётся.
+    function denyDevice(ctx) {
+        showNote(ctx.root, 'Проверка устройства…', '');
+        return getJson(ctx, 'metadata')
+            .then(function(metadata) { ctx.metadata = metadata; }, function() { ctx.metadata = null; })
+            .then(function() {
+                showBlocked(ctx, 'Устройство не разрешено', DEVICE_DENIED_TEXT,
+                    { noRegister: true, publishCode: true, tokenLabel: DEVICE_TOKEN_LABEL });
+            });
+    }
+
+    // #5046: проверка на ЛЮБОЙ странице базы (templates/atex/main.html). Страница до неё
+    // скрыта шаблоном; true — устройство разрешено, страницу можно показывать. Иначе
+    // поверх страницы (под верхним меню — из него можно выйти) встаёт экран отказа.
+    function checkUserPads(opts) {
+        if (deviceAllowedHere(opts && opts.pads)) return true;
+        var doc = root.document;
+        var show = function() {
+            var host = doc.getElementById('atex-pad-allow');
+            if (!host) {
+                host = el('div', { id: 'atex-pad-allow', class: 'atex-brand' });
+                doc.body.appendChild(host);
+            }
+            var navbar = doc.querySelector('.navbar');
+            if (navbar && navbar.getBoundingClientRect)
+                host.style.top = Math.max(0, navbar.getBoundingClientRect().bottom) + 'px';
+            denyDevice({ root: host, db: trimText(opts.db), xsrf: trimText(opts.xsrf), table: null });
+        };
+        if (doc.body && doc.readyState !== 'loading') show();
+        else doc.addEventListener('DOMContentLoaded', show);
+        return false;
     }
 
     // Скрипт рабочего места грузим только после успешной проверки.
@@ -661,6 +742,12 @@
             kind: trimText(script.getAttribute('data-pad-kind')),
             table: null
         };
+        // #5046: устройство должно быть в «Планшетах» пользователя (значение даёт шаблон
+        // main.html в window.atexUserPads). Не из списка — код пульта не грузится вовсе.
+        if (!deviceAllowedHere(root.atexUserPads)) {
+            denyDevice(ctx);
+            return;
+        }
         // #4868: РОЛЬ проверяем до всяких запросов — пульт оператора, чужому роли
         // он и не должен начинать грузиться.
         if (!isRoleAllowed(ctx.allowedRoles, root.roleId)) {
@@ -721,6 +808,9 @@
         candidateFromRows: candidateFromRows,   // #4944
         candidateWrite: candidateWrite,         // #4944
         publishCandidate: publishCandidate,     // #4944: код планшета — администратору
+        DEVICE_DENIED_TEXT: DEVICE_DENIED_TEXT, // #5046
+        isDeviceAllowed: isDeviceAllowed,       // #5046: код устройства в «Планшетах» пользователя
+        checkUserPads: checkUserPads,           // #5046: проверка на любой странице (main.html)
         CONFIG_REQS: CONFIG_REQS,          // #4789
         WORKSPACE_ACTION: WORKSPACE_ACTION, // #4789
         reqByName: reqByName,               // #4789
