@@ -246,7 +246,9 @@
    читается издалека), без подписи «Заказ». */
 .atex-sl-head-order-no { font-size: 28px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
 /* #4783 п.7: спецификация задания одной строкой — «Вид сырья / Метраж / Намотка / Лидер». */
-.atex-sl-spec { display: inline-flex; font-size: 15px; font-weight: 600; color: var(--sl-accent-d); }
+.atex-sl-spec { display: inline-flex; flex-direction: column; font-size: 15px; font-weight: 600; color: var(--sl-accent-d); }
+/* #5060: вторая строчка сводки — втулка задания «1", Пластик черная». */
+.atex-sl-spec-sleeve { font-weight: 500; }
 /* #4783 п.9: все кнопки управления заданием — одним рядом; #4933 п.1 — в строке шапки. */
 .atex-sl-actions { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 /* #4933 п.1: инструкция задания-«настройки» — единственный блок шапки на всю ширину. */
