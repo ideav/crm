@@ -69,6 +69,13 @@ eq('multifield', $tr->apply(array('transform' => 'multifield'), 'PHONE', $rec), 
 eq('dict', $tr->apply(array('transform' => 'dict:task_status'), 'ST', $rec), 'Завершена');
 eq('dict неизвестный код', $tr->apply(array('transform' => 'dict:task_status'), 'STX', $rec), '9');
 eq('dict учёт неизвестных', isset($tr->unknown['task_status']['9']), true);
+// #5061: пустое списочное поле Битрикс отдаёт как false — это «не задано», а не код «N»
+eq('dict false — пусто', $tr->apply(array('transform' => 'dict:task_status'), 'F', $rec), '');
+eq('dict [false] — пусто', $tr->apply(array('transform' => 'dict:task_status'), 'L', array('L' => array(false))), '');
+eq('dict false — не в неизвестных', isset($tr->unknown['task_status']['N']), false);
+eq('empty: значение для пустого', $tr->apply(array('transform' => 'dict:task_status', 'empty' => 'Нет'), 'F', $rec), 'Нет');
+eq('empty: непустое не трогает', $tr->apply(array('transform' => 'dict:task_status', 'empty' => 'Нет'), 'ST', $rec), 'Завершена');
+eq('empty: без преобразования', $tr->apply(array('empty' => '—'), 'NONE', $rec), '—');
 eq('template', $tr->apply(array('transform' => 'template', 'template' => '{LAST_NAME} {NAME} {SECOND_NAME}'), 'FIO', $rec), 'Иванов Иван');
 eq('строка чистится', $tr->apply(array(), 'TXT', $rec), 'a b');
 eq('datetime как есть', $tr->apply(array('transform' => 'datetime'), 'DT', $rec), '2026-05-12T10:17:25+03:00');

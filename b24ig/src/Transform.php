@@ -88,7 +88,14 @@ class Transform
         return array_key_exists($src, $record) ? $record[$src] : null;
     }
 
+    /** Значение колонки; пустое заменяется на `empty` поля, если он задан. */
     public function apply(array $spec, $fieldName, array $record)
+    {
+        $out = $this->convert($spec, $fieldName, $record);
+        return ($out === '' && isset($spec['empty'])) ? (string)$spec['empty'] : $out;
+    }
+
+    private function convert(array $spec, $fieldName, array $record)
     {
         $t = isset($spec['transform']) ? $spec['transform'] : '';
 
@@ -105,6 +112,7 @@ class Transform
             $dict = substr($t, 5);
             $out = array();
             foreach ((is_array($v) ? $v : array($v)) as $code) {
+                if ($code === false || $code === null) continue;   // пустое списочное поле Битрикса — false, а не код
                 $code = self::scalar($code);
                 if ($code === '') continue;
                 $name = $this->dicts->name($dict, $code);

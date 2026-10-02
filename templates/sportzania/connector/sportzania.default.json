@@ -431,7 +431,8 @@
         "UF_CRM_1648027063964": {
           "label": "Направление",
           "column": "Направление",
-          "transform": "dict:lead_direction"
+          "transform": "dict:lead_direction",
+          "empty": "Нет"
         },
         "LINK": {
           "label": "Ссылка",
