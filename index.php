@@ -2824,6 +2824,30 @@ function isRef($id, $par, $typ)
 		return $GLOBALS["STORED_REPS"][$id]["ref_typ"][$typ];	# seek reference
 	return false;
 }
+# <ref-anchors-5058>
+# Через какую таблицу присоединять $par по ссылке, когда на $par ссылаются несколько таблиц
+# отчёта (issue #5058): берём ту, чья ссылочная колонка на $par уже стоит в отчёте.
+# Возвращает [таблица-владелец => id реквизита-ссылки] или FALSE (неоднозначности нет либо
+# такой колонки нет — тогда прежний порядок: первая присоединённая таблица со ссылкой).
+function refAnchors($id, $par)
+{
+	$owners = 0;
+	if(isset($GLOBALS["STORED_REPS"][$id]["references"]))
+		foreach($GLOBALS["STORED_REPS"][$id]["references"] as $targets)
+			if(isset($targets[$par]))
+				$owners++;
+	if($owners < 2)
+		return FALSE;
+	$via = array();
+	foreach($GLOBALS["STORED_REPS"][$id]["types"] as $typ)
+		if(strlen($typ) && isset($GLOBALS["STORED_REPS"][$id]["ref_typ"][$typ])
+				&& ($GLOBALS["STORED_REPS"][$id]["ref_typ"][$typ] == $par)
+				&& isset($GLOBALS["STORED_REPS"]["parents"][$typ])
+				&& !isset($via[$GLOBALS["STORED_REPS"]["parents"][$typ]]))
+			$via[$GLOBALS["STORED_REPS"]["parents"][$typ]] = $typ;
+	return count($via) ? $via : FALSE;
+}
+# </ref-anchors-5058>
 function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FALSE) # $exe means we must retrieve data at last, not just prep the sql
 {
 	global $blocks, $obj, $z, $args;
@@ -3109,6 +3133,7 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 							if(!isset($tables[$par_alias])){ # The parent is not joined yet
         			    		trace("_ parent $par_alias ($par_orig) of $alias not joined yet");
 								$on = " AND $p$par_alias.t=$par";
+								$refVia = refAnchors($id, $par); # #5058
 								# First check the FROM set of the report
                         	    if(isset($repJoin)){
                         	        trace("__ REP_JOIN for $par_alias");
@@ -3147,7 +3172,7 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
                         	        trace("__ ".$tables[$par_alias]);
                         	    }
                         	    elseif(!isset($GLOBALS["STORED_REPS"][$id][REP_COL_ALIAS][$key]))
-								foreach($tables as $t => $j){ # Look through joined tables
+								foreach($refVia ? array_intersect_key($tables, $refVia) : $tables as $t => $j){ # Look through joined tables
             			    		trace("__ Look through joined tables");
 									if(substr($t, strpos($t, "_")) === (isset($suffix) ? $suffix : ""))
 										$orig = substr($t, 0, strpos($t, "_"));
@@ -3168,20 +3193,24 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
                 			    		trace("___ first suitable link [$orig]->[$par]"); // multiple refs to fix
 										if(!isset($joined["$p$t"]) || (strpos(implode(" ", $joined["$p$t"]), $ptid) === false))
 										    $joined["$p$t"][$ptid] = "$p$t.id $ptid";
+										# #5058: при выборе по колонке отчёта ссылка — именно этот реквизит
+										# (карта references хранит одну ссылку на пару таблиц)
+										$refReq = isset($refVia[$orig]) ? $refVia[$orig] : $GLOBALS["STORED_REPS"][$id]["references"][$orig][$par];
+										$refVal = isset($refVia[$orig]) ? " AND $pr$par_alias.val='$refReq'" : "";
 										if(HintNeeded($key, $id)){
-											$tables[$par_alias] = " LEFT JOIN ($z $pr$par_alias CROSS JOIN $z $p$par_alias USE INDEX (PRIMARY)) ON $pr$par_alias.up=$p$t.id AND $p$par_alias.id=$pr$par_alias.t $on";
+											$tables[$par_alias] = " LEFT JOIN ($z $pr$par_alias CROSS JOIN $z $p$par_alias USE INDEX (PRIMARY)) ON $pr$par_alias.up=$p$t.id AND $p$par_alias.id=$pr$par_alias.t$refVal $on";
     										$joined["$p$par_alias"][$par_alias] = "$pr$par_alias.up";
     										$joinedFrom["$p$par_alias"] = "FROM $z $pr$par_alias,$z $p$par_alias USE INDEX (PRIMARY)";
-    										$joinedClause["$p$par_alias"] = " WHERE $p$par_alias.id=$pr$par_alias.t $on ";
+    										$joinedClause["$p$par_alias"] = " WHERE $p$par_alias.id=$pr$par_alias.t$refVal $on ";
     										$joinedOn["$p$par_alias"] = ") $p$par_alias ON $p$par_alias.up=$ptid";
 										}
 										else{
-											$tables[$par_alias] = " LEFT JOIN ($z $pr$par_alias CROSS JOIN $z $p$par_alias) ON $pr$par_alias.val='".$GLOBALS["STORED_REPS"][$id]["references"][$orig][$par]."'"
+											$tables[$par_alias] = " LEFT JOIN ($z $pr$par_alias CROSS JOIN $z $p$par_alias) ON $pr$par_alias.val='$refReq'"
 																	." AND $pr$par_alias.up=$p$t.id AND $p$par_alias.id=$pr$par_alias.t $on";
     										$joined["$p$par_alias"][$par_alias] = "$pr$par_alias.up,$pr$par_alias.val";
     										$joinedFrom["$p$par_alias"] = "FROM $z $pr$par_alias,$z $p$par_alias";
     										$joinedClause["$p$par_alias"] = " WHERE $p$par_alias.id=$pr$par_alias.t $on ";
-    										$joinedOn["$p$par_alias"] = ") $p$par_alias ON $p$par_alias.val='".$GLOBALS["STORED_REPS"][$id]["references"][$orig][$par]."'"
+    										$joinedOn["$p$par_alias"] = ") $p$par_alias ON $p$par_alias.val='$refReq'"
 																	." AND $p$par_alias.up=$ptid";
 										}
 									}
