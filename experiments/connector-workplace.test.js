@@ -693,10 +693,17 @@ function fakeServer(o) {
             if (fd.fileName('userfile') === 'acme.json') st.cfgText = fd.get('userfile').text;
             return text('{"ok":true,"action":"upload"}');
         }
-        if (url.indexOf('/dir_admin/') >= 0 && url.indexOf('gf=acme.json') >= 0) return text(st.cfgText);
+        if (url.indexOf('/dir_admin/') >= 0 && url.indexOf('gf=acme.json') >= 0) {
+            return o.defaultOnly && !st.uploads.some((u) => u.name === 'acme.json')
+                ? text('<html>Файл не найден</html>') : text(st.cfgText);
+        }
+        if (url.indexOf('/dir_admin/') >= 0 && url.indexOf('gf=acme.default.json') >= 0) {
+            return text(JSON.stringify(ACME_CFG, null, 2));
+        }
         if (url.indexOf('/dir_admin/') >= 0) {
+            const cfgName = o.defaultOnly ? 'acme.default.json' : 'acme.json';
             return text('<table>' +
-                '<tr><td><a href="/spz/dir_admin/?templates=1&add_path=/connector&gf=acme.json">acme.json</a></td></tr>' +
+                '<tr><td><a href="/spz/dir_admin/?templates=1&add_path=/connector&gf=' + cfgName + '">' + cfgName + '</a></td></tr>' +
                 '<tr><td><a href="/spz/dir_admin/?templates=1&add_path=/connector&gf=secrets.json">secrets.json</a></td></tr>' +
                 '<tr><td><a href="/spz/dir_admin/?templates=1&add_path=/connector&gf=run.log">run.log</a></td></tr>' +
                 '</table>');
@@ -811,6 +818,29 @@ async function testEditReachesRun() {
         runIdx >= 0 ? fetchLog[runIdx].url : '');
 }
 
+// #5061: из репо деплоится только эталон <имя>.default.json, рабочий конфиг создаёт первое сохранение
+async function testDefaultConfigSeedsWorking() {
+    const srv = fakeServer({ defaultOnly: true });
+    const { document, fetchLog } = loadFromConfig(srv);
+    await flush(60);
+    const opts = document.getElementById('entities').querySelectorAll('option').map((x) => x.attrs.value);
+    assert(opts.join(',') === 'users,deps', '#5061: есть только эталон — конфиг «acme» открывается из него',
+        'options=' + opts.join(',') + ' | ' + document.getElementById('result').textContent);
+    document.getElementById('aiBtn').onclick();
+    await flush(60);
+    typeInto(rowsByName(document).NAME, 'Почта');
+    document.getElementById('runBtn').onclick();
+    await flush(60);
+    const cfgUp = srv.uploads.filter((u) => u.name === 'acme.json')[0];
+    assert(!!cfgUp && JSON.parse(cfgUp.body).entities.users.fields.NAME.column === 'Почта',
+        '#5061: сохранение пишет рабочий acme.json, а не эталон',
+        'uploads=' + srv.uploads.map((u) => u.name).join(','));
+    assert(!srv.uploads.some((u) => /default/.test(u.name)), '#5061: эталон не перезаписывается');
+    const run = fetchLog.find(isRun);
+    assert(!!run && run.url.split(/[?&]/).indexOf('config=acme') >= 0,
+        '#5061: запуск — по имени без .default', run ? run.url : '');
+}
+
 async function testSaveFailureBlocksRun() {
     const srv = fakeServer({ uploadFails: true });
     const { document, fetchLog } = loadFromConfig(srv);
@@ -901,6 +931,7 @@ function testTemplateHasNoBaseSpecifics() {
     await testConfigFromBase();
     await testEditReachesRun();
     await testSaveFailureBlocksRun();
+    await testDefaultConfigSeedsWorking();
     await testRefWithoutEntityBlocksSave();
     await testComboboxTypedAndManualLow();
     testTemplateHasNoBaseSpecifics();

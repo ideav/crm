@@ -254,6 +254,22 @@ eq('dbPaths: secrets.json', $p['secrets'], "$site/templates/custom/spz/connector
 throws('dbPaths: обход каталога в имени базы', function () use ($site) { Runner::dbPaths($site, '../spz', 'x'); }, 'имя базы');
 throws('dbPaths: слэш в имени конфига', function () use ($site) { Runner::dbPaths($site, 'spz', 'a/b'); }, 'имя конфига');
 throws('dbPaths: расширение в имени конфига', function () use ($site) { Runner::dbPaths($site, 'spz', 'x.json'); }, 'имя конфига');
+eq('dbPaths: эталон из репо', $p['default'], "$site/templates/custom/spz/connector/sportzania-spz.default.json");
+// #5061: рабочий конфиг создаётся из эталона один раз, правки из UI деплой эталона не затирает
+@mkdir($p['data_root'], 0775, true);
+eq('seedConfig: нет ни рабочего, ни эталона', Runner::seedConfig($p), false);
+file_put_contents($p['default'], '{"v":"эталон"}');
+eq('seedConfig: рабочего нет — создан из эталона', Runner::seedConfig($p), true);
+eq('seedConfig: рабочий = эталон', file_get_contents($p['config']), '{"v":"эталон"}');
+file_put_contents($p['config'], '{"v":"из UI"}');
+file_put_contents($p['default'], '{"v":"новый эталон"}');
+eq('seedConfig: рабочий есть — не трогается', Runner::seedConfig($p), false);
+eq('seedConfig: правка из UI сохранена', file_get_contents($p['config']), '{"v":"из UI"}');
+unlink($p['config']);
+$rep = null;
+Runner::run(array('db' => 'spz', 'config' => 'sportzania-spz', 'site_root' => $site, 'check' => true), $rep);
+eq('run: конфиг найден через эталон', strpos(json_encode($rep, JSON_UNESCAPED_UNICODE), 'не найден'), false);
+eq('run: рабочий конфиг создан из эталона', file_get_contents($p['config']), '{"v":"новый эталон"}');
 @mkdir($site, 0775, true);
 file_put_contents("$site/c.json", json_encode(array('project' => 'p', 'sources' => array('b' => array('type' => 'bitrix24', 'webhook' => '${B24IG_UNIT_WEBHOOK}')),
     'target' => array('base_url' => 'x', 'db' => 'spz', 'token' => '${B24IG_UNIT_TOKEN}'), 'order' => array('a'), 'entities' => array('a' => array()))));

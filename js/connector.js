@@ -114,23 +114,32 @@
         while ((m = re.exec(String(html)))) {
           var name = decodeURIComponent(m[1]);
           if (!/\.json$/i.test(name) || /^secrets\.json$/i.test(name)) continue;
-          name = name.replace(/\.json$/i, "");
+          name = name.replace(/(\.default)?\.json$/i, "");   // эталон из репо <имя>.default.json — тот же конфиг
           if (out.indexOf(name) < 0) out.push(name);
         }
         return out;
       });
   }
 
+  // Рабочего <имя>.json ещё нет (свежий деплой) — показываем эталон <имя>.default.json из репо;
+  // первое сохранение создаст рабочий конфиг, дальше деплой его не трогает (issue #5061).
   function readConfig(name) {
-    return fetchTO(dirAdminUrl("&gf=" + encodeURIComponent(name + ".json")))
+    return readConfigFile(name + ".json")
+      .catch(function (e) {
+        return readConfigFile(name + ".default.json").catch(function () { throw e; });
+      })
+      .catch(function (e) { throw new Error("конфиг «" + name + "» не прочитан: " + errMsg(e)); });
+  }
+
+  function readConfigFile(fileName) {
+    return fetchTO(dirAdminUrl("&gf=" + encodeURIComponent(fileName)))
       .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.text(); })
       .then(function (t) {
         var cfg;
         try { cfg = JSON.parse(t); } catch (e) { throw new Error(plainText(t).slice(0, 160) || "не JSON"); }
         if (!cfg || typeof cfg !== "object") throw new Error("не объект");
         return { cfg: cfg, text: t };
-      })
-      .catch(function (e) { throw new Error("конфиг «" + name + "» не прочитан: " + errMsg(e)); });
+      });
   }
 
   function uploadConfigFile(fileName, text, rewrite) {
