@@ -89,7 +89,6 @@
   "order": [
     "departments",
     "tabel",
-    "bitrix_users",
     "leads",
     "deals",
     "tasks"
@@ -133,16 +132,6 @@
           "label": "Название подразделения",
           "column": "@name"
         },
-        "SORT": {
-          "label": "Порядок сортировки",
-          "column": "Сортировка",
-          "transform": "number"
-        },
-        "UF_HEAD": {
-          "label": "Руководитель",
-          "column": "Руководитель (ID)",
-          "transform": "number"
-        },
         "PARENT": {
           "label": "Вышестоящее подразделение",
           "column": "Родительский",
@@ -158,7 +147,18 @@
     "tabel": {
       "enabled": true,
       "source": {
-        "from_entity": "bitrix_users"
+        "connection": "b24",
+        "method": "user.get",
+        "pagination": "start",
+        "result_path": "result",
+        "filters": [
+          {
+            "ACTIVE": true
+          },
+          {
+            "ACTIVE": false
+          }
+        ]
       },
       "load": {
         "mode": "full"
@@ -167,7 +167,7 @@
         "table": "Табельный",
         "table_id": 2946,
         "key": "@name",
-        "mode": "insert_only"
+        "mode": "upsert"
       },
       "fields": {
         "ID": {
@@ -191,106 +191,37 @@
           "column": "ФИО",
           "transform": "template",
           "template": "{LAST_NAME} {NAME} {SECOND_NAME}"
-        }
-      },
-      "on_source_delete": "keep"
-    },
-    "bitrix_users": {
-      "enabled": true,
-      "source": {
-        "connection": "b24",
-        "method": "user.get",
-        "pagination": "start",
-        "result_path": "result",
-        "filters": [
-          {
-            "ACTIVE": true
-          },
-          {
-            "ACTIVE": false
-          }
-        ]
-      },
-      "load": {
-        "mode": "full"
-      },
-      "target": {
-        "table": "Пользователь Битрикс",
-        "table_id": 969767,
-        "key": "@name",
-        "mode": "upsert"
-      },
-      "fields": {
-        "ID": {
-          "label": "ID",
-          "column": "@name"
-        },
-        "ID@tabel": {
-          "column": "Табельный",
-          "from": "ID",
-          "ref": {
-            "entity": "tabel",
-            "by": "key",
-            "missing": "skip"
-          }
-        },
-        "ACTIVE": {
-          "label": "Активность",
-          "column": "Активен",
-          "transform": "yn"
-        },
-        "LAST_NAME": {
-          "label": "Фамилия",
-          "column": "Фамилия"
-        },
-        "NAME": {
-          "label": "Имя",
-          "column": "Имя"
-        },
-        "SECOND_NAME": {
-          "label": "Отчество",
-          "column": "Отчество"
         },
         "EMAIL": {
-          "label": "E-Mail",
+          "label": "E-mail",
           "column": "Email"
         },
-        "WORK_PHONE": {
-          "label": "Телефон компании",
-          "column": "Рабочий телефон"
-        },
         "PERSONAL_MOBILE": {
-          "label": "Личный мобильный",
-          "column": "Мобильный"
+          "label": "Мобильный телефон",
+          "column": "Телефон"
+        },
+        "PERSONAL_BIRTHDAY": {
+          "label": "Дата рождения",
+          "column": "ДР",
+          "transform": "datetime"
         },
         "WORK_POSITION": {
           "label": "Должность",
-          "column": "Должность"
+          "column": "Должность",
+          "ref": {
+            "by": "name",
+            "missing": "create"
+          }
         },
         "UF_DEPARTMENT": {
           "label": "Подразделения",
-          "column": "Департаменты (ID)",
-          "transform": "join"
-        },
-        "UF_DEPARTMENT@ref": {
           "column": "Департамент",
-          "from": "UF_DEPARTMENT",
           "ref": {
             "entity": "departments",
             "by": "key",
-            "missing": "skip",
-            "multi": true
+            "multi": true,
+            "missing": "skip"
           }
-        },
-        "LAST_LOGIN": {
-          "label": "Последняя авторизация",
-          "column": "Последний вход",
-          "transform": "datetime"
-        },
-        "DATE_REGISTER": {
-          "label": "Дата регистрации",
-          "column": "Дата регистрации",
-          "transform": "datetime"
         }
       },
       "on_source_delete": "keep"
@@ -357,10 +288,6 @@
           "label": "Фамилия",
           "column": "Фамилия"
         },
-        "COMPANY_TITLE": {
-          "label": "Название компании",
-          "column": "Компания"
-        },
         "SOURCE_ID": {
           "label": "Источник",
           "column": "Источник лида",
@@ -401,10 +328,6 @@
           "column": "Открыт",
           "transform": "yn"
         },
-        "COMMENTS": {
-          "label": "Комментарий",
-          "column": "Комментарий"
-        },
         "HAS_PHONE": {
           "label": "Есть телефон",
           "column": "Есть телефон",
@@ -428,21 +351,6 @@
             "by": "key",
             "missing": "skip"
           }
-        },
-        "CREATED_BY_ID": {
-          "label": "Кем создан",
-          "column": "Создал (ID)",
-          "transform": "number"
-        },
-        "MODIFY_BY_ID": {
-          "label": "Кем изменён",
-          "column": "Изменил (ID)",
-          "transform": "number"
-        },
-        "MOVED_BY_ID": {
-          "label": "Кем перемещён",
-          "column": "Переместил (ID)",
-          "transform": "number"
         },
         "CONTACT_ID": {
           "label": "Контакт",
@@ -597,10 +505,6 @@
           "column": "Сумма",
           "transform": "money"
         },
-        "CURRENCY_ID": {
-          "label": "Валюта",
-          "column": "Валюта"
-        },
         "DATE_CREATE": {
           "label": "Дата создания",
           "column": "Дата создания",
@@ -624,10 +528,6 @@
           "label": "Закрыта",
           "column": "Закрыта",
           "transform": "yn"
-        },
-        "COMMENTS": {
-          "label": "Комментарий",
-          "column": "Комментарий"
         }
       },
       "on_source_delete": "keep"
@@ -741,16 +641,6 @@
           "label": "Базовая задача",
           "column": "Родительская задача",
           "transform": "number"
-        },
-        "TIME_ESTIMATE": {
-          "label": "Плановые трудозатраты",
-          "column": "Оценка времени",
-          "transform": "number"
-        },
-        "ALLOW_CHANGE_DEADLINE": {
-          "label": "Разрешить менять сроки",
-          "column": "Можно менять срок",
-          "transform": "yn"
         }
       },
       "on_source_delete": "keep"
