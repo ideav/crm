@@ -585,20 +585,56 @@
         };
     }
 
-    AtexProductionPlanning.prototype.getJson = function(path) {
-        return fetch(this.url(path), { credentials: 'same-origin' }).then(function(resp) {
+    // #5057: ЧТЕНИЕ ПЕРЕСПРАШИВАЕТ ДО 3 РАЗ. Недогруженный отчёт (обрыв сети, 5xx, оборванный
+    // не-JSON ответ, тело-ошибка `[{"error":…}]` при коде 200) раньше уходил в разбор как данные
+    // или глушился загрузчиком — и план молча строился без позиций: все полосы «ОТХОДЫ», номеров
+    // заказов нет. Теперь сбой переспрашивается, а после третьей неудачи — ошибка с путём запроса.
+    // Отказ 4xx (my_die: нет доступа, неверный запрос) — решение сервера, его не переспрашиваем.
+    var GET_ATTEMPTS = 3;
+    var GET_RETRY_DELAY_MS = 500;
+    // Тело-ошибка: ровно одна строка, и в ней только поле error/err (строка отчёта так не выглядит).
+    function isErrorBody(data) {
+        var obj = Array.isArray(data) ? (data.length === 1 ? data[0] : null) : data;
+        if (!obj || typeof obj !== 'object') return false;
+        var keys = Object.keys(obj);
+        return keys.length === 1 && (keys[0] === 'error' || keys[0] === 'err') && extractApiError(obj) !== '';
+    }
+    function getJsonOnce(ctx, path) {
+        return fetch(ctx.url(path), { credentials: 'same-origin' }).then(function(resp) {
             return resp.text().then(function(text) {
                 var data;
                 try { data = text ? JSON.parse(text) : null; }
                 catch (e) {
-                    if (!resp.ok) throw new Error('Сервер вернул ошибку ' + resp.status + ': ' + text.slice(0, 200));
-                    throw new Error('Некорректный JSON: ' + text.slice(0, 200));
+                    if (!resp.ok) throw ppErr('Сервер вернул ошибку ' + resp.status + ': ' + text.slice(0, 200), resp.status, 'parse');
+                    throw ppErr('Некорректный JSON: ' + text.slice(0, 200), resp.status, 'parse');
                 }
                 // Сервер сигналит отказ кодом 4xx и телом `[{"error":"…"}]` (my_die).
-                if (!resp.ok) throw new Error(extractApiError(data) || ('Сервер вернул ошибку ' + resp.status));
+                if (!resp.ok) throw ppErr(extractApiError(data) || ('Сервер вернул ошибку ' + resp.status), resp.status, 'server');
+                if (isErrorBody(data)) throw ppErr(extractApiError(data), resp.status, 'server');
                 return data;
             });
         });
+    }
+    AtexProductionPlanning.prototype.getJson = function(path) {
+        var self = this;
+        var delay = (typeof this.getRetryDelayMs === 'number') ? this.getRetryDelayMs : GET_RETRY_DELAY_MS;
+        function attempt(n) {
+            return getJsonOnce(self, path).catch(function(err) {
+                var status = err && err.status;
+                var refused = status >= 400 && status < 500 && status !== 408 && status !== 429;
+                if (refused) throw err;
+                var msg = (err && err.message) || String(err);
+                if (n >= GET_ATTEMPTS) {
+                    console.error('[pp] ❌ GET ' + path + ': не загрузилось после ' + GET_ATTEMPTS + ' попыток — ' + msg);
+                    throw ppErr(msg + ' (запрос ' + path + ', ' + GET_ATTEMPTS + ' попытки)', status, err && err.kind);
+                }
+                console.warn('[pp] ⟳ GET ' + path + ': попытка ' + n + ' из ' + GET_ATTEMPTS + ' не удалась — ' + msg);
+                return new Promise(function(resolve) { setTimeout(resolve, delay * n); }).then(function() {
+                    return attempt(n + 1);
+                });
+            });
+        }
+        return attempt(1);
     };
 
     AtexProductionPlanning.prototype.loadRefOptions = function(reqId, query, limit) {
@@ -2052,8 +2088,16 @@
     // #3372: справочник «Фактическая ширина резки» → this.actualWidthIndex.
     // Таблица/колонки резолвятся по имени из _metaAll (схемоустойчиво при пересборке
     // БД). Главное значение записи (r[0]) — фактическая ширина; «Ширина в заказе» —
-    // номинал; «Код» — условие применения. Нет таблицы/доступа → пустой индекс
-    // (фича тихо деградирует к номиналу).
+    // номинал; «Код» — условие применения. Нет таблицы в метаданных → пустой индекс (ширины
+    // номинальные). #5057: таблица есть, а чтение не удалось — загрузка падает (init → fatal):
+    // с номинальными ширинами полосы не сходятся с позициями, и вся резка уходит в «ОТХОДЫ».
+    // #5057: справочник геометрии не прочитался — называем его в ошибке загрузки.
+    function geometryLoadError(table, err) {
+        var msg = (err && err.message) || 'ошибка чтения';
+        console.error('[pp] ❌ справочник «' + table + '» не прочитан — ширины позиций посчитать не из чего:', msg);
+        return new Error('«' + table + '»: ' + msg);
+    }
+
     AtexProductionPlanning.prototype.loadActualWidths = function() {
         var self = this;
         this.actualWidthIndex = {};
@@ -2071,7 +2115,7 @@
                 };
             });
             self.actualWidthIndex = buildActualWidthIndex(list);
-        }).catch(function() { self.actualWidthIndex = {}; });
+        }).catch(function(err) { throw geometryLoadError('Фактическая ширина резки', err); });
     };
 
     // #3372: диаметр втулки в дюймах по id записи «Диаметр втулки» (8188 «Дюймы»)
@@ -2093,7 +2137,7 @@
                 if (isFinite(n)) map[String(rec.i)] = n;
             });
             self.sleeveInchesById = map;
-        }).catch(function() { self.sleeveInchesById = {}; });
+        }).catch(function(err) { throw geometryLoadError('Диаметр втулки', err); });
     };
 
     // #3812: ширина втулки в мм по id записи «Диаметр втулки» → this.sleeveWidthById =
@@ -2118,7 +2162,7 @@
                 if (isFinite(n) && n > 0) map[String(rec.i)] = Number(n);
             });
             self.sleeveWidthById = map;
-        }).catch(function() { self.sleeveWidthById = {}; });
+        }).catch(function(err) { throw geometryLoadError('Диаметр втулки', err); });
     };
 
     // #3372: проставить позициям фактическую ширину резки. Номинал заказа
