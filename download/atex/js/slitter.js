@@ -1403,6 +1403,25 @@
         return map;
     }
 
+    // #5060: втулка задания — из того же отчёта cut_planning (колонки «Дюймы» и
+    // «Материал втулки»), подпись «{Дюймы}", {Материал}»: 1", Пластик черная. Втулка у
+    // задания одна, поэтому в карте одна подпись на задание (первая непустая). Нет ни
+    // дюймов, ни материала — задания в карте нет, сводка обходится без второй строки.
+    function rowsToCutSleeves(rows) {
+        var map = {};
+        (rows || []).forEach(function(row) {
+            var cutId = firstField(row, ['cut_id', 'id']);
+            if (!cutId || map[cutId]) return;
+            var inches = toNumber(firstField(row, ['Дюймы']));
+            var material = firstField(row, ['Материал втулки']);
+            var parts = [];
+            if (inches > 0) parts.push(round3(inches) + '"');
+            if (material) parts.push(material);
+            if (parts.length) map[cutId] = parts.join(', ');
+        });
+        return map;
+    }
+
     // #4958: счётная форма слова «резка» для подписи карточки: 1 резка, 3 резки, 11 резок.
     function runsWord(count) {
         var n = Math.abs(Math.round(toNumber(count)));
@@ -1585,6 +1604,7 @@
         cutOrderLabel: cutOrderLabel,       // #4606
         rowsToCutWidths: rowsToCutWidths,   // #4958: ширина позиции из cut_planning
         rowsToCutAlts: rowsToCutAlts,       // #4996: альт-имя сырья из cut_planning
+        rowsToCutSleeves: rowsToCutSleeves, // #5060: втулка задания из cut_planning
         cutSpecLine: cutSpecLine,           // #4958: подпись позиции в карточке очереди
         isForeignWarehouse: isForeignWarehouse,
         // #3460: раскладка ножей (визуализация)
@@ -1674,6 +1694,7 @@
         this.cuts = [];           // производственные резки [{ id, label, status, slitter }]
         this.cutOrders = {};      // #4606: { cutId: [номера заказов] } из report/cut_planning
         this.cutWidths = {};      // #4958: { cutId: [ширины позиции, мм] } — тот же отчёт
+        this.cutSleeves = {};     // #5060: { cutId: '1", Пластик черная' } — тот же отчёт
         this.cutOrdersSlitterId = null; // станок, для которого загружены cutOrders/cutWidths
         // #3460: восстанавливаем выбор станка из localStorage при открытии формы.
         // #4789: станок планшета (таблица «Планшет») сильнее памяти браузера. Ссылкой он
@@ -2018,7 +2039,7 @@
     AtexSlitter.prototype.loadCutOrders = function() {
         var self = this;
         var sid = this.selectedSlitterId;
-        if (!sid) { this.cutOrders = {}; this.cutWidths = {}; this.cutAlts = {}; this.cutOrdersSlitterId = null; return Promise.resolve(); }
+        if (!sid) { this.cutOrders = {}; this.cutWidths = {}; this.cutAlts = {}; this.cutSleeves = {}; this.cutOrdersSlitterId = null; return Promise.resolve(); }
         if (this.cutOrdersSlitterId === String(sid)) return Promise.resolve();
         return this.getJson('report/cut_planning?JSON_KV&FR_cut_slitter_id=' + encodeURIComponent(sid) + '&LIMIT=0,5000')
             .then(function(rows) {
@@ -2026,9 +2047,10 @@
                 self.cutOrders = core.rowsToCutOrders(list);
                 self.cutWidths = core.rowsToCutWidths(list);   // #4958
                 self.cutAlts = core.rowsToCutAlts(list);       // #4996
+                self.cutSleeves = core.rowsToCutSleeves(list); // #5060
                 self.cutOrdersSlitterId = String(sid);
             })
-            .catch(function() { self.cutOrders = {}; self.cutWidths = {}; self.cutAlts = {}; self.cutOrdersSlitterId = null; });
+            .catch(function() { self.cutOrders = {}; self.cutWidths = {}; self.cutAlts = {}; self.cutSleeves = {}; self.cutOrdersSlitterId = null; });
     };
 
     // #4606: подпись заказа для задания («3738» / «3738, 3742 +1»); пусто — если
@@ -2968,6 +2990,7 @@
     // #4783 п.7/п.9: сводка задания — ОДНА строка «Вид сырья / Метраж, м / Намотка / Лидер»
     // (плашек-метрик больше нет: правая часть должна влезать в экран целиком). Число
     // проходов не дублируем — оно в заголовке «Резка N из M».
+    // #5060: второй строчкой — втулка задания «1", Пластик черная» (из cut_planning).
     AtexSlitter.prototype.renderCutSpec = function() {
         var cut = this.currentCut;
         var runLength = core.runLengthForCut(cut);
@@ -2978,7 +3001,10 @@
             cut.winding || '—',
             cut.leader || '—'
         ];
-        return el('div', { class: 'atex-sl-spec', text: parts.join(' / ') });
+        var lines = [el('div', { class: 'atex-sl-spec-line', text: parts.join(' / ') })];
+        var sleeve = (this.cutSleeves || {})[String(cut.id)];
+        if (sleeve) lines.push(el('div', { class: 'atex-sl-spec-line atex-sl-spec-sleeve', text: sleeve }));
+        return el('div', { class: 'atex-sl-spec' }, lines);
     };
 
     // #3460: цветная карта раскроя ножей с подписями ширин прямо на полосах
