@@ -54,17 +54,20 @@ done
 echo " — отвечает"
 
 docker exec -i "$DB" mariadb -uideav -pideav5058 ideav < "$ROOT/experiments/report-ref-anchor-5058-seed.sql"
+# Каталог базы: ядро пишет в него журнал (при создании базы через UI он появляется сам).
+docker exec "$APP" sh -c 'mkdir -p /var/www/html/templates/custom/ateh/logs && chown -R www-data:www-data /var/www/html/templates/custom/ateh'
 
 failed=0
 # check <отчёт> <доп. параметры> <ожидание "задание=дюймы ..."> <название>
 check(){
-    local got
-    got=$(docker exec "$APP" curl -s -H "X-Authorization: $TOKEN" "http://localhost/ateh/report/$1?JSON_KV$2" \
-        | parse_inches)
+    local raw got
+    raw=$(docker exec "$APP" curl -s -H "X-Authorization: $TOKEN" "http://localhost/ateh/report/$1?JSON_KV$2")
+    got=$(printf '%s' "$raw" | parse_inches)
     if [[ "$got" == "$3" ]]; then
         echo "  ok   $4: $got"
     else
         echo "  FAIL $4: ждали «$3», получили «$got»"
+        echo "       ответ: ${raw:0:300}"
         failed=$((failed + 1))
     fi
 }
