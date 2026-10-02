@@ -216,7 +216,21 @@ TXT;
         if (!preg_match(self::NAME_MASK, (string)$db)) throw new ConnectorException('неверное имя базы');
         if (!preg_match(self::NAME_MASK, (string)$config)) throw new ConnectorException('неверное имя конфига');
         $dir = rtrim($siteRoot, '/') . "/templates/custom/$db/connector";
-        return array('data_root' => $dir, 'config' => "$dir/$config.json", 'secrets' => "$dir/secrets.json");
+        return array('data_root' => $dir, 'config' => "$dir/$config.json", 'default' => "$dir/$config.default.json",
+            'secrets' => "$dir/secrets.json");
+    }
+
+    /**
+     * Рабочий конфиг базы живёт на сервере и правится из UI коннектора; из репо деплоится только
+     * эталон <имя>.default.json. Рабочего нет — один раз создаём его из эталона, дальше деплой
+     * эталона рабочий конфиг не трогает (issue #5061). true — конфиг создан.
+     */
+    public static function seedConfig(array $p)
+    {
+        if (is_file($p['config']) || !is_file($p['default'])) return false;
+        if (!@copy($p['default'], $p['config'])) return false;
+        @chmod($p['config'], 0664);   // cron и UI (dir_admin) могут работать от разных пользователей
+        return true;
     }
 
     /**
@@ -251,6 +265,7 @@ TXT;
         try {
             if ($siteRoot === null) $siteRoot = defined('B24IG_ROOT') ? B24IG_ROOT : dirname(__DIR__);
             $p = self::dbPaths($siteRoot, $db, $config);
+            self::seedConfig($p);
             if (!is_file($p['config'])) return $fail(404, "конфиг «{$config}» базы «{$db}» не найден");
             $secrets = is_file($p['secrets']) ? json_decode(file_get_contents($p['secrets']), true) : array();
             if (!is_array($secrets)) return $fail(500, 'secrets.json базы: ошибка JSON');
@@ -402,6 +417,7 @@ TXT;
     {
         try {
             $p = self::dbPaths($siteRoot, $opts['db'], $opts['config']);
+            self::seedConfig($p);
             if (!is_file($p['config'])) return null;
             $text = (string)file_get_contents($p['config']);
             $secrets = is_file($p['secrets']) ? json_decode(file_get_contents($p['secrets']), true) : array();
@@ -489,6 +505,7 @@ TXT;
         try {
             if (!empty($opts['db'])) {
                 $p = self::dbPaths(isset($opts['site_root']) ? $opts['site_root'] : $codeRoot, $opts['db'], $opts['config']);
+                self::seedConfig($p);
                 if (!is_file($p['config'])) throw new ConnectorException("конфиг «{$opts['config']}» базы «{$opts['db']}» не найден");
                 $secrets = is_file($p['secrets']) ? json_decode(file_get_contents($p['secrets']), true) : array();
                 if (!is_array($secrets)) throw new ConnectorException('secrets.json базы: ошибка JSON');

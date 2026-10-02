@@ -42,32 +42,40 @@ php b24ig.php --config=config/sportzania-spz.json --reset=leads                 
 Коды выхода: `0` — успех, `1` — были ошибки (подробности в логе и `logs/<проект>/last-report.json`), `2` — неверный запуск.
 
 ### На сервере Интеграма: запуск по URL и cron
-Выкладка — через `update.conf` (раскладку для `ideav/crm` собирает `tools/build-crm.sh`, строки — в `docs/b24ig/update.conf.snippet`):
+Выкладка — через `update.conf` (строки уже есть в `update.conf` репозитория `ideav/crm`):
 ```
-b24ig.php       : /var/www/www-root/data/www/ideav.ru/
-include/b24ig/* : /var/www/www-root/data/www/ideav.ru/include/b24ig/
+b24ig/b24ig.php : /var/www/www-root/data/www/ideav.ru/
+b24ig/src/*     : /var/www/www-root/data/www/ideav.ru/include/b24ig/
+# эталон конфига проекта — своей строкой: dir/* не захватывает подпапки
+templates/<проект>/connector/* : /var/www/www-root/data/www/ideav.ru/templates/custom/<база>/connector/
 ```
 Файлы базы лежат в её папке `templates/custom/<база>/connector/` (снаружи закрыта, владелец видит через `dir_admin`):
 
 | Файл | Что это |
 |---|---|
-| `<имя>.json` | конфиг; `target.db` указывать не нужно — база берётся из URL (`?db=…`); если указан, должен совпадать |
+| `<имя>.json` | рабочий конфиг, правится из рабочего места «Коннектор»; `target.db` указывать не нужно — база берётся из URL (`?db=…`); если указан, должен совпадать |
+| `<имя>.default.json` | эталон из репозитория (`templates/<проект>/connector/`); когда `<имя>.json` нет, первый запуск создаёт его копией эталона, а «Коннектор» открывает эталон и первым сохранением пишет `<имя>.json`. Дальше деплой эталона рабочий конфиг не трогает |
 | `secrets.json` | значения для `${…}`, если их нет в окружении: `{"INTEGRAM_TOKEN": "…", "B24_WEBHOOK": "…"}` |
 | `state/…`, `logs/…` | состояние загрузки и логи: пути из `runtime` считаются от этой папки |
 
 ```cron
-# cron на сервере Интеграма — вызов по URL
-0 * * * * curl -s "https://ideav.ru/b24ig.php?db=spz&config=sportzania-spz" >/dev/null
+# cron на сервере Интеграма — из командной строки (crontab пользователя сайта: crontab -u www-root -e)
+0 * * * * cd /var/www/www-root/data/www/ideav.ru && php b24ig.php --db=sportzania --config=sportzania >/dev/null 2>&1
+# или по URL — упирается в предел веб-запроса, URL открыт без авторизации
+0 * * * * curl -s "https://ideav.ru/b24ig.php?db=sportzania&config=sportzania" >/dev/null
 ```
 ```bash
-# первая большая загрузка — из командной строки, под пользователем сайта (чтобы state и logs принадлежали ему)
-sudo -u www-root php /var/www/www-root/data/www/ideav.ru/b24ig.php --db=spz --config=sportzania-spz --allow-mass-create
+# первая большая загрузка — из командной строки, под пользователем сайта (чтобы конфиг, state и logs принадлежали ему)
+cd /var/www/www-root/data/www/ideav.ru
+sudo -u www-root php b24ig.php --db=sportzania --config=sportzania --check    # сверка конфига со схемой базы, без записи
+sudo -u www-root php b24ig.php --db=sportzania --config=sportzania --allow-mass-create
 ```
 - По URL из опций принимаются только `only`, `dry_run`, `check`; `JSON` — ответ отчётом в JSON вместо лога. Массовое создание, сброс состояния и пути — только из командной строки.
 - Имена базы и конфига — по маске `[A-Za-z0-9_-]`: прочитать чужой файл через URL нельзя.
 - Ответ: `200` — успех, `500` — ошибки загрузки (в отчёте), `400` — неверные параметры или конфиг, `409` — предыдущий запуск ещё идёт.
 - Предел веб-запроса на сервере ~600 с: если запуск в него упрётся, следующий продолжит с сохранённого места.
-- Имя базы стоит в строке запуска (`db=spz`) — по нему ядро будет показывать задачи cron базы.
+- Имя базы стоит в строке запуска (`db=…` или `--db=…`) — по нему ядро показывает задачи cron базы владельцу в `dir_admin`.
+- Запуск из командной строки, если предыдущий ещё идёт, выходит с кодом 0 — cron не шлёт письмо.
 
 ### Проект в папке коннектора
 ```bash

@@ -25,8 +25,8 @@ EOF
 
 cat > "$out/docs/b24ig/update.conf.snippet" <<'EOF'
 # Коннектор b24ig (Битрикс24 / 1С → Интеграм)
-b24ig.php : /var/www/www-root/data/www/ideav.ru/
-include/b24ig/* : /var/www/www-root/data/www/ideav.ru/include/b24ig/
+b24ig/b24ig.php : /var/www/www-root/data/www/ideav.ru/
+b24ig/src/* : /var/www/www-root/data/www/ideav.ru/include/b24ig/
 EOF
 
 (cd "$out" && find . -type f | sort)
