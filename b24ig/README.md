@@ -58,11 +58,13 @@ templates/<проект>/connector/* : /var/www/www-root/data/www/ideav.ru/templ
 | `secrets.json` | значения для `${…}`, если их нет в окружении: `{"INTEGRAM_TOKEN": "…", "B24_WEBHOOK": "…"}` |
 | `state/…`, `logs/…` | состояние загрузки и логи: пути из `runtime` считаются от этой папки |
 
+Расписание прогона записано в конфиге базы (`runtime.schedule_hint`) и этой же строкой стоит в crontab;
+у sportzania это `0 6 * * *` — раз в сутки в 6:00.
 ```cron
 # cron на сервере Интеграма — из командной строки (crontab пользователя сайта: crontab -u www-root -e)
-0 * * * * cd /var/www/www-root/data/www/ideav.ru && php b24ig.php --db=sportzania --config=sportzania >/dev/null 2>&1
+0 6 * * * cd /var/www/www-root/data/www/ideav.ru && php b24ig.php --db=sportzania --config=sportzania >/dev/null 2>&1
 # или по URL — упирается в предел веб-запроса, URL открыт без авторизации
-0 * * * * curl -s "https://ideav.ru/b24ig.php?db=sportzania&config=sportzania" >/dev/null
+0 6 * * * curl -s "https://ideav.ru/b24ig.php?db=sportzania&config=sportzania" >/dev/null
 ```
 ```bash
 # первая большая загрузка — из командной строки, под пользователем сайта (чтобы конфиг, state и logs принадлежали ему)
@@ -76,6 +78,8 @@ sudo -u www-root php b24ig.php --db=sportzania --config=sportzania --allow-mass-
 - Предел веб-запроса на сервере ~600 с: если запуск в него упрётся, следующий продолжит с сохранённого места.
 - Имя базы стоит в строке запуска (`db=…` или `--db=…`) — по нему ядро показывает задачи cron базы владельцу в `dir_admin`.
 - Запуск из командной строки, если предыдущий ещё идёт, выходит с кодом 0 — cron не шлёт письмо.
+- Час в строке cron считается по часовому поясу сервера: на ideav.ru это MSK, поэтому `0 6 * * *` — это 6:00 по Москве. `runtime.timezone` до cron не доходит, им задаётся пояс штампов в логе, состоянии и фильтрах дат (`Runner.php:536`).
+- При суточном расписании неудавшийся прогон ждёт следующих суток, поэтому ошибку из `logs/<проект>/last-report.json` разбирают в тот же день, а прогон повторяют вручную — строкой ниже или кнопкой в «Коннекторе». Повтор догоняет пропущенное: курсор инкремента сдвигается только после успешной загрузки.
 
 ### Проект в папке коннектора
 ```bash

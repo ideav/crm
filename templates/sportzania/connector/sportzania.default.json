@@ -28,7 +28,7 @@
     "log_dir": "logs/sportzania",
     "log_keep_days": 30,
     "lock_file": "state/sportzania/run.lock",
-    "schedule_hint": "0 * * * *",
+    "schedule_hint": "0 6 * * *",
     "dry_run": false,
     "min_interval_sec": 900
   },
