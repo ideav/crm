@@ -903,6 +903,24 @@ function isApi(){
     global $dumpAPI;
     return (isset($dumpAPI) || !empty(array_filter(array_merge($_POST, $_GET), function($value, $key) { return strpos($key, 'JSON') === 0;}, ARRAY_FILTER_USE_BOTH)));
 }
+# <not-found-5067>
+# #5067: несуществующая таблица или отчёт — 404, а не 200 с текстом (и не 403 «нет прав»)
+function Find_table_or_404($id){
+	global $z;
+	$data_set = Exec_sql("SELECT obj.val, obj.t, par.id, obj.ord FROM $z obj
+						LEFT JOIN ($z par CROSS JOIN $z req USE INDEX (up_t)) ON par.up=0 AND req.up=par.id AND req.t=obj.id
+						WHERE obj.id=$id AND (obj.up=0 OR par.up=0)"
+						, "Get Object type name");
+	if($row = mysqli_fetch_array($data_set))
+		return $row;
+	my_die(t9n("[RU]Тип $id не найден[EN]Type $id not found"), "404 Not Found");
+}
+function Report_exists_or_404($id){
+	global $z;
+	if(!mysqli_fetch_array(Exec_sql("SELECT id FROM $z WHERE id=".(int)$id." AND t=".REPORT, "Check report exists")))
+		my_die(t9n("[RU]Запрос #$id не найден[EN]Report #$id not found"), "404 Not Found");
+}
+# </not-found-5067>
 function xsrf($a, $b){
 	return substr(hash("sha512", Salt($a, $b)), 0, 22);
 }
@@ -5417,19 +5435,11 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 				case "object":
 					if($id == 0)
 						die(t9n("[RU]Ошибка: id=0 или не задан[EN]Object id is empty or 0"));
-					$data_set = Exec_sql("SELECT obj.val, obj.t, par.id, obj.ord FROM $z obj
-										LEFT JOIN ($z par CROSS JOIN $z req USE INDEX (up_t)) ON par.up=0 AND req.up=par.id AND req.t=obj.id
-										WHERE obj.id=$id AND (obj.up=0 OR par.up=0)"
-										, "Get Object type name");
-					if($row = mysqli_fetch_array($data_set))
-					{
-						$blocks[$block]["title"][] = $row[0];
-						$blocks[$block]["typ"][] = $row[1];
-						$blocks[$block]["parent_obj"][] = $row[2];
-						$blocks[$block]["unique"][] = $row["ord"];
-					}
-					else
-					    die(t9n("[RU]Тип $id не найден[EN]Type $id not found"));
+					$row = Find_table_or_404($id);
+					$blocks[$block]["title"][] = $row[0];
+					$blocks[$block]["typ"][] = $row[1];
+					$blocks[$block]["parent_obj"][] = $row[2];
+					$blocks[$block]["unique"][] = $row["ord"];
 					break;
 				case "edit_obj":
 					if($id == 0)
@@ -8199,9 +8209,11 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 			break;
 
 		case "&uni_report":
-			if(!isset($GLOBALS["STORED_REPS"][$id]["header"]))
+			if(!isset($GLOBALS["STORED_REPS"][$id]["header"])){
+				Report_exists_or_404($id);
 				if(Check_Grant($id, 0, "READ"))
 					Compile_Report($id, $block, TRUE, TRUE);
+			}
 			$blocks[$block]["val"][] = $GLOBALS["STORED_REPS"][$id]["header"];
 			break;
 
@@ -11822,7 +11834,7 @@ if(isset($com[3]))
     	if($row = mysqli_fetch_array(Exec_sql("SELECT id FROM $z WHERE t=".REPORT." AND val='".addslashes(urldecode($com[3]))."'", "Get report by name")))
     	    $id = $row["id"];
     	else
-    	    my_die(t9n("[RU]Запрос не найден[EN]Report not found"));
+    	    my_die(t9n("[RU]Запрос не найден[EN]Report not found"), "404 Not Found");
     }
     elseif($row = mysqli_fetch_array(Exec_sql("SELECT id FROM $z WHERE up=0 AND val='".addslashes(urldecode($com[3]))."'", "Get object by name"))){
 	    $id = $row["id"];
