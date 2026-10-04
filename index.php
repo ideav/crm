@@ -11351,6 +11351,14 @@ function ApplyMBatch($payload)
 	Insert_batch("", "", "", "", "Flush batch");	# Дослать отложенные вставки, если они появились
 	return array("results" => $results, "ok" => $done, "failed" => $failed);
 }
+# Issue #5068: в ссылочное поле _m_set пишется только id записи. Значение ссылки приводится
+# к числу, и имя записи («Январь») стало бы нулём, а ноль у ссылки значит «очистить» —
+# существующая ссылка молча удалялась бы. Пустое значение и 0 — законная очистка.
+function RequireRefId($t, $val)
+{
+	if(is_array($val) || !preg_match('/^\s*\d*\s*$/', (string)$val))
+		OpFail(t9n("[RU]Ссылка должна быть id записи[EN]Reference must be a record id").": t$t = ".(is_array($val) ? "array" : $val));
+}
 # Тело команды _m_set. Вынесено из switch, чтобы пакетная запись выполняла ровно этот код,
 # а не его копию: иначе набор проверок у одиночного вызова и у пакета разойдётся.
 function ApplyMSet($id, $req, $files)
@@ -11382,6 +11390,8 @@ function ApplyMSet($id, $req, $files)
                 			    # There might be a set of Refs in an array
         				        if(!is_array($val))
         				            $val = explode(",", $val); # There might be comma separated IDs
+        				        foreach($val as $ref)
+        				            RequireRefId($t, $ref);
         				        foreach($val as $ref){
                 					$ref = (int)$ref;
                 					if(isset($ref_list["$ref"])){ # This Ref is already on the list
@@ -11404,6 +11414,7 @@ function ApplyMSet($id, $req, $files)
         				    }
         				    else{
                 				$cur_val = $row["ref_val"];
+            					RequireRefId($t, $val);
             					$val = (int)$val;
             					if($val)
             						checkNewRef($val, $row["t"]);
