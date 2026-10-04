@@ -903,28 +903,7 @@ function isApi(){
     global $dumpAPI;
     return (isset($dumpAPI) || !empty(array_filter(array_merge($_POST, $_GET), function($value, $key) { return strpos($key, 'JSON') === 0;}, ARRAY_FILTER_USE_BOTH)));
 }
-# <denied-columns-5067>
-# #5067: колонка, скрытая грантом BARRED, не пропадает молча — она попадает в denied_columns
-# ({ord, columnId, name}, без значений). Ответ-объект (JSON) получает ключ denied_columns,
-# любой ответ — заголовок X-Denied-Columns со списком id колонок (имена в заголовок не кладём: не ASCII).
-function Deny_column($id, $ord, $name){
-	$id = (int)$id;
-	if(!isset($GLOBALS["DENIED_COLUMNS"]))
-		$GLOBALS["DENIED_COLUMNS"] = array();
-	foreach($GLOBALS["DENIED_COLUMNS"] as $col)
-		if($col["columnId"] === $id)
-			return;
-	$GLOBALS["DENIED_COLUMNS"][] = array("ord" => (int)$ord, "columnId" => $id, "name" => (string)$name);
-	if(!headers_sent()){
-		header("X-Denied-Columns: ".implode(",", array_column($GLOBALS["DENIED_COLUMNS"], "columnId")));
-		header("Access-Control-Expose-Headers: X-Denied-Columns");
-	}
-}
-function Api_with_denied($api){
-	if(!empty($GLOBALS["DENIED_COLUMNS"]) && is_array($api))
-		$api["denied_columns"] = $GLOBALS["DENIED_COLUMNS"];
-	return $api;
-}
+# <not-found-5067>
 # #5067: несуществующая таблица или отчёт — 404, а не 200 с текстом (и не 403 «нет прав»)
 function Find_table_or_404($id){
 	global $z;
@@ -941,7 +920,7 @@ function Report_exists_or_404($id){
 	if(!mysqli_fetch_array(Exec_sql("SELECT id FROM $z WHERE id=".(int)$id." AND t=".REPORT, "Check report exists")))
 		my_die(t9n("[RU]Запрос #$id не найден[EN]Report #$id not found"), "404 Not Found");
 }
-# </denied-columns-5067>
+# </not-found-5067>
 function xsrf($a, $b){
 	return substr(hash("sha512", Salt($a, $b)), 0, 22);
 }
@@ -6081,10 +6060,8 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 				$base_typ = $GLOBALS["REQS"][$key]["base_typ"];
 				$GLOBALS["REV_BT"][$key] = $GLOBALS["REV_BT"][$base_typ];
 				if(isset($GLOBALS["GRANTS"][$key])) # Skip barred Reqs - hide them
-					if($GLOBALS["GRANTS"][$key] == "BARRED"){
-						Deny_column($key, $GLOBALS["REQS"][$key]["ord"] ?? 0, $GLOBALS["REQS"][$key]["val"] ?? "");
+					if($GLOBALS["GRANTS"][$key] == "BARRED")
 						continue;
-					}
 				if($GLOBALS["REV_BT"][$base_typ] == "BUTTON"){ # Remember Buttons to show them later as buttons
 					$blocks["BUTTONS"][$GLOBALS["REQS"][$key]["val"]] = $GLOBALS["REQS"][$key]["attrs"];
     				$GLOBALS["GLOBAL_VARS"]["api"]["reqs"][$key]["type"] = $GLOBALS["REQS"][$key]["val"];
@@ -7403,14 +7380,10 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 			$data_set = Exec_sql($sql, "Get all Names of Reqs of the Typ");
 			$GLOBALS["no_reqs"] = mysqli_num_rows($data_set) == 0; # Check if the Type has any Reqs
 			$ord = 0;
-			$req_pos = 0;
 			while($row = mysqli_fetch_array($data_set)){
-				$req_pos++;
 				if(isset($GLOBALS["GRANTS"][$row["id"]])) # Skip barred Reqs - hide them
-					if($GLOBALS["GRANTS"][$row["id"]] == "BARRED"){
-						Deny_column($row["id"], $req_pos, isset($row["ref_id"]) ? FetchAlias($row["attrs"], $row["val"]) : $row["val"]);
+					if($GLOBALS["GRANTS"][$row["id"]] == "BARRED")
 						continue;
-					}
 
 				$blocks[$block]["grant"][] = isset($GLOBALS["GRANTS"][$row["id"]]) ? $GLOBALS["GRANTS"][$row["id"]] : "";
 #print_r($GLOBALS);die();
@@ -8099,10 +8072,8 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 				else
 					$row = array("t" => $key);
 				if(isset($GLOBALS["GRANTS"][$key])) # Skip barred Reqs - hide them
-					if($GLOBALS["GRANTS"][$key] == "BARRED"){
-						Deny_column($key, $GLOBALS["REQS"][$key]["ord"] ?? 0, $GLOBALS["REQS"][$key]["val"] ?? "");
+					if($GLOBALS["GRANTS"][$key] == "BARRED")
 						continue;
-					}
 				$val = isset($row["val"]) ? $row["val"] : "";
 				$literal_typ = $GLOBALS["REV_BT"][$key];
 				$base_typ = isset($GLOBALS["BT"][$literal_typ]) ? $GLOBALS["BT"][$literal_typ] : $GLOBALS["BT"]["SHORT"];
@@ -13651,8 +13622,8 @@ if(Validate_Token())
 			    elseif(isset($_REQUEST["JSON_OBJ"]))
     				api_dump(json_encode($GLOBALS["GLOBAL_VARS"]["newapi"], JSON_UNESCAPED_UNICODE), "object_$id.json");
 				else
-    				die(json_encode(Api_with_denied($GLOBALS["GLOBAL_VARS"]["api"]), JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE));
-        	if(($z ==$GLOBALS["GLOBAL_VARS"]["user"]) || ($GLOBALS["GLOBAL_VARS"]["user"] == "admin"))
+    				die(json_encode($GLOBALS["GLOBAL_VARS"]["api"], JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE));
+        	if(($z == $GLOBALS["GLOBAL_VARS"]["user"]) || ($GLOBALS["GLOBAL_VARS"]["user"] == "admin"))
         		echo str_replace("<!--Elapsed-->"
         		                , "<font  size=\"-1\"><a href=\"/$z/dir_admin\">[$user]</a> $scount / $stime / $time ($tzone)</font>", $html);
         	else

@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
 # Сквозная проверка #5067 на реальном стеке Apache + mod_php + MariaDB:
-#   - колонка, скрытая грантом BARRED, сообщается заголовком X-Denied-Columns и ключом
-#     denied_columns ({ord, columnId, name}) в ответе-объекте ?JSON, значения её не отдаются;
-#   - без BARRED форма ответа прежняя (нет ни заголовка, ни ключа);
+#   - колонка, скрытая грантом BARRED, пропадает из ответа молча: ни значений, ни имени,
+#     ни пометки (заголовка X-Denied-Columns, ключа denied_columns) — роль не узнаёт о колонке;
+#   - без BARRED колонка видна;
 #   - несуществующая таблица (object/999999) и отчёт (report/999999, report/<нет такого имени>) — 404;
 #   - регрессия: существующие таблица и отчёт отдают 200 с данными.
 #
-# Модель (experiments/denied-columns-5067-seed.sql): таблица T=5100 «Склад», реквизиты 5120 «Цена»
+# Модель (experiments/not-found-5067-seed.sql): таблица T=5100 «Склад», реквизиты 5120 «Цена»
 # и R=5121 «Секрет». Роль viewer5067 — READ на T, BARRED на R; роль plain5067 — READ на T;
 # e5067 — суперпользователь (имя совпадает с именем базы). Отчёт 6000 «stock5067».
 #
-# Запуск (нужен docker): bash experiments/denied-columns-5067-e2e.sh
+# Запуск (нужен docker): bash experiments/not-found-5067-e2e.sh
 set -euo pipefail
 
-NET=denied-columns-5067-e2e-net
-DB=denied-columns-5067-e2e-db
-APP=denied-columns-5067-e2e-app
+NET=not-found-5067-e2e-net
+DB=not-found-5067-e2e-db
+APP=not-found-5067-e2e-app
 IMAGE_APP=${IMAGE_APP:-integram-5067-app}
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 BASE=e5067
@@ -60,7 +60,7 @@ for _ in $(seq 1 60); do
 done
 echo " — отвечает"
 
-docker exec -i "$DB" mariadb -uideav -pideav5067 ideav < "$ROOT/experiments/denied-columns-5067-seed.sql"
+docker exec -i "$DB" mariadb -uideav -pideav5067 ideav < "$ROOT/experiments/not-found-5067-seed.sql"
 # Каталог базы: ядро пишет в него журнал (при создании базы через UI он появляется сам).
 docker exec "$APP" sh -c "mkdir -p /var/www/html/templates/custom/$BASE/logs && chown -R www-data:www-data /var/www/html/templates/custom/$BASE"
 
@@ -87,9 +87,9 @@ denied_hdr(){ printf '%s\n' "$HDRS" | sed -n 's/^[Xx]-[Dd]enied-[Cc]olumns: *//p
 code_is(){ [[ "$CODE" == "$1" ]]; }
 body_has(){ [[ "$BODY" == *"$1"* ]]; }
 body_lacks(){ [[ "$BODY" != *"$1"* ]]; }
-hdr_lists(){ [[ ",$(denied_hdr)," == *",$1,"* ]]; }
 hdr_absent(){ [[ -z "$(denied_hdr)" ]]; }
-expose_hdr(){ printf '%s\n' "$HDRS" | grep -qi '^Access-Control-Expose-Headers:.*X-Denied-Columns'; }
+# BARRED не оставляет следов: ни заголовка, ни id скрытого реквизита в заголовках
+no_trace(){ hdr_absent && ! printf '%s\n' "$HDRS" | grep -i '^x-' | grep -qiE "denied|$R"; }
 # Образ собран без php.ini, display_errors=On: предупреждения ядра (не #5067, например
 # «Undefined global variable $ARR_typs» в edit_obj) печатаются HTML-ом перед JSON. Разбираем JSON после них.
 PHP_HELPERS='function strip_php_warnings($s){ return preg_replace("~^(\s*<br />\s*<b>(Warning|Notice|Deprecated)</b>:.*?<br />)+\s*~s", "", $s); }'
@@ -98,14 +98,6 @@ json_error(){
     docker exec "$APP" php -r "$PHP_HELPERS"'$j=json_decode(strip_php_warnings(file_get_contents("/tmp/b")),true);
         exit(is_array($j) && isset($j[0]["error"]) && strlen($j[0]["error"]) ? 0 : 1);'
 }
-# denied_columns содержит {columnId:$1, name:$2, ord>0}
-json_denied(){
-    docker exec "$APP" php -r "$PHP_HELPERS"'$j=json_decode(strip_php_warnings(file_get_contents("/tmp/b")),true);
-        foreach(($j["denied_columns"] ?? []) as $c)
-            if(($c["columnId"] ?? null) === (int)$argv[1] && ($c["name"] ?? null) === $argv[2] && (int)($c["ord"] ?? 0) > 0)
-                exit(0);
-        exit(1);' -- "$1" "$2"
-}
 # Тело — JSON-объект без ключа denied_columns
 json_no_denied(){
     docker exec "$APP" php -r "$PHP_HELPERS"'$j=json_decode(strip_php_warnings(file_get_contents("/tmp/b")),true);
@@ -113,24 +105,26 @@ json_no_denied(){
 }
 
 echo
-echo "1. Роль viewer5067: READ на «Склад», BARRED на «Секрет» ($R)"
+echo "1. Роль viewer5067: READ на «Склад», BARRED на «Секрет» ($R) — колонка пропадает молча"
 fetch "$TOK_VIEWER" "object/$T?JSON_OBJ"
 expect code_is 200                       "object/$T?JSON_OBJ: HTTP 200"
-expect hdr_lists "$R"                    "object/$T?JSON_OBJ: X-Denied-Columns содержит $R"
-expect expose_hdr                        "object/$T?JSON_OBJ: Access-Control-Expose-Headers: X-Denied-Columns"
 expect body_has item-A                   "object/$T?JSON_OBJ: записи на месте (item-A)"
 expect body_lacks TOPSECRET              "object/$T?JSON_OBJ: значений «Секрета» нет"
+expect no_trace                          "object/$T?JSON_OBJ: ни заголовка, ни упоминания скрытой колонки"
 fetch "$TOK_VIEWER" "object/$T?JSON"
 expect code_is 200                       "object/$T?JSON: HTTP 200"
-expect json_denied "$R" "$R_NAME"        "object/$T?JSON: denied_columns = {columnId:$R, name:«$R_NAME», ord>0}"
-expect hdr_lists "$R"                    "object/$T?JSON: X-Denied-Columns содержит $R"
 expect body_lacks TOPSECRET              "object/$T?JSON: значений «Секрета» нет"
+expect body_lacks "$R_NAME"              "object/$T?JSON: имени «$R_NAME» нет"
+expect json_no_denied                    "object/$T?JSON: ключа denied_columns нет"
+expect no_trace                          "object/$T?JSON: ни заголовка, ни упоминания скрытой колонки"
 fetch "$TOK_VIEWER" "edit_obj/5200?JSON"
 expect code_is 200                       "edit_obj/5200?JSON: HTTP 200"
-expect json_denied "$R" "$R_NAME"        "edit_obj/5200?JSON: denied_columns = {columnId:$R, name:«$R_NAME»}"
 expect body_lacks TOPSECRET              "edit_obj/5200?JSON: значения «Секрета» нет"
+expect body_lacks "$R_NAME"              "edit_obj/5200?JSON: имени «$R_NAME» нет"
+expect json_no_denied                    "edit_obj/5200?JSON: ключа denied_columns нет"
+expect no_trace                          "edit_obj/5200?JSON: ни заголовка, ни упоминания скрытой колонки"
 
-echo "2. Роль plain5067: без BARRED — форма ответа прежняя"
+echo "2. Роль plain5067: без BARRED — колонка видна"
 fetch "$TOK_PLAIN" "object/$T?JSON_OBJ"
 expect code_is 200                       "object/$T?JSON_OBJ: HTTP 200"
 expect hdr_absent                        "object/$T?JSON_OBJ: заголовка X-Denied-Columns нет"
