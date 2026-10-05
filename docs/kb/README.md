@@ -72,6 +72,8 @@
 | запрос отвечает `504`, «превышен предел времени N c» | предел запроса 30 c по умолчанию — передать `?TIME=<секунды>` (максимум 600) | [00-start.md](00-start.md) |
 | тяжёлый SELECT грузит CPU сервера часами | запрос переживал ушедший PHP — теперь его рубит `max_statement_time` + `KILL QUERY` | [00-start.md](00-start.md) |
 | `InvalidToken` в dir_admin | нет cookie `idb_{db}` | [files.md](files.md) |
+| файл, загруженный в подкаталог через `dir_admin`, лёг в корень | каталога `add_path` нет — сначала `mkdir` (имя в нижнем регистре) | [files.md](files.md) |
+| после переноса со старого Интеграма в длинных текстах склеились слова | хвосты `t=0` склеены без добивки кусков пробелами до 127 — склеивать `migrate.js sql` | [tools/old-integram-migration](../../tools/old-integram-migration/README.md) |
 | удалённый файл всё ещё на сервере | `update.php` только копирует, не удаляет | [deploy.md](deploy.md) |
 | `Uncaught SyntaxError: Unexpected token '<'` на своём `.js` | файл под `assets/` — каталога нет в `update.conf`, сервер отдаёт HTML; вендорное класть в `js/` | [deploy.md](deploy.md) |
 | пред-авторизационная ручка отвечает `401 No authorization token provided` | ветки на сервере нет — `index.php` старее фичи (он не в `update.conf`), выкладывать отдельно | [deploy.md](deploy.md) |
