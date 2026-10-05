@@ -3979,7 +3979,13 @@
             // Из взять нечего (партии нет в пуле / остаток пуст) — просим заполнить руками:
             // пустое начало сделало «Счётчик кон.» отрицательным (боевое #4580: 4×450 → −1800).
             var startFilled = String(cut.counterStart == null ? '' : cut.counterStart).trim() !== '';
-            if (!startFilled) {
+            // #5082: при заведённой записи джамбо поле «Счётчик нач.» пульта правит запись
+            // (#5010), а не задание — вписанное там начало и есть начало задания (уйдёт в
+            // задание той же записью, что и начало из остатка партии).
+            var startRec = self.activeJumbo();
+            if (!startFilled && startRec && core.toNumber(startRec.counterStart) > 0) {
+                cut.counterStart = String(startRec.counterStart).trim();
+            } else if (!startFilled) {
                 var srcBatch = self.findBatch(cut.batchId);
                 var remainderM = srcBatch ? core.toNumber(srcBatch.remainderM) : 0;
                 if (!(remainderM > 0)) {
