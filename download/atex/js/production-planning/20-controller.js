@@ -775,6 +775,12 @@
         return e;
     }
     function ppNoBatch() { return ppErr('пакетной записи на этой установке нет', 0, 'nobatch'); }
+    // #3895: отказ «записи нет» (сервер: «No such record») — запись уже удалена, править/удалять
+    // нечего. Единственное место, где записан этот контракт сервера: все пути пропуска (#3895)
+    // читают его отсюда и не разъезжаются при смене формулировки ошибки (#4990).
+    function ppIsMissingRecord(msg) {
+        return /no such record/i.test((msg && msg.message != null) ? String(msg.message) : String(msg));
+    }
     // Поля пакета нормализуются ровно как у одиночного post(): пустые значения не отправляются
     // (грабля #4366 — очистить поле этим путём нельзя, поведение общее для обоих путей).
     // #4986: рядом с полями пакета несём их ДО приведения к строке (`raw`) — запасной путь шлёт
@@ -864,6 +870,31 @@
             err.failures = failures;
             throw err;
         }
+        // Разбор ответа ручки по операциям пачки `sub`; возвращает операции, по которым ответа
+        // нет (#4990: ответ короче пачки). Строки сверх пачки не читаются — им нечего сопоставить.
+        function absorb(sub, res) {
+            var rs = (res && res.results) || [];
+            var n = Math.min(rs.length, sub.length);
+            for (var k = 0; k < n; k++) {
+                var r = rs[k];
+                allResults.push(r);
+                if (r && r.ok) applied += 1;
+                else {
+                    var f = { message: (r && r.error) || 'запись не удалась', opId: sub[k].id, op: sub[k].op };
+                    failures.push(f);
+                    if (!failure) failure = f;
+                }
+            }
+            return sub.slice(n);
+        }
+        // Операции без подтверждения — в отказы поимённо, тем же видом, что и отказ записи.
+        function lost(sub, message) {
+            sub.forEach(function(src) {
+                var f = { message: message, opId: src.id, op: src.op };
+                failures.push(f);
+                if (!failure) failure = f;
+            });
+        }
         function singles(rest) {
             _ppBatchOff = true;
             return ppSendSingles(self, rest, function(d) { applied = total - rest.length + d; progress(); })
@@ -887,17 +918,28 @@
                     progress();
                 });
                 return ppSendBatch(self, chunk).then(function(res) {
-                    (res.results || []).forEach(function(r, k) {
-                        var src = chunk[k] || {};
-                        allResults.push(r);
-                        if (r && r.ok) applied += 1;
-                        else {
-                            var f = { message: (r && r.error) || 'запись не удалась', opId: src.id, op: src.op };
-                            failures.push(f);
-                            if (!failure) failure = f;
+                    var rest = absorb(chunk, res);
+                    if (!rest.length) { progress(); return null; }
+                    // #4990: ответ КОРОЧЕ пачки (прокси, сбой, нарушение протокола) — у хвоста нет
+                    // ни успеха, ни отказа. Молча он засчитался бы применённым, и разбор «записи
+                    // нет» (#4158) вернул бы доли головам, которых нет. Хвост уходит ОДНИМ тихим
+                    // повтором (операции идемпотентны: пишут значение, а не приращение —
+                    // docs/kb/crud.md); что не подтвердилось и после него — отказ этой операции.
+                    return ppSendBatch(self, rest).then(function(res2) {
+                        lost(absorb(rest, res2), 'сервер не подтвердил запись операции');
+                        progress();
+                    }, function(err2) {
+                        if (err2 && err2.kind === 'nobatch') {
+                            _ppBatchOff = true;
+                            return ppSendSingles(self, rest).then(function(r) {
+                                applied += r.done;
+                                r.failures.forEach(function(f) { failures.push(f); if (!failure) failure = f; });
+                                progress();
+                            });
                         }
+                        lost(rest, (err2 && err2.message != null) ? String(err2.message) : 'сервер не подтвердил запись операции');
+                        progress();
                     });
-                    progress();
                 }, function(err) {
                     if (!err || err.kind !== 'nobatch') throw err;
                     // Ручки нет — эта пачка и все следующие уходят одиночными командами.
@@ -2323,8 +2365,7 @@
                                     return planJournal(self, { event: 'SLEEVE_DROP', order: '', cut: null,
                                         details: '#4631: снята лишняя «Задача на втулки» ' + taskId + ' (позиция ' + positionId + ')' });
                                 }).catch(function(err) {
-                                    var m = String((err && err.message) || err);
-                                    if (!/no such record/i.test(m)) throw err;   // уже удалена — не ошибка
+                                    if (!ppIsMissingRecord(err)) throw err;   // уже удалена — не ошибка
                                 });
                             });
                         });
@@ -10124,8 +10165,8 @@
         // оставались с коллизиями (#3885), а «Упорядочить» падал «Ошибка разбиения заданий».
         // Реальные (другие) ошибки по-прежнему пробрасываем.
         function softSkip(err) {
-            var m = (err && err.message != null) ? String(err.message) : String(err);
-            if (/no such record/i.test(m)) {
+            if (ppIsMissingRecord(err)) {
+                var m = (err && err.message != null) ? String(err.message) : String(err);
                 if (typeof console !== 'undefined' && console.warn) console.warn('[pp] #3895: пропуск операции — запись не найдена (' + m + ')');
                 splitBump();   // учли как обработанную (запись отсутствует — делать нечего)
                 return;
@@ -10138,18 +10179,32 @@
         //   ppSkipMissing → {id: true} по пропущенным записям, чтобы вызывающий знал, чего нет.
         // Отказ НЕ по операциям (сеть, 403, запрет записи при непринятом пересчёте #4402) приходит
         // без `failures` — он пробрасывается целиком, как и при одиночной записи.
+        // Проброшенная ошибка несёт текст ПЕРВОГО настоящего отказа (его видит оператор — как при
+        // одиночной записи), а рядом — весь разбор пакета: какая запись упала (`opId`), сколько
+        // применилось и поимённый перечень отказов (`failures`). Иначе трасса не скажет, какая из
+        // двадцати записей не легла — а разбор постфактум возможен только по ней (#4990).
         function ppRealFailure(err) {
             var fails = (err && err.failures) || null;
             if (!fails || !fails.length) return err || new Error('запись не удалась');
             for (var i = 0; i < fails.length; i++) {
-                if (!/no such record/i.test(String(fails[i].message))) return new Error(fails[i].message);
+                if (ppIsMissingRecord(fails[i].message)) continue;
+                var real = new Error(fails[i].message);
+                real.opId = fails[i].opId;
+                real.op = fails[i].op;
+                real.applied = err.applied;
+                real.results = err.results;
+                real.failures = fails;
+                real.status = err.status;
+                real.kind = err.kind;
+                real.cause = err;
+                return real;
             }
             return null;
         }
         function ppSkipMissing(err) {
             var out = {};
             ((err && err.failures) || []).forEach(function(f) {
-                if (!/no such record/i.test(String(f.message))) return;
+                if (!ppIsMissingRecord(f.message)) return;
                 out[String(f.opId)] = true;
                 if (typeof console !== 'undefined' && console.warn) console.warn('[pp] #3895: пропуск операции — запись не найдена (' + f.opId + ': ' + f.message + ')');
             });
@@ -10160,8 +10215,7 @@
         // Партии ГП → сама резка) дошла до конца и не оставила запись-фантом в очереди/Ганте.
         function delMissingOk(id) {
             return self.post('_m_del/' + encodeURIComponent(id) + '?JSON', {}).catch(function(err) {
-                var m = (err && err.message != null) ? String(err.message) : String(err);
-                if (/no such record/i.test(m)) { if (typeof console !== 'undefined' && console.warn) console.warn('[pp] #3895: уже удалено: ' + id); return; }
+                if (ppIsMissingRecord(err)) { if (typeof console !== 'undefined' && console.warn) console.warn('[pp] #3895: уже удалено: ' + id); return; }
                 throw err;
             });
         }
@@ -10210,76 +10264,74 @@
                     var mf = {}; mf[mainKey] = String(ts);
                     updateCutOps.push({ op: 'save', id: u.cutId, fields: mf });
                 }
-                {
-                    var fields = {};
-                    // #3923/#4001: «Очередность» не пишем — порядок задаёт planStart. «Кол-во резок
-                    // план» — только если изменилось (иначе churn всех записей при упорядочивании).
-                    var runsChanged = (u.plannedRuns != null && !!runsReqId && (!storedCut || Number(u.plannedRuns) !== Number(storedCut.plannedRuns)));
-                    if (runsChanged) fields['t' + runsReqId] = String(u.plannedRuns);
-                    // #3916/#3635 п.5 + #4001: тайминг сегмента («Длительность, минут» + «Резка и Лидер»)
-                    // по ЕГО проходам — пишем при СМЕНЕ проходов (при неизменных проходах тайминг тот же).
-                    if (runsChanged) Object.assign(fields, splitSegTimingFields(u.cutId, u.plannedRuns));
-                    // #3781 + #4001: «Метраж, м» = длине прогона головы цепочки — лечим ТОЛЬКО если
-                    // хранимое пусто/расходится (реюзнутое продолжение до фикса), а не переписываем совпадающее.
-                    if (lengthReqId) {
-                        var ulen = runLenForCutId(u.cutId);
-                        var lenOld = storedCut ? String(storedCut.length == null ? '' : storedCut.length).trim() : '';
-                        if (ulen > 0 && (lenOld === '' || round3(Number(lenOld)) !== round3(ulen))) fields['t' + lengthReqId] = String(round3(ulen));
-                    }
-                    // #3795 + #4001: «Вид сырья» = сырью головы — лечим ТОЛЬКО если хранимое пусто/иное.
-                    var matReqId = reqIdByName(cutMeta, CUT_REQ.material);
-                    if (matReqId) {
-                        var umat = materialForCutId(u.cutId);
-                        var matOld = origMaterialById[String(u.cutId)] || '';   // #4001: ХРАНИМОЕ (до heal в памяти)
-                        if (umat && matOld !== umat) fields['t' + matReqId] = umat;
-                    }
-                    // #3892 + #4001: «ID первой части» = голова цепочки — проставляем ТОЛЬКО если пусто/иное.
-                    if (firstPartReqId) {
-                        var uHead = (u.firstPartId != null && u.firstPartId !== '')
-                            ? String(u.firstPartId) : (chainHeadById[String(u.cutId)] || String(u.cutId));
-                        var fpOld = storedCut ? String(storedCut.firstPartId == null ? '' : storedCut.firstPartId).trim() : '';
-                        if (uHead && fpOld !== uHead) fields['t' + firstPartReqId] = uHead;
-                    }
-                    // #4452 (ТЗ §15, CUT_BATCH): «Партия сырья» — задание обязано её иметь. Значение
-                    // разрешил страж (guardPlanOps → resolveBatchForCut: цепочка → «Расход сырья» →
-                    // FIFO), фолбэк — партия головы цепочки. Пишем ТОЛЬКО если ХРАНИМОЕ пусто/иное:
-                    // сравниваем с batchIdStored (снимок до лечения в памяти), иначе восстановленная
-                    // партия навсегда осталась бы только в памяти, а база — пустой.
-                    if (cutReqIds.materialBatch) {
-                        var ubatch = (u.materialBatchId != null && String(u.materialBatchId) !== '')
-                            ? String(u.materialBatchId) : batchForCutId(u.cutId);
-                        var batchOld = storedCut
-                            ? String((storedCut.batchIdStored != null ? storedCut.batchIdStored : storedCut.batchId) || '').trim() : '';
-                        if (ubatch && batchOld !== ubatch) fields['t' + cutReqIds.materialBatch] = ubatch;
-                    }
-                    // #4128: «Тип намотки» = намотке головы цепочки. Запись становится сегментом
-                    // этой резки здесь же — намотка в этот момент известна, пишем её. Только если
-                    // хранимое пусто/иное (#4001), иначе лишний _m_set.
-                    if (cutReqIds.winding) {
-                        var uwind = windingForCutId(u.cutId);
-                        var windOld = storedCut ? normWinding(storedCut.winding) : '';
-                        if (uwind && windOld !== uwind) fields['t' + cutReqIds.winding] = uwind;
-                    }
-                    // #4085: слой размещения переназначил станок — пишем «Слиттер» (u.slitterId), только если
-                    // отличается от хранимого (в не-слот-режиме u.slitterId нет → ничего не пишем, контракт прежний).
-                    if (u.slitterId != null && cutReqIds.slitter) {
-                        var curSid = storedCut && storedCut.slitter ? String(storedCut.slitter.id) : '';
-                        if (String(u.slitterId) !== curSid) fields['t' + cutReqIds.slitter] = String(u.slitterId);
-                    }
-                    if (Object.keys(fields).length) updateCutOps.push({ op: 'set', id: u.cutId, fields: fields });
-                    // #4158: у ГОЛОВЫ схлопнутой цепочки — вернуть в её Обеспечение долю удаляемых
-                    // продолжений (консервация покрытия позиции). headSupplyRestore задан только для
-                    // голов с deletes; у реюзнутых продолжений/несхлопнутых цепочек список пуст → no-op.
-                    var restores = headSupplyRestore[String(u.cutId)] || [];
-                    if (restores.length) {
-                        restoreOpsByCut[String(u.cutId)] = restores.map(function(rs) {
-                            return { op: 'set', id: rs.supplyId, fields: buildSupplyFieldsForFinishedBatch(supMeta, {
-                                finishedBatchId: rs.finishedBatchId,
-                                footage: rs.footage > 0 ? rs.footage : '', rolls: rs.rolls,
-                                active: '1', status: SUPPLY_STATUSES[0]
-                            }) };
-                        });
-                    }
+                var fields = {};
+                // #3923/#4001: «Очередность» не пишем — порядок задаёт planStart. «Кол-во резок
+                // план» — только если изменилось (иначе churn всех записей при упорядочивании).
+                var runsChanged = (u.plannedRuns != null && !!runsReqId && (!storedCut || Number(u.plannedRuns) !== Number(storedCut.plannedRuns)));
+                if (runsChanged) fields['t' + runsReqId] = String(u.plannedRuns);
+                // #3916/#3635 п.5 + #4001: тайминг сегмента («Длительность, минут» + «Резка и Лидер»)
+                // по ЕГО проходам — пишем при СМЕНЕ проходов (при неизменных проходах тайминг тот же).
+                if (runsChanged) Object.assign(fields, splitSegTimingFields(u.cutId, u.plannedRuns));
+                // #3781 + #4001: «Метраж, м» = длине прогона головы цепочки — лечим ТОЛЬКО если
+                // хранимое пусто/расходится (реюзнутое продолжение до фикса), а не переписываем совпадающее.
+                if (lengthReqId) {
+                    var ulen = runLenForCutId(u.cutId);
+                    var lenOld = storedCut ? String(storedCut.length == null ? '' : storedCut.length).trim() : '';
+                    if (ulen > 0 && (lenOld === '' || round3(Number(lenOld)) !== round3(ulen))) fields['t' + lengthReqId] = String(round3(ulen));
+                }
+                // #3795 + #4001: «Вид сырья» = сырью головы — лечим ТОЛЬКО если хранимое пусто/иное.
+                var matReqId = reqIdByName(cutMeta, CUT_REQ.material);
+                if (matReqId) {
+                    var umat = materialForCutId(u.cutId);
+                    var matOld = origMaterialById[String(u.cutId)] || '';   // #4001: ХРАНИМОЕ (до heal в памяти)
+                    if (umat && matOld !== umat) fields['t' + matReqId] = umat;
+                }
+                // #3892 + #4001: «ID первой части» = голова цепочки — проставляем ТОЛЬКО если пусто/иное.
+                if (firstPartReqId) {
+                    var uHead = (u.firstPartId != null && u.firstPartId !== '')
+                        ? String(u.firstPartId) : (chainHeadById[String(u.cutId)] || String(u.cutId));
+                    var fpOld = storedCut ? String(storedCut.firstPartId == null ? '' : storedCut.firstPartId).trim() : '';
+                    if (uHead && fpOld !== uHead) fields['t' + firstPartReqId] = uHead;
+                }
+                // #4452 (ТЗ §15, CUT_BATCH): «Партия сырья» — задание обязано её иметь. Значение
+                // разрешил страж (guardPlanOps → resolveBatchForCut: цепочка → «Расход сырья» →
+                // FIFO), фолбэк — партия головы цепочки. Пишем ТОЛЬКО если ХРАНИМОЕ пусто/иное:
+                // сравниваем с batchIdStored (снимок до лечения в памяти), иначе восстановленная
+                // партия навсегда осталась бы только в памяти, а база — пустой.
+                if (cutReqIds.materialBatch) {
+                    var ubatch = (u.materialBatchId != null && String(u.materialBatchId) !== '')
+                        ? String(u.materialBatchId) : batchForCutId(u.cutId);
+                    var batchOld = storedCut
+                        ? String((storedCut.batchIdStored != null ? storedCut.batchIdStored : storedCut.batchId) || '').trim() : '';
+                    if (ubatch && batchOld !== ubatch) fields['t' + cutReqIds.materialBatch] = ubatch;
+                }
+                // #4128: «Тип намотки» = намотке головы цепочки. Запись становится сегментом
+                // этой резки здесь же — намотка в этот момент известна, пишем её. Только если
+                // хранимое пусто/иное (#4001), иначе лишний _m_set.
+                if (cutReqIds.winding) {
+                    var uwind = windingForCutId(u.cutId);
+                    var windOld = storedCut ? normWinding(storedCut.winding) : '';
+                    if (uwind && windOld !== uwind) fields['t' + cutReqIds.winding] = uwind;
+                }
+                // #4085: слой размещения переназначил станок — пишем «Слиттер» (u.slitterId), только если
+                // отличается от хранимого (в не-слот-режиме u.slitterId нет → ничего не пишем, контракт прежний).
+                if (u.slitterId != null && cutReqIds.slitter) {
+                    var curSid = storedCut && storedCut.slitter ? String(storedCut.slitter.id) : '';
+                    if (String(u.slitterId) !== curSid) fields['t' + cutReqIds.slitter] = String(u.slitterId);
+                }
+                if (Object.keys(fields).length) updateCutOps.push({ op: 'set', id: u.cutId, fields: fields });
+                // #4158: у ГОЛОВЫ схлопнутой цепочки — вернуть в её Обеспечение долю удаляемых
+                // продолжений (консервация покрытия позиции). headSupplyRestore задан только для
+                // голов с deletes; у реюзнутых продолжений/несхлопнутых цепочек список пуст → no-op.
+                var restores = headSupplyRestore[String(u.cutId)] || [];
+                if (restores.length) {
+                    restoreOpsByCut[String(u.cutId)] = restores.map(function(rs) {
+                        return { op: 'set', id: rs.supplyId, fields: buildSupplyFieldsForFinishedBatch(supMeta, {
+                            finishedBatchId: rs.finishedBatchId,
+                            footage: rs.footage > 0 ? rs.footage : '', rolls: rs.rolls,
+                            active: '1', status: SUPPLY_STATUSES[0]
+                        }) };
+                    });
                 }
         });
 
@@ -10291,7 +10343,12 @@
         // позиции (ровно то, что #4158 и чинит). Поэтому головы, которых на сервере нет, из
         // второго пакета вычёркиваются — граница пропуска остаётся на записи, как была.
         function runUpdatePhase() {
-            if (!updateCutOps.length && !Object.keys(restoreOpsByCut).length) return Promise.resolve();
+            // Записывать нечего (повтор «Упорядочить» по неизменившемуся плану) — фаза всё равно
+            // отчитывается по каждому заданию, иначе окно прогресса стоит на 0/N (#4990).
+            if (!updateCutOps.length && !Object.keys(restoreOpsByCut).length) {
+                (ops.updates || []).forEach(function() { splitBump(); });
+                return Promise.resolve();
+            }
             var missing = {};
             return self.postOps(updateCutOps).catch(function(err) {
                 var real = ppRealFailure(err);
@@ -10486,12 +10543,17 @@
                     if (!Object.keys(f).length) return;
                     aFixOps.push({ op: 'set', id: st.id, fields: f });
                 });
-                // Отказ пакета приводим к ОДНОЙ ошибке — той же, что дала бы одиночная запись этой
-                // операции: per-задача softSkip (#3895) ниже читает её ровно как прежде.
+                // Настоящий отказ пакета реджектит задачу — терминальный catch, как прежде.
+                // «No such record» в правке головы (протухший кеш: её Обеспечение/Партия ГП уже
+                // удалены на сервере, #3895) — продолжений этой цепочки НЕ рождаем, молча: доли
+                // посчитаны по снимку, и покрытие сегмента 0 никому не записано — рождённое B
+                // повисло бы «не привязанным к заказу» (#4155/#4163). Задание остаётся целым —
+                // ровно как в одиночной записи, где per-задача softSkip пропускал задачу (#4990).
+                var headMissing = false;
                 var cChain = self.postOps(aFixOps).catch(function(err) {
                     var real = ppRealFailure(err);
                     if (real) throw real;
-                    ppSkipMissing(err);
+                    headMissing = Object.keys(ppSkipMissing(err)).length > 0;
                 });
                 // 2b) каждое продолжение B (сегменты 1..N) — разные записи, идут параллельно.
                 var segTasks = crs.map(function(cr, ci) {
@@ -10617,7 +10679,13 @@
                         });
                     };
                 });
-                return cChain.then(function() { return runWithConcurrency(segTasks, MAX_PARALLEL_WRITES); });
+                return cChain.then(function() {
+                    if (headMissing) {
+                        if (typeof console !== 'undefined' && console.warn) console.warn('[pp] #3895: продолжения цепочки ' + parentId + ' не созданы — запись головы не найдена');
+                        return null;
+                    }
+                    return runWithConcurrency(segTasks, MAX_PARALLEL_WRITES);
+                });
             }).then(splitBump).catch(softSkip); };
         });
 
@@ -10742,6 +10810,12 @@
         }).catch(function(err) {
             self.hideProgress(); self.setBusy(false);
             journalFlush(self);   // #4979: действие сорвалось — накопленные строки всё равно должны лечь в базу
+            // #4990: в трассу — разбор отказа (какая запись, сколько применилось, все отказы
+            // пакета); оператору — прежний текст.
+            if (typeof console !== 'undefined' && console.error) {
+                console.error('[pp] applySplitPlan: запись сорвалась — ' + (err && err.message),
+                    { opId: err && err.opId, op: err && err.op, applied: err && err.applied, failures: err && err.failures });
+            }
             self.notify('Ошибка разбиения заданий: ' + err.message, 'error');
             return false;
         });
