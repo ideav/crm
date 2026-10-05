@@ -348,6 +348,17 @@
         return { counterStart: rec.counterStart, counterEnd: counterEndFromMeterage(start, consumed) };
     }
 
+    // #5080: сколько проходов отметки кладётся в активную запись джамбо. Проходы
+    // по записям задания — распределение ФАКТА резки: свои проходы отметки, но сумма
+    // по записям не выше нового факта (target). Вписанные заранее в «Проходов» (#5029)
+    // уже и есть эти резки — второй раз их не считаем (боевое: 4 вписано + 4 отметки = 8).
+    function jumboRunsForMark(jumbos, newRuns, target) {
+        var sum = (jumbos || []).reduce(function(s, r) {
+            return s + Math.max(0, toNumber(r && r.cutsCount));
+        }, 0);
+        return Math.max(0, Math.min(toNumber(newRuns), toNumber(target) - sum));
+    }
+
     // #5010: правка «Счётчика нач.» записи с панели. Кон. смещается на ту же
     // дельту: правкой начала оператор правит показание, а не погонаж записи.
     function jumboCountersAfterStartEdit(record, newStart) {
@@ -1603,6 +1614,7 @@
         counterEndFromMeterage: counterEndFromMeterage, // #4902: счётчик кон. = нач. − погонаж
         jumboMeterage: jumboMeterage,                   // #5010: погонаж записи джамбо = нач. − кон.
         jumboCountersAfterMark: jumboCountersAfterMark, // #5010: счётчики записи после отметки
+        jumboRunsForMark: jumboRunsForMark,             // #5080: проходы отметки — не сверх факта
         jumboCountersAfterStartEdit: jumboCountersAfterStartEdit, // #5010: правка начала записи
         jumboRunsFromInput: jumboRunsFromInput,                   // #5029: ввод «Проходов»
         jumboCountersAfterRunsEdit: jumboCountersAfterRunsEdit,   // #5029: правка проходов записи
@@ -4051,8 +4063,10 @@
                     stored.defectQty = acc.defectQty;
                     // #5005: резки этой отметки кладутся в АКТИВНУЮ запись — по записям
                     // джамбо видно, сколько резок с какого джамбо (на этом считает РМ
-                    // упаковщика).
-                    stored.cutsCount = core.toNumber(stored.cutsCount) + newRuns;
+                    // упаковщика). #5080: не сверх факта задания — вписанные заранее
+                    // проходы записи уже покрывают эти резки.
+                    var jumboRuns = core.jumboRunsForMark(cut.jumbos, newRuns, target);
+                    stored.cutsCount = core.toNumber(stored.cutsCount) + jumboRuns;
                     stored.spentDraft = '';
                     stored.writeoffDraft = '';
                     stored.defectMDraft = '';
@@ -4062,7 +4076,7 @@
                     if (String(stored.counterStart == null ? '' : stored.counterStart).trim() === '') {
                         stored.counterStart = String(cut.counterStart == null ? '' : cut.counterStart).trim();
                     }
-                    var counters = core.jumboCountersAfterMark(stored, newRuns, runLength, delta);
+                    var counters = core.jumboCountersAfterMark(stored, jumboRuns, runLength, delta);
                     if (counters) {
                         stored.counterStart = counters.counterStart;
                         stored.counterEnd = counters.counterEnd;
