@@ -55,6 +55,7 @@ var api = require('../download/atex/js/slitter.js');
 var core = api.core, Controller = api.Controller;
 
 var passed = 0, total = 0;
+var pending = [];
 function assertEqual(actual, expected, name) {
     var ok = JSON.stringify(actual) === JSON.stringify(expected);
     total++;
@@ -183,8 +184,36 @@ function lineCells(batch) {
         '#5075: строка партии — партия видна, «перерасход партии», проходов 0 (не минус)');
 })();
 
+// ── 4) Завершение задания не снимает с партии «В работе» (#4374 отключено по #5075) ──────────
+// Решение владельца: «Счётчик кон.» ≤ 0 в параллельном прогоне не значит, что рулон кончился,
+// поэтому слиттер пока не выводит партию из оборота. Остаток (м и м²) пишется как раньше.
+(function() {
+    var inst = Object.create(Controller.prototype);
+    var batch = { id: '77', materialId: 'm', remainderM: 100, remainder: 50, widthMm: 500, active: '1' };
+    inst.findBatch = function(id) { return String(id) === '77' ? batch : null; };
+    inst.materialWidths = {};
+    inst.meta = { batch: { id: '106', reqs: [
+        { id: '1148', val: 'Остаток, м' }, { id: '1050', val: 'Остаток, м²' }, { id: '1160', val: 'В работе' }] } };
+    var posts = [];
+    inst.post = function(path, params) { posts.push({ path: path, params: params }); return Promise.resolve({}); };
+    pending.push(inst.syncBatchRemainder({ batchId: '77' }, 0, true).then(function() {
+        return inst.syncBatchRemainder({ batchId: '77' }, -250, true);
+    }).then(function() {
+        assertEqual(posts.map(function(p) { return ['t1148' in p.params, 't1050' in p.params, 't1160' in p.params]; }),
+            [[true, true, false], [true, true, false]],
+            '#5075: завершение со «Счётчиком кон.» 0 и −250 пишет м и м², «В работе» не снимает');
+        assertEqual([batch.active, batch.remainderM, batch.remainder], ['1', -250, -125],
+            '#5075: партия остаётся «в работе» с отрицательным остатком (перерасход)');
+    }));
+})();
+
 // formatEventWhen (время событий смены) продолжает идти по часам планшета — его не трогаем.
 assertEqual(core.formatEventWhen('1781038800'), '10.06.2026 04:00',
     '#5075: время событий смены — по-прежнему по часам планшета');
 
-console.log('\n' + passed + '/' + total + ' passed');
+Promise.all(pending).then(function() {
+    console.log('\n' + passed + '/' + total + ' passed');
+}).catch(function(e) {
+    console.log('FAIL — исключение: ' + (e && e.stack || e));
+    process.exitCode = 1;
+});

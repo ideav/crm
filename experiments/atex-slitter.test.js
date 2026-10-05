@@ -609,8 +609,9 @@ assertEqual(core.metersFromArea(350, 0), 0, '#3861 metersFromArea: ширина 
         '#4374 syncBatchRemainder: finishMode с остатком → «В работе» не трогаем');
     // #4366: булев реквизит снимаем нулём (как «Зафиксировано» в планировании, #3508).
     inst.syncBatchRemainder({ batchId: '77' }, 0, true);
-    assertEqual(captured.params['t1160'], '0',
-        '#3861/#4374 syncBatchRemainder: партия ИСЧЕРПАНА (счётчик в нуле) → «В работе» снят нулём');
+    // #5075: снятие «В работе» при счётчике в нуле отключено (решение владельца, параллельный прогон).
+    assertEqual('t1160' in captured.params, false,
+        '#5075 syncBatchRemainder: счётчик в нуле → «В работе» НЕ снимается (#4374 отключено)');
 })();
 
 // markPassDone: ✓ Готово пишет «Погонаж факт» и «Расход сырья» (погонные метры) в резку
