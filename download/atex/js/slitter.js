@@ -1109,6 +1109,12 @@
         return pad2(d.h) + ':' + pad2(d.mi);
     }
 
+    // #5078: часы сервера в шапке пульта — «ЧЧ:ММ:СС» момента ms по Москве.
+    function formatClockSeconds(ms) {
+        var d = mskParts(ms);
+        return pad2(d.h) + ':' + pad2(d.mi) + ':' + pad2(d.s);
+    }
+
     // Штамп → «ДД.ММ.ГГГГ». Не-штамп возвращается как есть.
     function formatDate(value) {
         var s = String(value == null ? '' : value).trim();
@@ -1582,6 +1588,7 @@
         formatEventWhen: formatEventWhen,
         formatBatchLabel: formatBatchLabel,         // #5075: дата партии — по Москве
         serverNowMs: serverNowMs,                   // #5075: серверное «сейчас» (часы устройства + сдвиг)
+        formatClockSeconds: formatClockSeconds,     // #5078: часы сервера в шапке пульта
         noteServerDate: noteServerDate,             // #5075: сдвиг по заголовку Date ответа
         MSK_OFFSET_MS: MSK_OFFSET_MS,
         isBlankValue: isBlankValue,                 // #5075: «Остаток, м» не заполнен
@@ -2689,11 +2696,32 @@
             var last = idx === parts.length - 1;   // станок — всегда последняя часть
             if (idx) slot.appendChild(el('span', { class: 'atex-sl-nav-sep', text: '·' }));
             if (!last) { slot.appendChild(el('span', { class: 'atex-sl-nav-part', text: part })); return; }
+            // #5078: перед станком — идущие часы сервера.
+            slot.appendChild(self.startNavClock(el('span', { class: 'atex-sl-nav-part atex-sl-nav-clock' })));
+            slot.appendChild(el('span', { class: 'atex-sl-nav-sep', text: '·' }));
             var btn = el('button', { class: 'atex-sl-nav-slitter', type: 'button', text: part,
                 title: 'Выбрать станок' });
             btn.addEventListener('click', function() { self.chooseSlitter(); });
             slot.appendChild(btn);
         });
+    };
+
+    // #5078: часы сервера в шапке — московское серверное время (#5075: часы устройства + сдвиг
+    // по заголовку Date ответов), идут посекундно. Тик меняет только надпись часов, следующий
+    // ставится на границу серверной секунды. Перерисовка шапки снимает прежний таймер.
+    AtexSlitter.prototype.startNavClock = function(node) {
+        var self = this;
+        if (this.navClockTimer) clearTimeout(this.navClockTimer);
+        function tick() {
+            var now = core.serverNowMs();
+            node.textContent = core.formatClockSeconds(now);
+            var wait = 1000 - (((now % 1000) + 1000) % 1000);
+            self.navClockTimer = setTimeout(tick, wait);
+            // Node (тесты): таймер часов не держит процесс.
+            if (self.navClockTimer && typeof self.navClockTimer.unref === 'function') self.navClockTimer.unref();
+        }
+        tick();
+        return node;
     };
 
     // Имя планшета кладёт сторож pad-guard.js (#4666) — сначала в window.atexPad, а в
