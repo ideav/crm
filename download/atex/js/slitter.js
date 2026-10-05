@@ -155,6 +155,11 @@
         return isFinite(n) ? n : 0;
     }
 
+    // #5075: значение реквизита не заполнено (пусто/пробелы/null). «0» — заполнено.
+    function isBlankValue(value) {
+        return String(value == null ? '' : value).trim() === '';
+    }
+
     function round3(n) {
         return Math.round(n * 1000) / 1000;
     }
@@ -576,9 +581,38 @@
         return (n < 10 ? '0' : '') + n;
     }
 
+    // #5075: время пульта — СЕРВЕРНОЕ, московское (решение владельца: «пофиг на часы планшета,
+    // пиши серверное время»). Пояс сервера — Москва, UTC+3 круглый год, поэтому дата/время
+    // считаются фиксированным сдвигом от UTC, а не по поясу устройства. «Сейчас» — часы
+    // устройства плюс сдвиг, измеренный по заголовку `Date` ответов сервера (getJson/post):
+    // планшетов десятки, их часы врут на часы.
+    var MSK_OFFSET_MS = 3 * 3600 * 1000;
+    var serverClockOffsetMs = 0;
+    function serverNowMs() {
+        return Date.now() + serverClockOffsetMs;
+    }
+    // Заголовок Date ответа → сдвиг часов устройства. Нет/негодный — сдвиг прежний.
+    function noteServerDate(headerValue, deviceMs) {
+        var server = Date.parse(String(headerValue == null ? '' : headerValue));
+        if (!isFinite(server)) return false;
+        serverClockOffsetMs = server - (deviceMs != null ? deviceMs : Date.now());
+        return true;
+    }
+    // Московские «стеночные» части момента ms (через UTC-геттеры сдвинутой даты).
+    function mskParts(ms) {
+        var d = new Date(Number(ms) + MSK_OFFSET_MS);
+        return { y: d.getUTCFullYear(), mo: d.getUTCMonth() + 1, d: d.getUTCDate(),
+            h: d.getUTCHours(), mi: d.getUTCMinutes(), s: d.getUTCSeconds() };
+    }
+    // Московское «стеночное» время → момент (мс).
+    function mskWallToMs(y, mo, d, h, mi, sec) {
+        return Date.UTC(y, mo - 1, d, h || 0, mi || 0, sec || 0) - MSK_OFFSET_MS;
+    }
+
+    // «ГГГГ-ММ-ДД» московской даты: момента date (Date) или серверного «сейчас».
     function todayISO(date) {
-        var d = date instanceof Date ? date : new Date();
-        return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+        var p = mskParts(date instanceof Date ? date.getTime() : serverNowMs());
+        return p.y + '-' + pad2(p.mo) + '-' + pad2(p.d);
     }
 
     // #4808: ВРЕМЕННЫЙ тестовый вход — день пульта из строки запроса, `slitter?date=20260823`.
@@ -629,15 +663,15 @@
         if (/^\d{9,13}$/.test(s)) {
             var num = Number(s);
             var ms = num >= 1e12 ? num : num * 1000;
-            var d = new Date(ms);
-            if (!isNaN(d.getTime()) && d.getFullYear() >= 2001 && d.getFullYear() <= 2100) {
-                return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+            if (isFinite(ms)) {
+                var kp = mskParts(ms);   // #5075: день — московский
+                if (kp.y >= 2001 && kp.y <= 2100) return kp.y * 10000 + kp.mo * 100 + kp.d;
             }
         }
         var parsed = Date.parse(s);
         if (!isNaN(parsed)) {
-            var dt = new Date(parsed);
-            return dt.getFullYear() * 10000 + (dt.getMonth() + 1) * 100 + dt.getDate();
+            var dp = mskParts(parsed);
+            return dp.y * 10000 + dp.mo * 100 + dp.d;
         }
         return Infinity;
     }
@@ -768,9 +802,9 @@
         if (!/^\d{9,13}$/.test(s)) return null;
         var num = Number(s);
         var ms = num >= 1e12 ? num : num * 1000;
-        var d = new Date(ms);
-        if (isNaN(d.getTime())) return null;
-        return Math.floor(new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0).getTime() / 1000);
+        if (!isFinite(ms)) return null;
+        var dp = mskParts(ms);   // #5075: полночь московского дня
+        return Math.floor(mskWallToMs(dp.y, dp.mo, dp.d) / 1000);
     }
 
     // #3737: конфигурация первой резки СЛЕДУЮЩЕГО календарного дня (после curDayKey) для
@@ -1005,14 +1039,20 @@
         return Math.floor(coreToNumber(batch && batch.remainderM) / runLength);
     }
 
+    // #5075: партии для задания — «в работе» и того же вида сырья. По остатку НЕ фильтруем:
+    // «Остаток, м» — счётчик слиттера в параллельном прогоне с 1С, он бывает 0 и отрицательным
+    // (перерасход), а резать с такой партии оператору запрещать нельзя (решение владельца).
+    // Порядок: сначала партии, которых хватает хотя бы на проход (FIFO), затем остальные (FIFO) —
+    // автоподбор (syncInitialBatchSelection) берёт партию с остатком, если она есть.
     function availableBatchesForCut(batches, cut) {
         var runLength = runLengthForCut(cut);
-        return sortFifo((batches || []).filter(function(batch) {
-            if (!isActiveBatch(batch)) return false;
-            if (!batchMatchesCut(batch, cut)) return false;
-            if (!(runLength > 0)) return coreToNumber(batch && (batch.remainderM || batch.remainder)) > 0;
-            return batchPasses(batch, cut) >= 1;
+        var matching = sortFifo((batches || []).filter(function(batch) {
+            return isActiveBatch(batch) && batchMatchesCut(batch, cut);
         }));
+        if (!(runLength > 0)) return matching;
+        var enough = matching.filter(function(batch) { return batchPasses(batch, cut) >= 1; });
+        var rest = matching.filter(function(batch) { return !(batchPasses(batch, cut) >= 1); });
+        return enough.concat(rest);
     }
 
     function batchCoverage(batches, selectedIds, cut) {
@@ -1023,7 +1063,7 @@
         var selected = availableBatchesForCut(batches, cut).filter(function(batch) { return ids[String(batch.id)]; });
         var coveredRuns = 0;
         var details = selected.map(function(batch) {
-            var passes = batchPasses(batch, cut);
+            var passes = Math.max(0, batchPasses(batch, cut)); // #5075: перерасход — 0 проходов, не минус
             coveredRuns += passes;
             return { id: String(batch.id), passes: passes, meters: round3(passes * runLength) };
         });
@@ -1041,10 +1081,9 @@
     // Дата-время события смены в формате «YYYY-MM-DD HH:MM:SS» (хронология,
     // первая колонка «Событие смены»). Принимает Date — детерминируется в тестах.
     function formatDateTime(date) {
-        var d = (date instanceof Date) ? date : new Date(date);
-        function p(n) { return (n < 10 ? '0' : '') + n; }
-        return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) +
-            ' ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+        var ms = (date instanceof Date) ? date.getTime() : new Date(date).getTime();
+        var d = mskParts(ms);   // #5075: московские часы сервера
+        return d.y + '-' + pad2(d.mo) + '-' + pad2(d.d) + ' ' + pad2(d.h) + ':' + pad2(d.mi) + ':' + pad2(d.s);
     }
 
     // #3460: «номер» резки на самом деле — плановое время старта в unix-секундах
@@ -1066,16 +1105,16 @@
     function formatClock(value) {
         var s = String(value == null ? '' : value).trim();
         if (!isTimestampSeconds(s)) return s;
-        var d = new Date(Number(s) * 1000);
-        return pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+        var d = mskParts(Number(s) * 1000);   // #5075: по Москве
+        return pad2(d.h) + ':' + pad2(d.mi);
     }
 
     // Штамп → «ДД.ММ.ГГГГ». Не-штамп возвращается как есть.
     function formatDate(value) {
         var s = String(value == null ? '' : value).trim();
         if (!isTimestampSeconds(s)) return s;
-        var d = new Date(Number(s) * 1000);
-        return pad2(d.getDate()) + '.' + pad2(d.getMonth() + 1) + '.' + d.getFullYear();
+        var d = mskParts(Number(s) * 1000);   // #5075: по Москве
+        return pad2(d.d) + '.' + pad2(d.mo) + '.' + d.y;
     }
 
     // #4783 п.3/п.4: «ГГГГ-ММ-ДД» (день пульта) → «ДД.ММ.ГГГГ». Не дата — как есть.
@@ -1270,6 +1309,8 @@
                 date: firstField(row, ['batch_date', 'batch_arrival', 'batch_arrival_date', 'date']),
                 remainder: toNumber(firstField(row, ['batch_remainder_m2', 'remainder_m2', 'batch_remainder'])),
                 remainderM: toNumber(firstField(row, ['batch_remainder_m', 'remainder_m'])),
+                // #5075: «Остаток, м» не заполнен (а не «0») — только тогда метры выводятся из м².
+                remainderMEmpty: isBlankValue(firstField(row, ['batch_remainder_m', 'remainder_m'])),
                 // #3861: номинальная ширина рулона из отчёта — для взаимопересчёта остатка м↔м².
                 widthMm: toNumber(firstField(row, ['width_mm', 'batch_width_mm', 'material_width_mm'])),
                 materialId: matId || null,
@@ -1494,6 +1535,12 @@
     function eventWhenSeconds(value) {
         var s = String(value == null ? '' : value).trim();
         if (isTimestampSeconds(s)) return Number(s);
+        // #5075: «ГГГГ-ММ-ДД ЧЧ:ММ[:СС]» — московское время сервера, не пояс устройства.
+        var m = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+        if (m) {
+            return Math.round(mskWallToMs(Number(m[1]), Number(m[2]), Number(m[3]),
+                Number(m[4] || 0), Number(m[5] || 0), Number(m[6] || 0)) / 1000);
+        }
         var p = Date.parse(s.replace(' ', 'T'));
         return isNaN(p) ? NaN : Math.round(p / 1000);
     }
@@ -1505,6 +1552,14 @@
         var m = s.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
         if (m) return m[3] + '.' + m[2] + '.' + m[1] + ' ' + m[4] + ':' + m[5];
         return s;
+    }
+
+    // #5075: главное значение партии сырья — unix-штамп даты загрузки (1781038800); как и прочие
+    // времена пульта выводится по Москве (пояс сервера), а не по поясу планшета.
+    function formatBatchLabel(value) {
+        var s = String(value == null ? '' : value).trim();
+        if (!isTimestampSeconds(s)) return s;
+        return formatDate(s) + ' ' + formatClock(s);
     }
 
     // #3557: длительность (секунды) → «Ч ч М мин» / «М мин». Пусто/отрицательно → ''.
@@ -1525,6 +1580,11 @@
         deriveCutStatus: deriveCutStatus,
         eventWhenSeconds: eventWhenSeconds,
         formatEventWhen: formatEventWhen,
+        formatBatchLabel: formatBatchLabel,         // #5075: дата партии — по Москве
+        serverNowMs: serverNowMs,                   // #5075: серверное «сейчас» (часы устройства + сдвиг)
+        noteServerDate: noteServerDate,             // #5075: сдвиг по заголовку Date ответа
+        MSK_OFFSET_MS: MSK_OFFSET_MS,
+        isBlankValue: isBlankValue,                 // #5075: «Остаток, м» не заполнен
         formatDuration: formatDuration,
         toNumber: toNumber,
         round3: round3,
@@ -1721,6 +1781,9 @@
         // #4914: след автосохранения записи джамбо (та же схема, что savedReadings)
         this.savedJumbo = '';
         this.jumboRetry = false;
+        // #5075: запись джамбо не сохранилась и после повторов — отметки до перезагрузки РМ
+        // не пишутся (баннер .atex-sl-jumbo-fail).
+        this.jumboSaveFailed = false;
     }
 
     // #4370: сброс всего, что относится к ВЫБРАННОЙ резке. Вызывается при смене станка и даты:
@@ -1761,8 +1824,15 @@
     };
 
     // GET → JSON. Бросает Error при сетевой/JSON-ошибке.
+    // #5075: каждый ответ сервера уточняет сдвиг часов устройства (заголовок Date).
+    function noteResponseDate(resp) {
+        var h = resp && resp.headers && typeof resp.headers.get === 'function' ? resp.headers.get('Date') : null;
+        if (h) core.noteServerDate(h, Date.now());
+    }
+
     AtexSlitter.prototype.getJson = function(path) {
         return fetch(this.url(path), { credentials: 'same-origin' }).then(function(resp) {
+            noteResponseDate(resp);   // #5075: серверное время
             return resp.text().then(function(text) {
                 var data;
                 try { data = JSON.parse(text); }
@@ -1832,7 +1902,14 @@
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: body.toString()
         }).then(function(resp) {
+            noteResponseDate(resp);   // #5075: серверное время
             return resp.text().then(function(text) {
+                // #5075: 5xx — сбой сервера, его можно повторить (postRetry); помечаем статусом.
+                if (resp.status >= 500) {
+                    var se = new Error('Сервер ответил ' + resp.status + ': ' + String(text || '').slice(0, 200));
+                    se.status = resp.status;
+                    throw se;
+                }
                 var result;
                 try { result = JSON.parse(text); } catch (e) { throw new Error('Сервер вернул не JSON: ' + text.slice(0, 200)); }
                 if (result && (result.error || result.err)) throw new Error(result.error || result.err);
@@ -1845,7 +1922,70 @@
                 }
                 return result;
             });
+        }, function(err) {
+            // #5075: запрос не дошёл (нет сети, обрыв) — повторяемая ошибка.
+            var ne = err instanceof Error ? err : new Error(String(err));
+            ne.network = true;
+            throw ne;
         });
+    };
+
+    // #5075: запись «Номера джамбо» с повторами. Повторяем ТОЛЬКО сбой сети и 5xx (ошибка
+    // приложения — «нет прав», «нет реквизита» — повтором не лечится). Паузы перед повторами —
+    // JUMBO_RETRY_DELAYS (1 с / 2 с / 4 с: первая попытка и три повтора). opts.beforeRetry —
+    // проверка перед повтором (для _m_new: не создана ли запись первой попыткой, ответ на
+    // которую потерялся); вернула не null — это и есть результат, повтора нет. Повторы
+    // исчерпаны — markJumboSaveFailed (постоянный баннер, отметки до перезагрузки не пишутся).
+    var JUMBO_RETRY_DELAYS = [1000, 2000, 4000];
+    function isRetryableError(err) {
+        return !!(err && (err.network || Number(err.status) >= 500));
+    }
+    AtexSlitter.prototype.postRetry = function(path, params, opts) {
+        var self = this;
+        opts = opts || {};
+        var attempt = 0;
+        function wait(ms) { return new Promise(function(resolve) { setTimeout(resolve, ms); }); }
+        function run() {
+            return self.post(path, params).catch(function(err) {
+                if (!isRetryableError(err)) throw err;
+                if (attempt >= JUMBO_RETRY_DELAYS.length) {
+                    err.retriesExhausted = true;
+                    self.markJumboSaveFailed();
+                    throw err;
+                }
+                var ms = JUMBO_RETRY_DELAYS[attempt++];
+                return wait(ms).then(function() {
+                    if (typeof opts.beforeRetry !== 'function') return null;
+                    return Promise.resolve(opts.beforeRetry()).catch(function() { return null; });
+                }).then(function(found) { return found != null ? found : run(); });
+            });
+        }
+        return run();
+    };
+
+    // #5075: перед повтором _m_new — есть ли уже у задания запись с этим номером, которой нет
+    // среди известных (первая попытка дошла до базы, а ответ потерялся). Есть — { obj: id }.
+    AtexSlitter.prototype.findCreatedJumbo = function(cut, number) {
+        var known = {};
+        (cut.jumbos || []).forEach(function(r) { if (r && r.id) known[String(r.id)] = true; });
+        return this.getJson('report/task_jumbo?JSON_KV&FR_task_id=' + encodeURIComponent(cut.id) + '&LIMIT=0,100')
+            .then(function(rows) {
+                var list = core.rowsToJumbos(Array.isArray(rows) ? rows : ((rows && rows.rows) || []));
+                var hit = list.filter(function(r) {
+                    return r.id && !known[r.id] && String(r.jumboNo) === String(number);
+                })[0];
+                return hit ? { obj: hit.id } : null;
+            });
+    };
+
+    // #5075: запись джамбо не сохранилась после всех повторов. Баннер не скрывается сам:
+    // данные в РМ разошлись с базой, дальше работать можно только после перезагрузки.
+    AtexSlitter.prototype.markJumboSaveFailed = function() {
+        this.jumboSaveFailed = true;
+        if (this.jumboFailEl || !this.root) return;
+        this.jumboFailEl = el('div', { class: 'atex-sl-jumbo-fail', role: 'alert',
+            text: 'Не удалось сохранить джамбо — перезагрузите РМ' });
+        this.root.appendChild(this.jumboFailEl);
     };
 
     // Multipart-POST для файловых реквизитов (паттерн платформы, issue #1310):
@@ -1920,7 +2060,8 @@
     // #4317: досчёт «Остатка, м» — ЧАСТЬ загрузки, а не отдельный шаг инициализации. У большинства
     // партий «Остаток, м» в базе пуст (приход заводят в м², метры появляются только после первого
     // списания расходом): в отчёте `batch_remainder_m` = '' → remainderM = 0 → batchPasses = 0 →
-    // availableBatchesForCut отбрасывает партию → панель «Партии сырья» пишет «Нет партий в работе».
+    // availableBatchesForCut отбрасывал партию → панель «Партии сырья» писала «Нет партий в работе»
+    // (с #5075 по остатку партии не отбрасываются вовсе, но метры для «Счётчик нач.» нужны).
     // Перезагрузка страницы всё чинила, потому что fillBatchRemainderM звался ТОЛЬКО в start(), а
     // перечитывание партий после «Готово»/«Готовы все» (finishCut) шло без него — партии «терялись»
     // до F5 (issue #4317; на боевой ateh это 56 партий из 62). Хвост общий для обеих веток загрузки.
@@ -1956,6 +2097,7 @@
                     date: dateIdx >= 0 ? (row[dateIdx] || '') : '',
                     remainder: remIdx >= 0 ? core.toNumber(row[remIdx]) : 0,
                     remainderM: remMIdx >= 0 ? core.toNumber(row[remMIdx]) : 0,
+                    remainderMEmpty: remMIdx >= 0 ? core.isBlankValue(row[remMIdx]) : true, // #5075
                     materialId: matRef.id,
                     materialLabel: matRef.label,
                     warehouse: '',
@@ -1967,19 +2109,25 @@
         });
     };
 
-    // #3566 #5 / #3861: остаток в метрах — основная мера; площадь (м²) с ним
-    // взаимовычисляема по номинальной ширине. Если отчёт отдал только одно из
-    // значений — досчитываем второе. Ширина: сперва из отчёта (width_mm),
-    // иначе из справочника «Вид сырья». Вызывается после загрузки партий и ширин.
+    // #3566 #5 / #3861 / #5075: остаток партии в м и м² — две НЕЗАВИСИМЫЕ меры (параллельный
+    // прогон): «Остаток, м²» приходит из 1С загрузкой, «Остаток, м» ведёт слиттер своим счётчиком.
+    // Расхождение между ними — данные, а не ошибка, поэтому заполненные метры (в том числе 0 и
+    // отрицательные) НЕ пересчитываются. Метры выводятся из м² по ширине только когда «Остаток, м»
+    // не заполнен (remainderMEmpty / null / ''). Площадь досчитывается из положительных метров,
+    // только если м² равен нулю (пуст). Ширина: сперва из отчёта (width_mm), иначе из справочника
+    // «Вид сырья». Вызывается после загрузки партий и ширин; идемпотентна.
     AtexSlitter.prototype.fillBatchRemainderM = function() {
         var widths = this.materialWidths || {};
         (this.batches || []).forEach(function(b) {
             var width = core.toNumber(b.widthMm) || core.toNumber(widths[String(b.materialId)]);
-            var hasM = core.toNumber(b.remainderM) > 0;
-            var hasArea = core.toNumber(b.remainder) > 0;
             if (width <= 0) return;
-            if (!hasM && hasArea) b.remainderM = core.metersFromArea(b.remainder, width);
-            else if (hasM && !hasArea) b.remainder = core.areaFromMeters(b.remainderM, width);
+            var mEmpty = b.remainderMEmpty === true || b.remainderM == null || core.isBlankValue(b.remainderM);
+            var area = core.toNumber(b.remainder);
+            if (mEmpty) {
+                if (area !== 0) { b.remainderM = core.metersFromArea(area, width); b.remainderMEmpty = false; }
+            } else if (area === 0 && core.toNumber(b.remainderM) > 0) {
+                b.remainder = core.areaFromMeters(b.remainderM, width);
+            }
         });
     };
 
@@ -2418,11 +2566,18 @@
     // (#4332) оператор выполняет задания будущих дней; «Закончено» должно нести фактическую
     // дату завершения, а не плановую дату задания (иначе завершение уезжает в будущее и ломает
     // хронологию событий смены).
+    // #5075: «сейчас» — серверное московское время (часы планшета + сдвиг по заголовку Date),
+    // а не часы устройства: они на планшетах врут на часы.
     AtexSlitter.prototype.eventDateTime = function() {
-        var now = new Date();
-        function p(n) { return (n < 10 ? '0' : '') + n; }
-        var day = core.todayISO(now);
-        return day + ' ' + p(now.getHours()) + ':' + p(now.getMinutes()) + ':' + p(now.getSeconds());
+        return core.formatDateTime(new Date(core.serverNowMs()));
+    };
+
+    // #5075: день пульта при создании считается до первого ответа сервера (сдвиг ещё не
+    // известен) — после первого ответа берём московскую дату сервера. День из адреса
+    // (?date=, #4808) не трогаем.
+    AtexSlitter.prototype.syncSelectedDateWithServer = function() {
+        if (this.dateFromQuery) return;
+        this.selectedDate = core.todayISO();
     };
 
     // ── Рендеринг ──
@@ -3124,23 +3279,27 @@
         var list = ids.map(function(id) { return self.findBatch(id); }).filter(Boolean);
         if (!list.length) {
             wrap.appendChild(el('span', { class: 'atex-sl-muted',
-                text: 'Партия сырья не подобрана — нет партий в работе с остатком хотя бы на один проход.' }));
+                text: 'Партия сырья не подобрана — нет партий этого сырья в работе.' }));
             return wrap;
         }
         list.forEach(function(batch) {
-            var passes = core.batchPasses(batch, cut);
+            var passes = Math.max(0, core.batchPasses(batch, cut)); // #5075: при перерасходе 0, не минус
             var cells = [
-                'Партия: ' + core.formatEventWhen(batch.label),
+                'Партия: ' + core.formatBatchLabel(batch.label), // #5075: по Москве
                 'Приход: ' + (batch.date || '—'),
                 'Остаток, м: ' + core.round3(batch.remainderM || 0),
                 'Штрих-код: ' + (batch.barcode || '—'),
                 'Проходов: ' + passes
             ];
             if (batch.foreign) cells.push('Склад «' + (batch.warehouse || 'Атех') + '» — другой склад');
+            // #5075: отрицательный остаток — списано больше, чем было в партии. Говорим прямо.
+            var overrun = core.toNumber(batch.remainderM) < 0;
+            if (overrun) cells.push('⚠ перерасход партии');
             var row = el('div', { class: 'atex-sl-batch-row' });
             cells.forEach(function(text, idx) {
                 if (idx) row.appendChild(el('span', { class: 'atex-sl-batch-sep', text: '·' }));
-                row.appendChild(el('span', { class: 'atex-sl-batch-cell', text: text }));
+                var warn = overrun && idx === cells.length - 1;
+                row.appendChild(el('span', { class: 'atex-sl-batch-cell' + (warn ? ' atex-sl-batch-overrun' : ''), text: text }));
             });
             wrap.appendChild(row);
         });
@@ -3281,6 +3440,17 @@
             style: storedRec ? null : 'background:#f0f0f0;cursor:default'
         });
         runsInput.value = storedRec && storedRec.cutsCount != null ? String(storedRec.cutsCount) : '';
+        // #5075: у черновика с введённым номером фокус на «Проходов» сначала заводит запись
+        // (ensureJumboRecord) и перерисовывает панель — поле открывается для ввода.
+        if (!storedRec && active && String(active.jumboNo == null ? '' : active.jumboNo).trim() !== '') {
+            runsInput.addEventListener('focus', function() {
+                self.ensureJumboRecord(cut).then(function(stored) {
+                    if (stored) self.render();
+                }).catch(function(err) {
+                    self.notify('Запись «Номера джамбо» не сохранена: ' + (err && err.message ? err.message : err), 'error');
+                });
+            });
+        }
         if (storedRec) {
             runsInput.addEventListener('change', function() {
                 var runs = core.jumboRunsFromInput(runsInput.value);
@@ -3572,7 +3742,10 @@
         // Завершение резки само по себе партию из оборота не выводит — на рулоне остаются метры,
         // и он нужен следующим заданиям. Снимаем флаг только когда остаток ушёл в ноль.
         // (До #4366 снятие вообще не доезжало до сервера, поэтому промах не был виден.)
-        var retire = finishMode && !(newRemM > 0);
+        // #5075: снятие «В работе» при «Счётчик кон.» ≤ 0 ПОКА ОТКЛЮЧЕНО (решение владельца): в
+        // параллельном прогоне с 1С счётчик в нуле/минусе — перерасход, а не конец рулона.
+        // Вернуть — восстановить условие `finishMode && !(newRemM > 0)`.
+        var retire = false;
         if (retire) {
             // #4366: «В работе» партии — булев реквизит (1074/16427), снимаем нулём.
             var batchActiveReq = reqIdByAnyName(batchMeta, ['В работе', 'Активно', 'Активная', 'Действует']);
@@ -3581,6 +3754,7 @@
         if (!Object.keys(bf).length) return Promise.resolve(null);
         return this.post('_m_set/' + batch.id + '?JSON', bf).then(function() {
             batch.remainderM = newRemM;
+            batch.remainderMEmpty = false; // #5075: метры записаны — больше не выводятся из м²
             batch.remainder = newRemArea;
             if (retire && typeof batch.active !== 'undefined') batch.active = '';
         });
@@ -3723,6 +3897,11 @@
         var self = this;
         var cut = this.currentCut;
         if (this.busy || !cut) return;
+        // #5075: запись джамбо не сохранилась и после повторов — РМ разошлось с базой.
+        if (this.jumboSaveFailed) {
+            this.notify('Не удалось сохранить джамбо — перезагрузите РМ. До перезагрузки отметки не пишутся', 'error');
+            return;
+        }
         if (this.isCutLocked(cut)) { this.notify('Резка заблокирована очередью', 'error'); return; }
         if (core.isDone(cut.status)) { this.notify('Задание уже завершено', 'info'); return; }
         var runLength = core.runLengthForCut(cut);
@@ -4105,7 +4284,13 @@
         fields['t' + table.id] = number;
         var csRid = reqIdByName(table, JUMBO_REQ.counterStart);
         if (csRid && counterStart !== '') fields['t' + csRid] = core.toNumber(counterStart);
-        return this.post('_m_new/' + table.id + '?JSON&up=' + encodeURIComponent(cut.id), fields)
+        // #5075: одна заводка на задание за раз — фокус на «Проходов» и автосохранение номера
+        // не должны завести две записи одному черновику.
+        if (cut.jumboEnsuring) return cut.jumboEnsuring;
+        var done = function(v) { cut.jumboEnsuring = null; return v; };
+        var fail = function(err) { cut.jumboEnsuring = null; throw err; };
+        cut.jumboEnsuring = this.postRetry('_m_new/' + table.id + '?JSON&up=' + encodeURIComponent(cut.id), fields,
+            { beforeRetry: function() { return self.findCreatedJumbo(cut, number); } })
             .then(function(res) {
                 // ID новой записи приходит в res.obj (см. orders.js), fallback — id/i.
                 var newId = res && ((res.obj != null && String(res.obj))
@@ -4126,7 +4311,8 @@
                 cut.jumboActive = cut.jumbos.length - 1;
                 cut.pendingJumbo = null;
                 return stored;
-            });
+            }).then(done, fail);
+        return cut.jumboEnsuring;
     };
 
     // Поля записи «Номера джамбо» — соответствие имён и арифметика в core
@@ -4163,7 +4349,7 @@
         // #5010: full — вся запись (счётчики, длины): отметка резки и правка
         // «Счётчика нач.» ведут числа цепочки; автосейв ячеек — без full, как был.
         var fields = opts.full ? this.jumboFields(rec) : this.jumboInputFieldsOf(rec);
-        return this.post('_m_set/' + rec.id + '?JSON', fields).then(function() {
+        return this.postRetry('_m_set/' + rec.id + '?JSON', fields).then(function() {
             if (!opts.quiet) self.notify('Расход джамбо сохранён', 'success');
             return rec.id;
         }).catch(function(err) {
@@ -4185,7 +4371,7 @@
         if (no === '' || no === String(rec.savedNo == null ? '' : rec.savedNo)) return Promise.resolve();
         var fields = {};
         fields['t' + table.id] = no;
-        return this.post('_m_save/' + rec.id + '?JSON', fields).then(function() {
+        return this.postRetry('_m_save/' + rec.id + '?JSON', fields).then(function() {
             rec.savedNo = no;
         });
     };
@@ -4211,27 +4397,33 @@
     AtexSlitter.prototype.saveJumboValues = function(quiet) {
         var self = this;
         var cut = this.currentCut;
-        if (this.busy || !cut) return;
+        if (!cut) return;
+        // #5075: занято (идёт отметка/другая запись) — не теряем сохранение молча:
+        // флаг jumboRetry, его исполняет setBusy(false).
+        if (this.busy) { this.jumboRetry = true; return; }
         var rec = this.activeJumbo();
         if (!rec || String(rec.jumboNo == null ? '' : rec.jumboNo).trim() === '') {
             this.markJumboSaved();
             return;
         }
+        var wasDraft = !(rec.id != null && String(rec.id) !== '');
         this.setBusy(true);
         var sent = this.jumboSignature();
-        this.ensureJumboRecord(cut).then(function(stored) {
+        return this.ensureJumboRecord(cut).then(function(stored) {
             if (!stored) { self.setBusy(false); return null; }
+            // #5075: черновик стал записью — перерисовать панель, иначе она остаётся в режиме
+            // черновика и «Проходов» только для чтения (как в addJumbo).
+            if (wasDraft) self.render();
             return self.saveJumboNumber(stored).then(function() {
                 return self.saveJumboRecord(stored, { quiet: true });
             }).then(function() {
-                self.setBusy(false);
                 self.savedJumbo = sent;
+                self.setBusy(false);
                 if (!quiet) self.notify('Расход джамбо сохранён', 'success');
-                if (self.jumboRetry) { self.jumboRetry = false; self.saveJumboIfChanged(); }
             });
         }).catch(function(err) {
-            self.setBusy(false);
             self.jumboRetry = false;
+            self.setBusy(false);
             self.notify('Запись «Номера джамбо» не сохранена: ' + (err && err.message ? err.message : err), 'error');
         });
     };
@@ -4286,7 +4478,8 @@
             fields['t' + table.id] = number;
             var csRid = reqIdByName(table, JUMBO_REQ.counterStart);
             if (csRid && counterStart !== '') fields['t' + csRid] = counterStart;
-            return self.post('_m_new/' + table.id + '?JSON&up=' + encodeURIComponent(cut.id), fields)
+            return self.postRetry('_m_new/' + table.id + '?JSON&up=' + encodeURIComponent(cut.id), fields,
+                { beforeRetry: function() { return self.findCreatedJumbo(cut, number); } })
                 .then(function(res) {
                     var newId = res && ((res.obj != null && String(res.obj))
                         || (res.id != null && String(res.id)) || (res.i != null && String(res.i))) || '';
@@ -4416,6 +4609,11 @@
     AtexSlitter.prototype.setBusy = function(on) {
         this.busy = on;
         if (this.root) this.root.classList.toggle('is-busy', !!on);
+        // #5075: сохранение джамбо, отложенное занятостью, выполняется при освобождении.
+        if (!on && this.jumboRetry) {
+            this.jumboRetry = false;
+            this.saveJumboIfChanged();
+        }
     };
 
     // Уведомления без alert/confirm/prompt (раздел 8 гайда): встроенный тост,
@@ -4521,6 +4719,7 @@
         this.mainEl.appendChild(el('div', { class: 'atex-sl-placeholder', text: 'Загрузка данных…' }));
 
         return this.loadMetadata()
+            .then(function() { self.syncSelectedDateWithServer(); })   // #5075: день — серверный
             .then(function() { return Promise.all([self.loadSlitters(), self.loadBatches(), self.loadCuts(), self.loadMaterialWidths()]); })
             // #4317: loadBatches досчитывает остаток сам, но здесь он идёт ПАРАЛЛЕЛЬНО с
             // loadMaterialWidths — партиям без `width_mm` в отчёте ширины тогда ещё нет. Повторяем

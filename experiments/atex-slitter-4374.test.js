@@ -121,8 +121,9 @@ setTimeout(function() {
             used.findBatch = function(id) { return String(id) === '77' ? last : null; };
             used.syncBatchRemainder({ batchId: '77' }, 0, true);
             var g = used.posts[0].params;
-            assert(g['t8456'] === 0 && g['t16427'] === '0',
-                '#3861/#4374: партия исчерпана → «В работе» снят нулём (#4366)');
+            // #5075: снятие «В работе» при счётчике в нуле отключено (решение владельца).
+            assert(g['t8456'] === 0 && !('t16427' in g),
+                '#5075: счётчик в нуле → остаток 0, «В работе» не снимается (#4374 отключено)');
 
             var mid = makeInst(null);
             var half = { id: '77', materialId: 'm', remainderM: 1000, remainder: 0, widthMm: 500, active: 'X' };

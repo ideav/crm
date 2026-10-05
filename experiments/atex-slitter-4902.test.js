@@ -313,7 +313,8 @@ function flush() { return new Promise(function(resolve) { setTimeout(resolve, 0)
 
     inst.syncBatchRemainder({ batchId: '77' }, 0, true);
     assertEqual(captured.params['t8456'], 0, '#4902: счётчик в нуле — остаток 0');
-    assertEqual(captured.params['t16427'], '0', '#3861/#4374: партия исчерпана → «В работе» снят нулём');
+    // #5075: снятие «В работе» при счётчике в нуле отключено (решение владельца).
+    assertEqual('t16427' in captured.params, false, '#5075: счётчик в нуле → «В работе» не снимается (#4374 отключено)');
 
     inst.syncBatchRemainder({ batchId: '77' }, 200, true);
     assertEqual('t16427' in captured.params, false,

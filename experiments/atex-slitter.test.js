@@ -113,7 +113,7 @@ rem = core.restoreConsumption(rem, 50);          // отмена расхода
 assertEqual(rem, 100, 'cycle: cancel restores full 50 → 100');
 
 // ── formatDateTime: дата/время события смены (хронология) ──
-assertEqual(core.formatDateTime(new Date(2026, 4, 30, 9, 5, 7)), '2026-05-30 09:05:07',
+assertEqual(core.formatDateTime(new Date(Date.UTC(2026, 4, 30, 9, 5, 7) - core.MSK_OFFSET_MS)), '2026-05-30 09:05:07', // #5075: московские часы
     'formatDateTime pads month/day/time to YYYY-MM-DD HH:MM:SS');
 
 // ── остаток,м по дельте погонажа (используем applyConsumption/restoreConsumption) ──
@@ -217,7 +217,7 @@ assertEqual(core.hasOpenShift(twoMachineEvents, null, '2026-06-11', 'Стано�
         '#4919 isShiftOpen: «Конец смены» любого оператора закрывает смену станка');
 })();
 
-// ── партии сырья: FIFO, только В работе, остатка хватает минимум на один проход ──
+// ── партии сырья: FIFO, только В работе; сначала с остатком минимум на проход (#5075: остальные не отбрасываются) ──
 var rawBatches = [
     { id: 'new', date: '2026-06-05', remainderM: 950, materialId: 'm1', active: '1', barcode: 'NEW' },
     { id: 'old', date: '2026-06-01', remainderM: 700, materialId: 'm1', active: '1', barcode: 'OLD' },
@@ -227,7 +227,7 @@ var rawBatches = [
 ];
 var cutForCoverage = { materialId: 'm1', runLength: 400, plannedRuns: 4 };
 assertEqual(core.availableBatchesForCut(rawBatches, cutForCoverage).map(function(b) { return b.id; }),
-    ['old', 'new'], 'availableBatchesForCut keeps active matching batches with at least one pass, FIFO');
+    ['old', 'new', 'short'], 'availableBatchesForCut keeps active matching batches, those with at least one pass first, FIFO (#5075: short ones are not dropped)');
 assertEqual(core.batchCoverage(rawBatches, ['old', 'new'], cutForCoverage), {
     runLength: 400,
     neededRuns: 4,
@@ -284,7 +284,7 @@ assertEqual(core.STATUSES[2], 'Завершена', '#3459 STATUSES[2] = Зав�
 // ─────────────────────── #3460 ───────────────────────
 
 // ── isTimestampSeconds: распознаём unix-секунды (а не любые числа) ──
-var sampleTs = Math.floor(new Date(2026, 5, 18, 14, 30, 0).getTime() / 1000); // локальный TZ
+var sampleTs = Math.floor((Date.UTC(2026, 5, 18, 14, 30, 0) - core.MSK_OFFSET_MS) / 1000); // #5075: 14:30 по Москве (время пульта — серверное)
 assertEqual(core.isTimestampSeconds(sampleTs), true, 'isTimestampSeconds: валидный штамп 2026 → true');
 assertEqual(core.isTimestampSeconds('1781758800'), true, 'isTimestampSeconds: пример из issue → true');
 assertEqual(core.isTimestampSeconds('42'), false, 'isTimestampSeconds: маленькое число → false');
@@ -292,7 +292,7 @@ assertEqual(core.isTimestampSeconds('12,5'), false, 'isTimestampSeconds: не ц
 assertEqual(core.isTimestampSeconds(''), false, 'isTimestampSeconds: пусто → false');
 assertEqual(core.isTimestampSeconds('Резка'), false, 'isTimestampSeconds: текст → false');
 
-// ── formatClock: штамп → ЧЧ:ММ (локальное время, как и конструкция) ──
+// ── formatClock: штамп → ЧЧ:ММ (московское время сервера, #5075) ──
 assertEqual(core.formatClock(sampleTs), '14:30', 'formatClock: штамп → 14:30');
 assertEqual(core.formatClock('Резка'), 'Резка', 'formatClock: не штамп → как есть');
 assertEqual(core.formatClock(''), '', 'formatClock: пусто → пусто');
@@ -559,7 +559,7 @@ assertEqual(core.metersFromArea(350, 0), 0, '#3861 metersFromArea: ширина 
     var inst = Object.create(Controller.prototype);
     inst.materialWidths = {};
     inst.batches = [
-        { id: 'a', materialId: 'm', remainder: 350, remainderM: 0, widthMm: 500 }, // есть м², нет м
+        { id: 'a', materialId: 'm', remainder: 350, remainderM: 0, remainderMEmpty: true, widthMm: 500 }, // есть м², нет м (#5075: «не заполнен» — флаг, а не 0)
         { id: 'b', materialId: 'm', remainder: 0, remainderM: 700, widthMm: 500 }  // есть м, нет м²
     ];
     inst.fillBatchRemainderM();
@@ -609,8 +609,9 @@ assertEqual(core.metersFromArea(350, 0), 0, '#3861 metersFromArea: ширина 
         '#4374 syncBatchRemainder: finishMode с остатком → «В работе» не трогаем');
     // #4366: булев реквизит снимаем нулём (как «Зафиксировано» в планировании, #3508).
     inst.syncBatchRemainder({ batchId: '77' }, 0, true);
-    assertEqual(captured.params['t1160'], '0',
-        '#3861/#4374 syncBatchRemainder: партия ИСЧЕРПАНА (счётчик в нуле) → «В работе» снят нулём');
+    // #5075: снятие «В работе» при счётчике в нуле отключено (решение владельца, параллельный прогон).
+    assertEqual('t1160' in captured.params, false,
+        '#5075 syncBatchRemainder: счётчик в нуле → «В работе» НЕ снимается (#4374 отключено)');
 })();
 
 // markPassDone: ✓ Готово пишет «Погонаж факт» и «Расход сырья» (погонные метры) в резку
