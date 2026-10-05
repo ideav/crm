@@ -217,7 +217,7 @@ assertEqual(core.hasOpenShift(twoMachineEvents, null, '2026-06-11', 'Стано�
         '#4919 isShiftOpen: «Конец смены» любого оператора закрывает смену станка');
 })();
 
-// ── партии сырья: FIFO, только В работе, остатка хватает минимум на один проход ──
+// ── партии сырья: FIFO, только В работе; сначала с остатком минимум на проход (#5075: остальные не отбрасываются) ──
 var rawBatches = [
     { id: 'new', date: '2026-06-05', remainderM: 950, materialId: 'm1', active: '1', barcode: 'NEW' },
     { id: 'old', date: '2026-06-01', remainderM: 700, materialId: 'm1', active: '1', barcode: 'OLD' },
@@ -227,7 +227,7 @@ var rawBatches = [
 ];
 var cutForCoverage = { materialId: 'm1', runLength: 400, plannedRuns: 4 };
 assertEqual(core.availableBatchesForCut(rawBatches, cutForCoverage).map(function(b) { return b.id; }),
-    ['old', 'new'], 'availableBatchesForCut keeps active matching batches with at least one pass, FIFO');
+    ['old', 'new', 'short'], 'availableBatchesForCut keeps active matching batches, those with at least one pass first, FIFO (#5075: short ones are not dropped)');
 assertEqual(core.batchCoverage(rawBatches, ['old', 'new'], cutForCoverage), {
     runLength: 400,
     neededRuns: 4,

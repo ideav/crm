@@ -1010,14 +1010,20 @@
         return Math.floor(coreToNumber(batch && batch.remainderM) / runLength);
     }
 
+    // #5075: партии для задания — «в работе» и того же вида сырья. По остатку НЕ фильтруем:
+    // «Остаток, м» — счётчик слиттера в параллельном прогоне с 1С, он бывает 0 и отрицательным
+    // (перерасход), а резать с такой партии оператору запрещать нельзя (решение владельца).
+    // Порядок: сначала партии, которых хватает хотя бы на проход (FIFO), затем остальные (FIFO) —
+    // автоподбор (syncInitialBatchSelection) берёт партию с остатком, если она есть.
     function availableBatchesForCut(batches, cut) {
         var runLength = runLengthForCut(cut);
-        return sortFifo((batches || []).filter(function(batch) {
-            if (!isActiveBatch(batch)) return false;
-            if (!batchMatchesCut(batch, cut)) return false;
-            if (!(runLength > 0)) return coreToNumber(batch && (batch.remainderM || batch.remainder)) > 0;
-            return batchPasses(batch, cut) >= 1;
+        var matching = sortFifo((batches || []).filter(function(batch) {
+            return isActiveBatch(batch) && batchMatchesCut(batch, cut);
         }));
+        if (!(runLength > 0)) return matching;
+        var enough = matching.filter(function(batch) { return batchPasses(batch, cut) >= 1; });
+        var rest = matching.filter(function(batch) { return !(batchPasses(batch, cut) >= 1); });
+        return enough.concat(rest);
     }
 
     function batchCoverage(batches, selectedIds, cut) {
@@ -1028,7 +1034,7 @@
         var selected = availableBatchesForCut(batches, cut).filter(function(batch) { return ids[String(batch.id)]; });
         var coveredRuns = 0;
         var details = selected.map(function(batch) {
-            var passes = batchPasses(batch, cut);
+            var passes = Math.max(0, batchPasses(batch, cut)); // #5075: перерасход — 0 проходов, не минус
             coveredRuns += passes;
             return { id: String(batch.id), passes: passes, meters: round3(passes * runLength) };
         });
@@ -1953,7 +1959,8 @@
     // #4317: досчёт «Остатка, м» — ЧАСТЬ загрузки, а не отдельный шаг инициализации. У большинства
     // партий «Остаток, м» в базе пуст (приход заводят в м², метры появляются только после первого
     // списания расходом): в отчёте `batch_remainder_m` = '' → remainderM = 0 → batchPasses = 0 →
-    // availableBatchesForCut отбрасывает партию → панель «Партии сырья» пишет «Нет партий в работе».
+    // availableBatchesForCut отбрасывал партию → панель «Партии сырья» писала «Нет партий в работе»
+    // (с #5075 по остатку партии не отбрасываются вовсе, но метры для «Счётчик нач.» нужны).
     // Перезагрузка страницы всё чинила, потому что fillBatchRemainderM звался ТОЛЬКО в start(), а
     // перечитывание партий после «Готово»/«Готовы все» (finishCut) шло без него — партии «терялись»
     // до F5 (issue #4317; на боевой ateh это 56 партий из 62). Хвост общий для обеих веток загрузки.
@@ -3164,11 +3171,11 @@
         var list = ids.map(function(id) { return self.findBatch(id); }).filter(Boolean);
         if (!list.length) {
             wrap.appendChild(el('span', { class: 'atex-sl-muted',
-                text: 'Партия сырья не подобрана — нет партий в работе с остатком хотя бы на один проход.' }));
+                text: 'Партия сырья не подобрана — нет партий этого сырья в работе.' }));
             return wrap;
         }
         list.forEach(function(batch) {
-            var passes = core.batchPasses(batch, cut);
+            var passes = Math.max(0, core.batchPasses(batch, cut)); // #5075: при перерасходе 0, не минус
             var cells = [
                 'Партия: ' + core.formatBatchLabel(batch.label), // #5075: по Москве
                 'Приход: ' + (batch.date || '—'),

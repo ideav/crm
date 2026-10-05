@@ -142,6 +142,47 @@ function lineCells(batch) {
     assertEqual(ok.length, 5, '#5075: обычная партия — те же пять ячеек строки');
 })();
 
+// ── 3) Партия с перерасходом (м ≤ 0) остаётся доступной для резки ─────────────────────────────
+// Решение владельца: «мы не можем запретить оператору резать». Остаток в метрах — счётчик
+// параллельного прогона, по его знаку и величине партию не прячем. Прочие фильтры (в работе,
+// вид сырья) остаются. Порядок: сначала партии, которых хватает хотя бы на проход (FIFO),
+// затем остальные (FIFO) — автоподбор по-прежнему берёт партию с остатком, если она есть.
+(function() {
+    var cut = { materialId: 'm1', runLength: 400, plannedRuns: 4 };
+    var batches = [
+        { id: 'zero', date: '2026-05-01', remainderM: 0, materialId: 'm1', active: '1' },
+        { id: 'neg', date: '2026-05-02', remainderM: -18632.519, materialId: 'm1', active: '1' },
+        { id: 'short', date: '2026-05-03', remainderM: 399, materialId: 'm1', active: '1' },
+        { id: 'ok', date: '2026-06-01', remainderM: 900, materialId: 'm1', active: '1' },
+        { id: 'inactive', date: '2026-04-01', remainderM: 1200, materialId: 'm1', active: '0' },
+        { id: 'other', date: '2026-04-01', remainderM: 2000, materialId: 'm2', active: '1' }
+    ];
+    assertEqual(core.availableBatchesForCut(batches, cut).map(function(b) { return b.id; }),
+        ['ok', 'zero', 'neg', 'short'],
+        '#5075: партии с остатком 0, отрицательным и меньше прохода доступны (после партий с остатком); не в работе и чужое сырьё — нет');
+    assertEqual(core.availableBatchesForCut(batches, { materialId: 'm1' }).map(function(b) { return b.id; }),
+        ['zero', 'neg', 'short', 'ok'],
+        '#5075: без длины прохода — все партии в работе нужного сырья по FIFO, без фильтра по остатку');
+    var cov = core.batchCoverage(batches, ['neg', 'ok'], cut);
+    assertEqual([cov.coveredRuns, cov.batches.map(function(d) { return d.passes; })], [2, [2, 0]],
+        '#5075: перерасход не уменьшает покрытие проходов (проходов у такой партии 0, а не минус)');
+
+    // Пульт: у задания единственная партия — с перерасходом. Она подбирается, строка её показывает.
+    var inst = Object.create(Controller.prototype);
+    inst.batches = [{ id: '74929', label: '1781038800', date: '', remainderM: -18632.519, materialId: 'm1', active: '1', barcode: '' }];
+    inst.selectedBatchIds = [];
+    inst.currentCut = { id: '90', batchId: '', materialId: 'm1', runLength: '400', plannedRuns: '4', counterStart: '' };
+    inst.findBatch = function(id) { return inst.batches.filter(function(b) { return String(b.id) === String(id); })[0] || null; };
+    inst.syncInitialBatchSelection();
+    assertEqual([inst.selectedBatchIds, inst.currentCut.batchId, inst.currentCut.counterStart], [['74929'], '74929', ''],
+        '#5075: партия с перерасходом подбирается заданию; «Счётчик нач.» из минуса не заполняется');
+    var lineEl = inst.renderBatchLine();
+    var cells = lineEl.querySelectorAll('.atex-sl-batch-cell').map(function(n) { return n.textContent; });
+    assertEqual([cells.indexOf('Проходов: 0') >= 0, cells.filter(function(t) { return t.indexOf('перерасход партии') >= 0; }).length,
+        lineEl.textContent.indexOf('не подобрана') >= 0], [true, 1, false],
+        '#5075: строка партии — партия видна, «перерасход партии», проходов 0 (не минус)');
+})();
+
 // formatEventWhen (время событий смены) продолжает идти по часам планшета — его не трогаем.
 assertEqual(core.formatEventWhen('1781038800'), '10.06.2026 04:00',
     '#5075: время событий смены — по-прежнему по часам планшета');
