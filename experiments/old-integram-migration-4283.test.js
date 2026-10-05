@@ -9,9 +9,9 @@
 //   3) копирование файлов байт-в-байт (двоичные не портятся), подкаталог создаётся до загрузки
 //      (иначе dir_admin молча кладёт файл в корень), служебные logs/backups и шаблоны,
 //      перекрывающие общие шаблоны нового ядра (main.html), не переносятся;
-//   4) правка запроса MyRoleMenu доводит его до колонок, которые читает новый main.html
-//      (menu_id, menu_up, name, href, icon): недостающие создаются, «Name»/«HREF» старого
-//      меню переименовываются, повторный прогон ничего не меняет.
+//   4) запрос MyRoleMenu приводится к эталону нового ядра — его читает блок MyRoleMenu в main.html
+//      (menu_id, menu_up, name, href, icon); прежние колонки старого ядра удаляются после
+//      создания эталонных, повторный прогон ничего не меняет.
 
 const test = require('node:test');
 const assert = require('node:assert');
@@ -148,32 +148,134 @@ function row(i, src, name, extra = {}) {
     return { i: String(i), u: '346', r };
 }
 
-test('MyRoleMenu: недостающие колонки создаются, старые имена переименовываются', () => {
-    const cols = [row(354, '151:Меню', 'Name'), row(381, '153:Меню -> Адрес', 'HREF'), row(352, '42:Роль', 'РольID')];
-    const plan = M.planMenuReport({ meta: META, columns: cols });
-    const renames = plan.ops.filter((o) => o.kind === 'rename');
-    const creates = plan.ops.filter((o) => o.kind === 'create');
-    assert.deepStrictEqual(renames.map((o) => [o.id, o.params.t100]).sort(), [['354', 'name'], ['381', 'href']]);
-    const byName = Object.fromEntries(creates.map((o) => [o.params.t100, o.params]));
-    assert.deepStrictEqual(Object.keys(byName).sort(), ['icon', 'menu_id', 'menu_up']);
+// Колонки эталона так, как их отдаёт JSON_OBJ: ссылки — «id:имя».
+const LABEL = { '151': 'Меню', '42': 'Роль', '18': 'Пользователь', '0': 'Вычисляемое', '153': 'Меню -> Адрес', '391': 'Меню -> Иконка', '85': 'abn_ID', '86': 'abn_UP', '93': 'abn_ORD', '74': 'COUNT', '34': 'HTML' };
+function refRows(ref) {
+    return ref.map((w, n) => {
+        const r = new Array(REQS28.length + 1).fill('');
+        Object.keys(w).filter((k) => /^\d+$/.test(k)).forEach((k) => { r[k] = [0, 5, 9].includes(Number(k)) ? w[k] + ':' + LABEL[w[k]] : w[k]; });
+        return { i: String(500 + n), u: '346', r };
+    });
+}
+
+test('MyRoleMenu старого ядра заменяется эталонным: сначала создать эталон, затем удалить прежние колонки', () => {
+    // колонки MyRoleMenu базы r7ohr, перенесённой со старого Интеграма (05.10.2026)
+    const old = [row(170, '18:Пользователь', '', { 3: '[USER_ID]', 5: '85:abn_ID', 8: 'X' }), row(174, '42:Роль', '', { 8: 'X' }),
+        row(176, '151:Меню', 'Name'), row(178, '153:Меню -> Адрес', 'HREF'), row(248, '151:Меню', '', { 5: '93:abn_ORD', 8: 'X', 10: '1' })];
+    const plan = M.planMenuReport({ meta: META, columns: old });
+    const kinds = plan.ops.map((o) => o.kind);
+    assert.ok(kinds.lastIndexOf('create') < kinds.indexOf('delete'), kinds.join());
+    assert.deepStrictEqual(plan.ops.filter((o) => o.kind === 'delete').map((o) => o.id), ['170', '174', '176', '178', '248']);
+    const byName = Object.fromEntries(plan.ops.filter((o) => o.kind === 'create').map((o) => [o.params.t100 || 'COUNT', o.params]));
+    assert.deepStrictEqual(Object.keys(byName).sort(), ['COUNT', 'href', 'icon', 'menu_id', 'menu_up', 'name', 'Вычисляемое', 'МенюOrd', 'Пользователь', 'РольID'].sort());
     assert.strictEqual(byName.menu_id.t28, '151');
     assert.strictEqual(byName.menu_id.t63, '85');   // abn_ID
     assert.strictEqual(byName.menu_up.t63, '86');   // abn_UP
+    assert.strictEqual(byName['Вычисляемое'].t28, '0');
+    assert.strictEqual(byName['Вычисляемое'].t102, '1');
     assert.strictEqual(byName.icon.t28, '391');
     assert.strictEqual(byName.icon.t29, '34');      // формат HTML
 });
 
-test('MyRoleMenu: готовый запрос не меняется, без реквизита иконки колонка icon не создаётся', () => {
-    const full = [row(1, '151:Меню', 'name'), row(2, '153:Меню -> Адрес', 'href'), row(3, '151:Меню', 'menu_id', { 5: '85:abn_ID' }),
-        row(4, '151:Меню', 'menu_up', { 5: '86:abn_UP' }), row(5, '391:Меню -> Иконка', 'icon')];
-    assert.deepStrictEqual(M.planMenuReport({ meta: META, columns: full }).ops, []);
+// Эталон MyRoleMenu для базы с реквизитом «Иконка» (391) и без него.
+const menuRef = (hasIcon) => M.MENU_REFERENCE.filter((w) => (hasIcon ? !w.ifNoReq : !w.needsReq));
+
+test('MyRoleMenu: эталонный запрос не меняется; без реквизита иконки icon — пустая вычисляемая', () => {
+    assert.deepStrictEqual(M.planMenuReport({ meta: META, columns: refRows(menuRef(true)) }).ops, []);
     const noIcon = [{ id: '28', reqs: META[0].reqs }, { id: '151', reqs: [{ id: '153' }] }];
-    const plan = M.planMenuReport({ meta: noIcon, columns: full.slice(0, 4) });
+    const plan = M.planMenuReport({ meta: noIcon, columns: refRows(menuRef(false)) });
     assert.deepStrictEqual(plan.ops, []);
     assert.ok(plan.warnings.some((w) => /иконк/i.test(w)));
+    // блок MyRoleMenu выводит строку, только если заполнены все подстановки — icon должна быть всегда
+    const created = M.planMenuReport({ meta: noIcon, columns: [] }).ops.map((o) => o.params);
+    assert.ok(created.every((p) => p.t28 !== '391'));
+    const icon = created.find((p) => p.t100 === 'icon');
+    assert.ok(icon && icon.t28 === '0' && icon.t101 === "''", JSON.stringify(icon));
 });
 
 test('MyRoleMenu: структура колонок не совпала с метаданными — отказ, а не запись наугад', () => {
     const bad = [{ i: '1', u: '346', r: ['151:Меню', 'name'] }];
     assert.throws(() => M.planMenuReport({ meta: META, columns: bad }), /реквизит/);
+});
+
+// Поддельная база для fixMenu: ответы GET по пути, POST записываются.
+function fakeMenuDb(data) {
+    const posts = [];
+    let next = 9000;
+    return {
+        posts,
+        client: {
+            getJson: async (p) => { if (!(p in data)) throw new Error('unexpected ' + p); return data[p]; },
+            post: async (action, params) => { posts.push({ action, params }); return { id: String(next++) }; },
+        },
+    };
+}
+const MENU_ITEMS = {
+    'object/42?JSON_OBJ&LIMIT=0,100000': [{ i: '145', r: ['admin'] }, { i: '164', r: ['user'] }],
+    // как отвечает ядро: без F_U подчинённые записи меню не отдаются
+    'object/151?JSON_OBJ&LIMIT=0,100000': [],
+    'object/151?JSON_OBJ&F_U=145&LIMIT=0,100000': [{ i: '167', u: '145', r: ['Пользователи', 'object/18', ''] }],
+    'object/151?JSON_OBJ&F_U=164&LIMIT=0,100000': [{ i: '170', u: '164', r: ['Мои задачи', 'report/5?FR_user=[USER_ID]', ''] }],
+};
+const resolved = (cols, fnId) => cols.map((w) => Object.assign({}, w, w[5] === '@RECURSIVE' ? { 5: fnId } : {}));
+LABEL['339'] = 'RECURSIVE';
+
+test('меню: эталонная база не меняется; пункты с [USER_ID] находятся под ролями (чтение по F_U)', async () => {
+    const reps = M.MENU_REPORTS.map((d, n) => ({ i: String(300 + n), r: [d.name] }));
+    const data = Object.assign({
+        'metadata': META,
+        'object/63?JSON_OBJ&LIMIT=0,100000': [{ i: '85', r: ['abn_ID'] }, { i: '339', r: ['RECURSIVE'] }],
+        'object/22?JSON_OBJ&LIMIT=0,100000': reps,
+    }, MENU_ITEMS);
+    M.MENU_REPORTS.forEach((d, n) => { data[`object/28?JSON_OBJ&F_U=${300 + n}&LIMIT=0,100000`] = refRows(resolved(d.name === 'MyRoleMenu' ? menuRef(true) : d.cols, '339')); });
+    const db = fakeMenuDb(data);
+    const logs = [];
+    await M.fixMenu({ client: db.client, apply: true, log: (s) => logs.push(s) });
+    assert.deepStrictEqual(db.posts, []);
+    assert.ok(logs.some((s) => s.includes('170') && s.includes('[USER_ID]')), logs.join('\n'));
+});
+
+test('меню: в базе старого ядра нет RECURSIVE, myMenus и rec — создаются до MyRoleMenu, rec ссылается на новую функцию', async () => {
+    // r7ohr после переноса: из запросов меню есть только MyRoleMenu старого вида, функции RECURSIVE нет
+    const data = Object.assign({
+        'metadata': META,
+        'object/63?JSON_OBJ&LIMIT=0,100000': [{ i: '85', r: ['abn_ID'] }],
+        'object/22?JSON_OBJ&LIMIT=0,100000': [{ i: '169', r: ['MyRoleMenu'] }],
+        'object/28?JSON_OBJ&F_U=169&LIMIT=0,100000': [row(176, '151:Меню', 'Name'), row(178, '153:Меню -> Адрес', 'HREF')],
+    }, MENU_ITEMS);
+    const db = fakeMenuDb(data);
+    await M.fixMenu({ client: db.client, apply: true, log: () => {} });
+    const p = db.posts;
+    assert.deepStrictEqual(p[0], { action: '_m_new/63', params: { up: 1, t63: 'RECURSIVE' } });
+    const fnId = '9000';
+    const repMy = p.findIndex((x) => x.action === '_m_new/22' && x.params.t22 === 'myMenus');
+    const repRec = p.findIndex((x) => x.action === '_m_new/22' && x.params.t22 === 'rec');
+    assert.ok(repMy > 0 && repRec > repMy);
+    const recId = '9005'; // 9000 функция, 9001 myMenus, 9002–9004 его колонки, 9005 rec
+    const recCol = p.find((x) => x.action === '_m_new/28' && x.params.up === recId);
+    assert.ok(recCol, JSON.stringify(p.slice(0, 8)));
+    assert.strictEqual(recCol.params.t63, fnId);           // функция RECURSIVE — новая запись
+    assert.strictEqual(recCol.params.t102, '[myMenus]');
+    const firstMyRole = p.findIndex((x) => x.action === '_m_new/28' && x.params.up === '169');
+    const lastRec = p.findIndex((x) => x === recCol);
+    assert.ok(firstMyRole > lastRec);
+    assert.deepStrictEqual(p.filter((x) => /^_m_del\//.test(x.action)).map((x) => x.action), ['_m_del/176', '_m_del/178']);
+});
+
+test('шаблон на jQuery получает подключение jQuery: общий main.html нового ядра его не грузит', async () => {
+    const usesJq = Buffer.from('<div id="x"></div><script>$("#x").html("ok");</script>');
+    const hasJq = Buffer.from('<script src="/js/jquery3.1.1.min.js"></script><script>$(".a").hide();</script>');
+    const plain = Buffer.from('<div>без скриптов</div>');
+    const oldSrv = fakeServer('old', { templates: { '': { 'a.html': usesJq, 'b.html': hasJq, 'c.html': plain } }, download: { '': { 'd.js': usesJq } } });
+    const newSrv = fakeServer('new', { templates: { '': {} }, download: { '': {} } });
+    const src = new M.Client({ base: 'https://old.example/old', token: 't1', fetch: oldSrv.fetch });
+    const dst = new M.Client({ base: 'https://new.example/new', token: 't2', fetch: newSrv.fetch });
+    const report = await M.copyFiles({ src, dst, commonTemplates: [], log: () => {} });
+    const a = newSrv.fsys.templates['']['a.html'].toString();
+    assert.ok(a.startsWith('<script src="/js/jquery3.1.1.min.js"></script>'), a);
+    assert.ok(a.endsWith(usesJq.toString()));
+    assert.deepStrictEqual(newSrv.fsys.templates['']['b.html'], hasJq);
+    assert.deepStrictEqual(newSrv.fsys.templates['']['c.html'], plain);
+    assert.deepStrictEqual(newSrv.fsys.download['']['d.js'], usesJq); // файлы download/ — байт-в-байт
+    assert.deepStrictEqual(report.patched.map((p) => p.name), ['a.html']);
 });

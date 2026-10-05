@@ -20,6 +20,17 @@ const VAL_LIM = 127;
 // Каталоги dir_admin, которые не переносятся: журналы трассировки и архивы бэкапов.
 const SERVICE_DIRS = ['logs', 'backups'];
 
+// Старый main.html подключал jQuery для всех рабочих мест, новый — нет: рабочее место нового ядра
+// подключает его само (templates/form.html, dict.html). Шаблону старой базы на jQuery это
+// подключение дописывается в начало.
+const JQUERY_TAG = '<script src="/js/jquery3.1.1.min.js"></script>';
+function withJquery(name, data) {
+    if (!/\.html?$/i.test(name)) return null;
+    const text = data.toString('utf8');
+    if (!/\$\(|\$\.|jQuery/.test(text) || /<script[^>]+jquery[^>]*\.js/i.test(text)) return null;
+    return Buffer.from(JQUERY_TAG + '\n' + text, 'utf8');
+}
+
 function chars(s) { return Array.from(String(s == null ? '' : s)); }
 function padChunk(s) { const n = chars(s).length; return n < VAL_LIM ? s + ' '.repeat(VAL_LIM - n) : s; }
 
@@ -33,32 +44,59 @@ function joinTails(parentVal, tails) {
     return out;
 }
 
+// Операторы шага 1; {T} — имя таблицы базы. Каждый выполняется через PREPARE, чтобы имя
+// таблицы задавалось в скрипте один раз — переменной @tbl в первой строке.
+const pad = (x) => `CONCAT(${x}, REPEAT(' ', ${VAL_LIM} - CHAR_LENGTH(${x})))`;
+const MERGE_STATEMENTS = [
+    // 1. Структура как у нового ядра: val -> longtext utf8mb4, индекс t_val с префиксом 127
+    `ALTER TABLE {T}
+  MODIFY id  int UNSIGNED NOT NULL AUTO_INCREMENT,
+  MODIFY t   int UNSIGNED NOT NULL,
+  MODIFY up  int UNSIGNED NOT NULL,
+  MODIFY ord int UNSIGNED NOT NULL,
+  MODIFY val longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
+  DROP KEY t_val,
+  ADD KEY t_val (t, val(127))`,
+    // 2. Хвосты (t = 0) — в val родителя; каждый кусок, кроме последнего, добивается пробелами до 127
+    `UPDATE {T} a
+JOIN (
+  SELECT v.id,
+         CONCAT(${pad('v.val')},
+                GROUP_CONCAT(IF(t.ord = m.last_ord, t.val, ${pad('t.val')}) ORDER BY t.ord SEPARATOR '')) AS new_val
+  FROM {T} v
+  JOIN {T} t ON t.up = v.id AND t.t = 0
+  JOIN (SELECT up, MAX(ord) AS last_ord FROM {T} WHERE t = 0 GROUP BY up) m ON m.up = v.id
+  WHERE v.t <> 0
+  GROUP BY v.id, v.val
+) calculated ON a.id = calculated.id
+SET a.val = calculated.new_val`,
+    `DELETE FROM {T} WHERE t = 0 AND up <> 0`,
+    // 3. Реквизит «Иконка» (391) таблицы «Меню»: в него пишет редактор меню нового ядра
+    //    (js/main-app.js, t391). Занятый id 391 не трогается.
+    `INSERT IGNORE INTO {T} (id, up, ord, t, val)
+SELECT 391, 151, MAX(ord) + 1, 8, 'Иконка' FROM {T} WHERE up = 151 HAVING COUNT(*) > 0`,
+];
+
+// Оператор как строка для PREPARE: CONCAT('…`', @tbl, '`…').
+function prepared(stmt) {
+    const parts = stmt.split('{T}').map((p) => "'" + p.replace(/\\/g, '\\\\').replace(/'/g, "''") + "'");
+    return `SET @q = CONCAT(${parts.join(", '`', @tbl, '`', ")});\nPREPARE q FROM @q; EXECUTE q; DEALLOCATE PREPARE q;`;
+}
+
 // SQL шага 1: та же склейка, что joinTails, для всей таблицы базы.
 function buildMergeSql(db) {
     if (!/^[A-Za-z0-9_]+$/.test(String(db || ''))) throw new Error('Недопустимое имя базы: ' + db);
-    const T = '`' + db + '`';
-    const pad = (x) => `CONCAT(${x}, REPEAT(' ', ${VAL_LIM} - CHAR_LENGTH(${x})))`;
-    return `-- #4283: склейка хвостов значений (строки t=0) базы ${db} после копирования из старого Интеграма.
--- Каждый кусок, кроме последнего, дополняется пробелами до ${VAL_LIM} символов: так их писало старое ядро,
--- а хвостовые пробелы срезал MySQL. Выполнять один раз; повторный прогон ничего не меняет (хвостов уже нет).
+    return `SET @tbl = '${db}';  -- таблица базы: единственное место, где задаётся имя
+
+-- #4283: перевод таблицы базы, скопированной со старого Интеграма, на новое ядро.
+-- Старое ядро писало куски значения ровно по ${VAL_LIM} символов, MySQL срезал у них хвостовые пробелы;
+-- склейка возвращает их, иначе слова на стыках кусков слипаются. Повторный прогон ничего не меняет.
 SET SESSION group_concat_max_len = 16777216;
 
-ALTER TABLE ${T} MODIFY val MEDIUMTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL;
+${MERGE_STATEMENTS.map(prepared).join('\n\n')}
 
-UPDATE ${T} a
-JOIN (
-    SELECT v.id,
-           CONCAT(${pad('v.val')},
-                  GROUP_CONCAT(IF(t.ord = m.last_ord, t.val, ${pad('t.val')}) ORDER BY t.ord SEPARATOR '')) AS new_val
-    FROM ${T} v
-    JOIN ${T} t ON t.up = v.id AND t.t = 0
-    JOIN (SELECT up, MAX(ord) AS last_ord FROM ${T} WHERE t = 0 GROUP BY up) m ON m.up = v.id
-    WHERE v.t <> 0
-    GROUP BY v.id, v.val
-) calculated ON a.id = calculated.id
-SET a.val = calculated.new_val;
-
-DELETE FROM ${T} WHERE t = 0 AND up <> 0;
+-- (необязательно) переименовать таблицу, как в новой схеме:
+-- RENAME TABLE \`${db}\` TO \`r1\`;
 `;
 }
 
@@ -160,7 +198,7 @@ function repoTemplates() {
 
 async function copyFiles({ src, dst, commonTemplates, keepOverrides = false, apply = true, log = console.log }) {
     const common = new Set(commonTemplates || repoTemplates());
-    const report = { copied: [], skipped: [], warnings: [] };
+    const report = { copied: [], skipped: [], patched: [], warnings: [] };
     for (const root of ['templates', 'download']) {
         const walk = async (dir, dstDir) => {
             const qp = dir ? '/' + dir : '';
@@ -173,10 +211,15 @@ async function copyFiles({ src, dst, commonTemplates, keepOverrides = false, app
                     log(`пропущен ${where}: перекрыл бы общий шаблон нового ядра`);
                     continue;
                 }
-                if (apply) {
-                    const data = await src.getBuffer(`dir_admin/?${root}=1&add_path=${encodeURIComponent(qp)}&gf=${encodeURIComponent(name)}`);
-                    await dst.dirForm(root, dstDir ? '/' + dstDir : '', { upload: 'Загрузить', rewrite: '1' }, { name, data });
+                // Содержимое читается и при пробном прогоне: нужно знать, какие шаблоны получат jQuery.
+                let data = await src.getBuffer(`dir_admin/?${root}=1&add_path=${encodeURIComponent(qp)}&gf=${encodeURIComponent(name)}`);
+                const patched = root === 'templates' ? withJquery(name, data) : null;
+                if (patched) {
+                    data = patched;
+                    report.patched.push({ root, dir: dstDir, name });
+                    log(`${where}: шаблон на jQuery — дописано подключение jQuery`);
                 }
+                if (apply) await dst.dirForm(root, dstDir ? '/' + dstDir : '', { upload: 'Загрузить', rewrite: '1' }, { name, data });
                 report.copied.push({ root, dir: dstDir, name });
                 log(`${apply ? 'скопирован' : 'будет скопирован'} ${where}`);
             }
@@ -200,20 +243,45 @@ async function copyFiles({ src, dst, commonTemplates, keepOverrides = false, app
 
 // ---------------------------------------------------------------- меню
 
-// Колонки запроса MyRoleMenu, которые читает новый templates/main.html (блок MyRoleMenu:
-// menu_id, menu_up, name, href, icon). Значения — позиции записи «Колонки» (type 28) в
-// порядке реквизитов, как в эталоне docs/integram-app-workflow.md §5.9.3.
-const MENU_COLUMNS = [
-    { name: 'name', r: { 0: '151' } },
-    { name: 'href', r: { 0: '153' } },
-    { name: 'menu_id', r: { 0: '151', 5: '85' } },     // функция abn_ID
-    { name: 'menu_up', r: { 0: '151', 5: '86' } },     // функция abn_UP
-    { name: 'icon', r: { 0: '391', 9: '34' }, needsReq: '391' }, // формат HTML
+// Эталонные запросы меню нового ядра (docs/integram-app-workflow.md §5.9.3; так же устроены в
+// базах, созданных новым ядром). Блок MyRoleMenu в templates/main.html читает одноимённый запрос:
+// menu_id, menu_up, name, href, icon. Его вычисляемая колонка зовёт [rec] — рекурсивный обход
+// меню (функция RECURSIVE) от пунктов запроса [myMenus]; без этих двух запросов SQL меню падает.
+// Каждая колонка — значения записи «Колонки запроса» (type 28) по позициям реквизитов:
+// 0 — источник, 1 — имя, 2 — формула/псевдоним, 3 — значение (от), 5 — функция, 8 — скрыть,
+// 9 — формат, 10 — сортировка. Функции — id (`85` = abn_ID), `@RECURSIVE` — по имени.
+const MENU_FORMULA = "IF(МенюID IN([rec]), ПользовательID IS NULL OR (ПользовательID=[USER_ID] AND LOCATE('_request','_request_.FR_RoleID')) OR '_request_.FR_RoleID'=РольID, (ПользовательID=[USER_ID] AND LOCATE('_request','_request_.FR_RoleID')) OR '_request_.FR_RoleID'=РольID)";
+const MENU_REFERENCE = [
+    { 0: '151', 1: 'name' },
+    { 0: '42', 1: 'РольID', 2: 'РольID', 5: '85', 8: 'X', 10: '-1' },
+    { 0: '18', 1: 'Пользователь', 2: 'ПользовательID', 5: '85', 8: 'X' },
+    { 0: '151', 1: 'menu_id', 2: 'МенюID', 5: '85' },
+    { 0: '0', 1: 'Вычисляемое', 2: MENU_FORMULA, 3: '1', 8: 'X' },
+    { 0: '151', 1: 'menu_up', 5: '86' },
+    { 0: '151', 1: 'МенюOrd', 5: '93', 8: 'X', 10: '2' },
+    { 0: '153', 1: 'href' },
+    { 0: '391', 1: 'icon', 9: '34', needsReq: '391' },
+    // Без реквизита 391 — пустая вычисляемая icon: блок MyRoleMenu выводит только строки, где
+    // заполнены все подстановки (index.php, Parse_block), без {icon} меню пустое.
+    { 0: '0', 1: 'icon', 2: "''", ifNoReq: '391' },
+    { 0: '151', 5: '74' }, // COUNT — группировка, без повторов пунктов
+];
+const MENU_REPORTS = [
+    { name: 'myMenus', cols: [
+        { 0: '18', 1: 'ПользовательID', 3: '[USER_ID]', 5: '85', 8: 'X' },
+        { 0: '42', 1: 'RoleID', 5: '85', 8: 'X' },
+        { 0: '151', 1: 'Меню', 5: '85' },
+    ] },
+    { name: 'rec', cols: [{ 0: '151', 1: 'Меню', 3: '[myMenus]', 5: '@RECURSIVE' }] },
+    { name: 'MyRoleMenu', cols: MENU_REFERENCE },
 ];
 
-function refId(v) { const m = /^(\d+):/.exec(String(v || '')); return m ? m[1] : String(v || ''); }
+function refId(v) { const m = /^(\d+):/.exec(String(v == null ? '' : v)); return m ? m[1] : String(v == null ? '' : v); }
 
-function planMenuReport({ meta, columns }) {
+// План приведения колонок запроса к эталону: если колонки уже эталонные — ничего; иначе создать
+// эталонные и удалить прежние (создание первым: сбой посередине не оставляет запрос пустым).
+// fn — id функций по имени для значений `@ИМЯ`.
+function planReportColumns({ meta, columns, reference, fn = {} }) {
     const byId = (id) => (Array.isArray(meta) ? meta : []).find((t) => String(t.id) === id);
     const t28 = byId('28');
     if (!t28 || !Array.isArray(t28.reqs)) throw new Error('В метаданных нет типа 28 «Колонки запроса»');
@@ -225,44 +293,83 @@ function planMenuReport({ meta, columns }) {
         }
     });
     const menuReqs = new Set(((byId('151') || {}).reqs || []).map((r) => String(r.id)));
-    const ops = [];
     const warnings = [];
-    for (const want of MENU_COLUMNS) {
-        if (columns.some((c) => c.r[1] === want.name)) continue;
-        const other = columns.find((c) => String(c.r[1]).toLowerCase() === want.name);
-        if (other) { ops.push({ kind: 'rename', id: String(other.i), params: { [key(1)]: want.name } }); continue; }
-        if (want.needsReq && !menuReqs.has(want.needsReq)) {
-            warnings.push(`У таблицы «Меню» нет реквизита ${want.needsReq} (иконка) — колонка ${want.name} не создана, меню будет без иконок`);
-            continue;
+    const resolve = (v) => (/^@/.test(v) ? String(fn[v.slice(1)] || v) : v);
+    const wanted = reference.filter((w) => {
+        if (w.ifNoReq) {
+            if (menuReqs.has(w.ifNoReq)) return false;
+            warnings.push(`У таблицы «Меню» нет реквизита ${w.ifNoReq} «Иконка»: колонка icon — пустая вычисляемая, редактор меню не сохранит иконки; реквизит создаёт SQL шага 1`);
+            return true;
         }
-        const params = { [key(1)]: want.name };
-        Object.keys(want.r).forEach((pos) => { params[key(Number(pos))] = refId(want.r[pos]); });
-        ops.push({ kind: 'create', params });
-    }
+        return !w.needsReq || menuReqs.has(w.needsReq);
+    }).map((w) => {
+        const out = {};
+        Object.keys(w).filter((k) => /^\d+$/.test(k)).forEach((k) => { out[k] = resolve(w[k]); });
+        return out;
+    });
+    const sig = (vals) => Array.from({ length: reqIds.length + 1 }, (_, k) => refId(vals[k])).join('\u0001');
+    const have = columns.map((c) => sig(c.r)).sort();
+    const want = wanted.map((w) => sig(w)).sort();
+    if (have.join('\n') === want.join('\n')) return { ops: [], warnings };
+    const ops = wanted.map((w) => {
+        const params = {};
+        Object.keys(w).forEach((pos) => { params[key(Number(pos))] = w[pos]; });
+        return { kind: 'create', params };
+    });
+    columns.forEach((c) => ops.push({ kind: 'delete', id: String(c.i), was: c.r }));
     return { ops, warnings };
+}
+
+function planMenuReport({ meta, columns }) {
+    return planReportColumns({ meta, columns, reference: MENU_REFERENCE });
 }
 
 async function fixMenu({ client, apply = false, log = console.log }) {
     const meta = await client.getJson('metadata');
-    const reports = await client.getJson('object/22?JSON_OBJ&LIMIT=0,100000');
-    const rep = (Array.isArray(reports) ? reports : []).find((q) => q.r && q.r[0] === 'MyRoleMenu');
-    if (!rep) throw new Error('В базе нет запроса MyRoleMenu');
-    const columns = await client.getJson(`object/28?JSON_OBJ&F_U=${rep.i}&LIMIT=0,100000`);
-    const plan = planMenuReport({ meta, columns: Array.isArray(columns) ? columns : [] });
-    plan.warnings.forEach((w) => log('ВНИМАНИЕ: ' + w));
-    for (const op of plan.ops) {
-        const what = op.kind === 'rename' ? `переименовать колонку ${op.id}: ${JSON.stringify(op.params)}` : `создать колонку ${JSON.stringify(op.params)}`;
-        if (!apply) { log('будет: ' + what); continue; }
-        if (op.kind === 'rename') await client.post(`_m_set/${op.id}`, op.params);
-        else await client.post('_m_new/28', Object.assign({ up: rep.i }, op.params));
+    const step = async (what, fnApply) => {
+        if (!apply) { log('будет: ' + what); return null; }
+        const res = await fnApply();
         log('сделано: ' + what);
+        return res;
+    };
+    const idOf = (res, fallback) => String((res && (res.id || res.obj)) || fallback);
+    // Функция RECURSIVE (таблица «Функция», 63) — ядро узнаёт её по имени (index.php, RECURSIVE).
+    const fns = await client.getJson('object/63?JSON_OBJ&LIMIT=0,100000');
+    const fn = {};
+    (Array.isArray(fns) ? fns : []).forEach((f) => { fn[String(f.r[0])] = String(f.i); });
+    if (!fn.RECURSIVE) {
+        fn.RECURSIVE = idOf(await step('создать функцию RECURSIVE', () => client.post('_m_new/63', { up: 1, t63: 'RECURSIVE' })), '<новая RECURSIVE>');
     }
-    if (!plan.ops.length) log('MyRoleMenu уже в формате нового ядра');
+    const reports = await client.getJson('object/22?JSON_OBJ&LIMIT=0,100000');
+    const plans = {};
+    let changed = 0;
+    for (const def of MENU_REPORTS) {
+        let rep = (Array.isArray(reports) ? reports : []).find((q) => q.r && q.r[0] === def.name);
+        let columns = [];
+        if (rep) columns = await client.getJson(`object/28?JSON_OBJ&F_U=${rep.i}&LIMIT=0,100000`);
+        else rep = { i: idOf(await step(`создать запрос ${def.name}`, () => client.post('_m_new/22', { up: 1, t22: def.name })), `<новый ${def.name}>`) };
+        const plan = planReportColumns({ meta, columns: Array.isArray(columns) ? columns : [], reference: def.cols, fn });
+        plans[def.name] = plan;
+        plan.warnings.forEach((w) => log('ВНИМАНИЕ: ' + w));
+        for (const op of plan.ops) {
+            changed++;
+            if (op.kind === 'delete') await step(`${def.name}: удалить прежнюю колонку ${op.id}: ${JSON.stringify(op.was)}`, () => client.post(`_m_del/${op.id}`, {}));
+            else await step(`${def.name}: создать колонку ${JSON.stringify(op.params)}`, () => client.post('_m_new/28', Object.assign({ up: rep.i }, op.params)));
+        }
+    }
+    if (!changed) log('Запросы меню (myMenus, rec, MyRoleMenu) уже в формате нового ядра');
+    const plan = plans.MyRoleMenu;
     // Пункты меню, которые новый main.html не покажет как есть.
     const t151 = (meta || []).find((t) => String(t.id) === '151') || { reqs: [] };
     const hrefPos = t151.reqs.findIndex((r) => String(r.id) === '153') + 1;
-    const items = hrefPos > 0 ? await client.getJson('object/151?JSON_OBJ&LIMIT=0,100000') : [];
-    (Array.isArray(items) ? items : []).forEach((m) => {
+    // Пункты меню — подчинённые записи ролей: читаются по каждой роли (F_U).
+    const roles = hrefPos > 0 ? await client.getJson('object/42?JSON_OBJ&LIMIT=0,100000') : [];
+    const items = [];
+    for (const role of Array.isArray(roles) ? roles : []) {
+        const part = await client.getJson(`object/151?JSON_OBJ&F_U=${role.i}&LIMIT=0,100000`);
+        if (Array.isArray(part)) items.push(...part);
+    }
+    items.forEach((m) => {
         const href = String(m.r[hrefPos] || '');
         if (href.includes('[USER_ID]')) log(`ВНИМАНИЕ: пункт меню ${m.i} «${m.r[0]}»: [USER_ID] в адресе новое меню не подставляет — ${href}`);
         if (href.includes("'")) log(`ВНИМАНИЕ: пункт меню ${m.i} «${m.r[0]}»: апостроф в адресе ломает меню — ${href}`);
@@ -311,7 +418,7 @@ async function main(argv) {
     }
 }
 
-module.exports = { VAL_LIM, joinTails, buildMergeSql, Client, parseDirListing, copyFiles, planMenuReport, fixMenu, MENU_COLUMNS };
+module.exports = { VAL_LIM, joinTails, buildMergeSql, Client, parseDirListing, copyFiles, planReportColumns, planMenuReport, fixMenu, MENU_REFERENCE, MENU_REPORTS };
 
 if (require.main === module) {
     main(process.argv.slice(2)).catch((e) => { console.error(e.message); process.exit(1); });
