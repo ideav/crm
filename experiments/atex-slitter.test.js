@@ -113,7 +113,7 @@ rem = core.restoreConsumption(rem, 50);          // отмена расхода
 assertEqual(rem, 100, 'cycle: cancel restores full 50 → 100');
 
 // ── formatDateTime: дата/время события смены (хронология) ──
-assertEqual(core.formatDateTime(new Date(2026, 4, 30, 9, 5, 7)), '2026-05-30 09:05:07',
+assertEqual(core.formatDateTime(new Date(Date.UTC(2026, 4, 30, 9, 5, 7) - core.MSK_OFFSET_MS)), '2026-05-30 09:05:07', // #5075: московские часы
     'formatDateTime pads month/day/time to YYYY-MM-DD HH:MM:SS');
 
 // ── остаток,м по дельте погонажа (используем applyConsumption/restoreConsumption) ──
@@ -284,7 +284,7 @@ assertEqual(core.STATUSES[2], 'Завершена', '#3459 STATUSES[2] = Зав�
 // ─────────────────────── #3460 ───────────────────────
 
 // ── isTimestampSeconds: распознаём unix-секунды (а не любые числа) ──
-var sampleTs = Math.floor(new Date(2026, 5, 18, 14, 30, 0).getTime() / 1000); // локальный TZ
+var sampleTs = Math.floor((Date.UTC(2026, 5, 18, 14, 30, 0) - core.MSK_OFFSET_MS) / 1000); // #5075: 14:30 по Москве (время пульта — серверное)
 assertEqual(core.isTimestampSeconds(sampleTs), true, 'isTimestampSeconds: валидный штамп 2026 → true');
 assertEqual(core.isTimestampSeconds('1781758800'), true, 'isTimestampSeconds: пример из issue → true');
 assertEqual(core.isTimestampSeconds('42'), false, 'isTimestampSeconds: маленькое число → false');
@@ -292,7 +292,7 @@ assertEqual(core.isTimestampSeconds('12,5'), false, 'isTimestampSeconds: не ц
 assertEqual(core.isTimestampSeconds(''), false, 'isTimestampSeconds: пусто → false');
 assertEqual(core.isTimestampSeconds('Резка'), false, 'isTimestampSeconds: текст → false');
 
-// ── formatClock: штамп → ЧЧ:ММ (локальное время, как и конструкция) ──
+// ── formatClock: штамп → ЧЧ:ММ (московское время сервера, #5075) ──
 assertEqual(core.formatClock(sampleTs), '14:30', 'formatClock: штамп → 14:30');
 assertEqual(core.formatClock('Резка'), 'Резка', 'formatClock: не штамп → как есть');
 assertEqual(core.formatClock(''), '', 'formatClock: пусто → пусто');

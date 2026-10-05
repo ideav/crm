@@ -581,9 +581,38 @@
         return (n < 10 ? '0' : '') + n;
     }
 
+    // #5075: время пульта — СЕРВЕРНОЕ, московское (решение владельца: «пофиг на часы планшета,
+    // пиши серверное время»). Пояс сервера — Москва, UTC+3 круглый год, поэтому дата/время
+    // считаются фиксированным сдвигом от UTC, а не по поясу устройства. «Сейчас» — часы
+    // устройства плюс сдвиг, измеренный по заголовку `Date` ответов сервера (getJson/post):
+    // планшетов десятки, их часы врут на часы.
+    var MSK_OFFSET_MS = 3 * 3600 * 1000;
+    var serverClockOffsetMs = 0;
+    function serverNowMs() {
+        return Date.now() + serverClockOffsetMs;
+    }
+    // Заголовок Date ответа → сдвиг часов устройства. Нет/негодный — сдвиг прежний.
+    function noteServerDate(headerValue, deviceMs) {
+        var server = Date.parse(String(headerValue == null ? '' : headerValue));
+        if (!isFinite(server)) return false;
+        serverClockOffsetMs = server - (deviceMs != null ? deviceMs : Date.now());
+        return true;
+    }
+    // Московские «стеночные» части момента ms (через UTC-геттеры сдвинутой даты).
+    function mskParts(ms) {
+        var d = new Date(Number(ms) + MSK_OFFSET_MS);
+        return { y: d.getUTCFullYear(), mo: d.getUTCMonth() + 1, d: d.getUTCDate(),
+            h: d.getUTCHours(), mi: d.getUTCMinutes(), s: d.getUTCSeconds() };
+    }
+    // Московское «стеночное» время → момент (мс).
+    function mskWallToMs(y, mo, d, h, mi, sec) {
+        return Date.UTC(y, mo - 1, d, h || 0, mi || 0, sec || 0) - MSK_OFFSET_MS;
+    }
+
+    // «ГГГГ-ММ-ДД» московской даты: момента date (Date) или серверного «сейчас».
     function todayISO(date) {
-        var d = date instanceof Date ? date : new Date();
-        return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+        var p = mskParts(date instanceof Date ? date.getTime() : serverNowMs());
+        return p.y + '-' + pad2(p.mo) + '-' + pad2(p.d);
     }
 
     // #4808: ВРЕМЕННЫЙ тестовый вход — день пульта из строки запроса, `slitter?date=20260823`.
@@ -634,15 +663,15 @@
         if (/^\d{9,13}$/.test(s)) {
             var num = Number(s);
             var ms = num >= 1e12 ? num : num * 1000;
-            var d = new Date(ms);
-            if (!isNaN(d.getTime()) && d.getFullYear() >= 2001 && d.getFullYear() <= 2100) {
-                return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+            if (isFinite(ms)) {
+                var kp = mskParts(ms);   // #5075: день — московский
+                if (kp.y >= 2001 && kp.y <= 2100) return kp.y * 10000 + kp.mo * 100 + kp.d;
             }
         }
         var parsed = Date.parse(s);
         if (!isNaN(parsed)) {
-            var dt = new Date(parsed);
-            return dt.getFullYear() * 10000 + (dt.getMonth() + 1) * 100 + dt.getDate();
+            var dp = mskParts(parsed);
+            return dp.y * 10000 + dp.mo * 100 + dp.d;
         }
         return Infinity;
     }
@@ -773,9 +802,9 @@
         if (!/^\d{9,13}$/.test(s)) return null;
         var num = Number(s);
         var ms = num >= 1e12 ? num : num * 1000;
-        var d = new Date(ms);
-        if (isNaN(d.getTime())) return null;
-        return Math.floor(new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0).getTime() / 1000);
+        if (!isFinite(ms)) return null;
+        var dp = mskParts(ms);   // #5075: полночь московского дня
+        return Math.floor(mskWallToMs(dp.y, dp.mo, dp.d) / 1000);
     }
 
     // #3737: конфигурация первой резки СЛЕДУЮЩЕГО календарного дня (после curDayKey) для
@@ -1052,10 +1081,9 @@
     // Дата-время события смены в формате «YYYY-MM-DD HH:MM:SS» (хронология,
     // первая колонка «Событие смены»). Принимает Date — детерминируется в тестах.
     function formatDateTime(date) {
-        var d = (date instanceof Date) ? date : new Date(date);
-        function p(n) { return (n < 10 ? '0' : '') + n; }
-        return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) +
-            ' ' + p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+        var ms = (date instanceof Date) ? date.getTime() : new Date(date).getTime();
+        var d = mskParts(ms);   // #5075: московские часы сервера
+        return d.y + '-' + pad2(d.mo) + '-' + pad2(d.d) + ' ' + pad2(d.h) + ':' + pad2(d.mi) + ':' + pad2(d.s);
     }
 
     // #3460: «номер» резки на самом деле — плановое время старта в unix-секундах
@@ -1077,16 +1105,16 @@
     function formatClock(value) {
         var s = String(value == null ? '' : value).trim();
         if (!isTimestampSeconds(s)) return s;
-        var d = new Date(Number(s) * 1000);
-        return pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+        var d = mskParts(Number(s) * 1000);   // #5075: по Москве
+        return pad2(d.h) + ':' + pad2(d.mi);
     }
 
     // Штамп → «ДД.ММ.ГГГГ». Не-штамп возвращается как есть.
     function formatDate(value) {
         var s = String(value == null ? '' : value).trim();
         if (!isTimestampSeconds(s)) return s;
-        var d = new Date(Number(s) * 1000);
-        return pad2(d.getDate()) + '.' + pad2(d.getMonth() + 1) + '.' + d.getFullYear();
+        var d = mskParts(Number(s) * 1000);   // #5075: по Москве
+        return pad2(d.d) + '.' + pad2(d.mo) + '.' + d.y;
     }
 
     // #4783 п.3/п.4: «ГГГГ-ММ-ДД» (день пульта) → «ДД.ММ.ГГГГ». Не дата — как есть.
@@ -1507,6 +1535,12 @@
     function eventWhenSeconds(value) {
         var s = String(value == null ? '' : value).trim();
         if (isTimestampSeconds(s)) return Number(s);
+        // #5075: «ГГГГ-ММ-ДД ЧЧ:ММ[:СС]» — московское время сервера, не пояс устройства.
+        var m = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+        if (m) {
+            return Math.round(mskWallToMs(Number(m[1]), Number(m[2]), Number(m[3]),
+                Number(m[4] || 0), Number(m[5] || 0), Number(m[6] || 0)) / 1000);
+        }
         var p = Date.parse(s.replace(' ', 'T'));
         return isNaN(p) ? NaN : Math.round(p / 1000);
     }
@@ -1520,28 +1554,12 @@
         return s;
     }
 
-    // #5075: главное значение партии сырья — unix-штамп даты загрузки (1781038800). Выводим его
-    // в поясе склада (Москва), а не в поясе планшета: дата партии — свойство записи, а не смены.
-    // Время событий смены (formatEventWhen) по-прежнему идёт по часам планшета.
-    var BATCH_TIME_ZONE = 'Europe/Moscow';
-    var MOSCOW_OFFSET_MIN = 180; // фолбэк без Intl: в Москве UTC+3 круглый год
+    // #5075: главное значение партии сырья — unix-штамп даты загрузки (1781038800); как и прочие
+    // времена пульта выводится по Москве (пояс сервера), а не по поясу планшета.
     function formatBatchLabel(value) {
         var s = String(value == null ? '' : value).trim();
         if (!isTimestampSeconds(s)) return s;
-        var ms = Number(s) * 1000;
-        try {
-            var parts = {};
-            new Intl.DateTimeFormat('ru-RU', {
-                timeZone: BATCH_TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit',
-                hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
-            }).formatToParts(new Date(ms)).forEach(function(p) { parts[p.type] = p.value; });
-            if (parts.year && parts.month && parts.day && parts.hour && parts.minute) {
-                return parts.day + '.' + parts.month + '.' + parts.year + ' ' + parts.hour + ':' + parts.minute;
-            }
-        } catch (e) { /* Intl без поясов — ниже фиксированный сдвиг */ }
-        var d = new Date(ms + MOSCOW_OFFSET_MIN * 60000);
-        return pad2(d.getUTCDate()) + '.' + pad2(d.getUTCMonth() + 1) + '.' + d.getUTCFullYear() +
-            ' ' + pad2(d.getUTCHours()) + ':' + pad2(d.getUTCMinutes());
+        return formatDate(s) + ' ' + formatClock(s);
     }
 
     // #3557: длительность (секунды) → «Ч ч М мин» / «М мин». Пусто/отрицательно → ''.
@@ -1563,6 +1581,9 @@
         eventWhenSeconds: eventWhenSeconds,
         formatEventWhen: formatEventWhen,
         formatBatchLabel: formatBatchLabel,         // #5075: дата партии — по Москве
+        serverNowMs: serverNowMs,                   // #5075: серверное «сейчас» (часы устройства + сдвиг)
+        noteServerDate: noteServerDate,             // #5075: сдвиг по заголовку Date ответа
+        MSK_OFFSET_MS: MSK_OFFSET_MS,
         isBlankValue: isBlankValue,                 // #5075: «Остаток, м» не заполнен
         formatDuration: formatDuration,
         toNumber: toNumber,
@@ -1803,8 +1824,15 @@
     };
 
     // GET → JSON. Бросает Error при сетевой/JSON-ошибке.
+    // #5075: каждый ответ сервера уточняет сдвиг часов устройства (заголовок Date).
+    function noteResponseDate(resp) {
+        var h = resp && resp.headers && typeof resp.headers.get === 'function' ? resp.headers.get('Date') : null;
+        if (h) core.noteServerDate(h, Date.now());
+    }
+
     AtexSlitter.prototype.getJson = function(path) {
         return fetch(this.url(path), { credentials: 'same-origin' }).then(function(resp) {
+            noteResponseDate(resp);   // #5075: серверное время
             return resp.text().then(function(text) {
                 var data;
                 try { data = JSON.parse(text); }
@@ -1874,6 +1902,7 @@
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
             body: body.toString()
         }).then(function(resp) {
+            noteResponseDate(resp);   // #5075: серверное время
             return resp.text().then(function(text) {
                 // #5075: 5xx — сбой сервера, его можно повторить (postRetry); помечаем статусом.
                 if (resp.status >= 500) {
@@ -2537,11 +2566,18 @@
     // (#4332) оператор выполняет задания будущих дней; «Закончено» должно нести фактическую
     // дату завершения, а не плановую дату задания (иначе завершение уезжает в будущее и ломает
     // хронологию событий смены).
+    // #5075: «сейчас» — серверное московское время (часы планшета + сдвиг по заголовку Date),
+    // а не часы устройства: они на планшетах врут на часы.
     AtexSlitter.prototype.eventDateTime = function() {
-        var now = new Date();
-        function p(n) { return (n < 10 ? '0' : '') + n; }
-        var day = core.todayISO(now);
-        return day + ' ' + p(now.getHours()) + ':' + p(now.getMinutes()) + ':' + p(now.getSeconds());
+        return core.formatDateTime(new Date(core.serverNowMs()));
+    };
+
+    // #5075: день пульта при создании считается до первого ответа сервера (сдвиг ещё не
+    // известен) — после первого ответа берём московскую дату сервера. День из адреса
+    // (?date=, #4808) не трогаем.
+    AtexSlitter.prototype.syncSelectedDateWithServer = function() {
+        if (this.dateFromQuery) return;
+        this.selectedDate = core.todayISO();
     };
 
     // ── Рендеринг ──
@@ -4683,6 +4719,7 @@
         this.mainEl.appendChild(el('div', { class: 'atex-sl-placeholder', text: 'Загрузка данных…' }));
 
         return this.loadMetadata()
+            .then(function() { self.syncSelectedDateWithServer(); })   // #5075: день — серверный
             .then(function() { return Promise.all([self.loadSlitters(), self.loadBatches(), self.loadCuts(), self.loadMaterialWidths()]); })
             // #4317: loadBatches досчитывает остаток сам, но здесь он идёт ПАРАЛЛЕЛЬНО с
             // loadMaterialWidths — партиям без `width_mm` в отчёте ширины тогда ещё нет. Повторяем
