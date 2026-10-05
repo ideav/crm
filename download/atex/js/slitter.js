@@ -143,6 +143,9 @@
     };
     // Типы событий смены (справочник «Тип события» базы ateh, 1193).
     var EVENT_TYPES = [EV.shiftStart, EV.startCut, EV.setup, EV.brk, EV.resume, EV.pass, EV.skip, EV.finish, EV.abort, EV.cleanup, EV.shiftEnd];
+    // #5075: допуск расхождения «Остатка, м» с метрами, пересчитанными из «Остатка, м²» (доля).
+    // Больше — метры устарели (загрузка остатков пишет только м²) и берутся из м².
+    var BATCH_REMAINDER_TOLERANCE = 0.02;
 
     // ───────────────────────── Чистое ядро ─────────────────────────
 
@@ -1507,6 +1510,30 @@
         return s;
     }
 
+    // #5075: главное значение партии сырья — unix-штамп даты загрузки (1781038800). Выводим его
+    // в поясе склада (Москва), а не в поясе планшета: дата партии — свойство записи, а не смены.
+    // Время событий смены (formatEventWhen) по-прежнему идёт по часам планшета.
+    var BATCH_TIME_ZONE = 'Europe/Moscow';
+    var MOSCOW_OFFSET_MIN = 180; // фолбэк без Intl: в Москве UTC+3 круглый год
+    function formatBatchLabel(value) {
+        var s = String(value == null ? '' : value).trim();
+        if (!isTimestampSeconds(s)) return s;
+        var ms = Number(s) * 1000;
+        try {
+            var parts = {};
+            new Intl.DateTimeFormat('ru-RU', {
+                timeZone: BATCH_TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit',
+                hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
+            }).formatToParts(new Date(ms)).forEach(function(p) { parts[p.type] = p.value; });
+            if (parts.year && parts.month && parts.day && parts.hour && parts.minute) {
+                return parts.day + '.' + parts.month + '.' + parts.year + ' ' + parts.hour + ':' + parts.minute;
+            }
+        } catch (e) { /* Intl без поясов — ниже фиксированный сдвиг */ }
+        var d = new Date(ms + MOSCOW_OFFSET_MIN * 60000);
+        return pad2(d.getUTCDate()) + '.' + pad2(d.getUTCMonth() + 1) + '.' + d.getUTCFullYear() +
+            ' ' + pad2(d.getUTCHours()) + ':' + pad2(d.getUTCMinutes());
+    }
+
     // #3557: длительность (секунды) → «Ч ч М мин» / «М мин». Пусто/отрицательно → ''.
     function formatDuration(seconds) {
         var s = Number(seconds);
@@ -1525,6 +1552,8 @@
         deriveCutStatus: deriveCutStatus,
         eventWhenSeconds: eventWhenSeconds,
         formatEventWhen: formatEventWhen,
+        formatBatchLabel: formatBatchLabel,         // #5075: дата партии — по Москве
+        BATCH_REMAINDER_TOLERANCE: BATCH_REMAINDER_TOLERANCE, // #5075: допуск м ↔ м²
         formatDuration: formatDuration,
         toNumber: toNumber,
         round3: round3,
@@ -1967,19 +1996,26 @@
         });
     };
 
-    // #3566 #5 / #3861: остаток в метрах — основная мера; площадь (м²) с ним
-    // взаимовычисляема по номинальной ширине. Если отчёт отдал только одно из
-    // значений — досчитываем второе. Ширина: сперва из отчёта (width_mm),
-    // иначе из справочника «Вид сырья». Вызывается после загрузки партий и ширин.
+    // #3566 #5 / #3861 / #5075: остаток партии в м и м² взаимовычисляем по номинальной ширине.
+    // Источник правды — «Остаток, м²» (его пишет загрузка остатков, issue #5075). Если м² задан
+    // (≠ 0, в том числе отрицательный), метры берутся из м², когда они пусты, ≤ 0 или расходятся
+    // с м² больше чем на BATCH_REMAINDER_TOLERANCE; в пределах допуска остаются метры счётчика.
+    // Если м² пуст — метры как есть (отрицательные тоже: перерасход), а м² досчитывается из
+    // положительных метров. Ширина: сперва из отчёта (width_mm), иначе из справочника «Вид сырья».
+    // Вызывается после загрузки партий и ширин; идемпотентна.
     AtexSlitter.prototype.fillBatchRemainderM = function() {
         var widths = this.materialWidths || {};
         (this.batches || []).forEach(function(b) {
             var width = core.toNumber(b.widthMm) || core.toNumber(widths[String(b.materialId)]);
-            var hasM = core.toNumber(b.remainderM) > 0;
-            var hasArea = core.toNumber(b.remainder) > 0;
             if (width <= 0) return;
-            if (!hasM && hasArea) b.remainderM = core.metersFromArea(b.remainder, width);
-            else if (hasM && !hasArea) b.remainder = core.areaFromMeters(b.remainderM, width);
+            var m = core.toNumber(b.remainderM);
+            var area = core.toNumber(b.remainder);
+            if (area !== 0) {
+                var derived = core.metersFromArea(area, width);
+                if (m <= 0 || Math.abs(m - derived) > Math.abs(derived) * BATCH_REMAINDER_TOLERANCE) b.remainderM = derived;
+            } else if (m > 0) {
+                b.remainder = core.areaFromMeters(m, width);
+            }
         });
     };
 
@@ -3130,17 +3166,21 @@
         list.forEach(function(batch) {
             var passes = core.batchPasses(batch, cut);
             var cells = [
-                'Партия: ' + core.formatEventWhen(batch.label),
+                'Партия: ' + core.formatBatchLabel(batch.label), // #5075: по Москве
                 'Приход: ' + (batch.date || '—'),
                 'Остаток, м: ' + core.round3(batch.remainderM || 0),
                 'Штрих-код: ' + (batch.barcode || '—'),
                 'Проходов: ' + passes
             ];
             if (batch.foreign) cells.push('Склад «' + (batch.warehouse || 'Атех') + '» — другой склад');
+            // #5075: отрицательный остаток — списано больше, чем было в партии. Говорим прямо.
+            var overrun = core.toNumber(batch.remainderM) < 0;
+            if (overrun) cells.push('⚠ перерасход партии');
             var row = el('div', { class: 'atex-sl-batch-row' });
             cells.forEach(function(text, idx) {
                 if (idx) row.appendChild(el('span', { class: 'atex-sl-batch-sep', text: '·' }));
-                row.appendChild(el('span', { class: 'atex-sl-batch-cell', text: text }));
+                var warn = overrun && idx === cells.length - 1;
+                row.appendChild(el('span', { class: 'atex-sl-batch-cell' + (warn ? ' atex-sl-batch-overrun' : ''), text: text }));
             });
             wrap.appendChild(row);
         });

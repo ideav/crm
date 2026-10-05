@@ -468,6 +468,7 @@
 .atex-sl-batch-row { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
 .atex-sl-batch-cell { white-space: nowrap; }
 .atex-sl-batch-sep { color: var(--sl-muted); }
+.atex-sl-batch-overrun { color: var(--sl-warn); font-weight: 600; } /* #5075: перерасход партии */
 
 /* Кнопки */
 .atex-sl-btn {
