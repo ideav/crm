@@ -106,6 +106,8 @@
    Станок — кнопка: единственное, что оператор здесь меняет. */
 .navbar-workspace.atex-sl-nav { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .atex-sl-nav-sep { opacity: .5; }
+/* #5078: часы сервера в шапке — цифры одной ширины, шапка не дёргается на каждом тике */
+.atex-sl-nav-clock { font-variant-numeric: tabular-nums; }
 .atex-sl-nav-slitter {
     border: 1px solid var(--input-border, #d9dee5);
     border-radius: 6px;

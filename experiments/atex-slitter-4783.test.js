@@ -184,8 +184,10 @@ function makeInst(opts) {
     navbarSlot.childNodes = [];
     inst.renderWorkspaceTitle();
     var texts = navbarSlot.childNodes.map(function(n) { return n.textContent; });
-    assertEqual(texts, ['Планшет №3', '·', '18.08.2026', '·', 'Станок 1'],
-        '#4783 п.3: в .navbar-workspace — «планшет · дата · станок»');
+    // #5078: перед станком идут часы сервера — их значение проверяет atex-slitter-5078-nav-clock.
+    texts[texts.length - 3] = 'ЧЧ:ММ:СС';
+    assertEqual(texts, ['Планшет №3', '·', '18.08.2026', '·', 'ЧЧ:ММ:СС', '·', 'Станок 1'],
+        '#4783 п.3: в .navbar-workspace — «планшет · дата · часы (#5078) · станок»');
     var btn = navbarSlot.querySelector('.atex-sl-nav-slitter');
     assert(!!btn, '#4783 п.3: станок в шапке — кнопка (выбор станка ушёл из формы туда)');
     var opened = 0;
