@@ -143,9 +143,6 @@
     };
     // Типы событий смены (справочник «Тип события» базы ateh, 1193).
     var EVENT_TYPES = [EV.shiftStart, EV.startCut, EV.setup, EV.brk, EV.resume, EV.pass, EV.skip, EV.finish, EV.abort, EV.cleanup, EV.shiftEnd];
-    // #5075: допуск расхождения «Остатка, м» с метрами, пересчитанными из «Остатка, м²» (доля).
-    // Больше — метры устарели (загрузка остатков пишет только м²) и берутся из м².
-    var BATCH_REMAINDER_TOLERANCE = 0.02;
 
     // ───────────────────────── Чистое ядро ─────────────────────────
 
@@ -156,6 +153,11 @@
         var text = String(value == null ? '' : value).replace(/\s+/g, '').replace(',', '.');
         var n = parseFloat(text);
         return isFinite(n) ? n : 0;
+    }
+
+    // #5075: значение реквизита не заполнено (пусто/пробелы/null). «0» — заполнено.
+    function isBlankValue(value) {
+        return String(value == null ? '' : value).trim() === '';
     }
 
     function round3(n) {
@@ -1273,6 +1275,8 @@
                 date: firstField(row, ['batch_date', 'batch_arrival', 'batch_arrival_date', 'date']),
                 remainder: toNumber(firstField(row, ['batch_remainder_m2', 'remainder_m2', 'batch_remainder'])),
                 remainderM: toNumber(firstField(row, ['batch_remainder_m', 'remainder_m'])),
+                // #5075: «Остаток, м» не заполнен (а не «0») — только тогда метры выводятся из м².
+                remainderMEmpty: isBlankValue(firstField(row, ['batch_remainder_m', 'remainder_m'])),
                 // #3861: номинальная ширина рулона из отчёта — для взаимопересчёта остатка м↔м².
                 widthMm: toNumber(firstField(row, ['width_mm', 'batch_width_mm', 'material_width_mm'])),
                 materialId: matId || null,
@@ -1553,7 +1557,7 @@
         eventWhenSeconds: eventWhenSeconds,
         formatEventWhen: formatEventWhen,
         formatBatchLabel: formatBatchLabel,         // #5075: дата партии — по Москве
-        BATCH_REMAINDER_TOLERANCE: BATCH_REMAINDER_TOLERANCE, // #5075: допуск м ↔ м²
+        isBlankValue: isBlankValue,                 // #5075: «Остаток, м» не заполнен
         formatDuration: formatDuration,
         toNumber: toNumber,
         round3: round3,
@@ -1985,6 +1989,7 @@
                     date: dateIdx >= 0 ? (row[dateIdx] || '') : '',
                     remainder: remIdx >= 0 ? core.toNumber(row[remIdx]) : 0,
                     remainderM: remMIdx >= 0 ? core.toNumber(row[remMIdx]) : 0,
+                    remainderMEmpty: remMIdx >= 0 ? core.isBlankValue(row[remMIdx]) : true, // #5075
                     materialId: matRef.id,
                     materialLabel: matRef.label,
                     warehouse: '',
@@ -1996,25 +2001,24 @@
         });
     };
 
-    // #3566 #5 / #3861 / #5075: остаток партии в м и м² взаимовычисляем по номинальной ширине.
-    // Источник правды — «Остаток, м²» (его пишет загрузка остатков, issue #5075). Если м² задан
-    // (≠ 0, в том числе отрицательный), метры берутся из м², когда они пусты, ≤ 0 или расходятся
-    // с м² больше чем на BATCH_REMAINDER_TOLERANCE; в пределах допуска остаются метры счётчика.
-    // Если м² пуст — метры как есть (отрицательные тоже: перерасход), а м² досчитывается из
-    // положительных метров. Ширина: сперва из отчёта (width_mm), иначе из справочника «Вид сырья».
-    // Вызывается после загрузки партий и ширин; идемпотентна.
+    // #3566 #5 / #3861 / #5075: остаток партии в м и м² — две НЕЗАВИСИМЫЕ меры (параллельный
+    // прогон): «Остаток, м²» приходит из 1С загрузкой, «Остаток, м» ведёт слиттер своим счётчиком.
+    // Расхождение между ними — данные, а не ошибка, поэтому заполненные метры (в том числе 0 и
+    // отрицательные) НЕ пересчитываются. Метры выводятся из м² по ширине только когда «Остаток, м»
+    // не заполнен (remainderMEmpty / null / ''). Площадь досчитывается из положительных метров,
+    // только если м² равен нулю (пуст). Ширина: сперва из отчёта (width_mm), иначе из справочника
+    // «Вид сырья». Вызывается после загрузки партий и ширин; идемпотентна.
     AtexSlitter.prototype.fillBatchRemainderM = function() {
         var widths = this.materialWidths || {};
         (this.batches || []).forEach(function(b) {
             var width = core.toNumber(b.widthMm) || core.toNumber(widths[String(b.materialId)]);
             if (width <= 0) return;
-            var m = core.toNumber(b.remainderM);
+            var mEmpty = b.remainderMEmpty === true || b.remainderM == null || core.isBlankValue(b.remainderM);
             var area = core.toNumber(b.remainder);
-            if (area !== 0) {
-                var derived = core.metersFromArea(area, width);
-                if (m <= 0 || Math.abs(m - derived) > Math.abs(derived) * BATCH_REMAINDER_TOLERANCE) b.remainderM = derived;
-            } else if (m > 0) {
-                b.remainder = core.areaFromMeters(m, width);
+            if (mEmpty) {
+                if (area !== 0) { b.remainderM = core.metersFromArea(area, width); b.remainderMEmpty = false; }
+            } else if (area === 0 && core.toNumber(b.remainderM) > 0) {
+                b.remainder = core.areaFromMeters(b.remainderM, width);
             }
         });
     };
@@ -3621,6 +3625,7 @@
         if (!Object.keys(bf).length) return Promise.resolve(null);
         return this.post('_m_set/' + batch.id + '?JSON', bf).then(function() {
             batch.remainderM = newRemM;
+            batch.remainderMEmpty = false; // #5075: метры записаны — больше не выводятся из м²
             batch.remainder = newRemArea;
             if (retire && typeof batch.active !== 'undefined') batch.active = '';
         });

@@ -559,7 +559,7 @@ assertEqual(core.metersFromArea(350, 0), 0, '#3861 metersFromArea: ширина 
     var inst = Object.create(Controller.prototype);
     inst.materialWidths = {};
     inst.batches = [
-        { id: 'a', materialId: 'm', remainder: 350, remainderM: 0, widthMm: 500 }, // есть м², нет м
+        { id: 'a', materialId: 'm', remainder: 350, remainderM: 0, remainderMEmpty: true, widthMm: 500 }, // есть м², нет м (#5075: «не заполнен» — флаг, а не 0)
         { id: 'b', materialId: 'm', remainder: 0, remainderM: 700, widthMm: 500 }  // есть м, нет м²
     ];
     inst.fillBatchRemainderM();
