@@ -469,6 +469,12 @@
 .atex-sl-batch-cell { white-space: nowrap; }
 .atex-sl-batch-sep { color: var(--sl-muted); }
 .atex-sl-batch-overrun { color: var(--sl-warn); font-weight: 600; } /* #5075: перерасход партии */
+/* #5075: запись джамбо не сохранилась и после повторов — баннер не скрывается сам */
+.atex-sl-jumbo-fail {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+    padding: 12px 16px; text-align: center; font-size: 18px; font-weight: 700;
+    background: var(--sl-danger-bg, #fee2e2); color: var(--sl-warn); border-bottom: 2px solid var(--sl-danger-border);
+}
 
 /* Кнопки */
 .atex-sl-btn {

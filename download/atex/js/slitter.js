@@ -1760,6 +1760,9 @@
         // #4914: след автосохранения записи джамбо (та же схема, что savedReadings)
         this.savedJumbo = '';
         this.jumboRetry = false;
+        // #5075: запись джамбо не сохранилась и после повторов — отметки до перезагрузки РМ
+        // не пишутся (баннер .atex-sl-jumbo-fail).
+        this.jumboSaveFailed = false;
     }
 
     // #4370: сброс всего, что относится к ВЫБРАННОЙ резке. Вызывается при смене станка и даты:
@@ -1872,6 +1875,12 @@
             body: body.toString()
         }).then(function(resp) {
             return resp.text().then(function(text) {
+                // #5075: 5xx — сбой сервера, его можно повторить (postRetry); помечаем статусом.
+                if (resp.status >= 500) {
+                    var se = new Error('Сервер ответил ' + resp.status + ': ' + String(text || '').slice(0, 200));
+                    se.status = resp.status;
+                    throw se;
+                }
                 var result;
                 try { result = JSON.parse(text); } catch (e) { throw new Error('Сервер вернул не JSON: ' + text.slice(0, 200)); }
                 if (result && (result.error || result.err)) throw new Error(result.error || result.err);
@@ -1884,7 +1893,70 @@
                 }
                 return result;
             });
+        }, function(err) {
+            // #5075: запрос не дошёл (нет сети, обрыв) — повторяемая ошибка.
+            var ne = err instanceof Error ? err : new Error(String(err));
+            ne.network = true;
+            throw ne;
         });
+    };
+
+    // #5075: запись «Номера джамбо» с повторами. Повторяем ТОЛЬКО сбой сети и 5xx (ошибка
+    // приложения — «нет прав», «нет реквизита» — повтором не лечится). Паузы перед повторами —
+    // JUMBO_RETRY_DELAYS (1 с / 2 с / 4 с: первая попытка и три повтора). opts.beforeRetry —
+    // проверка перед повтором (для _m_new: не создана ли запись первой попыткой, ответ на
+    // которую потерялся); вернула не null — это и есть результат, повтора нет. Повторы
+    // исчерпаны — markJumboSaveFailed (постоянный баннер, отметки до перезагрузки не пишутся).
+    var JUMBO_RETRY_DELAYS = [1000, 2000, 4000];
+    function isRetryableError(err) {
+        return !!(err && (err.network || Number(err.status) >= 500));
+    }
+    AtexSlitter.prototype.postRetry = function(path, params, opts) {
+        var self = this;
+        opts = opts || {};
+        var attempt = 0;
+        function wait(ms) { return new Promise(function(resolve) { setTimeout(resolve, ms); }); }
+        function run() {
+            return self.post(path, params).catch(function(err) {
+                if (!isRetryableError(err)) throw err;
+                if (attempt >= JUMBO_RETRY_DELAYS.length) {
+                    err.retriesExhausted = true;
+                    self.markJumboSaveFailed();
+                    throw err;
+                }
+                var ms = JUMBO_RETRY_DELAYS[attempt++];
+                return wait(ms).then(function() {
+                    if (typeof opts.beforeRetry !== 'function') return null;
+                    return Promise.resolve(opts.beforeRetry()).catch(function() { return null; });
+                }).then(function(found) { return found != null ? found : run(); });
+            });
+        }
+        return run();
+    };
+
+    // #5075: перед повтором _m_new — есть ли уже у задания запись с этим номером, которой нет
+    // среди известных (первая попытка дошла до базы, а ответ потерялся). Есть — { obj: id }.
+    AtexSlitter.prototype.findCreatedJumbo = function(cut, number) {
+        var known = {};
+        (cut.jumbos || []).forEach(function(r) { if (r && r.id) known[String(r.id)] = true; });
+        return this.getJson('report/task_jumbo?JSON_KV&FR_task_id=' + encodeURIComponent(cut.id) + '&LIMIT=0,100')
+            .then(function(rows) {
+                var list = core.rowsToJumbos(Array.isArray(rows) ? rows : ((rows && rows.rows) || []));
+                var hit = list.filter(function(r) {
+                    return r.id && !known[r.id] && String(r.jumboNo) === String(number);
+                })[0];
+                return hit ? { obj: hit.id } : null;
+            });
+    };
+
+    // #5075: запись джамбо не сохранилась после всех повторов. Баннер не скрывается сам:
+    // данные в РМ разошлись с базой, дальше работать можно только после перезагрузки.
+    AtexSlitter.prototype.markJumboSaveFailed = function() {
+        this.jumboSaveFailed = true;
+        if (this.jumboFailEl || !this.root) return;
+        this.jumboFailEl = el('div', { class: 'atex-sl-jumbo-fail', role: 'alert',
+            text: 'Не удалось сохранить джамбо — перезагрузите РМ' });
+        this.root.appendChild(this.jumboFailEl);
     };
 
     // Multipart-POST для файловых реквизитов (паттерн платформы, issue #1310):
@@ -3332,6 +3404,17 @@
             style: storedRec ? null : 'background:#f0f0f0;cursor:default'
         });
         runsInput.value = storedRec && storedRec.cutsCount != null ? String(storedRec.cutsCount) : '';
+        // #5075: у черновика с введённым номером фокус на «Проходов» сначала заводит запись
+        // (ensureJumboRecord) и перерисовывает панель — поле открывается для ввода.
+        if (!storedRec && active && String(active.jumboNo == null ? '' : active.jumboNo).trim() !== '') {
+            runsInput.addEventListener('focus', function() {
+                self.ensureJumboRecord(cut).then(function(stored) {
+                    if (stored) self.render();
+                }).catch(function(err) {
+                    self.notify('Запись «Номера джамбо» не сохранена: ' + (err && err.message ? err.message : err), 'error');
+                });
+            });
+        }
         if (storedRec) {
             runsInput.addEventListener('change', function() {
                 var runs = core.jumboRunsFromInput(runsInput.value);
@@ -3778,6 +3861,11 @@
         var self = this;
         var cut = this.currentCut;
         if (this.busy || !cut) return;
+        // #5075: запись джамбо не сохранилась и после повторов — РМ разошлось с базой.
+        if (this.jumboSaveFailed) {
+            this.notify('Не удалось сохранить джамбо — перезагрузите РМ. До перезагрузки отметки не пишутся', 'error');
+            return;
+        }
         if (this.isCutLocked(cut)) { this.notify('Резка заблокирована очередью', 'error'); return; }
         if (core.isDone(cut.status)) { this.notify('Задание уже завершено', 'info'); return; }
         var runLength = core.runLengthForCut(cut);
@@ -4160,7 +4248,13 @@
         fields['t' + table.id] = number;
         var csRid = reqIdByName(table, JUMBO_REQ.counterStart);
         if (csRid && counterStart !== '') fields['t' + csRid] = core.toNumber(counterStart);
-        return this.post('_m_new/' + table.id + '?JSON&up=' + encodeURIComponent(cut.id), fields)
+        // #5075: одна заводка на задание за раз — фокус на «Проходов» и автосохранение номера
+        // не должны завести две записи одному черновику.
+        if (cut.jumboEnsuring) return cut.jumboEnsuring;
+        var done = function(v) { cut.jumboEnsuring = null; return v; };
+        var fail = function(err) { cut.jumboEnsuring = null; throw err; };
+        cut.jumboEnsuring = this.postRetry('_m_new/' + table.id + '?JSON&up=' + encodeURIComponent(cut.id), fields,
+            { beforeRetry: function() { return self.findCreatedJumbo(cut, number); } })
             .then(function(res) {
                 // ID новой записи приходит в res.obj (см. orders.js), fallback — id/i.
                 var newId = res && ((res.obj != null && String(res.obj))
@@ -4181,7 +4275,8 @@
                 cut.jumboActive = cut.jumbos.length - 1;
                 cut.pendingJumbo = null;
                 return stored;
-            });
+            }).then(done, fail);
+        return cut.jumboEnsuring;
     };
 
     // Поля записи «Номера джамбо» — соответствие имён и арифметика в core
@@ -4218,7 +4313,7 @@
         // #5010: full — вся запись (счётчики, длины): отметка резки и правка
         // «Счётчика нач.» ведут числа цепочки; автосейв ячеек — без full, как был.
         var fields = opts.full ? this.jumboFields(rec) : this.jumboInputFieldsOf(rec);
-        return this.post('_m_set/' + rec.id + '?JSON', fields).then(function() {
+        return this.postRetry('_m_set/' + rec.id + '?JSON', fields).then(function() {
             if (!opts.quiet) self.notify('Расход джамбо сохранён', 'success');
             return rec.id;
         }).catch(function(err) {
@@ -4240,7 +4335,7 @@
         if (no === '' || no === String(rec.savedNo == null ? '' : rec.savedNo)) return Promise.resolve();
         var fields = {};
         fields['t' + table.id] = no;
-        return this.post('_m_save/' + rec.id + '?JSON', fields).then(function() {
+        return this.postRetry('_m_save/' + rec.id + '?JSON', fields).then(function() {
             rec.savedNo = no;
         });
     };
@@ -4266,27 +4361,33 @@
     AtexSlitter.prototype.saveJumboValues = function(quiet) {
         var self = this;
         var cut = this.currentCut;
-        if (this.busy || !cut) return;
+        if (!cut) return;
+        // #5075: занято (идёт отметка/другая запись) — не теряем сохранение молча:
+        // флаг jumboRetry, его исполняет setBusy(false).
+        if (this.busy) { this.jumboRetry = true; return; }
         var rec = this.activeJumbo();
         if (!rec || String(rec.jumboNo == null ? '' : rec.jumboNo).trim() === '') {
             this.markJumboSaved();
             return;
         }
+        var wasDraft = !(rec.id != null && String(rec.id) !== '');
         this.setBusy(true);
         var sent = this.jumboSignature();
-        this.ensureJumboRecord(cut).then(function(stored) {
+        return this.ensureJumboRecord(cut).then(function(stored) {
             if (!stored) { self.setBusy(false); return null; }
+            // #5075: черновик стал записью — перерисовать панель, иначе она остаётся в режиме
+            // черновика и «Проходов» только для чтения (как в addJumbo).
+            if (wasDraft) self.render();
             return self.saveJumboNumber(stored).then(function() {
                 return self.saveJumboRecord(stored, { quiet: true });
             }).then(function() {
-                self.setBusy(false);
                 self.savedJumbo = sent;
+                self.setBusy(false);
                 if (!quiet) self.notify('Расход джамбо сохранён', 'success');
-                if (self.jumboRetry) { self.jumboRetry = false; self.saveJumboIfChanged(); }
             });
         }).catch(function(err) {
-            self.setBusy(false);
             self.jumboRetry = false;
+            self.setBusy(false);
             self.notify('Запись «Номера джамбо» не сохранена: ' + (err && err.message ? err.message : err), 'error');
         });
     };
@@ -4341,7 +4442,8 @@
             fields['t' + table.id] = number;
             var csRid = reqIdByName(table, JUMBO_REQ.counterStart);
             if (csRid && counterStart !== '') fields['t' + csRid] = counterStart;
-            return self.post('_m_new/' + table.id + '?JSON&up=' + encodeURIComponent(cut.id), fields)
+            return self.postRetry('_m_new/' + table.id + '?JSON&up=' + encodeURIComponent(cut.id), fields,
+                { beforeRetry: function() { return self.findCreatedJumbo(cut, number); } })
                 .then(function(res) {
                     var newId = res && ((res.obj != null && String(res.obj))
                         || (res.id != null && String(res.id)) || (res.i != null && String(res.i))) || '';
@@ -4471,6 +4573,11 @@
     AtexSlitter.prototype.setBusy = function(on) {
         this.busy = on;
         if (this.root) this.root.classList.toggle('is-busy', !!on);
+        // #5075: сохранение джамбо, отложенное занятостью, выполняется при освобождении.
+        if (!on && this.jumboRetry) {
+            this.jumboRetry = false;
+            this.saveJumboIfChanged();
+        }
     };
 
     // Уведомления без alert/confirm/prompt (раздел 8 гайда): встроенный тост,
