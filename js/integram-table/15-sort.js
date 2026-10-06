@@ -27,6 +27,18 @@
         }
 
         /**
+         * ORDER parameter value for the current sort state, or null when not sorting.
+         * Tabular (subordinate-table) columns are sorted by the array type id (arr_id),
+         * not the column's own req id — backend joins values by t=<ORDER_VAL> (issue #5087).
+         */
+        getOrderParamValue() {
+            if (this.sortColumn === null || this.sortDirection === null) return null;
+            const column = (this.columns || []).find(c => c.id === this.sortColumn);
+            const sortId = (column && column.arr_id) ? column.arr_id : this.sortColumn;
+            return this.sortDirection === 'desc' ? `-${ sortId }` : String(sortId);
+        }
+
+        /**
          * Reload table data with current filter parameters
          * This method resets the table state and reloads from the beginning
          * while preserving current filters, column settings, and other state

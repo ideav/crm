@@ -951,8 +951,8 @@ class IntegramTable{
             });
 
             // Add ORDER parameter for sorting
-            if (this.sortColumn !== null && this.sortDirection !== null) {
-                const orderValue = this.sortDirection === 'desc' ? `-${this.sortColumn}` : this.sortColumn;
+            const orderValue = this.getOrderParamValue();
+            if (orderValue !== null) {
                 params.set('ORDER', orderValue);
             }
 
@@ -1252,8 +1252,8 @@ class IntegramTable{
             }
 
             // Add ORDER parameter for sorting
-            if (this.sortColumn !== null && this.sortDirection !== null) {
-                const orderValue = this.sortDirection === 'desc' ? `-${this.sortColumn}` : this.sortColumn;
+            const orderValue = this.getOrderParamValue();
+            if (orderValue !== null) {
                 dataUrl += `&ORDER=${ orderValue }`;
             }
 
@@ -1468,8 +1468,8 @@ class IntegramTable{
             }
 
             // Add ORDER parameter for sorting
-            if (this.sortColumn !== null && this.sortDirection !== null) {
-                const orderValue = this.sortDirection === 'desc' ? `-${this.sortColumn}` : this.sortColumn;
+            const orderValue = this.getOrderParamValue();
+            if (orderValue !== null) {
                 dataUrl += `&ORDER=${ orderValue }`;
             }
 
@@ -1799,7 +1799,10 @@ class IntegramTable{
         applyFilter(params, column, filter) {
             const type = filter.type || '^';
             const value = filter.value;
-            const colId = column.id;
+            // Табличный реквизит (подчинённая таблица) фильтруется по id массива:
+            // бекенд строит join a<key>.t=<key>, а строки подчинённой таблицы несут
+            // t=arr_id, а не id строки-реквизита (issue #5087).
+            const colId = column.arr_id || column.id;
 
             const format = column.format || 'SHORT';
             const filterGroup = this.getColumnFilterTypes(column);
@@ -10760,6 +10763,18 @@ class IntegramTable{
                 }
             }
 
+            // Старые ссылки адресуют табличный реквизит id'ом массива (FR_<arr_id>,
+            // например FR_1081 для «Партия ГП») — перепривязываем к самой колонке,
+            // чтобы фильтр показывался и редактировался в UI (issue #5087).
+            Object.keys(urlFilters).forEach(colId => {
+                if (this.columns.some(c => c.id === colId)) return;
+                const owner = this.columns.find(c => c.arr_id && String(c.arr_id) === colId);
+                if (owner) {
+                    urlFilters[owner.id] = urlFilters[colId];
+                    delete urlFilters[colId];
+                }
+            });
+
             this.urlFilters = urlFilters;
 
             // If we have URL filters, populate this.filters and enable filter row
@@ -11160,6 +11175,18 @@ class IntegramTable{
             this.hasMore = true;
             this.totalRows = null;
             this.loadData(false);
+        }
+
+        /**
+         * ORDER parameter value for the current sort state, or null when not sorting.
+         * Tabular (subordinate-table) columns are sorted by the array type id (arr_id),
+         * not the column's own req id — backend joins values by t=<ORDER_VAL> (issue #5087).
+         */
+        getOrderParamValue() {
+            if (this.sortColumn === null || this.sortDirection === null) return null;
+            const column = (this.columns || []).find(c => c.id === this.sortColumn);
+            const sortId = (column && column.arr_id) ? column.arr_id : this.sortColumn;
+            return this.sortDirection === 'desc' ? `-${ sortId }` : String(sortId);
         }
 
         /**
@@ -12250,9 +12277,14 @@ class IntegramTable{
             const urlParams = new URLSearchParams(window.location.search);
             const paramsToRemove = [];
 
+            // Табличный реквизит может приходить в URL под id массива — чистим и
+            // такие написания, чтобы старое значение не подмешивалось в запрос (issue #5087)
+            const column = (this.columns || []).find(c => c.id === colId);
+            const colIds = (column && column.arr_id) ? [String(colId), String(column.arr_id)] : [String(colId)];
+
             // Check for FR_, TO_, and F_ parameters for this column
             for (const [key, value] of urlParams.entries()) {
-                if (key === `FR_${colId}` || key === `TO_${colId}` || key === `F_${colId}`) {
+                if (colIds.some(id => key === `FR_${id}` || key === `TO_${id}` || key === `F_${id}`)) {
                     paramsToRemove.push(key);
                 }
             }
@@ -18654,8 +18686,8 @@ class IntegramTable{
             });
 
             // Add ORDER parameter for sorting
-            if (this.sortColumn !== null && this.sortDirection !== null) {
-                const orderValue = this.sortDirection === 'desc' ? `-${this.sortColumn}` : this.sortColumn;
+            const orderValue = this.getOrderParamValue();
+            if (orderValue !== null) {
                 params.set('ORDER', orderValue);
             }
 
@@ -18734,8 +18766,8 @@ class IntegramTable{
             });
 
             // Add ORDER parameter for sorting
-            if (this.sortColumn !== null && this.sortDirection !== null) {
-                const orderValue = this.sortDirection === 'desc' ? `-${this.sortColumn}` : this.sortColumn;
+            const orderValue = this.getOrderParamValue();
+            if (orderValue !== null) {
                 params.set('ORDER', orderValue);
             }
 

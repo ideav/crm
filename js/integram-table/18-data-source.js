@@ -95,9 +95,14 @@
             const urlParams = new URLSearchParams(window.location.search);
             const paramsToRemove = [];
 
+            // Табличный реквизит может приходить в URL под id массива — чистим и
+            // такие написания, чтобы старое значение не подмешивалось в запрос (issue #5087)
+            const column = (this.columns || []).find(c => c.id === colId);
+            const colIds = (column && column.arr_id) ? [String(colId), String(column.arr_id)] : [String(colId)];
+
             // Check for FR_, TO_, and F_ parameters for this column
             for (const [key, value] of urlParams.entries()) {
-                if (key === `FR_${colId}` || key === `TO_${colId}` || key === `F_${colId}`) {
+                if (colIds.some(id => key === `FR_${id}` || key === `TO_${id}` || key === `F_${id}`)) {
                     paramsToRemove.push(key);
                 }
             }

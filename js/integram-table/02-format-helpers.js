@@ -141,8 +141,8 @@
             }
 
             // Add ORDER parameter for sorting
-            if (this.sortColumn !== null && this.sortDirection !== null) {
-                const orderValue = this.sortDirection === 'desc' ? `-${this.sortColumn}` : this.sortColumn;
+            const orderValue = this.getOrderParamValue();
+            if (orderValue !== null) {
                 dataUrl += `&ORDER=${ orderValue }`;
             }
 
