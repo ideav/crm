@@ -50,7 +50,10 @@
         applyFilter(params, column, filter) {
             const type = filter.type || '^';
             const value = filter.value;
-            const colId = column.id;
+            // Табличный реквизит (подчинённая таблица) фильтруется по id массива:
+            // бекенд строит join a<key>.t=<key>, а строки подчинённой таблицы несут
+            // t=arr_id, а не id строки-реквизита (issue #5087).
+            const colId = column.arr_id || column.id;
 
             const format = column.format || 'SHORT';
             const filterGroup = this.getColumnFilterTypes(column);

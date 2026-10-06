@@ -299,6 +299,18 @@
                 }
             }
 
+            // Старые ссылки адресуют табличный реквизит id'ом массива (FR_<arr_id>,
+            // например FR_1081 для «Партия ГП») — перепривязываем к самой колонке,
+            // чтобы фильтр показывался и редактировался в UI (issue #5087).
+            Object.keys(urlFilters).forEach(colId => {
+                if (this.columns.some(c => c.id === colId)) return;
+                const owner = this.columns.find(c => c.arr_id && String(c.arr_id) === colId);
+                if (owner) {
+                    urlFilters[owner.id] = urlFilters[colId];
+                    delete urlFilters[colId];
+                }
+            });
+
             this.urlFilters = urlFilters;
 
             // If we have URL filters, populate this.filters and enable filter row
