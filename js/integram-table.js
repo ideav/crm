@@ -12248,8 +12248,10 @@ class IntegramTable{
             const forwardParams = new URLSearchParams();
 
             // Parameters to exclude (already handled internally or could conflict)
-            // F_I added for issue #563
-            const excludeParams = new Set(['parentId', 'F_U', 'F_I', 'up', 'LIMIT', 'ORDER', 'RECORD_COUNT', '_count', 'JSON_OBJ', 'JSON']);
+            // F_I added for issue #563; _itc is browser-only table config for the
+            // share-link feature (#510) — the core ignores it, don't send it with
+            // every request (issue #5089)
+            const excludeParams = new Set(['parentId', 'F_U', 'F_I', 'up', 'LIMIT', 'ORDER', 'RECORD_COUNT', '_count', 'JSON_OBJ', 'JSON', '_itc']);
 
             for (const [key, value] of pageParams.entries()) {
                 // Skip excluded params
