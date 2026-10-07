@@ -3509,6 +3509,47 @@
                 var f = fixedFloorDay[String(id)];
                 return f == null || d >= f;
             }
+            // #5092 (#4736, ТЗ §15): 🔒, ЧЕЙ ДЕНЬ УСТУПИЛ РУЧНОМУ СДВИГУ, МЕНЯЕТ ДЕНЬ, НО НЕ ПОРЯДОК.
+            // Якоря дня у неё нет, и пулы свободных брали её по сроку: боевое 06.10.2026 — 918853
+            // (срок 05.10) из хвоста 07.10 встала в голову очереди, обогнав пять заданий. Порядок
+            // держим ХРАНИМЫЙ, по «Дате план» на этом станке: всё, что стояло перед такой 🔒, кладётся
+            // раньше неё, а всё, что стояло после (и новое, места в плане не имевшее), — после.
+            // Исключения: задание, которое двигает оператор прямо сейчас, и продолжение (оно доводится).
+            var shiftedFixedIds = poolOrder.filter(function(id) {
+                var st = state[id];
+                return st && !st.isCont && st.cut && st.cut.fixed && shiftedByManual(id) && storedPlanTs(id) != null;
+            });
+            function unplaced(id) {
+                var st = state[id];
+                return !!st && (st.remaining > 0 || (st.perPass <= 0 && !st.placedEmpty));
+            }
+            function storedBefore(aId, bId) {
+                var a = storedPlanTs(aId), b = storedPlanTs(bId);
+                if (a == null || b == null) return false;
+                var sa = storedSidOf(aId), sb = storedSidOf(bId);
+                if (sa != null && sb != null && sa !== sb) return false;
+                return a < b;
+            }
+            function orderAllows(id) {
+                if (!shiftedFixedIds.length) return true;
+                var st = state[id];
+                if (!st || st.isCont || movedByOperator(id)) return true;
+                var key = String(id);
+                for (var oi = 0; oi < shiftedFixedIds.length; oi++) {
+                    var lid = shiftedFixedIds[oi];
+                    if (String(lid) === key || !unplaced(lid)) continue;
+                    if (!storedBefore(id, lid)) return false;   // стояло после 🔒 (или места не имело) — ждёт её
+                }
+                if (shiftedByManual(id) && st.cut && st.cut.fixed) {
+                    for (var pi = 0; pi < poolOrder.length; pi++) {
+                        var xid = poolOrder[pi];
+                        if (String(xid) === key || !unplaced(xid) || movedByOperator(xid)) continue;
+                        if (state[xid] && state[xid].isCont) continue;
+                        if (storedBefore(xid, id)) return false;   // перед ней стояло — она его не обгоняет
+                    }
+                }
+                return true;
+            }
             // #4491: звено монолита нельзя взять РАНЬШЕ своих предшественников по хранимому дню.
             // Без этого первое звено уехавшего монолита выбирает очередь §8 — и пара, стоявшая
             // подряд, приезжает в новый день в обратном порядке (боевое: Q → P вместо P → Q).
@@ -3754,8 +3795,8 @@
                 // предлагаем, оно уезжает целиком. Метка на день, поэтому назавтра оно снова кандидат.
                 // #4542 (ТЗ §15): в оба пула не пускаем задание, которое на этом дне ОБОГНАЛО БЫ 🔒
                 // (floorAllows) — ни как «созревшее по сроку», ни как подтянутое из будущего.
-                var freeDue = rem.filter(function(id){ return state[id].fixedDay == null && !isReservedFoil(id) && state[id].deferDay !== day && floorAllows(id, day) && (state[id].anchor == null || state[id].anchor <= day); });
-                var freeAny = rem.filter(function(id){ return state[id].fixedDay == null && !isReservedFoil(id) && state[id].deferDay !== day && floorAllows(id, day); });
+                var freeDue = rem.filter(function(id){ return state[id].fixedDay == null && !isReservedFoil(id) && state[id].deferDay !== day && floorAllows(id, day) && orderAllows(id) && (state[id].anchor == null || state[id].anchor <= day); });
+                var freeAny = rem.filter(function(id){ return state[id].fixedDay == null && !isReservedFoil(id) && state[id].deferDay !== day && floorAllows(id, day) && orderAllows(id); });
                 var resFoilToday = rem.filter(function(id){ return state[id].resFoilDay === day && state[id].fixedDay == null; });
                 // #4326-seal: ЗАМОРОЗКА — планировщик НЕ кладёт в этот день ничего НОВОГО. Существующие
                 // резки замороженного дня закреплены (#4326: c.fixed → fixedDay===day) и остаются здесь;

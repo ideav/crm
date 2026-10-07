@@ -13,7 +13,9 @@
 //   A — боевое воспроизведение: 🔒 хвоста ручного сдвига не попадает в отработанный день 0;
 //   B — правило целиком: ни одно задание не затаскивается в отработанный день из более позднего —
 //       при любом сочетании preserveOrder / trainOnly / ручного сдвига 🔒;
-//   C — начатое задание в отработанном дне остаётся там, где стоит (правило не про сделанное).
+//   C — начатое задание в отработанном дне остаётся там, где стоит (правило не про сделанное);
+//   D — 🔒 хвоста ручного сдвига (#4736) меняет день, но не порядок: никого не обгоняет и не
+//       пропускает вперёд себя то, что стояло после неё.
 //
 // Run with: node experiments/atex-pp-5092-no-past-day.test.js
 
@@ -38,7 +40,7 @@ function dayOf(tsSec) { return Math.floor((Number(tsSec) * 1000 - BASE) / 864000
 
 function engCut(id, o) {
     return { id: id, slitter: { id: SID }, materialId: o.mat || 'MR192', winding: 'OUT', batchId: 'B' + (o.mat || 'MR192'),
-             knifeWidths: widths(10, 59), knifeCount: 10, rollerWidth: 60, plannedRuns: o.runs,
+             knifeWidths: widths(10, o.w || 59), knifeCount: 10, rollerWidth: 60, plannedRuns: o.runs,
              isFoil: false, status: '', fixed: !!o.fixed, firstPartId: id,
              startDate: o.started ? String(D0 + o.day * DAY) : '', endDate: '',
              planDate: String(D0 + o.day * DAY + (o.min || 0) * 60) };
@@ -56,16 +58,20 @@ function pack(cuts, o) {
         planBaseMidnightMs: BASE, weights: {}, times: { KNIFE: 30, MATERIAL_WINDING: 15, BETWEEN_CUTS: 0 },
         dayStartMin: 480, dayEndMin: 930, dayEndHourMin: 930, maxOverworkCutsMin: 5, maxOverworkTuneMin: 10,
         lunchStartMin: 740, lunchDurationMin: 40, gapFill: true, preserveOrder: !!o.preserveOrder,
-        trainOnly: !!o.trainOnly, slotPlacement: false, firstCutSetup: false, prevSetupBySlitter: {},
+        trainOnly: !!o.trainOnly, deadlineAware: !o.preserveOrder, slotPlacement: !!o.slot, firstCutSetup: false, prevSetupBySlitter: {},
         intraDayResequence: true, perPassByCut: pp, slitterIds: [SID], dueDayByCut: due, dueKeyByCut: {},
         dayAnchorByCut: anchor,
         workedDayForSlitter: function () { return function (d) { return Number(d) <= 0; }; },
         manualShiftByCut: o.shiftBy || {}
     });
-    var days = {};
+    var days = {}, ts = {};
+    cuts.forEach(function (c) { ts[String(c.id)] = Number(c.planDate); });
     (ops.updates || []).forEach(function (u) {
-        if (u.planStartTs != null) days[String(u.cutId)] = dayOf(u.planStartTs);
+        if (u.planStartTs == null) return;
+        days[String(u.cutId)] = dayOf(u.planStartTs);
+        ts[String(u.cutId)] = Number(u.planStartTs);
     });
+    days.order = Object.keys(ts).sort(function (x, y) { return ts[x] - ts[y]; });
     return days;
 }
 
@@ -118,6 +124,29 @@ function pack(cuts, o) {
     var days = pack(cuts, { due: { n2: 0 } });
     assert(days.s1 == null || days.s1 === 0, 'C. начатое задание из отработанного дня не уезжает',
         'день=' + days.s1);
+})();
+
+// ── D. 🔒 ХВОСТА РУЧНОГО СДВИГА МЕНЯЕТ ДЕНЬ, НО НЕ ПОРЯДОК (#4736) ─────────────────────────────
+// Хранимый порядок a, b, c, 🔒L, d; срок у L — вчера, у остальных поздний. Пересборка вправе
+// переставлять свободные между собой, но L остаётся после a, b, c и перед d — в любом режиме.
+(function () {
+    var bad = [];
+    [{ preserveOrder: false, slot: false }, { preserveOrder: false, slot: true },
+     { preserveOrder: true, slot: false }, { preserveOrder: true, slot: true }].forEach(function (m) {
+        var cuts = [engCut('a', { day: 1, runs: 6 }), engCut('b', { day: 1, min: 90, runs: 6, mat: 'MR200' }),
+                    engCut('c', { day: 1, min: 200, runs: 6, w: 40 }),
+                    engCut('L', { day: 2, runs: 4, fixed: true, mat: 'MR300' }),
+                    engCut('d', { day: 2, min: 60, runs: 4 })];
+        var r = pack(cuts, { preserveOrder: m.preserveOrder, slot: m.slot, shiftBy: { L: true },
+            due: { a: 5, b: 5, c: 5, L: 0, d: 6 } });
+        var pos = {};
+        r.order.forEach(function (id, i) { pos[id] = i; });
+        if (!(pos.a < pos.L && pos.b < pos.L && pos.c < pos.L && pos.L < pos.d)) {
+            bad.push(JSON.stringify(m) + ' → ' + r.order.join(','));
+        }
+    });
+    assert(bad.length === 0, 'D. #5092/#4736: 🔒 хвоста ручного сдвига не меняет порядок ни в одном режиме',
+        bad.join('; '));
 })();
 
 console.log('\n' + passed + '/' + total + ' проверок прошли');
