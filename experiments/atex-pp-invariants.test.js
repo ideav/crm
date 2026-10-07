@@ -331,6 +331,57 @@ AUTO_INPUTS.forEach(function(input) {
         'FIXED_NO_OVERTAKE: без хранимого плана правило не срабатывает (конвенция реестра)');
 })();
 
+// ── 5г. FIXED_ORDER_KEPT (#4736, #5092) на всех входах автоматики ───────────────────────────
+// 🔒 не обгоняет стоявшее перед ней. Хранимый план (боевое #5092): свободное «2» — 05.10, 🔒 «3» —
+// 07.10 (хвост ручного сдвига). Любой вход, поставивший «3» раньше «2», ловится правилом.
+(function() {
+    var TS_FREE2 = Date.UTC(2026, 9, 5, 10, 0, 0);
+    var TS_LOCK3 = Date.UTC(2026, 9, 7, 10, 0, 0);
+    var ordCtx = {
+        isFixedCut: ctx.isFixedCut,
+        dayKeyOfCut: ctx.dayKeyOfCut,
+        dayKeyOfTs: ctx.dayKeyOfTs,
+        planSnapshot: function() {
+            return [{ id: '2', slitterId: '1', planStartTs: TS_FREE2, fixed: false },
+                    { id: '3', slitterId: '1', planStartTs: TS_LOCK3, fixed: true }];
+        }
+    };
+    function rule(ops, c) {
+        return planning.checkPlanInvariants(ops, c || ordCtx, 'auto')
+            .filter(function(x) { return x.rule === 'FIXED_ORDER_KEPT'; });
+    }
+    AUTO_INPUTS.forEach(function(input) {
+        var ops = emptyOps();
+        ops.updates.push({ cutId: '3', slitterId: '1', planStartTs: TS_FREE2 - 3600000 });
+        var v = rule(ops);
+        assert(v.length === 1 && v[0].cutId === '3' && v[0].otherCutId === '2',
+            'FIXED_ORDER_KEPT × ' + input + ': 🔒 встала раньше стоявшего перед ней — нарушение', '(' + v.length + ')');
+    });
+    // Свободное уехало ПОСЛЕ 🔒 — тот же перевёрнутый порядок, с другой стороны.
+    var pushed = emptyOps();
+    pushed.updates.push({ cutId: '2', slitterId: '1', planStartTs: TS_LOCK3 + 3600000 });
+    assert(rule(pushed).length === 1, 'FIXED_ORDER_KEPT: стоявшее перед 🔒 уехало за неё — нарушение');
+    // 🔒 сменила день, но порядок цел (#4736 это разрешает).
+    var shifted = emptyOps();
+    shifted.updates.push({ cutId: '3', slitterId: '1', planStartTs: TS_FREE2 + 3600000 });
+    assert(rule(shifted).length === 0, 'FIXED_ORDER_KEPT: 🔒 сменила день, порядок цел — не нарушение');
+    // Ручное действие оператора правилом не ограничено (ТЗ §15).
+    var mctx = {}; Object.keys(ordCtx).forEach(function(k) { mctx[k] = ordCtx[k]; });
+    mctx.isManualMoveCut = function(id) { return String(id) === '3'; };
+    var manual = emptyOps();
+    manual.updates.push({ cutId: '3', slitterId: '1', planStartTs: TS_FREE2 - 3600000 });
+    assert(rule(manual, mctx).length === 0, 'FIXED_ORDER_KEPT: ручной перенос оператора не ограничен');
+    // Уехавшее на другой станок порядка с 🔒 больше не имеет.
+    var other = emptyOps();
+    other.updates.push({ cutId: '2', slitterId: '9', planStartTs: TS_LOCK3 + 3600000 });
+    assert(rule(other).length === 0, 'FIXED_ORDER_KEPT: задание на другом станке — не нарушение');
+    // КОНВЕНЦИЯ РЕЕСТРА: нет снимка плана — правило молчит.
+    var bare = emptyOps();
+    bare.updates.push({ cutId: '3', slitterId: '1', planStartTs: TS_FREE2 - 3600000 });
+    assert(rule(bare, { isFixedCut: ctx.isFixedCut }).length === 0,
+        'FIXED_ORDER_KEPT: без хранимого плана правило не срабатывает (конвенция реестра)');
+})();
+
 // ── 6. Реестр не пуст и правила описаны ─────────────────────────────────────────────────────
 (function() {
     var inv = planning.invariants || [];

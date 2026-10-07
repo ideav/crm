@@ -4364,6 +4364,71 @@
             }
         },
         {
+            id: 'FIXED_ORDER_KEPT',
+            tz: '§15 (#4736, #5092)',
+            actor: 'auto',
+            mode: 'audit',      // страж СЧИТАЕТ и кричит, но операцию не выбрасывает — причина в why
+            why: 'то же, что у FIXED_NO_OVERTAKE: очерёдность чинится построением плана, а не отказом от '
+                 + 'записи — выброшенная операция оставила бы задание с прежним planStart',
+            title: 'Зафиксированное (🔒) задание не обгоняет задания, стоявшие перед ним на станке',
+            // ЧТО ЗАПРЕЩЕНО. Поставить 🔒 РАНЬШЕ (по времени старта) задания того же станка, которое в
+            // ХРАНИМОМ плане стояло перед ней. Ручной сдвиг (#4736) снимает с 🔒 в своём хвосте якорь
+            // дня: она меняет день, рвётся и схлопывается, но порядок сохраняет. Симптом до правила
+            // (боевое 06.10.2026, ateh, Станок 1285): 918853 (срок 05.10) из хвоста 07.10 пересборка
+            // взяла по сроку и поставила в голову очереди — перед пятью заданиями, во вчерашний день
+            // (issue #5092). Встречное направление — подвижное задание встало раньше 🔒, за которой
+            // стояло, — судит FIXED_NO_OVERTAKE; взаимный порядок 🔒 внутри дня — FIXED_BLOCK.
+            //
+            // ЧТО РАЗРЕШЕНО: ручное действие оператора — над самой 🔒 или над заданием перед ней (ТЗ
+            // §15, `isManualMoveCut`); задание, уехавшее на другой станок (на этом станке порядка с
+            // ним больше нет); новые записи и хвосты разбиения — хранимого места у них нет.
+            //
+            // ПОЧЕМУ mode:'audit'. Как у FIXED_NO_OVERTAKE: выброс операции порядок не чинит. Запрет
+            // обеспечен ПО ПОСТРОЕНИЮ в упаковщике (`orderAllows` в splitMachineQueue); шлюз — аудит
+            // на всех путях записи разом.
+            //
+            // ctx.planSnapshot() → [{ id, slitterId, planStartTs, fixed }] — ХРАНИМЫЙ план.
+            // Нет предиката → правило не срабатывает (общая конвенция реестра).
+            check: function(ops, ctx) {
+                var snapFn = (ctx && typeof ctx.planSnapshot === 'function') ? ctx.planSnapshot : null;
+                if (!snapFn) return [];
+                var snap = snapFn() || [];
+                var isFixed = ppCtxFn(ctx, 'isFixedCut');
+                var isManual = ppCtxFn(ctx, 'isManualMoveCut');
+                var stored = {}, now = {};
+                snap.forEach(function(r) {
+                    if (!r || r.id == null) return;
+                    var k = String(r.id), sid = String(r.slitterId == null ? '' : r.slitterId);
+                    stored[k] = { sid: sid, ts: Number(r.planStartTs), fixed: !!(r.fixed || isFixed(r.id)) };
+                    now[k] = { sid: sid, ts: Number(r.planStartTs) };
+                });
+                (ops && ops.updates || []).forEach(function(u) {
+                    var k = String(u.cutId);
+                    if (!now[k]) return;   // хранимого места нет — сравнивать не с чем
+                    now[k].ts = Number(u.planStartTs);
+                    if (u.slitterId != null) now[k].sid = String(u.slitterId);
+                });
+                (ops && ops.deletes || []).forEach(function(id) { delete now[String(id)]; });
+                var ids = Object.keys(now).filter(function(k) {
+                    return isFinite(stored[k].ts) && isFinite(now[k].ts);
+                });
+                var out = [];
+                ids.forEach(function(f) {
+                    if (!stored[f].fixed || isManual(f)) return;
+                    ids.forEach(function(x) {
+                        if (x === f || isManual(x)) return;
+                        if (stored[x].sid !== stored[f].sid || now[x].sid !== now[f].sid) return;
+                        if (!(stored[x].ts < stored[f].ts)) return;   // стояло после 🔒 — не наш вопрос
+                        if (!(now[f].ts < now[x].ts)) return;         // порядок цел
+                        out.push(ppViolation('FIXED_ORDER_KEPT', f,
+                            'зафиксированное ' + f + ' встало раньше ' + x + ', стоявшего перед ним',
+                            { slitterId: now[f].sid, otherCutId: x, kind: 'fixed-overtake' }));
+                    });
+                });
+                return out;
+            }
+        },
+        {
             id: 'DAY_CAPACITY',
             tz: '§15 (потолок дня, #4467)',
             actor: 'auto',
