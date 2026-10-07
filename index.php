@@ -5377,6 +5377,15 @@ function CheckObjSubst($i)
             return $GLOBALS["obj_subst"][$i];
     return $i;
 }
+# Базовый тип записи $t - из кэша constructHeader, при первом входе из базы (issue #5095)
+function ImportTypeBase($t)
+{
+	global $z;
+	if(isset($GLOBALS["base"][$t]))
+		return $GLOBALS["base"][$t];
+	$row = mysqli_fetch_array(Exec_sql("SELECT t FROM $z WHERE id=$t", "Get type base"));
+	return $GLOBALS["base"][$t] = $row ? (string)$row["t"] : "0";
+}
 function maskCsvDelimiters($v){
     if(strpos($v,"\"") !== false)
         return "\"".str_replace("\"","\"\"",$v)."\"";
@@ -6721,6 +6730,14 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
     			        trace("typ ".$object[0]);
     					$typ = explode(":",  $object[0]);	# Get Type's attributes
     					$obj = $typ[0];
+					if($obj == "subst")	# issue #5095: термин - "subst:ТЕРМИН:ВЛАДЕЛЕЦ:<подпись реквизита>"
+					{
+						$GLOBALS["imported_terms"][] = $typ;
+						if(feof($handle))
+							    break;
+						$buffer = fgets($handle);
+						continue;
+					}
     					foreach($object as $value)
     					    $GLOBALS["imported"][$obj][$order++] = UnHideDelimiters($value);
     			        trace("(".$count++.") check $obj");
@@ -6841,6 +6858,11 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
         				    }
         		        }
     				}
+				# issue #5095: связать термины файла (subst:...) с местными реквизитами
+				# и разметить реквизиты, несущие литералы-значения справочников
+				if(isset($GLOBALS["imported_terms"]))
+					Import_map_terms($GLOBALS["imported_terms"], $GLOBALS["imported"], $GLOBALS["local_types"], $GLOBALS["local_struct"], $GLOBALS["warning"]);
+				$GLOBALS["lit_fields"] = Import_lit_fields($GLOBALS["imported"]);
 				}
 				trace("Data");
 #print_r($GLOBALS);my_die();
@@ -7239,6 +7261,13 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
     				$t = CheckSubst($orig);	# Detect the target Type
 					if(!isset($GLOBALS["local_struct"][$t]))
 						my_die(t9n("[RU]Строка $count: Недопустимый тип $t, остутствующий в мета-данных[EN]Line $count: Invalid type $t that is not present in the metadata")." ($buffer)");
+					# issue #5095: у записи колонки отчёта (base REPORT_COLUMN) значение - id термина
+					# файла; свод структуры уже нашёл ему местный реквизит - подменяем до вставки
+					if(isset($typ[2]) && (int)$typ[2] != 0 && ImportTypeBase($t) == (string)$GLOBALS["BT"]["REPORT_COLUMN"])
+						if(isset($GLOBALS["local_struct"]["subst"][(int)$typ[2]]))
+							$typ[2] = $GLOBALS["local_struct"]["subst"][(int)$typ[2]];
+						elseif(!mysqli_fetch_array(Exec_sql("SELECT 1 FROM $z WHERE id=".(int)$typ[2], "Check term of report column")))
+							$GLOBALS["warning"] .= t9n("[RU]Строка $count: термин ".$typ[2]." (колонка отчёта) отсутствует в базе[EN]Line $count: term ".$typ[2]." (report column) is missing from the DB")."<br>";
     				trace("(".$count++.") Buffer: $buffer");
 #print_r($GLOBALS);my_die();
 					array_pop($object);	# Cut off the empty item after the last semi-colon
@@ -7255,8 +7284,16 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                             if($key == "")
                                 my_die(t9n("[RU]Тип $orig ($t) не имеет реквизита №$order (дано слишком много реквизитов)[EN]The type $orig ($t) does not have attribute #$order (too many attributes)"));
 							if(strlen($value))
-								if(!isset($GLOBALS["refs"][$key])) // Ordinary attribute of some base type
-									Insert_batch($new_id, 1, $key, UnMaskDelimiters($value), "Import req");
+									if(!isset($GLOBALS["refs"][$key])) // Ordinary attribute of some base type
+									{
+										$value = UnMaskDelimiters($value);
+										if(isset($GLOBALS["lit_fields"][$orig][$order]))	# issue #5095: литералы-значения справочников
+											$value = Import_subst_literals($value
+												, isset($GLOBALS["obj_subst"]) ? $GLOBALS["obj_subst"] : Array()
+												, function($id) use ($z){ return (bool)mysqli_fetch_array(Exec_sql("SELECT 1 FROM $z WHERE id=$id", "Check literal value")); }
+												, $count, $GLOBALS["warning"]);
+										Insert_batch($new_id, 1, $key, $value, "Import req");
+									}
 								elseif(isset($GLOBALS["MULTI"][$key])){ // Reference might be set by multi ID
 						            $multies = explode(",", $value);	# Get multiselect items set
     					            $ord = 1;
