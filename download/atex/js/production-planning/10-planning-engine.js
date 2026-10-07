@@ -3447,6 +3447,17 @@
                 while (d > 0 && !workedDay(d - 1)) d -= 1;
                 return d;
             }
+            // #5092 (ТЗ #4740): В ОТРАБОТАННЫЙ ДЕНЬ НЕ ЗАТАСКИВАЮТ НИЧЕГО — В ЛЮБОМ РЕЖИМЕ, НЕ ТОЛЬКО
+            // У ПАРОВОЗА. День 0 — это «С» фильтра, а не сегодня: при «С» = вчера пересборка после 🗓
+            // клала задание со сроком «вчера» в прошедший день (боевое 06.10.2026: 918853 перенесли
+            // в 07.10, перенос соседа вернул его в 05.10). Пол — первый день после последнего
+            // отработанного подряд от «С» (прошедшие дни отработаны все, сегодняшний — если станок
+            // закрыл смену или день кончился фактом); начатое и 🔒 с якорем держат свой день через
+            // fixedDay и пола не спрашивают.
+            var openFloorDay = 0;
+            if (workedDay) {
+                while (openFloorDay < 400 && workedDay(openFloorDay)) openFloorDay += 1;
+            }
             poolOrder.forEach(function(id) {
                 var st = state[id];
                 // #4736: 🔒, чей день уступил ручному сдвигу, пол получает наравне со свободными —
@@ -3476,6 +3487,11 @@
                     if (mayPrecedeFixed(id, fid)) return;
                     if (floor == null || fst.anchor > floor) floor = fst.anchor;
                 });
+                // Затащить В отработанный день нельзя; то, что в нём уже стоит, отсюда не выселяем —
+                // пол не выше хранимого дня (как у паровоза, #4732/#4743).
+                var openFloor = openFloorDay, ownDay = Number(storedDayBy[String(id)]);
+                if (isFinite(ownDay) && ownDay < openFloor) openFloor = Math.max(0, ownDay);
+                if (openFloor > 0 && (floor == null || floor < openFloor)) floor = openFloor;
                 if (floor != null) fixedFloorDay[String(id)] = floor;
             });
             // ТЗ §14: правило не срабатывает молча — в трассе видно, кого и до какого дня оно
