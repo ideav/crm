@@ -1247,6 +1247,14 @@ function login($z="", $u="", $message="", $details=""){
 	header("Location: /start.html".substr($p, 0, -1));
 	die();
 }
+# Кто сделал запрос — для логов базы. ИИ своего пользователя не имеет: он ходит токеном
+# пользователя и помечает запросы параметром client=ai, в логе это логин с суффиксом ~ai
+# (ivanov~ai — ИИ под пользователем ivanov; python2node#778, #779, #839).
+function aiLogUser(){
+    $user = isset($GLOBALS["GLOBAL_VARS"]["user"]) ? (string)$GLOBALS["GLOBAL_VARS"]["user"] : "";
+    $client = isset($_REQUEST["client"]) && is_string($_REQUEST["client"]) ? strtolower($_REQUEST["client"]) : "";
+    return $client === "ai" ? $user."~ai" : $user;
+}
 function wlog($text, $mode="log"){
     $file = fopen(LOGS_DIR.$GLOBALS["z"]."_$mode.txt", "a+");
     fwrite ($file, date("d/m/Y H:i:s")." $text\n");
@@ -1299,7 +1307,7 @@ function Exec_sql($sql, $err_msg, $log=TRUE, $fatal=TRUE){
 	    if(strtoupper(substr($sql, 0, 6)) === "INSERT")
 	        $sql = str_replace("INSERT INTO $z (up, ord, t, val) VALUES ("
 	                        , "INSERT INTO $z (up, ord, t, val) VALUES (/*". mysqli_insert_id($connection)."*/ ", $sql);
-	    wlog((isset($GLOBALS["GLOBAL_VARS"]["user"])?$GLOBALS["GLOBAL_VARS"]["user"]:"")."@".$_SERVER["REMOTE_ADDR"]."[".round($time, 4)."]$sql;[$err_msg]","sql");
+	    wlog(aiLogUser()."@".$_SERVER["REMOTE_ADDR"]."[".round($time, 4)."]$sql;[$err_msg]","sql");
 	}
 	trace("[".round($time, 4)."] $sql; [$err_msg]");
 	if(isset($GLOBALS["sqls"])){
@@ -13666,7 +13674,7 @@ if(Validate_Token())
         	$scount = $GLOBALS["sqls"];
         	$tzone = $GLOBALS["tzone"];
 			updateBilling();
-    		wlog("$user@".$_SERVER["REMOTE_ADDR"]."[$scount/$time/$stime]", "log");
+    		wlog(aiLogUser()."@".$_SERVER["REMOTE_ADDR"]."[$scount/$time/$stime]", "log");
 			if(isApi())
 			    if(isset($_REQUEST["JSON_DATA"]))
     				die("[".implode(",", $GLOBALS["GLOBAL_VARS"]["newapi"])."]");
