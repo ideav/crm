@@ -6,7 +6,7 @@
 # зависимостей (XSRF, оплата, вызов агента):
 #   • POST владельцем -> создаётся job, ответ {job:{status:done,result:...}};
 #   • GET ?job=ID и GET ?latest возвращают ту же задачу;
-#   • не-владелец -> 403; нет оплаты -> 402; пустой запрос -> 400;
+#   • не вошедший/guest -> 403; нет оплаты -> 402; пустой запрос -> 400;
 #   • сбой агента -> 502, а задача сохраняется со статусом error.
 
 $failures = 0;
@@ -60,7 +60,8 @@ function extract_function_source($source, $name){
 
 $source = file_get_contents(__DIR__."/../index.php");
 $fns = array(
-    "handleAiAgentRequest","aiAgentRequireOwner","aiAgentSubmitRequest","aiAgentStatusRequest",
+    "handleAiAgentRequest","aiAgentCurrentUser","aiAgentRequireUser","aiAgentJobIsOf",
+    "aiAgentSubmitRequest","aiAgentStatusRequest",
     "aiAgentCallbackUrl","collectAiAgentAttachments",
     "aiAgentJobsFile","aiAgentJobId","aiAgentJobNew","aiAgentJobsAppend","aiAgentJobsFind",
     "aiAgentJobsLatest","aiAgentJobsPrune","aiAgentJobsApplyChanges","aiAgentJobsReplace",
@@ -102,12 +103,14 @@ expect($r["data"]["job"]["status"] === "done", "GET ?job shows done status");
 $r = run("GET", array());
 expect($r["ok"] && $r["data"]["job"]["id"] === $jobId, "GET latest returns the most recent job");
 
-# 4) Не-владелец -> 403.
-$GLOBALS["GLOBAL_VARS"]["user"] = "someoneelse";
+# 4) guest (не вошедший пользователь) -> 403. Любой вошедший пользователь базы допускается
+#    (python2node#839), это проверяет experiments/ai-agent-user-rights-839.test.php.
+$GLOBALS["GLOBAL_VARS"]["user"] = "guest";
 $r = run("POST", array(), array("message"=>"hi"));
-expect(!$r["ok"] && $r["code"] === 403, "non-owner POST is rejected with 403");
+expect(!$r["ok"] && $r["code"] === 403, "guest POST is rejected with 403");
 $r = run("GET", array());
-expect(!$r["ok"] && $r["code"] === 403, "non-owner GET is rejected with 403");
+expect(!$r["ok"] && $r["code"] === 403, "guest GET is rejected with 403");
+
 $GLOBALS["GLOBAL_VARS"]["user"] = $db;
 
 # 5) Нет оплаты -> 402 + payUrl.

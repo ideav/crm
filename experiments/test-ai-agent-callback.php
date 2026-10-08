@@ -68,7 +68,9 @@ function extract_function_source($source, $name){
 $source = file_get_contents(__DIR__."/../index.php");
 $fns = array(
     "callIntegramAgent","extractAiProviderContent",
-    "handleAiAgentRequest","aiAgentRequireOwner","aiAgentSubmitRequest","aiAgentStatusRequest",
+    "handleAiAgentRequest","aiAgentCurrentUser","aiAgentRequireUser","aiAgentJobIsOf",
+    "aiAgentSubmitRequest","aiAgentStatusRequest",
+
     "handleAiAgentCallback","aiAgentCallbackUrl","collectAiAgentAttachments",
     "aiAgentJobsFile","aiAgentJobId","aiAgentJobNew","aiAgentJobsAppend","aiAgentJobsFind",
     "aiAgentJobsLatest","aiAgentJobsPrune","aiAgentJobsApplyChanges","aiAgentJobsReplace",

@@ -116,13 +116,10 @@ $long = aiProviderErrorMessage(500, json_encode(array("error" => str_repeat("я"
 ok(mb_strpos($long, str_repeat("я", 500)) !== FALSE && mb_strpos($long, str_repeat("я", 501)) === FALSE,
    "текст сервиса обрезан до 500 символов");
 
-echo "\n5. Ядро зовёт именно эту сборку и посылает агенту open_db\n";
+echo "\n5. Ядро зовёт именно эту сборку\n";
 ok(strpos($src, "throw new Exception(aiProviderErrorMessage(\$httpCode, \$raw, \$endpoint), 502);") !== FALSE,
    "aiChatPostJson отдаёт сообщение через aiProviderErrorMessage");
-ok(preg_match('~"open_db"\s*=>\s*aiAgentIsOpenDb\(\$db\)~', $src) === 1,
-   "в запрос агенту кладётся open_db (issue #4620 → #4627)");
-ok(strpos(file_get_contents(__DIR__."/../docs/ai-agent-endpoint.md"), '"open_db"') !== FALSE,
-   "поле описано в контракте docs/ai-agent-endpoint.md");
+
 
 echo "\n";
 if($failed){

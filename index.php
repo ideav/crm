@@ -9809,10 +9809,11 @@ function getAiAccessibleDbs(){
 # Issue #3392: упрощённый ИИ-агент (/{db}/ai/agent)
 #
 # Новый чат обращается только к нашему фиксированному агенту. Доступ разрешён
-# только пользователю, имя которого совпадает с именем базы. Условие доработки —
-# действующая оплата клиента, которая проверяется SQL-запросом напрямую к
-# $connection (issue #3404) и кешируется. Все действия агента ограничены текущей
-# базой данных (см. docs/integram-app-workflow.md).
+# любому вошедшему пользователю базы (кроме guest), агент работает его токеном и
+# с его правами (issue #839). Единственное условие — действующая оплата базы,
+# которая проверяется SQL-запросом напрямую к $connection (issue #3404) и
+# кешируется. Все действия агента ограничены текущей базой данных
+# (см. docs/integram-app-workflow.md).
 # ============================================================
 function handleAiAgentRequest($com){
     # Issue #3410: POST — поставить запрос ИИ-агенту (создаётся job), GET — узнать
@@ -9826,32 +9827,23 @@ function handleAiAgentRequest($com){
         aiAgentError(t9n("[RU]ИИ-агент принимает GET (статус) или POST (запрос)[EN]The AI agent accepts GET (status) or POST (request)"), 405);
     return aiAgentSubmitRequest($com);
 }
-# Issue #4620: БАЗЫ, ГДЕ ИИ-АГЕНТ ОТКРЫТ ЛЮБОМУ ПОЛЬЗОВАТЕЛЮ. ВРЕМЕННОЕ ИСКЛЮЧЕНИЕ —
-# отключается удалением имени базы из этого списка (и такого же списка в js/ai-agent-chat.js,
-# см. AI_AGENT_OPEN_DBS там же: клиент прячет кнопку, сервер отвечает 403, и разойтись им
-# нельзя). Пустой список = прежнее поведение #3716 «только владельцу».
-# ВНИМАНИЕ при снятии исключения: история задач агента лежит ПО ИМЕНИ БАЗЫ
-# (aiAgentJobsFile), поэтому в открытой базе её видят все её пользователи, а не каждый свою.
-function aiAgentOpenDbs(){
-    return array("ateh", "ateh1");
+# Имя текущего пользователя в нижнем регистре ("" — не вошёл).
+function aiAgentCurrentUser(){
+    return isset($GLOBALS["GLOBAL_VARS"]["user"]) ? strtolower((string)$GLOBALS["GLOBAL_VARS"]["user"]) : "";
 }
-function aiAgentIsOpenDb($db){
-    return in_array(strtolower((string)$db), array_map("strtolower", aiAgentOpenDbs()), true);
-}
-# Доступ к ИИ-агенту — только владельцу базы (имя пользователя совпадает с именем
-# базы). При нарушении завершает запрос ответом 403.
-# Issue #4620: базы из aiAgentOpenDbs() пропускаем ЛЮБОГО аутентифицированного пользователя.
-function aiAgentRequireOwner($db){
-    $user = isset($GLOBALS["GLOBAL_VARS"]["user"]) ? strtolower((string)$GLOBALS["GLOBAL_VARS"]["user"]) : "";
-    if($user !== "" && aiAgentIsOpenDb($db)) return;
-    if($user === "" || $user !== strtolower((string)$db))
-        aiAgentError(t9n("[RU]ИИ-агент доступен только владельцу базы — пользователю, имя которого совпадает с именем базы данных.[EN]The AI agent is available only to the database owner — the user whose name matches the database name."), 403);
+# Доступ к ИИ-агенту — любому вошедшему пользователю базы (issue #839): агент получает
+# его токен и может ровно то, что может он сам. guest — анонимный посетитель, у него
+# своего токена нет, ему отказ. При нарушении завершает запрос ответом 403.
+function aiAgentRequireUser(){
+    $user = aiAgentCurrentUser();
+    if($user === "" || $user === "guest")
+        aiAgentError(t9n("[RU]ИИ-агент доступен только вошедшему пользователю базы.[EN]The AI agent is available only to a signed-in database user."), 403);
 }
 # POST /{db}/ai/agent — поставить новый запрос ИИ-агенту.
 function aiAgentSubmitRequest($com){
     global $z;
     check(); # XSRF
-    aiAgentRequireOwner($z);
+    aiAgentRequireUser();
 
     # Проверка оплаты (закеширована). При отсутствии/истечении оплаты — ссылка на оплату.
     $payment = checkAiAgentPayment($z);
@@ -9869,7 +9861,7 @@ function aiAgentSubmitRequest($com){
     $attachmentNames = array();
     foreach($attachments as $a)
         $attachmentNames[] = isset($a["name"]) ? (string)$a["name"] : "";
-    $job = aiAgentJobCreate($z, $message, $attachmentNames);
+    $job = aiAgentJobCreate($z, $message, $attachmentNames, aiAgentCurrentUser());
     $jobId = $job["id"];
 
     # Для асинхронного агента готовим callback (см. docs/ai-agent-endpoint.md):
@@ -9912,18 +9904,21 @@ function aiAgentSubmitRequest($com){
 # даже если оплаченный период истёк.
 function aiAgentStatusRequest($com){
     global $z;
-    aiAgentRequireOwner($z);
+    aiAgentRequireUser();
+    # Ответ агента собран с правами того, кто спрашивал, поэтому каждый видит только
+    # свои задачи (issue #839); чужая задача неотличима от несуществующей.
+    $user = aiAgentCurrentUser();
 
     $jobId = isset($_GET["job"]) ? preg_replace('/[^a-f0-9]/i', '', (string)$_GET["job"]) : "";
     if($jobId !== ""){
         $job = aiAgentJobGet($z, $jobId);
-        if(!$job)
+        if(!$job || !aiAgentJobIsOf($job, $user))
             aiAgentError(t9n("[RU]Задача ИИ-агента не найдена[EN]AI agent job not found"), 404);
         api_dump(json_encode(array("job" => aiAgentJobPublic($job)), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "ai-agent.json");
         return;
     }
 
-    $job = aiAgentJobLatest($z);
+    $job = aiAgentJobLatest($z, $user);
     api_dump(json_encode(array("job" => $job ? aiAgentJobPublic($job) : null), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "ai-agent.json");
 }
 # POST /{db}/ai/agent/callback — приём результата от асинхронного ИИ-агента
@@ -10199,15 +10194,14 @@ function callIntegramAgent($db, $message, $attachments, $payment, $jobId="", $ca
         );
     }
     validateAiProviderEndpoint($endpoint);
-    # "user" — тот, кто пишет в чат, и он НЕ обязан быть владельцем базы: с issue #4620
-    # базы из aiAgentOpenDbs() открыты любому аутентифицированному пользователю. Чтобы
-    # сервису агента не приходилось знать наш список, посылаем ему готовый ответ на его
-    # единственный вопрос — вправе ли здесь работать не-владелец (issue #4627).
+    # "user" — тот, кто пишет в чат (любой вошедший пользователь базы), "token" — его
+    # токен в этой базе: агент работает под ним и наследует ровно его права (issue #839).
     $request = array(
         "db" => $db,
         "user" => isset($GLOBALS["GLOBAL_VARS"]["user"]) ? $GLOBALS["GLOBAL_VARS"]["user"] : "",
-        "open_db" => aiAgentIsOpenDb($db),
+        "token" => isset($GLOBALS["GLOBAL_VARS"]["token"]) ? (string)$GLOBALS["GLOBAL_VARS"]["token"] : "",
         "message" => $message,
+
         "attachments" => $attachments
     );
     # Async-режим (вариант B1): сообщаем агенту, куда вернуть результат. Для
@@ -10263,7 +10257,8 @@ function callIntegramAgent($db, $message, $attachments, $payment, $jobId="", $ca
 #     при повторном открытии панели, в т.ч. из ДРУГОГО браузера (состояние лежит
 #     на сервере, а не в localStorage);
 #   • устойчивость к таймауту сервера (30–60 c): запрос сохраняется до обработки.
-# Хранилище ограничено владельцем базы (aiAgentRequireOwner) и текущей базой.
+# Хранилище — файл на базу; задача помнит автора (user), и каждый пользователь
+# видит только свои задачи (aiAgentStatusRequest, issue #839).
 # Пер-база храним последние AI_AGENT_JOBS_MAX задач не старше AI_AGENT_JOBS_TTL.
 # ============================================================
 if(!defined("AI_AGENT_JOBS_MAX")) define("AI_AGENT_JOBS_MAX", 20);
@@ -10281,10 +10276,11 @@ function aiAgentJobId(){
     }
     return md5(uniqid((string)mt_rand(), true));
 }
-function aiAgentJobNew($message, $attachmentNames, $now){
+function aiAgentJobNew($message, $attachmentNames, $now, $user=""){
     $names = is_array($attachmentNames) ? array_values(array_map("strval", $attachmentNames)) : array();
     return array(
         "id" => aiAgentJobId(),
+        "user" => strtolower((string)$user),
         "createdAt" => (int)$now,
         "updatedAt" => (int)$now,
         "status" => "queued",
@@ -10311,12 +10307,20 @@ function aiAgentJobsFind($jobs, $id){
             return $job;
     return null;
 }
-function aiAgentJobsLatest($jobs){
+# Задача пользователя $user? Задачи без поля user (созданные до issue #839) — ничьи.
+function aiAgentJobIsOf($job, $user){
+    return is_array($job) && isset($job["user"]) && (string)$user !== ""
+        && (string)$job["user"] === strtolower((string)$user);
+}
+# $user === null — последняя задача базы, иначе последняя задача этого пользователя.
+function aiAgentJobsLatest($jobs, $user=null){
     if(!is_array($jobs))
         return null;
     $latest = null;
     foreach($jobs as $job){
         if(!is_array($job) || !isset($job["createdAt"]))
+            continue;
+        if($user !== null && !aiAgentJobIsOf($job, $user))
             continue;
         if($latest === null || (int)$job["createdAt"] >= (int)$latest["createdAt"])
             $latest = $job;
@@ -10415,9 +10419,9 @@ function aiAgentJobsMutate($db, $mutator){
     @fclose($fp);
     return $ret;
 }
-function aiAgentJobCreate($db, $message, $attachmentNames){
+function aiAgentJobCreate($db, $message, $attachmentNames, $user=""){
     $now = time();
-    $job = aiAgentJobNew($message, $attachmentNames, $now);
+    $job = aiAgentJobNew($message, $attachmentNames, $now, $user);
     aiAgentJobsMutate($db, function($jobs) use ($job, $now){
         $jobs = aiAgentJobsPrune($jobs, $now, AI_AGENT_JOBS_TTL);
         $jobs = aiAgentJobsAppend($jobs, $job, AI_AGENT_JOBS_MAX);
@@ -10439,9 +10443,9 @@ function aiAgentJobUpdate($db, $id, $changes){
 function aiAgentJobGet($db, $id){
     return aiAgentJobsFind(aiAgentJobsLoadRaw($db), $id);
 }
-function aiAgentJobLatest($db){
+function aiAgentJobLatest($db, $user=null){
     $jobs = aiAgentJobsPrune(aiAgentJobsLoadRaw($db), time(), AI_AGENT_JOBS_TTL);
-    return aiAgentJobsLatest($jobs);
+    return aiAgentJobsLatest($jobs, $user);
 }
 function getAiChatSettings($settings=array()){
     if(is_string($settings)){
@@ -12241,7 +12245,8 @@ if(Validate_Token())
 	{
         case "ai":
             # Issue #3392: /{db}/ai/agent — упрощённый чат с фиксированным ИИ-агентом
-            # (доступ только владельцу базы + проверка оплаты). Старый /{db}/ai/chat
+            # (любой вошедший пользователь + проверка оплаты). Старый /{db}/ai/chat
+
             # сохранён как backend, но скрыт из интерфейса.
             if(isset($com[3]) && $com[3] === "agent")
                 handleAiAgentRequest($com);
