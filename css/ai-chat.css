@@ -40,6 +40,7 @@
     display: flex;
     flex-direction: column;
     width: min(460px, 100vw);
+    max-width: 100vw;
     height: 100vh;
     background-color: var(--card-bg);
     border-left: 1px solid var(--border-color);
@@ -54,6 +55,38 @@
     transform: translateX(0);
     visibility: visible;
     pointer-events: auto;
+}
+
+/* backlogram#735: ширина панели ИИ-агента — перетаскиванием левого края. */
+.ai-chat-panel.is-resizing {
+    transition: none;
+}
+
+.ai-agent-resizer {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -4px;
+    width: 8px;
+    cursor: ew-resize;
+    touch-action: none;
+    z-index: 1;
+}
+
+.ai-agent-resizer:hover,
+.ai-agent-resizer:focus-visible,
+.ai-chat-panel.is-resizing .ai-agent-resizer {
+    background: linear-gradient(to right, transparent 3px, var(--button-primary) 3px, var(--button-primary) 5px, transparent 5px);
+    outline: none;
+}
+
+body.ai-agent-resizing {
+    cursor: ew-resize;
+    user-select: none;
+}
+
+body.ai-agent-resizing iframe {
+    pointer-events: none;
 }
 
 .ai-chat-header {
@@ -413,7 +446,11 @@
 
 @media (max-width: 600px) {
     .ai-chat-panel {
-        width: 100vw;
+        width: 100vw !important;
+    }
+
+    .ai-agent-resizer {
+        display: none;
     }
 
     .ai-chat-header,
