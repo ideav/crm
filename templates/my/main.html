@@ -485,6 +485,15 @@
                     </div>
                 </div>
 
+                <!-- Offer to create the DB asked for at password reset (issue #691) -->
+                <div id="wanted-db-offer" class="create-db-form" style="display:none;">
+                    <p class="wanted-db-question">Вы хотели создать базу «<b id="wanted-db-name"></b>»?</p>
+                    <div class="create-db-actions">
+                        <button type="button" id="wanted-db-yes" class="btn-primary btn-small">Да, создать</button>
+                        <button type="button" id="wanted-db-no" class="btn-secondary btn-small">Нет</button>
+                    </div>
+                </div>
+
                 <!-- Create DB Form -->
                 <div id="create-db-form" class="create-db-form" style="display:none;">
                     <div class="create-db-fields">

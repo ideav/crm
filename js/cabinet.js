@@ -2,6 +2,9 @@
 // Cabinet Page Controller
 // ============================================================
 
+// Имя базы: от 3 до 15 латинских символов и цифр, начиная с буквы
+const DB_NAME_RE = /^[a-zA-Z][a-zA-Z0-9]{2,14}$/;
+
 class CabinetController {
     constructor() {
         this.userData = null;
@@ -74,6 +77,80 @@ class CabinetController {
         if (targetSection === 'community' && subTab === 'requests' && extra[0] === 'request' && extra[1]) {
             this.openCreateRequestForm(extra[1]);
         }
+
+        await this.offerWantedDb();
+    }
+
+    // Issue #691: при сбросе пароля пользователь ввёл базу, которой у него нет, —
+    // пароль пришёл от ЛК, а имя базы осталось в localStorage (js/app.js). Если имя
+    // свободно — спрашиваем, хотел ли он её создать; ответ (любой) имя забывает.
+    async offerWantedDb() {
+        let name = '';
+        try { name = (localStorage.getItem(WANTED_DB_KEY) || '').trim(); } catch (e) { return; }
+        if (!name) return;
+
+        const offer = document.getElementById('wanted-db-offer');
+        if (!offer) return;
+
+        const planId = parseInt(this.userData && this.userData.PlanID || '0', 10);
+        const atLimit = this.databases.length >= 3 && planId < 1147;
+        const own = this.databases.some(db => String(db.DB || '').toLowerCase() === name.toLowerCase());
+        if (own || atLimit) {
+            rememberWantedDb('');
+            return;
+        }
+        // Недопустимое имя не проверяем — форма создания сама подскажет, каким оно должно быть
+        if (DB_NAME_RE.test(name)) {
+            let taken;
+            try {
+                taken = await this.isDbNameTaken(name);
+            } catch (err) {
+                console.error('[cabinet] Error checking wanted DB name:', err);
+                return; // спросим при следующем входе
+            }
+            if (taken) {
+                rememberWantedDb('');
+                return;
+            }
+        }
+
+        const nameEl = document.getElementById('wanted-db-name');
+        if (nameEl) nameEl.textContent = name;
+        offer.style.display = '';
+
+        const yesBtn = document.getElementById('wanted-db-yes');
+        const noBtn = document.getElementById('wanted-db-no');
+        if (yesBtn) yesBtn.onclick = () => {
+            rememberWantedDb('');
+            offer.style.display = 'none';
+            this.showSection('databases');
+            const createForm = document.getElementById('create-db-form');
+            const nameInput = document.getElementById('new-db-name');
+            if (createForm) createForm.style.display = '';
+            if (nameInput) {
+                nameInput.value = name;
+                nameInput.focus();
+            }
+        };
+        if (noBtn) noBtn.onclick = () => {
+            rememberWantedDb('');
+            offer.style.display = 'none';
+        };
+    }
+
+    // report/292: поле DB равно '0', если имя свободно
+    async isDbNameTaken(dbName) {
+        const checkFd = new FormData();
+        checkFd.append('_xsrf', xsrf);
+        const checkUrl = 'https://' + this.apiConfig.host + '/my/report/292?JSON&FR_DB=' + encodeURIComponent(dbName);
+        const checkResp = await fetch(checkUrl, {
+            method: 'POST',
+            credentials: 'include',
+            body: checkFd
+        });
+        if (!checkResp.ok) throw new Error('HTTP ' + checkResp.status);
+        const dbExists = this.getJsonValue(await checkResp.json(), 'DB', 0);
+        return dbExists !== '0' && dbExists !== 0 && dbExists !== '';
     }
 
     async checkAuth() {
@@ -2015,7 +2092,7 @@ class CabinetController {
         const template = templateSelect.value;
 
         // Validate name: 3-15 latin chars/digits, starting with a letter
-        if (!(/^[a-zA-Z][a-zA-Z0-9]{2,14}$/).test(dbName)) {
+        if (!DB_NAME_RE.test(dbName)) {
             if (errEl) {
                 errEl.textContent = 'От 3 до 15 латинских символов и цифр, начиная с буквы';
                 errEl.style.display = '';
@@ -2035,21 +2112,7 @@ class CabinetController {
             const host = this.apiConfig.host;
 
             // Step 1: Check if DB name is taken (report/292)
-            const checkFd = new FormData();
-            checkFd.append('_xsrf', xsrf);
-            const checkUrl = 'https://' + host + '/my/report/292?JSON&FR_DB=' + encodeURIComponent(dbName);
-            const checkResp = await fetch(checkUrl, {
-                method: 'POST',
-                credentials: 'include',
-                body: checkFd
-            });
-
-            if (!checkResp.ok) throw new Error('HTTP ' + checkResp.status);
-
-            const checkData = await checkResp.json();
-            // If DB field is '0' — name is free; otherwise — taken
-            const dbExists = this.getJsonValue(checkData, 'DB', 0);
-            if (dbExists !== '0' && dbExists !== 0 && dbExists !== '') {
+            if (await this.isDbNameTaken(dbName)) {
                 // Name is taken
                 if (errEl) {
                     errEl.textContent = 'Это имя занято, придумайте другое';
