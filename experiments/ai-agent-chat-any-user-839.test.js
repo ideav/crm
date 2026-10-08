@@ -1,15 +1,14 @@
 /*
- * Issue #3716: /{db}/ai/agent?JSON не вызывается, если имя пользователя ≠ имя базы.
- * https://github.com/ideav/crm/issues/3716
+ * python2node#839: кнопка ИИ-агента видна ЛЮБОМУ вошедшему пользователю базы.
+ * https://github.com/ideav/python2node/issues/839
  *
- * Лёгкий харнесс без jsdom: подменяем document/window/fetch и проверяем:
- *   1) isAgentAllowed() — сравнение имени пользователя и имени базы;
- *   2) НЕ владелец (user != db): init не делает НИ ОДНОГО fetch к ai/agent,
- *      кнопка ИИ-агента скрыта;
- *   3) владелец (user == db): init поднимает последнюю задачу (resume → ai/agent?JSON),
- *      кнопка видна.
+ * Агент работает токеном пользователя и с его правами, поэтому ограничение «имя
+ * пользователя = имя базы» снято и на сервере, и в клиенте. Проверяется поведение:
+ *   1) isAgentAllowed() — любой вошедший да, не вошедший и guest нет, база значения не имеет;
+ *   2) пользователь petrov в базе acme: кнопка видна, resume идёт к ai/agent текущей базы;
+ *   3) guest: кнопка скрыта, ни одного запроса к ai/agent.
  *
- * Run with: node experiments/test-issue-3716-ai-agent-owner-only.js
+ * Run with: node experiments/ai-agent-chat-any-user-839.test.js
  */
 'use strict';
 
@@ -59,52 +58,42 @@ function makeEnv(userName, dbName){
 }
 function fresh(userName, dbName){ var els = makeEnv(userName, dbName); delete require.cache[path]; var agent = require(path); return { agent: agent, els: els }; }
 
-// ===================== 1) isAgentAllowed (логика) =====================
-// require без auto-init: document отсутствует.
+// ===================== 1) isAgentAllowed =====================
 delete global.document;
 delete require.cache[path];
 var A = require(path);
-A.getCurrentDbName = function(){ return 'acme'; };
-A.getCurrentUserName = function(){ return 'acme'; };
-expect(A.isAgentAllowed() === true, '#3716: user == db → разрешён');
-A.getCurrentUserName = function(){ return 'bob'; };
-expect(A.isAgentAllowed() === false, '#3716: user != db → запрещён');
-A.getCurrentUserName = function(){ return ''; };
-expect(A.isAgentAllowed() === false, '#3716: пустой user → запрещён');
-A.getCurrentUserName = function(){ return 'acme'; };
-A.getCurrentDbName = function(){ return ''; };
-expect(A.isAgentAllowed() === false, '#3716: пустая база → запрещён');
-// регистронезависимо (зеркало strtolower на сервере).
-A.getCurrentUserName = function(){ return 'ACME'; };
-A.getCurrentDbName = function(){ return 'acme'; };
-expect(A.isAgentAllowed() === true, '#3716: разный регистр (ACME/acme) → разрешён');
-A.getCurrentUserName = function(){ return 'Acme'; };
-A.getCurrentDbName = function(){ return 'AcMe'; };
-expect(A.isAgentAllowed() === true, '#3716: разный регистр (Acme/AcMe) → разрешён');
+function allowed(u, d){ A.getCurrentUserName = function(){ return u; }; A.getCurrentDbName = function(){ return d; }; return A.isAgentAllowed(); }
 
-// ===================== 2) НЕ владелец: ноль вызовов =====================
-function scNotOwner(){
-    var ctx = fresh('bob', 'acme');   // имя пользователя ≠ имя базы
+expect(allowed('petrov', 'acme') === true, '#839: пользователь petrov в базе acme → разрешён');
+expect(allowed('acme', 'acme') === true,   '#839: владелец базы → разрешён');
+expect(allowed('bob', 'ateh') === true,    '#839: пользователь в бывшей «открытой» базе → разрешён');
+expect(allowed('Petrov', 'ACME') === true, '#839: регистр значения не имеет');
+expect(allowed('', 'acme') === false,      '#839: не вошедший → запрещён');
+expect(allowed('guest', 'acme') === false, '#839: guest → запрещён');
+expect(allowed('GUEST', 'acme') === false, '#839: GUEST в другом регистре → запрещён');
+
+// ===================== 2) Обычный пользователь: кнопка видна, resume идёт =====================
+function scUser(){
+    var ctx = fresh('petrov', 'acme');
     return flush().then(flush).then(function(){
         var calls = global.__calls || [];
-        expect(calls.length === 0, '#3716: НЕ владелец → НИ ОДНОГО вызова ai/agent?JSON');
-        expect(ctx.els['ai-chat-toggle'].style.display === 'none', '#3716: НЕ владелец → кнопка ИИ-агента скрыта');
-    });
-}
-
-// ===================== 3) Владелец: работает как прежде =====================
-function scOwner(){
-    var ctx = fresh('acme', 'acme');  // имя пользователя = имя базы
-    return flush().then(flush).then(function(){
-        var calls = global.__calls || [];
-        expect(calls.length >= 1, '#3716: владелец → resume обращается к ai/agent?JSON');
+        expect(ctx.els['ai-chat-toggle'].style.display !== 'none', '#839: petrov в acme → кнопка ИИ-агента видна');
         expect(calls.length >= 1 && /\/acme\/ai\/agent\?JSON=1/.test(calls[0].url),
-            '#3716: владелец → URL ai/agent текущей базы (?latest)');
-        expect(ctx.els['ai-chat-toggle'].style.display !== 'none', '#3716: владелец → кнопка видна');
+            '#839: petrov в acme → resume обращается к ai/agent текущей базы');
     });
 }
 
-scNotOwner().then(scOwner).then(function(){
+// ===================== 3) guest: ни одного вызова =====================
+function scGuest(){
+    var ctx = fresh('guest', 'acme');
+    return flush().then(flush).then(function(){
+        var calls = global.__calls || [];
+        expect(calls.length === 0, '#839: guest → НИ ОДНОГО вызова ai/agent');
+        expect(ctx.els['ai-chat-toggle'].style.display === 'none', '#839: guest → кнопка скрыта');
+    });
+}
+
+scUser().then(scGuest).then(function(){
     console.log('');
     if(failures){ console.log('FAILED: ' + failures + ' check(s) failed'); process.exit(1); }
     console.log('ALL TESTS PASSED');
