@@ -110,7 +110,6 @@ $r = run("POST", array(), array("message"=>"hi"));
 expect(!$r["ok"] && $r["code"] === 403, "guest POST is rejected with 403");
 $r = run("GET", array());
 expect(!$r["ok"] && $r["code"] === 403, "guest GET is rejected with 403");
-
 $GLOBALS["GLOBAL_VARS"]["user"] = $db;
 
 # 5) Нет оплаты -> 402 + payUrl.

@@ -70,7 +70,6 @@ $fns = array(
     "callIntegramAgent","extractAiProviderContent",
     "handleAiAgentRequest","aiAgentCurrentUser","aiAgentRequireUser","aiAgentJobIsOf",
     "aiAgentSubmitRequest","aiAgentStatusRequest",
-
     "handleAiAgentCallback","aiAgentCallbackUrl","collectAiAgentAttachments",
     "aiAgentJobsFile","aiAgentJobId","aiAgentJobNew","aiAgentJobsAppend","aiAgentJobsFind",
     "aiAgentJobsLatest","aiAgentJobsPrune","aiAgentJobsApplyChanges","aiAgentJobsReplace",

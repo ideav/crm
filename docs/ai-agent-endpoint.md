@@ -186,4 +186,3 @@ curl -sS -X POST https://<agent-host>/path \
   -d '{"db":"acme","user":"petrov","token":"<токен petrov>","message":"привет","attachments":[]}'
 # ожидаем: {"content":"..."} (или plain-text), HTTP 200; user ≠ db — не повод отказывать
 ```
-

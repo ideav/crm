@@ -10201,7 +10201,6 @@ function callIntegramAgent($db, $message, $attachments, $payment, $jobId="", $ca
         "user" => isset($GLOBALS["GLOBAL_VARS"]["user"]) ? $GLOBALS["GLOBAL_VARS"]["user"] : "",
         "token" => isset($GLOBALS["GLOBAL_VARS"]["token"]) ? (string)$GLOBALS["GLOBAL_VARS"]["token"] : "",
         "message" => $message,
-
         "attachments" => $attachments
     );
     # Async-режим (вариант B1): сообщаем агенту, куда вернуть результат. Для
@@ -12246,7 +12245,6 @@ if(Validate_Token())
         case "ai":
             # Issue #3392: /{db}/ai/agent — упрощённый чат с фиксированным ИИ-агентом
             # (любой вошедший пользователь + проверка оплаты). Старый /{db}/ai/chat
-
             # сохранён как backend, но скрыт из интерфейса.
             if(isset($com[3]) && $com[3] === "agent")
                 handleAiAgentRequest($com);

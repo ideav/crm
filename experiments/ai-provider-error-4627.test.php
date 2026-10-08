@@ -120,7 +120,6 @@ echo "\n5. Ядро зовёт именно эту сборку\n";
 ok(strpos($src, "throw new Exception(aiProviderErrorMessage(\$httpCode, \$raw, \$endpoint), 502);") !== FALSE,
    "aiChatPostJson отдаёт сообщение через aiProviderErrorMessage");
 
-
 echo "\n";
 if($failed){
     echo "FAILED: $failed\n";
