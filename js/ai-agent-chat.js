@@ -48,7 +48,6 @@
             this.rendered = {};
             this.toggle = document.getElementById('ai-chat-toggle');
             this.panel = document.getElementById('ai-agent-panel');
-            this.backdrop = document.getElementById('ai-agent-backdrop');
             this.closeBtn = document.getElementById('ai-agent-close');
             this.input = document.getElementById('ai-agent-input');
             this.sendBtn = document.getElementById('ai-agent-send');
@@ -73,11 +72,15 @@
 
             this.toggle.addEventListener('click', function () { self.togglePanel(); });
             if (this.closeBtn) this.closeBtn.addEventListener('click', function () { self.closePanel(); });
-            if (this.backdrop) this.backdrop.addEventListener('click', function () { self.closePanel(); });
 
+            // backlogram#735: из страницы в чат копируют данные — панель не модальная:
+            // подложки нет, клик вне панели её не закрывает; Esc закрывает, только когда
+            // фокус внутри панели (Esc на странице — для её собственных окон).
             document.addEventListener('keydown', function (e) {
-                if (e.key === 'Escape' && self.isOpen()) self.closePanel();
+                if (e.key === 'Escape' && self.isOpen() && self.panel.contains(document.activeElement)) self.closePanel();
             });
+
+            this.initResizer();
 
             if (this.sendBtn) this.sendBtn.addEventListener('click', function () { self.send(); });
 
@@ -118,7 +121,6 @@
             this.panel.classList.add('open');
             this.panel.setAttribute('aria-hidden', 'false');
             this.panel.removeAttribute('inert');
-            if (this.backdrop) this.backdrop.hidden = false;
             if (this.toggle) this.toggle.setAttribute('aria-expanded', 'true');
             if (this.input) this.input.focus();
             this.resume();
@@ -130,8 +132,90 @@
             this.panel.classList.remove('open');
             this.panel.setAttribute('aria-hidden', 'true');
             this.panel.setAttribute('inert', '');
-            if (this.backdrop) this.backdrop.hidden = true;
             if (this.toggle) this.toggle.setAttribute('aria-expanded', 'false');
+        },
+
+        // --- backlogram#735: ширина панели перетаскиванием левого края ---
+
+        minWidth: 320,          // уже — не помещаются сообщения и поле ввода
+        defaultWidth: 460,      // как width в css/ai-chat.css
+        pageGap: 120,           // слева всегда видна полоса страницы, чтобы копировать из неё
+        widthStep: 40,          // шаг стрелками на ручке
+        widthKey: 'integram.aiAgent.panelWidth',
+        panelWidth: 0,          // 0 — ширина по умолчанию из CSS
+
+        clampWidth: function (w) {
+            var vw = (typeof window !== 'undefined' && window.innerWidth) || 0;
+            var max = vw ? Math.max(this.minWidth, vw - this.pageGap) : w;
+            w = Math.round(Math.min(Math.max(w, this.minWidth), max));
+            return vw ? Math.min(w, vw) : w;
+        },
+
+        setWidth: function (w) {
+            this.panelWidth = this.clampWidth(w);
+            this.panel.style.width = this.panelWidth + 'px';
+        },
+
+        resetWidth: function () {
+            this.panelWidth = 0;
+            this.panel.style.width = '';
+            this.storage('removeItem');
+        },
+
+        // localStorage недоступен в приватном режиме/при запрете — ширина просто не запомнится.
+        storage: function (method, value) {
+            try {
+                var ls = window.localStorage;
+                return method === 'setItem' ? ls.setItem(this.widthKey, value) : ls[method](this.widthKey);
+            } catch (e) {
+                return null;
+            }
+        },
+
+        initResizer: function () {
+            var self = this;
+            var handle = document.createElement('div');
+            handle.className = 'ai-agent-resizer';
+            handle.setAttribute('role', 'separator');
+            handle.setAttribute('aria-orientation', 'vertical');
+            handle.setAttribute('aria-label', 'Ширина панели ИИ-агента');
+            handle.setAttribute('tabindex', '0');
+            handle.title = 'Потяните, чтобы изменить ширину. Двойной щелчок — ширина по умолчанию';
+            this.panel.appendChild(handle);
+            this.resizer = handle;
+
+            var saved = parseInt(this.storage('getItem'), 10);
+            if (saved > 0) this.setWidth(saved);
+
+            var drag = null;
+            handle.addEventListener('pointerdown', function (e) {
+                if (e.button) return;
+                e.preventDefault();
+                drag = { x: e.clientX, w: self.panelWidth || self.panel.offsetWidth || self.defaultWidth };
+                self.panel.classList.add('is-resizing');
+                if (document.body) document.body.classList.add('ai-agent-resizing');
+            });
+            document.addEventListener('pointermove', function (e) {
+                if (drag) self.setWidth(drag.w + (drag.x - e.clientX));
+            });
+            var stop = function () {
+                if (!drag) return;
+                drag = null;
+                self.panel.classList.remove('is-resizing');
+                if (document.body) document.body.classList.remove('ai-agent-resizing');
+                if (self.panelWidth) self.storage('setItem', String(self.panelWidth));
+            };
+            document.addEventListener('pointerup', stop);
+            document.addEventListener('pointercancel', stop);
+
+            handle.addEventListener('keydown', function (e) {
+                var dir = e.key === 'ArrowLeft' ? 1 : e.key === 'ArrowRight' ? -1 : 0;
+                if (!dir) return;
+                e.preventDefault();
+                self.setWidth((self.panelWidth || self.panel.offsetWidth || self.defaultWidth) + dir * self.widthStep);
+                self.storage('setItem', String(self.panelWidth));
+            });
+            handle.addEventListener('dblclick', function () { self.resetWidth(); });
         },
 
         getCurrentDbName: function () {
