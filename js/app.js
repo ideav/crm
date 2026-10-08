@@ -156,6 +156,28 @@ async function hasValidAuthToken(host) {
 }
 
 // ============================================================
+// Password reset into a DB the user does not have (issue #691)
+// ============================================================
+// Имя базы, которую пользователь ввёл при сбросе пароля, но которой у него нет.
+// Пароль тогда уходит от ЛК, а ЛК при входе предлагает создать эту базу (js/cabinet.js).
+const WANTED_DB_KEY = 'integram_wanted_db';
+const RESET_OK_MESSAGES = ['NEW_PWD', 'MAIL', 'SMS'];
+
+// Базы нет вовсе (404 [{error}], dBNotExists, не-JSON «Invalid database») или
+// пользователя нет в этой базе (WRONG_DB, WRONG_CONT).
+function isNoSuchDbForUser(data) {
+    if (data === null || data === undefined || Array.isArray(data)) return true;
+    return ['dBNotExists', 'WRONG_DB', 'WRONG_CONT'].includes(data.message);
+}
+
+function rememberWantedDb(name) {
+    try {
+        if (name) localStorage.setItem(WANTED_DB_KEY, name);
+        else localStorage.removeItem(WANTED_DB_KEY);
+    } catch (e) { /* storage disabled — the cabinet just won't ask */ }
+}
+
+// ============================================================
 // Notification utility
 // ============================================================
 function showToast(message, type = 'info') {
@@ -956,31 +978,53 @@ class App {
                 const customInput = document.getElementById('auth-db-custom');
                 let selectedDb = dbSelect ? dbSelect.value : 'my';
                 if (selectedDb === '__other__') {
-                    selectedDb = customInput ? customInput.value.trim() : '';
-                    if (!selectedDb) {
-                        showToast('Введите имя базы данных', 'error');
-                        return;
-                    }
+                    // #691: базу можно не указывать — тогда сбрасываем пароль от ЛК
+                    selectedDb = (customInput ? customInput.value.trim() : '') || 'my';
                 }
                 resetSubmitBtn.disabled = true;
                 try {
-                    const url = `${encodeURIComponent(selectedDb)}/auth?JSON&reset&db=${encodeURIComponent(selectedDb)}&login=${encodeURIComponent(loginVal)}`;
-                    const response = await fetch(url);
-                    const text = await response.text();
-                    let data = null;
-                    try { data = JSON.parse(text); } catch (e) { data = null; }
+                    const requestReset = async (db) => {
+                        const url = `${encodeURIComponent(db)}/auth?JSON&reset&db=${encodeURIComponent(db)}&login=${encodeURIComponent(loginVal)}`;
+                        const response = await fetch(url);
+                        const text = await response.text();
+                        let data = null;
+                        try { data = JSON.parse(text); } catch (e) { data = null; }
+                        return { text, data };
+                    };
+                    let { text, data } = await requestReset(selectedDb);
+                    // #691: такой базы у пользователя нет — шлём пароль от ЛК, а имя базы
+                    // запоминаем: ЛК при входе предложит её создать (js/cabinet.js).
+                    let wantedDb = '';
+                    if (selectedDb !== 'my' && isNoSuchDbForUser(data)) {
+                        const fromMy = await requestReset('my');
+                        if (fromMy.data && !Array.isArray(fromMy.data) && RESET_OK_MESSAGES.includes(fromMy.data.message)) {
+                            ({ text, data } = fromMy);
+                            wantedDb = selectedDb;
+                            rememberWantedDb(wantedDb);
+                        }
+                    }
                     if (resetMessage) {
                         resetMessage.style.display = '';
                         if (data === null) {
                             resetMessage.style.background = 'var(--bg-secondary)';
                             resetMessage.style.color = 'var(--text-primary)';
                             resetMessage.textContent = text;
+                        } else if (Array.isArray(data)) {
+                            resetMessage.style.background = 'var(--bg-secondary)';
+                            resetMessage.style.color = 'var(--error-color, #ef4444)';
+                            resetMessage.textContent = (data[0] && data[0].error) || text;
                         } else {
                             const msg = (data.message || '').toUpperCase();
                             const isError = msg.includes('WRONG') || msg.includes('ERROR');
                             if (!isError) {
                                 resetMessage.className = 'success-message';
-                                resetMessage.textContent = data.details || data.message || text;
+                                resetMessage.textContent = (wantedDb
+                                    ? `Базы «${wantedDb}» у вас нет, поэтому прислали пароль от личного кабинета. Войдите в него — и мы предложим создать эту базу. `
+                                    : '') + (data.details || data.message || text);
+                                if (wantedDb && dbSelect) {
+                                    dbSelect.value = 'my';
+                                    dbSelect.dispatchEvent(new Event('change'));
+                                }
                             } else {
                                 resetMessage.style.background = 'var(--bg-secondary)';
                                 resetMessage.style.color = 'var(--error-color, #ef4444)';
