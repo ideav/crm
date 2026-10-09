@@ -29345,6 +29345,12 @@
         var mismatch = actDirtyId ? self.recalcMismatchRows(actDirtyId) : { rows: [], byId: {}, ids: [] };
         var mismatchIds = mismatch.ids;
         var mismatchByCut = mismatch.byId;
+        // crm#5113: что сейчас на экране — для ИИ-чата (agentScreenContext).
+        this._agentScreen = {
+            slitter: activeGroup.slitter,
+            cutIds: activeGroup.cuts.filter(cutMatchesSearch).map(function(c) { return String(c.id); }),
+            mismatchIds: mismatchIds.map(String)
+        };
         if (mismatchIds.length) {
             // #4430: вид и ЛИПКОСТЬ кнопки — в CSS (.atex-pp-recalc-setup): она приклеена к верху
             // экрана, иначе в длинной очереди уезжала вверх и расхождение чинить было нечем.
@@ -30673,6 +30679,40 @@
             .catch(function(err) { self.fatal('Ошибка инициализации: ' + err.message); });
     };
 
+    // crm#5113: дополнение к снимку экрана для ИИ-чата (js/ai-agent-chat.js снимает станок и
+    // дни с экрана сам) — то, чего на экране нет: id станка, заданий и таблиц, задания с
+    // разошедшейся наладкой (кнопка «↻ Пересчитать наладку»). Страница убрана из DOM или
+    // очередь ещё не отрисована — null.
+    AtexProductionPlanning.prototype.agentScreenContext = function() {
+        var snap = this._agentScreen;
+        if (!snap || !this.root || this.root.isConnected === false) return null;
+        var cutById = {};
+        (this.cuts || []).forEach(function(c) { cutById[String(c.id)] = c; });
+        var slitter = snap.slitter || {};
+        var days = formatPlanDayRangeLabel(this.filter.date, this.filter.dateTo);
+        var screen = {
+            label: ['Планирование', slitter.label, days].filter(Boolean).join(' · '),
+            machine: slitter.label || 'Без слиттера',
+            plan_dates: days,
+            machines: (this.slitters || []).map(function(s) { return s.label + ' (id ' + s.id + ')'; }),
+            jobs_on_screen_count: snap.cutIds.length,
+            jobs_on_screen: snap.cutIds.map(function(id) {
+                var c = cutById[id] || {};
+                var parts = [c.materialName, c.winding, c.timing, c.status].filter(function(v) { return v != null && String(v) !== ''; });
+                return 'id ' + id + (parts.length ? ': ' + parts.join(', ') : '');
+            })
+        };
+        if (slitter.id != null && Number(slitter.id) > 0) screen.machine_id = Number(slitter.id);
+        if (this.meta && this.meta.cut && Number(this.meta.cut.id) > 0) screen.jobs_table_id = Number(this.meta.cut.id);
+        if (this.meta && this.meta.slitter && Number(this.meta.slitter.id) > 0) screen.machines_table_id = Number(this.meta.slitter.id);
+        if (snap.mismatchIds.length) screen.setup_mismatch_jobs = snap.mismatchIds.map(Number);
+        var query = String(this.filter.query == null ? '' : this.filter.query).trim();
+        if (query) screen.search = query;
+        if (this.filter.status) screen.status = this.filter.status;
+        if (this.selectedCutId != null && Number(this.selectedCutId) > 0) screen.selected_job = Number(this.selectedCutId);
+        return screen;
+    };
+
     function init() {
         if (typeof document === 'undefined') return;
         var root = document.getElementById('atex-production-planning');
@@ -30681,6 +30721,9 @@
         console.log('[pp] 🟢 init: запуск production-planning, db=', (root.getAttribute('data-db') || '?'));
         var controller = new AtexProductionPlanning(root);
         root._atexProductionPlanning = controller;
+        if (typeof window !== 'undefined') {
+            window.integramAgentContext = function() { return controller.agentScreenContext(); };
+        }
         // #3638: deep-link из cut-gantt (?cut=..&date=..&slitter=..) — после загрузки
         // данных открыть очередь на нужном дне/станке и подсветить задание.
         var deepLink = (typeof window !== 'undefined' && window.location)
