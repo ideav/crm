@@ -293,7 +293,7 @@ function aiAgentCallbackUrl($db){ return "https://h/$db/ai/agent/callback"; }
 
 $source = file_get_contents(__DIR__."/../index.php");
 foreach(array("aiLogUser", "InBatchOp", "my_die", "OpFail", "BtCorePort", "BtWarn", "BtDrainWarnings", "BtSkipRequest", "BtChainFromRequest",
-        "BtAsUser", "BtCoreWrite", "BtJobsStore", "BtPromptGate", "BtJobPending", "BtPromptSubmit", "BtCallbackApply", "BtActionRequest",
+        "BtAsUser", "BtCoreWrite", "BtLoopbackBase", "BtJobsStore", "BtPromptGate", "BtJobPending", "BtPromptSubmit", "BtCallbackApply", "BtActionRequest",
         "BtHookBefore", "handleAiAgentCallback", "aiAgentCurrentUser", "aiAgentJobIsOf",
         "aiAgentJobsFile", "aiAgentJobId", "aiAgentJobNew", "aiAgentJobsAppend", "aiAgentJobsFind", "aiAgentJobsLatest", "aiAgentJobsPrune",
         "aiAgentJobsApplyChanges", "aiAgentJobsReplace", "aiAgentJobPublic", "aiAgentJobsEncode", "aiAgentJobsDecode", "aiAgentJobsLoadRaw",
@@ -354,6 +354,14 @@ expect($thrown && !InBatchOp(), "conflict 5: my_die inside a trigger write throw
 # 5.3 Промпт: задача в отдельном хранилище, токен исполнителя, дубль не ставится, лимит в час
 $z = "t866_".getmypid();
 $GLOBALS["z"] = $z;
+# 5.6 Запрос к себе идёт только на свой сервер: адрес не берётся из заголовка Host клиента
+$_SERVER["HTTP_HOST"] = "evil.example";
+$_SERVER["SERVER_NAME"] = "ideav.ru";
+eq(BtLoopbackBase(), "https://ideav.ru", "loopback: the server name, not the client Host header");
+$_SERVER["SERVER_NAME"] = "_";
+eq(BtLoopbackBase(), "", "loopback: a catch-all server name gives no address (the query is refused)");
+unset($_SERVER["HTTP_HOST"], $_SERVER["SERVER_NAME"]);
+
 @unlink(aiAgentJobsFile("trg:".$z));
 expect(aiAgentJobsFile("trg:".$z) !== aiAgentJobsFile($z), "jobs: trigger jobs live in their own file (chat jobs are not evicted)");
 $pjob = array("message" => "?", "context" => array("page" => "trigger"), "runAs" => $users[17],
