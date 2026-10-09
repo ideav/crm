@@ -58,8 +58,11 @@ assertTrue(/\$_POST\["c"\]/.test(qrpollCase) && /\$_POST\["s"\]/.test(qrpollCase
 assertTrue(!/\$_REQUEST\["s"\]/.test(qrpollCase), 'qrpoll не берёт секрет из $_REQUEST (туда попадает и GET)');
 
 // ── Маски логов ──
+// Журнал запросов (#5104) пишет путь без строки запроса, а GET- и POST-параметры — через
+// $sensitivePostKeys; маска URI остаётся у трассировки (TRACE_IT). Поведение журнала —
+// experiments/jsonl-log-5104.test.php (c и s из GET и тела не попадают ни в один файл).
 var uriMasks = php.match(/\(\[\?&\]\([a-z|]+\)=\)/g) || [];
-assertTrue(uriMasks.length >= 2, 'маска URI применяется при логировании');
+assertTrue(uriMasks.length >= 1, 'маска URI применяется при логировании');
 uriMasks.forEach(function(mask, i) {
     var names = mask.replace(/[^a-z|]/g, '').split('|');
     assertTrue(names.indexOf('s') !== -1, 'маска URI #' + (i + 1) + ' закрывает `s` (секрет QR)');
