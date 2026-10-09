@@ -184,15 +184,33 @@ function FieldAttrsBuild($default="", $required=false, $multi=false, $alias=null
 // kept as the attrs default, which the server substitutes [ID]/[VAL] into for
 // the record card and the API; other types leave the default empty, so the
 // cell carries either nothing (show the button) or a written result.
-function FieldAttrsNormalizeAction($action)
+//
+// Launch (python2node#866) — optional keys, omitted at their defaults so that
+// older modifiers stay byte-identical:
+//   on        — events: PRESS (click, default), CREATE, UPDATE, DELETE (server,
+//               include/button_triggers.php), READ (on display, browser). A string
+//               "CREATE,UPDATE" is accepted. A link runs on PRESS only.
+//   recompute — with READ: recompute on every display, ignoring the stored value.
+//   when      — formula condition; the action runs only when it is truthy.
+//   user      — the user the action runs as (record id, or a login that _d_action
+//               turns into the id); empty — the current user.
+// $error receives the reason when the action is rejected (return false).
+function FieldAttrsActionEvents()
 {
+	return array("PRESS", "CREATE", "UPDATE", "DELETE", "READ");
+}
+function FieldAttrsNormalizeAction($action, &$error=null)
+{
+	$error = "";
 	if(is_string($action)){
 		if(trim($action) === "")
 			return null;
 		$action = json_decode($action, true);
 	}
-	if(!is_array($action) || !isset($action["type"]))
+	if(!is_array($action) || !isset($action["type"])){
+		$error = "действие — не объект JSON с полем type";
 		return false;
+	}
 	$type = (string)$action["type"];
 	$fields = array(
 		"link" => array("url"),
@@ -200,8 +218,10 @@ function FieldAttrsNormalizeAction($action)
 		"formula" => array("formula"),
 		"query" => array("query", "params")
 	);
-	if(!isset($fields[$type]))
+	if(!isset($fields[$type])){
+		$error = "неизвестный тип «{$type}»: допустимы link, prompt, formula, query";
 		return false;
+	}
 	$result = array("type" => $type);
 	foreach(array_merge(array("label"), $fields[$type]) as $f)
 		if(isset($action[$f]) && !is_array($action[$f]) && trim((string)$action[$f]) !== "")
@@ -210,6 +230,41 @@ function FieldAttrsNormalizeAction($action)
 		$result["newTab"] = !isset($action["newTab"]) || FieldAttrsBool($action["newTab"]);
 	else
 		$result["write"] = isset($action["write"]) && FieldAttrsBool($action["write"]);
+
+	$on = isset($action["on"]) ? $action["on"] : array();
+	if(is_string($on))
+		$on = preg_split('/[\s,;]+/', $on, -1, PREG_SPLIT_NO_EMPTY);
+	if(!is_array($on)){
+		$error = "on — список событий";
+		return false;
+	}
+	$events = array();
+	foreach($on as $e){
+		$e = strtoupper(trim(is_scalar($e) ? (string)$e : ""));
+		if(!in_array($e, FieldAttrsActionEvents(), true)){
+			$error = "неизвестное событие «{$e}»: допустимы ".implode(", ", FieldAttrsActionEvents());
+			return false;
+		}
+		$events[$e] = TRUE;
+	}
+	$ordered = array();
+	foreach(FieldAttrsActionEvents() as $e)
+		if(isset($events[$e]))
+			$ordered[] = $e;
+	if($type === "link" && count(array_diff($ordered, array("PRESS")))){
+		$error = "ссылка запускается только нажатием (PRESS)";
+		return false;
+	}
+	if(count($ordered) && $ordered !== array("PRESS"))
+		$result["on"] = $ordered;
+	if(in_array("READ", $ordered, true) && isset($action["recompute"]) && FieldAttrsBool($action["recompute"]))
+		$result["recompute"] = true;
+	if($type !== "link" && isset($action["when"]) && is_scalar($action["when"]) && trim((string)$action["when"]) !== "")
+		$result["when"] = mb_substr(trim((string)$action["when"]), 0, 8000);
+	if(isset($action["user"]) && is_scalar($action["user"]) && trim((string)$action["user"]) !== ""){
+		$user = trim((string)$action["user"]);
+		$result["user"] = ctype_digit($user) ? (int)$user : mb_substr($user, 0, 255);
+	}
 	return $result;
 }
 

@@ -11,11 +11,45 @@
 // With "write" the result is stored into the record's value of this column;
 // a stored value is shown instead of the button, with recalc and clear.
 // Redefining the column does not recalculate stored results.
+//
+// Launch (python2node#866): "on" lists the events — PRESS (click, default),
+// READ (on display when the value is empty, or every time with "recompute"),
+// CREATE / UPDATE / DELETE (run by the server, include/button_triggers.php).
+// "when" — formula condition; "user" — the user the action runs as (then the
+// browser asks the server to run it: POST _m_action/{id}?col={column}).
 
 const IntegramButtonAction = (function () {
     const TYPES = ['link', 'prompt', 'formula', 'query'];
     const TYPE_NAMES = { link: 'Ссылка', prompt: 'Промпт ИИ', formula: 'Формула', query: 'Запрос' };
     const TYPE_ICONS = { link: 'pi-external-link', prompt: 'pi-sparkles', formula: 'pi-calculator', query: 'pi-database' };
+    const EVENTS = ['PRESS', 'CREATE', 'UPDATE', 'DELETE', 'READ'];
+    const EVENT_NAMES = { PRESS: 'по нажатию', CREATE: 'при создании', UPDATE: 'при изменении', DELETE: 'при удалении', READ: 'при показе' };
+
+    /** Events list from a stored value (array or "A,B" string), in canonical order. */
+    function normalizeEvents(on, strict) {
+        let list = on;
+        if (typeof list === 'string') list = list.split(/[\s,;]+/).filter(Boolean);
+        if (!Array.isArray(list)) {
+            if (strict && list !== undefined && list !== null) throw new Error('on — список событий');
+            list = [];
+        }
+        const set = new Set();
+        list.forEach((e) => {
+            const ev = String(e).trim().toUpperCase();
+            if (EVENTS.indexOf(ev) === -1) {
+                if (strict) throw new Error(`неизвестное событие «${ ev }»: допустимы ${ EVENTS.join(', ') }`);
+                return;
+            }
+            set.add(ev);
+        });
+        return EVENTS.filter(e => set.has(e));
+    }
+
+    /** Events the action runs on; no "on" means PRESS. */
+    function events(cfg) {
+        return cfg && Array.isArray(cfg.on) && cfg.on.length ? cfg.on : ['PRESS'];
+    }
+    function hasEvent(cfg, ev) { return events(cfg).indexOf(ev) !== -1; }
 
     function parseAttrs(attrs) {
         if (typeof parseIntegramAttrs === 'function') return parseIntegramAttrs(attrs);
@@ -50,6 +84,12 @@ const IntegramButtonAction = (function () {
                     cfg.query = String(action.query || '');
                     cfg.params = String(action.params || '');
                 }
+                // Launch keys only when they differ from the defaults
+                const on = normalizeEvents(action.on, false);
+                if (on.length && !(on.length === 1 && on[0] === 'PRESS')) cfg.on = on;
+                if (cfg.on && cfg.on.indexOf('READ') !== -1 && action.recompute) cfg.recompute = true;
+                if (action.when !== undefined && String(action.when).trim() !== '') cfg.when = String(action.when).trim();
+                if (action.user !== undefined && action.user !== null && String(action.user).trim() !== '') cfg.user = String(action.user).trim();
             }
             return cfg;
         }
@@ -63,12 +103,20 @@ const IntegramButtonAction = (function () {
         if (!cfg || TYPES.indexOf(cfg.type) === -1) return null;
         const a = { type: cfg.type };
         if (cfg.label) a.label = cfg.label;
-        if (cfg.type === 'link') { a.url = cfg.url || ''; a.newTab = cfg.newTab !== false; }
-        else {
+        if (cfg.type === 'link') {
+            a.url = cfg.url || ''; a.newTab = cfg.newTab !== false;
+            const on = normalizeEvents(cfg.on, true);
+            if (on.some(e => e !== 'PRESS')) throw new Error('ссылка запускается только нажатием (PRESS)');
+        } else {
             if (cfg.type === 'prompt') a.prompt = cfg.prompt || '';
             if (cfg.type === 'formula') a.formula = cfg.formula || '';
             if (cfg.type === 'query') { a.query = cfg.query || ''; if (cfg.params) a.params = cfg.params; }
             a.write = !!cfg.write;
+            const on = normalizeEvents(cfg.on, true);
+            if (on.length && !(on.length === 1 && on[0] === 'PRESS')) a.on = on;
+            if (a.on && a.on.indexOf('READ') !== -1 && cfg.recompute) a.recompute = true;
+            if (cfg.when && String(cfg.when).trim()) a.when = String(cfg.when).trim();
+            if (cfg.user !== undefined && cfg.user !== null && String(cfg.user).trim() !== '') a.user = String(cfg.user).trim();
         }
         return a;
     }
@@ -319,7 +367,9 @@ const IntegramButtonAction = (function () {
         return s;
     }
 
-    return { TYPES, TYPE_NAMES, TYPE_ICONS, parseConfig, toAction, substitute, evalFormula, formatResult, buildPrompt, cleanAnswer };
+    function truthyValue(v) { return truthy(v); }
+
+    return { TYPES, TYPE_NAMES, TYPE_ICONS, EVENTS, EVENT_NAMES, parseConfig, toAction, events, hasEvent, substitute, evalFormula, formatResult, truthy: truthyValue, buildPrompt, cleanAnswer };
 })();
 
 if (typeof window !== 'undefined') window.IntegramButtonAction = IntegramButtonAction;
@@ -347,21 +397,109 @@ if (typeof IntegramTable !== 'undefined') {
             return { id: raw && raw.i !== undefined ? raw.i : '', val: val === null || val === undefined ? '' : val, fields };
         },
 
-        /** Inner HTML of a BUTTON cell that has an action config. */
-        renderButtonActionCell(column, value, cfg) {
+        /**
+         * Inner HTML of a BUTTON cell that has an action config. `rowIndex` lets a
+         * READ action compute the value of an empty cell (or every time with
+         * recompute); without PRESS the cell has no run button.
+         */
+        renderButtonActionCell(column, value, cfg, rowIndex) {
             const colId = this.escapeHtml(String(column.id));
             const title = this.escapeHtml(cfg.label || IntegramButtonAction.TYPE_NAMES[cfg.type]);
-            const stored = value !== null && value !== undefined && String(value) !== '';
-            if (stored) {
-                return `<span class="it-btn-result">${ this.escapeHtml(String(value)) }</span>` +
-                    `<span class="it-btn-result-tools" style="white-space:nowrap;margin-left:4px;">` +
-                    `<button type="button" class="it-btn-tool" style="border:0;background:none;padding:0 2px;cursor:pointer;opacity:.6;" data-btn-action="run" data-col-id="${ colId }" title="Пересчитать"><i class="pi pi-refresh"></i></button>` +
-                    `<button type="button" class="it-btn-tool" style="border:0;background:none;padding:0 2px;cursor:pointer;opacity:.6;" data-btn-action="clear" data-col-id="${ colId }" title="Удалить результат"><i class="pi pi-times"></i></button>` +
-                    `</span>`;
+            const press = IntegramButtonAction.hasEvent(cfg, 'PRESS');
+            const read = cfg.type !== 'link' && IntegramButtonAction.hasEvent(cfg, 'READ');
+            let shown = value;
+            let stored = value !== null && value !== undefined && String(value) !== '';
+            let computed = false;
+            if (read && rowIndex !== undefined && rowIndex !== null && (!stored || cfg.recompute)) {
+                const r = this.computeButtonActionRead(rowIndex, column, cfg);
+                if (r.pending) return `<span class="it-btn-result it-btn-read-pending" data-col-id="${ colId }" style="opacity:.5;">…</span>`;
+                if (r.error) return `<span class="it-btn-result it-btn-error" data-col-id="${ colId }" title="${ this.escapeHtml(r.error) }">⚠</span>`;
+                shown = r.value;
+                stored = shown !== '';
+                computed = true;
             }
+            if (stored) {
+                const tools = [];
+                if (press) tools.push(`<button type="button" class="it-btn-tool" style="border:0;background:none;padding:0 2px;cursor:pointer;opacity:.6;" data-btn-action="run" data-col-id="${ colId }" title="Пересчитать"><i class="pi pi-refresh"></i></button>`);
+                if ((press || read) && !(computed && cfg.recompute)) tools.push(`<button type="button" class="it-btn-tool" style="border:0;background:none;padding:0 2px;cursor:pointer;opacity:.6;" data-btn-action="clear" data-col-id="${ colId }" title="Удалить результат"><i class="pi pi-times"></i></button>`);
+                return `<span class="it-btn-result" data-col-id="${ colId }">${ this.escapeHtml(String(shown)) }</span>` +
+                    (tools.length ? `<span class="it-btn-result-tools" style="white-space:nowrap;margin-left:4px;">${ tools.join('') }</span>` : '');
+            }
+            if (!press) return `<span class="it-btn-result" data-col-id="${ colId }"></span>`;
             const label = cfg.label ? `<span class="it-btn-label">${ this.escapeHtml(cfg.label) }</span>` : '';
             return `<button type="button" class="btn btn-sm btn-primary it-btn-action" data-btn-action="run" data-col-id="${ colId }" title="${ title }">` +
                 `<i class="pi ${ IntegramButtonAction.TYPE_ICONS[cfg.type] }"></i>${ label }</button>`;
+        },
+
+        /** Row index of a record id on the current page (-1 — not on it). */
+        findButtonActionRow(recordId) {
+            const raws = this.rawObjectData || [];
+            for (let i = 0; i < raws.length; i++) if (raws[i] && String(raws[i].i) === String(recordId)) return i;
+            return -1;
+        },
+
+        /**
+         * READ: value of a cell on display. A formula is computed right away; a
+         * query, a prompt or an action under another user goes through a
+         * sequential queue, once per record and column per page load. With
+         * write (and without recompute) the result is stored into the record.
+         * Returns {value} | {pending} | {error}.
+         */
+        computeButtonActionRead(rowIndex, column, cfg) {
+            const raw = this.rawObjectData && this.rawObjectData[rowIndex];
+            if (!raw || raw.i === undefined) return { value: '' };
+            const recId = raw.i;
+            const key = `${ recId }:${ column.id }`;
+            if (!this._btnRead) this._btnRead = new Map();
+            const store = cfg.write && !cfg.recompute;
+            if (cfg.type === 'formula' && !cfg.user) {
+                if (store && this._btnRead.has(key)) return this._btnRead.get(key);
+                let entry;
+                try {
+                    const ctx = this.buildButtonActionContext(rowIndex);
+                    if (cfg.when && !IntegramButtonAction.truthy(IntegramButtonAction.evalFormula(cfg.when, ctx))) entry = { value: '' };
+                    else entry = { value: IntegramButtonAction.formatResult(IntegramButtonAction.evalFormula(cfg.formula, ctx)) };
+                } catch (err) {
+                    entry = { error: err.message };
+                }
+                if (store) {
+                    this._btnRead.set(key, entry);
+                    if (entry.value) {
+                        const value = entry.value;
+                        this._btnReadWrites = (this._btnReadWrites || Promise.resolve()).then(() => {
+                            const idx = this.findButtonActionRow(recId);
+                            return idx >= 0 ? this.writeButtonActionResult(idx, column, value) : null;
+                        }).catch(err => this.showToast(`${ column.name }: ${ err.message }`, 'error'));
+                    }
+                }
+                return entry;
+            }
+            if (this._btnRead.has(key)) return this._btnRead.get(key);
+            const pending = { pending: true };
+            this._btnRead.set(key, pending);
+            this._btnReadChain = (this._btnReadChain || Promise.resolve()).then(async () => {
+                let entry;
+                try {
+                    const idx = this.findButtonActionRow(recId);
+                    if (idx < 0) { this._btnRead.delete(key); return; }
+                    const ctx = this.buildButtonActionContext(idx);
+                    if (!cfg.user && cfg.when && !IntegramButtonAction.truthy(IntegramButtonAction.evalFormula(cfg.when, ctx))) {
+                        entry = { value: '' };
+                    } else {
+                        const r = await this.runButtonActionFull(idx, column, cfg, { nowrite: !store });
+                        entry = { value: r.value === null || r.value === undefined ? '' : String(r.value) };
+                        if (r.written) { this._btnRead.set(key, entry); return; }
+                    }
+                } catch (err) {
+                    entry = { error: err.message };
+                }
+                this._btnRead.set(key, entry);
+                const idx = this.findButtonActionRow(recId);
+                const cellEl = idx >= 0 && this.container && this.container.querySelector(`td[data-row="${ idx }"] [data-col-id="${ column.id }"]`);
+                const td = cellEl ? cellEl.closest('td') : null;
+                if (td) td.innerHTML = this.renderButtonActionCell(column, this.data[idx] ? this.data[idx][this.columns.indexOf(column)] : '', cfg, idx);
+            });
+            return pending;
         },
 
         getButtonActionColumns() {
@@ -370,10 +508,10 @@ if (typeof IntegramTable !== 'undefined') {
                 .filter(x => x.cfg && x.cfg.type !== 'link');
         },
 
-        /** Toolbar buttons that run an action column for the selected rows. */
+        /** Toolbar buttons that run an action column for the selected rows (PRESS columns only). */
         renderButtonActionBulkButtons(instanceName) {
             if (!this.checkboxMode || !this.selectedRows || this.selectedRows.size === 0) return '';
-            return this.getButtonActionColumns().map(({ col, cfg }) =>
+            return this.getButtonActionColumns().filter(({ cfg }) => IntegramButtonAction.hasEvent(cfg, 'PRESS')).map(({ col, cfg }) =>
                 `<button class="btn btn-sm btn-outline-primary it-btn-action-bulk" onclick="window.${ instanceName }.runButtonActionForSelected('${ this.escapeHtml(String(col.id)) }')" title="${ this.escapeHtml(IntegramButtonAction.TYPE_NAMES[cfg.type]) } для выделенных строк">` +
                 `<i class="pi ${ IntegramButtonAction.TYPE_ICONS[cfg.type] }"></i> ${ this.escapeHtml(col.name) } (${ this.selectedRows.size })</button>`
             ).join('');
@@ -398,11 +536,10 @@ if (typeof IntegramTable !== 'undefined') {
                 }
                 el.disabled = true;
                 el.classList.add('it-btn-busy');
-                const result = await this.runButtonAction(rowIndex, column, cfg);
-                if (result === null) return;
-                if (cfg.write) {
-                    await this.writeButtonActionResult(rowIndex, column, result);
-                } else if (cfg.type === 'prompt') {
+                const r = await this.runButtonActionFull(rowIndex, column, cfg, {});
+                const result = r.value;
+                if (result === null || r.written) return;
+                if (cfg.type === 'prompt') {
                     this.showButtonActionAnswer(column, result);
                 } else {
                     td.innerHTML = `<span class="it-btn-result it-btn-result-temp">${ this.escapeHtml(result) }</span>` +
@@ -444,6 +581,73 @@ if (typeof IntegramTable !== 'undefined') {
                     return this.runButtonActionPrompt(cfg, ctx, column);
             }
             return null;
+        },
+
+        /**
+         * Run an action and store the result when it writes. With "user" the
+         * server runs it as that user (_m_action) and stores the result itself.
+         * Returns {value, written}; value null — a link (no result).
+         */
+        async runButtonActionFull(rowIndex, column, cfg, opts) {
+            const o = opts || {};
+            if (cfg.user && cfg.type !== 'link') {
+                const r = await this.runButtonActionServer(rowIndex, column, cfg, o);
+                if (r.written) this.applyButtonActionStored(rowIndex, column, r.value);
+                return r;
+            }
+            const value = await this.runButtonAction(rowIndex, column, cfg);
+            if (value !== null && cfg.write && !o.nowrite) {
+                await this.writeButtonActionResult(rowIndex, column, value);
+                return { value, written: true };
+            }
+            return { value, written: false };
+        },
+
+        /** Server-side run under the column's user: POST _m_action/{id}?col={column}. */
+        async runButtonActionServer(rowIndex, column, cfg, opts) {
+            const raw = this.rawObjectData && this.rawObjectData[rowIndex];
+            if (!raw || raw.i === undefined) throw new Error('Не найден id записи');
+            const params = new URLSearchParams();
+            params.append('_xsrf', this.getButtonActionXsrf());
+            if (opts && opts.nowrite) params.append('nowrite', '1');
+            const resp = await fetch(`${ this.getApiBase() }/_m_action/${ raw.i }?JSON&col=${ encodeURIComponent(column.id) }`, {
+                method: 'POST', body: params, credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+            });
+            const text = await resp.text();
+            let data = null;
+            try { data = JSON.parse(text); } catch (e) { /* error page */ }
+            const err = Array.isArray(data) ? (data[0] && data[0].error) : (data && data.error);
+            if (!resp.ok || !data || err) throw new Error(err || `Действие не выполнено (HTTP ${ resp.status })`);
+            if (data.job) {
+                const res = await this.pollButtonActionJob(data.job);
+                const value = IntegramButtonAction.cleanAnswer(this.buttonActionJobContent(res));
+                return { value, written: !!cfg.write && !(opts && opts.nowrite) };
+            }
+            return { value: data.result === undefined || data.result === null ? '' : String(data.result), written: !!data.written };
+        },
+
+        /** Poll ai/agent?job=… until the job is done; returns its result. */
+        async pollButtonActionJob(job) {
+            const agentUrl = `${ this.getApiBase() }/ai/agent?JSON=1`;
+            const deadline = Date.now() + 5 * 60 * 1000;
+            while (job.status !== 'done' && job.status !== 'error') {
+                if (Date.now() > deadline) throw new Error('ИИ-агент не ответил за 5 минут');
+                await new Promise(r => setTimeout(r, 2500));
+                const pr = await fetch(`${ agentUrl }&job=${ encodeURIComponent(job.id) }`, {
+                    credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                });
+                const pd = await pr.json().catch(() => null);
+                if (pd && pd.job) job = pd.job;
+            }
+            const res = job.result || {};
+            if (job.status === 'error') throw new Error(job.error || res.error || 'ИИ-агент завершил работу с ошибкой');
+            return res;
+        },
+
+        buttonActionJobContent(res) {
+            return res.assistant && typeof res.assistant.content === 'string' ? res.assistant.content
+                : (typeof res.content === 'string' ? res.content : (typeof res.message === 'string' ? res.message : ''));
         },
 
         async runButtonActionQuery(cfg, ctx) {
@@ -489,22 +693,10 @@ if (typeof IntegramTable !== 'undefined') {
             });
             const data = await resp.json().catch(() => null);
             if (resp.status === 402) throw new Error((data && (data.error || data.message)) || 'Доступ к ИИ-агенту не оплачен');
-            let job = data && data.job;
+            const job = data && data.job;
             if (!job) throw new Error((data && (data.error || data.message)) || 'ИИ-агент недоступен');
-            const deadline = Date.now() + 5 * 60 * 1000;
-            while (job.status !== 'done' && job.status !== 'error') {
-                if (Date.now() > deadline) throw new Error('ИИ-агент не ответил за 5 минут');
-                await new Promise(r => setTimeout(r, 2500));
-                const pr = await fetch(`${ agentUrl }&job=${ encodeURIComponent(job.id) }`, {
-                    credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' }
-                });
-                const pd = await pr.json().catch(() => null);
-                if (pd && pd.job) job = pd.job;
-            }
-            const res = job.result || {};
-            if (job.status === 'error') throw new Error(job.error || res.error || 'ИИ-агент завершил работу с ошибкой');
-            const content = res.assistant && typeof res.assistant.content === 'string' ? res.assistant.content
-                : (typeof res.content === 'string' ? res.content : (typeof res.message === 'string' ? res.message : ''));
+            const res = await this.pollButtonActionJob(job);
+            const content = this.buttonActionJobContent(res);
             if (res.plan && res.plan.status === 'pending' && !cfg.write) {
                 return `${ content }\n\nАгент предложил изменения — подтвердите их в ИИ-чате.`;
             }
@@ -527,19 +719,24 @@ if (typeof IntegramTable !== 'undefined') {
             try { result = JSON.parse(text); } catch (e) { /* non-JSON error page */ }
             const err = typeof this.getServerError === 'function' ? this.getServerError(result) : (result && result.error);
             if (!resp.ok || !result || err) throw new Error(err || `Запись не сохранена (HTTP ${ resp.status })`);
+            this.applyButtonActionStored(rowIndex, column, value);
+            return value;
+        },
+
+        /** Show a value stored into the record (by the browser or by the server). */
+        applyButtonActionStored(rowIndex, column, value) {
             const colIndex = this.columns.indexOf(column);
             if (this.data[rowIndex]) this.data[rowIndex][colIndex] = value;
             const td = this.container && this.container.querySelector(`td[data-row="${ rowIndex }"] [data-col-id="${ column.id }"]`);
             const cell = td ? td.closest('td') : null;
             if (cell) this.refreshButtonActionCell(cell, rowIndex, column);
-            return value;
         },
 
         refreshButtonActionCell(td, rowIndex, column) {
             const colIndex = this.columns.indexOf(column);
             const value = this.data[rowIndex] ? this.data[rowIndex][colIndex] : '';
             const cfg = IntegramButtonAction.parseConfig(column.attrs);
-            if (cfg) td.innerHTML = this.renderButtonActionCell(column, value, cfg);
+            if (cfg) td.innerHTML = this.renderButtonActionCell(column, value, cfg, rowIndex);
         },
 
         /** Run a column's action for every selected row, one after another. */
@@ -555,8 +752,7 @@ if (typeof IntegramTable !== 'undefined') {
             for (let k = 0; k < rows.length; k++) {
                 this.showToast(`${ column.name }: ${ k + 1 } из ${ rows.length }…`, 'info');
                 try {
-                    const result = await this.runButtonAction(rows[k], column, cfg);
-                    if (cfg.write && result !== null) await this.writeButtonActionResult(rows[k], column, result);
+                    await this.runButtonActionFull(rows[k], column, cfg, {});
                     ok++;
                 } catch (err) {
                     const raw = this.rawObjectData && this.rawObjectData[rows[k]];
@@ -620,8 +816,29 @@ if (typeof IntegramTable !== 'undefined') {
                             <input type="checkbox" id="${ p }-write" ${ cfg.write ? 'checked' : '' }> Записывать результат в поле записи
                         </label>
                     </div>
+                    <div class="col-edit-row" id="${ p }-on-row">
+                        <label class="col-edit-label">Запуск:</label>
+                        <span class="col-edit-events">
+                            ${ IntegramButtonAction.EVENTS.map(e => `<label class="col-edit-check-label" id="${ p }-on-${ e }-label" style="margin-right:10px;white-space:nowrap;">` +
+                                `<input type="checkbox" id="${ p }-on-${ e }" value="${ e }" ${ IntegramButtonAction.hasEvent(cfg, e) ? 'checked' : '' }> ${ IntegramButtonAction.EVENT_NAMES[e] }</label>`).join('') }
+                        </span>
+                    </div>
+                    <div class="col-edit-row" id="${ p }-recompute-row">
+                        <label class="col-edit-label col-edit-check-label">
+                            <input type="checkbox" id="${ p }-recompute" ${ cfg.recompute ? 'checked' : '' }> Пересчитывать при каждом показе
+                        </label>
+                    </div>
+                    <div class="col-edit-row" id="${ p }-when-row">
+                        <label class="col-edit-label">Условие (формула):</label>
+                        <input type="text" id="${ p }-when" class="form-control form-control-sm col-edit-input" value="${ this.escapeHtml(cfg.when || '') }" placeholder="Пусто — всегда; например {Статус} = &quot;Оплачен&quot;" autocomplete="off">
+                    </div>
+                    <div class="col-edit-row" id="${ p }-user-row">
+                        <label class="col-edit-label">Выполнять от имени:</label>
+                        <input type="text" id="${ p }-user" class="form-control form-control-sm col-edit-input" value="${ this.escapeHtml(cfg.user || '') }" placeholder="Пусто — текущий пользователь; логин или id" autocomplete="off">
+                    </div>
                     <div class="col-edit-hint" style="font-size:12px;color:var(--md-on-surface-variant,#666);">
                         [ID] — id записи, [VAL] — значение первой колонки, {Название колонки} — значение поля строки.
+                        При создании, изменении и удалении действие выполняет сервер — для любого способа записи.
                     </div>
                 </div>`;
         },
@@ -645,8 +862,17 @@ if (typeof IntegramTable !== 'undefined') {
                 q('-params-row').style.display = t === 'query' ? '' : 'none';
                 q('-newtab-row').style.display = t === 'link' ? '' : 'none';
                 q('-write-row').style.display = t === 'link' ? 'none' : '';
+                // A link runs on click only
+                IntegramButtonAction.EVENTS.forEach(e => {
+                    const lbl = q(`-on-${ e }-label`);
+                    if (lbl) lbl.style.display = t === 'link' && e !== 'PRESS' ? 'none' : '';
+                });
+                q('-recompute-row').style.display = t !== 'link' && q('-on-READ').checked ? '' : 'none';
+                q('-when-row').style.display = t === 'link' ? 'none' : '';
+                q('-user-row').style.display = t === 'link' ? 'none' : '';
             };
             q('-type').addEventListener('change', sync);
+            q('-on-READ').addEventListener('change', sync);
             // Enter inside the prompt/formula text must add a line, not save the modal
             q('-body').addEventListener('keydown', (e) => { if (e.key === 'Enter') e.stopPropagation(); });
             sync();
@@ -665,6 +891,10 @@ if (typeof IntegramTable !== 'undefined') {
                 if (type === 'prompt') cfg.prompt = body;
                 if (type === 'formula') cfg.formula = body;
                 if (type === 'query') { cfg.query = body; cfg.params = q('-params').value.trim(); }
+                cfg.on = IntegramButtonAction.EVENTS.filter(e => q(`-on-${ e }`) && q(`-on-${ e }`).checked);
+                cfg.recompute = q('-recompute').checked;
+                cfg.when = q('-when').value.trim();
+                cfg.user = q('-user').value.trim();
             }
             return IntegramButtonAction.toAction(cfg);
         },
