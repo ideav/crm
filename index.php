@@ -1666,6 +1666,8 @@ function Exec_sql($sql, $err_msg, $log=TRUE, $fatal=TRUE){
 		die_info($msg);
 	}
 	$time = microtime(TRUE) - $time_start;
+	# id вставки снимается до журнала: его SELECT сбрасывает mysqli_insert_id() в 0
+	$GLOBALS["insert_id"] = mysqli_insert_id($connection);
 	if($change)
 	    logChangeAfter($change, $time);
 	trace("[".round($time, 4)."] $sql; [$err_msg]");
@@ -9643,7 +9645,7 @@ function Insert($up, $ord, $t, $val, $message)
 {
 	global $connection, $z;
 	exec_sql("INSERT INTO $z (up, ord, t, val) VALUES ($up, $ord, $t, '".addcslashes($val, "\\\'")."')", "Insert: $message");
-	return mysqli_insert_id($connection);
+	return $GLOBALS["insert_id"];  # снят в Exec_sql до SELECT журнала
 }
 # Update the type
 function UpdateTyp($id, $t)
