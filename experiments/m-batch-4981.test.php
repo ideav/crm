@@ -142,7 +142,7 @@ if($part === "batch"){
         return $id;
     }
 
-    core_eval($coreSrc, array("my_die", "InBatchOp", "OpFail", "Reset_Reqs_Cache", "ApplyOp", "ApplyMBatch"));
+    core_eval($coreSrc, array("my_die", "InBatchOp", "OpFail", "Reset_Reqs_Cache", "ApplyOp", "BatchRefs", "ApplyMBatch"));
 
     function run($ops){
         $GLOBALS["CALLS"] = array();

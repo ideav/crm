@@ -19,9 +19,12 @@ if($indexSource === false){
     exit(1);
 }
 
-$start = strpos($indexSource, 'case "_m_new":');
-$end = strpos($indexSource, '# Type editor commands', $start);
-assertTest($start !== false && $end !== false, "_m_new case is present in index.php");
+# The _m_new body lives in ApplyMNew (issue #4988: shared with _m_batch).
+$start = strpos($indexSource, 'function ApplyMNew(');
+$end = strpos($indexSource, "
+}
+", $start);
+assertTest($start !== false && $end !== false, "_m_new handler ApplyMNew is present in index.php");
 
 $newCase = substr($indexSource, $start, $end - $start);
 assertTest(
