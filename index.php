@@ -9884,7 +9884,8 @@ function aiAgentSubmitRequest($com){
         # Синхронный агент (вариант A) отвечает сразу content -> задача done.
         # Асинхронный (вариант B1) отвечает 202 {status:queued} -> задача остаётся
         # processing, результат придёт в callback; клиентский опрос это поддерживает.
-        $response = callIntegramAgent($z, $message, $attachments, $payment, $jobId, $callbackUrl, $callbackSecret);
+        $context = aiAgentScreenContext(isset($_POST["context"]) ? (string)$_POST["context"] : "");
+        $response = callIntegramAgent($z, $message, $attachments, $payment, $jobId, $callbackUrl, $callbackSecret, $context);
         if(!empty($response["pending"])){
             $changes = array("status" => "processing");
             if(!empty($response["agentJobId"]))
@@ -10178,7 +10179,52 @@ function evaluateAiAgentPayment($raw, $db){
     $result["paidUntil"] = $paidAt + 31 * 24 * 3600;
     return $result;
 }
-function callIntegramAgent($db, $message, $attachments, $payment, $jobId="", $callbackUrl="", $callbackSecret=""){
+# python2node#847: контекст экрана из js/ai-agent-chat.js (JSON в поле context) — где сейчас
+# пользователь. Пропускаются только известные поля: числа — положительные, строки — в одну
+# строку с обрезкой. Нет контекста, главная страница или мусор — null, запрос агенту прежний.
+function aiAgentScreenContext($raw){
+    $src = json_decode((string)$raw, true);
+    if(!is_array($src))
+        return null;
+    $page = isset($src["page"]) && is_string($src["page"]) ? $src["page"] : "";
+    if(!in_array($page, array("object", "table", "report", "workplace", "dir_admin"), true))
+        return null;
+    $line = function($v, $max){
+        if(!is_string($v) && !is_int($v) && !is_float($v))
+            return "";
+        return mb_substr(trim(preg_replace('/\s+/u', " ", (string)$v)), 0, $max, "UTF-8");
+    };
+    $ctx = array("page" => $page);
+    foreach(array("table_id", "object_id", "report_id") as $k)
+        if(isset($src[$k]) && is_scalar($src[$k]) && preg_match('/^\d{1,12}$/', (string)$src[$k]) && (int)$src[$k] > 0)
+            $ctx[$k] = (int)$src[$k];
+    if(isset($src["filters"]) && is_array($src["filters"])){
+        $filters = array();
+        foreach($src["filters"] as $k => $v){
+            if(count($filters) >= 20)
+                break;
+            if(preg_match('/^(F|FR|TO)_\w{1,64}$/u', (string)$k) && (is_string($v) || is_int($v) || is_float($v)))
+                $filters[(string)$k] = $line($v, 200);
+        }
+        if(count($filters))
+            $ctx["filters"] = $filters;
+    }
+    if(isset($src["selection"]) && is_array($src["selection"])){
+        $ids = array();
+        foreach($src["selection"] as $v)
+            if(is_scalar($v) && preg_match('/^\d{1,12}$/', (string)$v) && (int)$v > 0 && !in_array((int)$v, $ids, true) && count($ids) < 50)
+                $ids[] = (int)$v;
+        if(count($ids))
+            $ctx["selection"] = $ids;
+    }
+    foreach(array("url" => 500, "label" => 120, "workplace" => 64) as $k => $max){
+        $v = isset($src[$k]) ? $line($src[$k], $max) : "";
+        if($v !== "" && ($k !== "url" || $v[0] === "/"))
+            $ctx[$k] = $v;
+    }
+    return $ctx;
+}
+function callIntegramAgent($db, $message, $attachments, $payment, $jobId="", $callbackUrl="", $callbackSecret="", $context=null){
     # Отправка данных фиксированному ИИ-агенту (см. docs/ai-agent-endpoint.md).
     # Endpoint берётся из конфигурации; при его отсутствии возвращается подтверждение
     # готовности без вызова. $jobId/$callbackUrl/$callbackSecret включают async-режим
@@ -10211,6 +10257,9 @@ function callIntegramAgent($db, $message, $attachments, $payment, $jobId="", $ca
         "message" => $message,
         "attachments" => $attachments
     );
+    # Где сейчас пользователь (python2node#847); без контекста поле не передаётся.
+    if(is_array($context) && count($context))
+        $request["context"] = $context;
     # Async-режим (вариант B1): сообщаем агенту, куда вернуть результат. Для
     # синхронного агента поля безвредны — он их игнорирует и отвечает content сразу.
     if($jobId !== "" && $callbackUrl !== ""){
