@@ -21,7 +21,7 @@
 | Деплой: update.php, PR, worktree | [deploy.md](deploy.md) | update.php, update.conf, форк unidel2035, git worktree, ветки, шаблон базы, TEMPLATES, newDb |
 | Дэшборд / финмодель `dash` | [dashboard.md](dashboard.md) | Дэшборд 559, Лист, Панель, RG, Строка, Значение, period, RGtype, RGcolumns, Метка, формулы, словарь периодов |
 | Дэшборд: устройство кода и развитие | [dashboard-dev.md](dashboard-dev.md) | dash.js, dash-optimize.js, dash-import, конвейер загрузки, data-src, формулы, eval, правка ячеек, viz-настройки, плитки, opti, развитие дэшборда, подсветка влияющих ячеек |
-| Колонки-кнопки: ссылка, промпт ИИ, формула, запрос | [button-columns.md](button-columns.md) | BUTTON, тип 7, _d_action, action, промпт, формула, ИИ-колонка, [ID], [VAL], {Колонка}, записать результат |
+| Колонки-кнопки: ссылка, промпт ИИ, формула, запрос | [button-columns.md](button-columns.md) | BUTTON, тип 7, _d_action, action, промпт, формула, ИИ-колонка, [ID], [VAL], {Колонка}, записать результат, триггер, при создании, при изменении, при удалении, при показе, CREATE, UPDATE, DELETE, READ, on, when, recompute, от имени, user, _m_action, конфликты |
 | Компонент таблиц (data-grid) | [table-component.md](table-component.md) | integram-table, data-integram-table, data-api-url, фильтры, инлайн-правка, экспорт, вставка из буфера, paste-data-btn, build.sh |
 | Импорт батчем `import=1` | [import.md](import.md) | bki_file, DATA, plain_data, формат строк, завершающий `;`, чанки 8МБ, upsert |
 | Архив таблицы: BKI и JSON | [json-archive.md](json-archive.md) | json_export, integram-archive, метаданные+данные, types, reqs, target, сведение колонок, перенос между базами |
@@ -40,6 +40,7 @@
 
 | Симптом / ключ | Тема | Файл |
 |---|---|---|
+| триггер кнопки с запросом ничего не пишет, в журнале ошибка связи «запрос …» | сервер не видит себя по `https://{Host}` — задать `BUTTON_TRIGGER_BASE_URL` | [button-columns.md](button-columns.md) |
 | в `<db>_log.jsonl` нет строки запроса, упавшего с фатальной ошибкой | `exit` в обработчике завершения отменяет остальные — звать `logRequest()` перед `exit` | [logs.md](logs.md) |
 | `_m_set` отбит целиком, «полусделанная» запись, повтор упирается в уже записанное | реквизит без гранта в общем запросе — грант на колонку + изоляция шага | [roles.md](roles.md) |
 | значение при импорте переехало в соседнюю колонку, текст обрезан по середине | `;` внутри значения — разделитель колонок BKI; экранировать `\;` | [import.md](import.md) |

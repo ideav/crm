@@ -669,6 +669,7 @@ define("SETTINGS_TYPE", 271);
 define("SETTINGS_VAL", 273);
 
 require_once __DIR__ . "/include/field_attrs.php";
+require_once __DIR__ . "/include/button_triggers.php";
 require_once __DIR__ . "/include/delimiters.php";
 require_once __DIR__ . "/include/json_archive.php";
 require_once __DIR__ . "/include/import_reconcile.php";
@@ -10453,7 +10454,13 @@ function aiAgentStatusRequest($com){
     $jobId = isset($_GET["job"]) ? preg_replace('/[^a-f0-9]/i', '', (string)$_GET["job"]) : "";
     if($jobId !== ""){
         $job = aiAgentJobGet($z, $jobId);
-        if(!$job || !aiAgentJobIsOf($job, $user))
+        # python2node#866: задача кнопки, запущенной на сервере от имени другого пользователя, —
+        # видна тому, кто нажал (viewer)
+        if(!$job || !aiAgentJobIsOf($job, $user)){
+            $btJob = aiAgentJobGet("trg:".$z, $jobId);
+            $job = ($btJob && isset($btJob["viewer"]) && $btJob["viewer"] === $user) ? $btJob : null;
+        }
+        if(!$job)
             aiAgentError(t9n("[RU]Задача ИИ-агента не найдена[EN]AI agent job not found"), 404);
         api_dump(json_encode(array("job" => aiAgentJobPublic($job)), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "ai-agent.json");
         return;
@@ -10481,7 +10488,13 @@ function handleAiAgentCallback($db){
     if($jobId === "")
         aiAgentError(t9n("[RU]В callback не передан job_id[EN]Callback is missing job_id"), 400);
 
+    $store = $db;
     $job = aiAgentJobGet($db, $jobId);
+    if(!$job){ # python2node#866: задача кнопки или триггера
+        $job = aiAgentJobGet("trg:".$db, $jobId);
+        if($job)
+            $store = "trg:".$db;
+    }
     # Принимаем callback только для задачи, которую сами поставили на async (есть
     # сохранённый секрет). Иначе — 404, чтобы не раскрывать существование задач.
     if(!$job || empty($job["callbackSecret"]))
@@ -10508,7 +10521,7 @@ function handleAiAgentCallback($db){
     if($status === "progress"){
         $progress = aiAgentProgressClean(isset($data["progress"]) ? $data["progress"] : "");
         if($progress !== "")
-            aiAgentJobUpdate($db, $jobId, array("progress" => $progress));
+            aiAgentJobUpdate($store, $jobId, array("progress" => $progress));
         api_dump(json_encode(array("ok" => true, "status" => "processing"), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "ai-agent.json");
         return;
     }
@@ -10516,7 +10529,7 @@ function handleAiAgentCallback($db){
         $error = (isset($data["error"]) && trim((string)$data["error"]) !== "")
             ? (string)$data["error"]
             : t9n("[RU]ИИ-агент завершил работу с ошибкой[EN]The AI agent finished with an error");
-        aiAgentJobUpdate($db, $jobId, array("status" => "error", "error" => $error));
+        aiAgentJobUpdate($store, $jobId, array("status" => "error", "error" => $error));
         api_dump(json_encode(array("ok" => true, "status" => "error"), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "ai-agent.json");
         return;
     }
@@ -10533,7 +10546,7 @@ function handleAiAgentCallback($db){
     $plan = isset($data["plan"]) ? aiAgentPlanPublic($data["plan"]) : null;
     if($plan)
         $result["plan"] = $plan;
-    aiAgentJobUpdate($db, $jobId, array(
+    aiAgentJobUpdate($store, $jobId, array(
         "status" => "done",
         "result" => $result,
         "error" => null,
@@ -10548,6 +10561,12 @@ function handleAiAgentCallback($db){
             $origin["result"]["plan"] = $plan;
             aiAgentJobUpdate($db, $plan["id"], array("result" => $origin["result"]));
         }
+    }
+    # python2node#866: ответ для записи в поле — пишется дальше по ходу запроса, после
+    # подключения к БД (BtCallbackApply), от имени исполнителя задачи
+    if($store !== $db && !empty($job["trigger"]["write"])){
+        $GLOBALS["BT_CALLBACK"] = array("job" => $jobId);
+        return;
     }
     api_dump(json_encode(array("ok" => true, "status" => "done"), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "ai-agent.json");
 }
@@ -10985,6 +11004,11 @@ if(!defined("AI_AGENT_JOBS_MAX")) define("AI_AGENT_JOBS_MAX", 20);
 if(!defined("AI_AGENT_JOBS_TTL")) define("AI_AGENT_JOBS_TTL", 24 * 3600);
 
 function aiAgentJobsFile($db){
+    # "trg:<база>" — задачи кнопок и триггеров (python2node#866), отдельный файл: не вытесняют задачи чата
+    if(strncmp((string)$db, "trg:", 4) === 0){
+        $safeDb = preg_replace('/[^a-z0-9_]/i', '', substr((string)$db, 4));
+        return $safeDb === "" ? "" : sys_get_temp_dir()."/ai_agent_trigger_jobs_".$safeDb.".json";
+    }
     $safeDb = preg_replace('/[^a-z0-9_]/i', '', (string)$db);
     if($safeDb === "")
         return "";
@@ -12061,6 +12085,7 @@ function ApplyOp($op, $rec_id, $fields, $up = 0, &$rec = NULL)
 		elseif($op === "new"){
 			$res = ApplyMNew($rec_id, $up, array());
 			$rec = $res["rec"];
+			$GLOBALS["BT_NEW_CREATED"] = ($res["json"] !== "") && !isset($res["warning"]);	# python2node#866
 			if(isset($res["warning"]))
 				$warnings = $res["warning"];
 		}
@@ -12146,7 +12171,13 @@ function ApplyMBatch($payload)
 			if(isset($fields["copybtn"]))
 				throw new IntegramOpError(t9n("[RU]Копия записи в пакете не поддерживается[EN]Copying a record is not supported in a batch"));
 			$newRec = NULL;
+			# python2node#866: триггеры кнопок — по каждой операции, работа — после ответа на пакет.
+			# function_exists: тесты пакета (m-batch-*.test.php) берут ApplyMBatch из ядра без движка.
+			$btHook = function_exists("BtHookBefore") ? BtHookBefore($kind, $rec) : null;
+			$GLOBALS["BT_NEW_CREATED"] = FALSE;
 			$warnings = ApplyOp($kind, $rec, $fields, $up, $newRec);
+			if($btHook)
+				$warnings .= BtHookAfter($btHook, ($kind === "new" && $GLOBALS["BT_NEW_CREATED"]) ? $newRec : null);
 			if($kind === "new"){
 				$created[$n] = $newRec;
 				$res["type"] = $rec;
@@ -12942,6 +12973,497 @@ function ApplyMSave($id, $req, $files)
 }
 # </m-batch-4981>
 
+# <button-triggers-866> Триггеры колонок-кнопок (python2node#866): связка движка
+# include/button_triggers.php с ядром. Движок вызывает функции порта (BtCorePort), здесь
+# они сделаны на Exec_sql/ApplyOp/ИИ-агенте. Описание — docs/kb/button-columns.md.
+function BtCorePort(){
+	return array("meta" => "BtMeta", "record" => "BtRecord", "write" => "BtCoreWrite"
+		, "query" => "BtQueryLoopback", "prompt" => "BtPromptSubmit", "promptGate" => "BtPromptGate"
+		, "user" => "BtLoadUser", "defer" => "BtDefer", "warn" => "BtWarn", "log" => "BtLog");
+}
+function BtLog($msg){ wlog("[button] ".$msg, "log"); }
+function BtWarn($msg){ $GLOBALS["BT_WARN"][] = $msg; }
+# Накопленные предупреждения триггеров одной строкой (и очистка)
+function BtDrainWarnings(){
+	$w = isset($GLOBALS["BT_WARN"]) ? $GLOBALS["BT_WARN"] : array();
+	$GLOBALS["BT_WARN"] = array();
+	return count($w) ? implode("<br>", $w)."<br>" : "";
+}
+# Запрос пишет сам ИИ-агент (client=ai) — его записи триггеры не запускают
+function BtSkipRequest(){
+	foreach(array($_GET, $_POST) as $src)
+		if(isset($src["client"]) && is_string($src["client"]) && strtolower($src["client"]) === "ai")
+			return TRUE;
+	return FALSE;
+}
+# Цепочка триггеров, пришедшая с запросом (запрос отчёта триггера: bt_chain=колонки через запятую)
+function BtChainFromRequest(){
+	$raw = isset($_GET["bt_chain"]) ? (string)$_GET["bt_chain"] : (isset($_POST["bt_chain"]) && is_string($_POST["bt_chain"]) ? $_POST["bt_chain"] : "");
+	$chain = array();
+	foreach(explode(",", $raw) as $c)
+		if(ctype_digit(trim($c)) && count($chain) < 10)
+			$chain[] = (int)trim($c);
+	return $chain;
+}
+# Метаданные таблицы для движка: имя, базовый тип, колонки в порядке ord (кешируется на запрос)
+function BtMeta($typ){
+	global $z;
+	$typ = (int)$typ;
+	if(isset($GLOBALS["BT_META"][$typ]))
+		return $GLOBALS["BT_META"][$typ];
+	$meta = null;
+	$row = mysqli_fetch_array(Exec_sql("SELECT val, t FROM $z WHERE id=$typ AND up=0", "Button triggers: table"));
+	if($row){
+		$cols = array();
+		$data_set = Exec_sql("SELECT a.id, a.val attrs, CASE WHEN a.t=1 OR refs.id IS NOT NULL THEN 1 ELSE 0 END isref"
+				.", CASE WHEN refs.id IS NULL THEN typs.t ELSE refs.t END base_typ"
+				.", CASE WHEN a.t=1 THEN a.val WHEN refs.id IS NULL THEN typs.val ELSE refs.val END val"
+			." FROM $z a LEFT JOIN $z typs ON typs.id=a.t AND a.t!=1"
+			." LEFT JOIN $z refs ON refs.id=typs.t AND refs.t!=refs.id"
+			." WHERE a.up=$typ AND NOT (a.t=a.up AND a.ord=0) ORDER BY a.ord", "Button triggers: columns");
+		while($c = mysqli_fetch_array($data_set))
+			$cols[] = array("id" => (int)$c["id"], "name" => FieldAttrsAlias($c["attrs"], (string)$c["val"])
+				, "base" => isset($GLOBALS["REV_BT"][$c["base_typ"]]) ? $GLOBALS["REV_BT"][$c["base_typ"]] : ""
+				, "ref" => (bool)$c["isref"], "attrs" => (string)$c["attrs"]);
+		$meta = array("id" => $typ, "name" => (string)$row["val"]
+			, "base" => isset($GLOBALS["REV_BT"][$row["t"]]) ? $GLOBALS["REV_BT"][$row["t"]] : "", "cols" => $cols);
+	}
+	$GLOBALS["BT_META"][$typ] = $meta;
+	return $meta;
+}
+# Значение для подстановок — как его видит пользователь
+function BtViewValue($base, $val){
+	$val = (string)$val;
+	$tz = isset($GLOBALS["tzone"]) ? (int)$GLOBALS["tzone"] : 0;
+	if($val === "")
+		return $val;
+	if($base === "DATE")
+		return strlen($val) > 8 ? date("d.m.Y", (int)$val + $tz) : substr($val, 6, 2).".".substr($val, 4, 2).".".substr($val, 0, 4);
+	if($base === "DATETIME" && is_numeric($val))
+		return date("d.m.Y H:i:s", (int)$val + $tz);
+	if($base === "FILE" && strpos($val, ":"))
+		return substr($val, strpos($val, ":") + 1);
+	return $val;
+}
+# Снимок записи: тип, главное значение и значения колонок (ссылки — значения записей, через запятую)
+function BtRecord($id){
+	global $z;
+	$id = (int)$id;
+	if($id <= 0)
+		return null;
+	$row = mysqli_fetch_array(Exec_sql("SELECT t, val, up FROM $z WHERE id=$id", "Button triggers: record"));
+	if(!$row || (int)$row["up"] === 0)
+		return null;
+	$meta = BtMeta((int)$row["t"]);
+	if(!$meta)
+		return null;
+	$scalar = array();
+	$refs = array();
+	foreach($meta["cols"] as $col)
+		if($col["ref"])
+			$refs[$col["id"]] = TRUE;
+		else
+			$scalar[$col["id"]] = $col["base"];
+	$values = array();
+	$data_set = Exec_sql("SELECT c.t, c.val, r.val rval FROM $z c LEFT JOIN $z r ON r.id=c.t WHERE c.up=$id ORDER BY c.ord", "Button triggers: record values");
+	while($c = mysqli_fetch_array($data_set)){
+		$t = (int)$c["t"];
+		if(isset($scalar[$t]))	# Реквизит опознаём по t (колонке), а ссылку — по val, только если t не колонка
+			$values[$t] = BtViewValue($scalar[$t], $c["val"]);
+		elseif(ctype_digit((string)$c["val"]) && isset($refs[(int)$c["val"]])){
+			$k = (int)$c["val"];
+			$values[$k] = (isset($values[$k]) && $values[$k] !== "" ? $values[$k]."," : "").(string)$c["rval"];
+		}
+	}
+	return array("id" => $id, "type" => (int)$row["t"], "val" => BtViewValue($meta["base"], $row["val"]), "values" => $values);
+}
+# Пользователь, от имени которого выполняется действие: id записи «Пользователь» или логин.
+# Удалён — не найден; без роли — закрыт (Validate_Token такого не пускает). Нет токена —
+# выпускается, как при входе (updateTokens).
+function BtLoadUser($ref){
+	global $z;
+	if((is_int($ref) || ctype_digit((string)$ref)) && (int)$ref === 0 && isset($GLOBALS["GLOBAL_VARS"]["user_id"]) && (string)$GLOBALS["GLOBAL_VARS"]["user_id"] === "0")
+		return array("user" => "admin", "user_id" => 0, "role" => "admin", "role_id" => ADMINROLE
+			, "token" => hash("sha512", ADMINHASH.$z), "xsrf" => hash("sha512", $z.ADMINHASH), "grants" => FALSE);
+	$where = (is_int($ref) || ctype_digit((string)$ref)) ? "u.id=".(int)$ref : "u.val='".addslashes((string)$ref)."'";
+	$row = mysqli_fetch_array(Exec_sql("SELECT u.id, u.val, role_def.id r, role_def.val role, tok.val tok, xsrf.val xsrf FROM $z u"
+			." LEFT JOIN ($z r CROSS JOIN $z role_def) ON r.up=u.id AND role_def.id=r.t AND role_def.t=".ROLE
+			." LEFT JOIN $z tok ON tok.up=u.id AND tok.t=".TOKEN
+			." LEFT JOIN $z xsrf ON xsrf.up=u.id AND xsrf.t=".XSRF
+			." WHERE u.t=".USER." AND $where LIMIT 1", "Button triggers: run-as user"));
+	if(!$row)
+		throw new Exception(t9n("[RU]пользователь «".$ref."» не найден — действие не выполнено[EN]user '".$ref."' not found — the action was not run"));
+	if(!$row["r"])
+		throw new Exception(t9n("[RU]у пользователя «".$row["val"]."» нет роли (доступ закрыт) — действие не выполнено[EN]user '".$row["val"]."' has no role (access closed) — the action was not run"));
+	$tok = (string)$row["tok"];
+	$xsrf = (string)$row["xsrf"];
+	if($tok === ""){
+		$tok = secureToken();
+		Insert($row["id"], 1, TOKEN, $tok, "Issue token for a button action user");
+	}
+	if($xsrf === ""){
+		$xsrf = xsrf($tok, $z);
+		Insert($row["id"], 1, XSRF, $xsrf, "Issue xsrf for a button action user");
+	}
+	return array("user" => strtolower($row["val"]), "user_id" => (int)$row["id"], "role" => strtolower($row["role"])
+		, "role_id" => $row["r"], "token" => $tok, "xsrf" => $xsrf, "grants" => TRUE);
+}
+# Выполнить $fn от имени пользователя $user (null — текущий): подменяются GLOBAL_VARS и GRANTS
+function BtAsUser($user, $fn){
+	if(!$user)
+		return $fn();
+	$savedVars = isset($GLOBALS["GLOBAL_VARS"]) ? $GLOBALS["GLOBAL_VARS"] : array();
+	$savedGrants = isset($GLOBALS["GRANTS"]) ? $GLOBALS["GRANTS"] : array();
+	foreach(array("user", "user_id", "role", "role_id", "token", "xsrf") as $k)
+		$GLOBALS["GLOBAL_VARS"][$k] = $user[$k];
+	$GLOBALS["GRANTS"] = array();
+	if(!empty($user["grants"]))
+		getGrants($user["role_id"]);
+	try{
+		return $fn();
+	}
+	finally{
+		$GLOBALS["GLOBAL_VARS"] = $savedVars;
+		$GLOBALS["GRANTS"] = $savedGrants;
+	}
+}
+# Запись значения колонки кнопки: тот же обработчик, что _m_set, с проверкой прав. Отказ ядра
+# (OpFail/my_die) внутри — исключение, а не exit: BATCH_OP переводит их в IntegramOpError.
+# Запись ИИ ($asAi) идёт с client=ai — в журнале логин~ai.
+function BtCoreWrite($rec, $col, $value, $runAs, $asAi, $chain){
+	$fields = array("t".(int)$col => $value);
+	if($asAi)
+		$fields["client"] = "ai";
+	BtAsUser($runAs, function() use ($rec, $col, $value, $fields, $chain){
+		$wasBatch = isset($GLOBALS["BATCH_OP"]) ? $GLOBALS["BATCH_OP"] : NULL;
+		$GLOBALS["BATCH_OP"] = TRUE;
+		try{
+			$w = ApplyOp("set", (int)$rec, $fields);
+			BtLog("#$rec t$col ← «".mb_substr((string)$value, 0, 200)."» (цепочка ".implode(",", $chain).")".($w !== "" ? "; $w" : ""));
+		}
+		finally{
+			if($wasBatch === NULL)
+				unset($GLOBALS["BATCH_OP"]);
+			else
+				$GLOBALS["BATCH_OP"] = $wasBatch;
+		}
+	});
+}
+# Адрес этого сервера для запросов к самому себе (отчёт триггера)
+function BtLoopbackBase(){
+	$base = aiConfigValue(array("BUTTON_TRIGGER_BASE_URL", "AI_AGENT_CALLBACK_BASE_URL", "INTEGRAM_AGENT_CALLBACK_BASE_URL"));
+	if($base === ""){
+		$host = isset($_SERVER["HTTP_HOST"]) ? preg_replace('/[^a-z0-9.\-:]/i', '', (string)$_SERVER["HTTP_HOST"]) : "";
+		if($host === "")
+			return "";
+		$base = "https://".$host;
+	}
+	return rtrim($base, "/");
+}
+# Запрос report/{имя}?JSON_KV отдельным HTTP-запросом к себе с токеном исполнителя: отчёт
+# работает в своём процессе со своими глобалами, а цепочка уходит параметром bt_chain.
+function BtQueryLoopback($name, $params, $runAs, $chain){
+	global $z;
+	$token = $runAs ? $runAs["token"] : (isset($GLOBALS["GLOBAL_VARS"]["token"]) ? (string)$GLOBALS["GLOBAL_VARS"]["token"] : "");
+	$base = BtLoopbackBase();
+	if($base === "")
+		throw new Exception(t9n("[RU]не задан адрес сервера (BUTTON_TRIGGER_BASE_URL)[EN]server address is not set (BUTTON_TRIGGER_BASE_URL)"));
+	if(!function_exists("curl_init"))
+		throw new Exception("PHP cURL недоступен");
+	$url = "$base/$z/report/".BtEncodeUriComponent($name)."?JSON_KV".($params !== "" ? "&$params" : "")
+		.(count($chain) ? "&bt_chain=".implode(",", array_map("intval", $chain)) : "");
+	$ch = curl_init($url);
+	curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+	curl_setopt($ch, CURLOPT_HTTPHEADER, array("X-Authorization: $token", "Accept: application/json", "User-Agent: Integram button trigger"));
+	curl_setopt($ch, CURLOPT_TIMEOUT, 60);
+	$raw = curl_exec($ch);
+	$errno = curl_errno($ch);
+	$error = curl_error($ch);
+	$code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+	curl_close($ch);
+	if($errno)
+		throw new Exception("запрос «".$name."»: ".$error);
+	$data = json_decode((string)$raw, true);
+	if(!is_array($data))
+		throw new Exception("запрос «".$name."» вернул не JSON (HTTP $code)");
+	if(isset($data[0]["error"]) && count($data) === 1)
+		throw new Exception("запрос «".$name."»: ".$data[0]["error"]);
+	if(isset($data["error"]))
+		throw new Exception("запрос «".$name."»: ".(is_scalar($data["error"]) ? $data["error"] : json_encode($data["error"])));
+	return $data;
+}
+# Хранилище задач ИИ-агента от кнопок — отдельный файл базы (не вытесняет задачи чата)
+function BtJobsStore(){ global $z; return "trg:".$z; }
+# Проверка перед промптом триггера: "" — можно, FALSE — молча пропустить (не оплачено, в журнал),
+# иначе текст отказа (лимит в час, по этой записи и колонке задача уже идёт)
+function BtPromptGate($key){
+	global $z;
+	$payment = checkAiAgentPayment($z);
+	if(empty($payment["ok"])){
+		BtLog("ИИ-агент не оплачен — промпт триггера пропущен ($key)");
+		return FALSE;
+	}
+	$jobs = aiAgentJobsLoadRaw(BtJobsStore());
+	$now = time();
+	$hour = 0;
+	foreach($jobs as $job){
+		if(!isset($job["trigger"]) || !isset($job["createdAt"]))
+			continue;
+		if(isset($job["viewer"]))	# нажатие через _m_action — не триггер
+			continue;
+		if($now - (int)$job["createdAt"] < 3600)
+			$hour++;
+		if(BtJobPending($job, $key, $now))
+			return t9n("[RU]по этой записи уже выполняется задача ИИ-агента — повторная не ставится[EN]an AI agent job is already running for this record — no second one");
+	}
+	if($hour >= BT_PROMPT_HOURLY_CAP)
+		return t9n("[RU]лимит промпт-задач триггеров исчерпан (".BT_PROMPT_HOURLY_CAP." в час на базу) — промпт не отправлен[EN]trigger prompt limit reached (".BT_PROMPT_HOURLY_CAP." per hour per database) — the prompt was not sent");
+	return "";
+}
+# Задача по той же записи и колонке ещё в работе (не старше 15 минут)
+function BtJobPending($job, $key, $now){
+	return isset($job["trigger"]["key"]) && $job["trigger"]["key"] === $key
+		&& in_array(isset($job["status"]) ? $job["status"] : "", array("queued", "processing"), TRUE)
+		&& ($now - (int)$job["createdAt"]) < 900;
+}
+# Поставить задачу ИИ-агенту от имени исполнителя. Повторная задача по той же записи и колонке,
+# пока прежняя в работе, не ставится (проверка под блокировкой файла задач). Синхронный агент
+# отвечает сразу — content возвращается движку для записи.
+function BtPromptSubmit($job){
+	global $z;
+	return BtAsUser($job["runAs"], function() use ($job, $z){
+		$payment = checkAiAgentPayment($z);
+		if(empty($payment["ok"])){
+			BtLog("ИИ-агент не оплачен — промпт пропущен (#".$job["trigger"]["rec"].")");
+			return array();
+		}
+		$now = time();
+		$rec = aiAgentJobNew($job["message"], array(), $now, aiAgentCurrentUser());
+		$rec["status"] = "processing";
+		$rec["trigger"] = $job["trigger"];
+		$rec["trigger"]["uid"] = isset($GLOBALS["GLOBAL_VARS"]["user_id"]) ? (int)$GLOBALS["GLOBAL_VARS"]["user_id"] : null;
+		if(isset($job["viewer"]))
+			$rec["viewer"] = $job["viewer"];
+		$rec["callbackSecret"] = aiAgentJobId();
+		$key = $job["trigger"]["key"];
+		$created = aiAgentJobsMutate(BtJobsStore(), function($jobs) use ($rec, $now, $key){
+			$jobs = aiAgentJobsPrune($jobs, $now, AI_AGENT_JOBS_TTL);
+			foreach($jobs as $j)
+				if(BtJobPending($j, $key, $now))
+					return array($jobs, FALSE);
+			return array(aiAgentJobsAppend($jobs, $rec, 500), TRUE);
+		});
+		if(!$created){
+			BtLog("по записи ".$key." уже идёт задача ИИ-агента — повторная не поставлена");
+			return array();
+		}
+		$id = $rec["id"];
+		try{
+			$response = callIntegramAgent($z, $job["message"], array(), $payment, $id, aiAgentCallbackUrl($z), $rec["callbackSecret"], $job["context"]);
+		}
+		catch(Exception $e){
+			aiAgentJobUpdate(BtJobsStore(), $id, array("status" => "error", "error" => $e->getMessage()));
+			BtLog("промпт #".$job["trigger"]["rec"].": ".$e->getMessage());
+			return array("job" => $id);
+		}
+		if(!empty($response["pending"])){
+			aiAgentJobUpdate(BtJobsStore(), $id, array("agentJobId" => isset($response["agentJobId"]) ? (string)$response["agentJobId"] : ""));
+			return array("job" => $id);
+		}
+		aiAgentJobUpdate(BtJobsStore(), $id, array("status" => "done", "result" => $response, "error" => null, "applied" => "sync"));
+		$content = isset($response["assistant"]["content"]) ? (string)$response["assistant"]["content"] : "";
+		return array("job" => $id, "content" => $content);
+	});
+}
+# Работа триггеров — после отправки ответа: запись пользователя уже сохранена и отдана.
+# Одинаковый ключ (запись:колонка:событие) за запрос выполняется один раз — с последним снимком.
+function BtDefer($key, $fn){
+	if(!isset($GLOBALS["BT_DEFERRED"])){
+		$GLOBALS["BT_DEFERRED"] = array();
+		register_shutdown_function("BtRunDeferred");
+	}
+	$GLOBALS["BT_DEFERRED"][$key] = $fn;
+}
+function BtRunDeferred(){
+	if(empty($GLOBALS["BT_DEFERRED"]))
+		return;
+	if(function_exists("fastcgi_finish_request"))
+		@fastcgi_finish_request();
+	ob_start(function($buffer){ return ""; });	# вывод ядра после ответа никуда не идёт
+	Limit_time(300);
+	while(count($GLOBALS["BT_DEFERRED"])){
+		reset($GLOBALS["BT_DEFERRED"]);
+		$key = key($GLOBALS["BT_DEFERRED"]);
+		$fn = $GLOBALS["BT_DEFERRED"][$key];
+		unset($GLOBALS["BT_DEFERRED"][$key]);
+		try{
+			$fn();
+		}
+		catch(Throwable $e){
+			BtLog("$key: ".$e->getMessage());
+		}
+		foreach(isset($GLOBALS["BT_WARN"]) ? $GLOBALS["BT_WARN"] : array() as $w)
+			BtLog($w);
+		$GLOBALS["BT_WARN"] = array();
+	}
+	@ob_end_clean();
+}
+# Перед записью: нужна ли работа триггеров, и снимок записи до изменения (UPDATE — для
+# сравнения, DELETE — значения удаляемой записи)
+function BtHookBefore($op, $id){
+	global $z;
+	if(BtSkipRequest())
+		return null;
+	try{
+		if($op === "new"){
+			$meta = BtMeta((int)$id);
+			return ($meta && count(BtTriggerColumns($meta, "CREATE"))) ? array("op" => "new", "type" => (int)$id) : null;
+		}
+		$row = mysqli_fetch_array(Exec_sql("SELECT t FROM $z WHERE id=".(int)$id." AND up!=0", "Button triggers: record type"));
+		$meta = $row ? BtMeta((int)$row["t"]) : null;
+		if(!$meta)
+			return null;
+		$events = $op === "del" ? array("DELETE") : array("UPDATE", "CREATE");
+		$any = FALSE;
+		foreach($events as $e)
+			$any = $any || count(BtTriggerColumns($meta, $e)) > 0;
+		if(!$any)
+			return null;
+		return array("op" => $op, "rec" => (int)$id, "type" => (int)$row["t"], "before" => BtRecord((int)$id));
+	}
+	catch(Throwable $e){
+		BtLog("before $op #$id: ".$e->getMessage());
+		return null;
+	}
+}
+# После успешной записи: события CREATE / UPDATE / DELETE. Возвращает предупреждения.
+# $newRec — созданная запись (new, копия при save) или null.
+function BtHookAfter($h, $newRec=null){
+	if(!$h)
+		return "";
+	try{
+		$port = BtCorePort();
+		$opts = array("chain" => BtChainFromRequest());
+		if($h["op"] === "new"){
+			if($newRec)
+				BtFire($port, "CREATE", BtRecord((int)$newRec), $opts);
+		}
+		elseif($h["op"] === "del")
+			BtFire($port, "DELETE", $h["before"], $opts);
+		elseif($newRec && (int)$newRec !== $h["rec"])
+			BtFire($port, "CREATE", BtRecord((int)$newRec), $opts);
+		else{
+			$after = BtRecord($h["rec"]);
+			$opts["changed"] = BtDiff($h["before"], $after);
+			if(count($opts["changed"]))
+				BtFire($port, "UPDATE", $after, $opts);
+		}
+	}
+	catch(Throwable $e){
+		BtWarn("button trigger: ".$e->getMessage());
+	}
+	return BtDrainWarnings();
+}
+# То же для одиночной команды: предупреждения — в ответ запроса
+function BtHookAfterWarn($h, $newRec=null){
+	$w = BtHookAfter($h, $newRec);
+	if($w !== "")
+		$GLOBALS["warning"] = (isset($GLOBALS["warning"]) ? $GLOBALS["warning"] : "").$w;
+	return $w;
+}
+# Callback агента по задаче кнопки с записью результата. Пришёл без сессии (handleAiAgentCallback),
+# поэтому пишем от имени исполнителя задачи (trigger.uid), а не через Validate_Token.
+function BtCallbackApply(){
+	$jobId = $GLOBALS["BT_CALLBACK"]["job"];
+	$job = aiAgentJobGet(BtJobsStore(), $jobId);
+	$status = ($job && !empty($job["applied"])) ? (string)$job["applied"] : "skipped";
+	$attempted = FALSE;
+	try{
+		if($job && !empty($job["trigger"]["write"]) && empty($job["applied"])){
+			$attempted = TRUE;
+			$runAs = BtLoadUser(isset($job["trigger"]["uid"]) ? (int)$job["trigger"]["uid"] : (string)$job["user"]);
+			$content = isset($job["result"]["assistant"]["content"]) ? (string)$job["result"]["assistant"]["content"] : "";
+			$ok = BtAsUser($runAs, function() use ($job, $content, $runAs){
+				return BtApplyAnswer(BtCorePort(), $job["trigger"], $content, $runAs);
+			});
+			$status = $ok ? "written" : "skipped";
+		}
+	}
+	catch(Throwable $e){
+		$status = "error";
+		BtLog("callback $jobId: ".$e->getMessage());
+	}
+	if($attempted)
+		aiAgentJobUpdate(BtJobsStore(), $jobId, array("applied" => $status));
+	foreach(isset($GLOBALS["BT_WARN"]) ? $GLOBALS["BT_WARN"] : array() as $w)
+		BtLog($w);
+	$GLOBALS["BT_WARN"] = array();
+	api_dump(json_encode(array("ok" => true, "status" => "done", "applied" => $status), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "ai-agent.json");
+}
+# POST /{db}/_m_action/{запись}?col={колонка}: выполнить действие колонки на сервере от имени
+# исполнителя (action.user) — браузер так не умеет. nowrite=1 — не записывать (READ с recompute).
+# Ответ: {result, written} или {job} для промпта (браузер опрашивает ai/agent?job=…).
+function BtActionRequest($recId, $colId, $noWrite){
+	global $z;
+	$port = BtCorePort();
+	$rec = BtRecord($recId);
+	if(!$rec)
+		my_die(t9n("[RU]Запись не найдена[EN]Record not found"), "404 Not Found");
+	Check_Grant($recId, 0, "READ");
+	$meta = BtMeta($rec["type"]);
+	$col = null;
+	foreach($meta["cols"] as $c)
+		if($c["id"] === (int)$colId && !$c["ref"] && $c["base"] === "BUTTON")
+			$col = $c;
+	$action = $col ? BtColumnAction($col) : null;
+	if(!$action || $action["type"] === "link")
+		my_die(t9n("[RU]У колонки нет действия, выполняемого на сервере[EN]The column has no server-side action"));
+	$col["action"] = $action;
+	try{
+		$runAs = BtRunAs($port, $action);
+	}
+	catch(Exception $e){
+		my_die($e->getMessage());
+	}
+	$ctx = BtContext($meta, $rec);
+	$write = !empty($action["write"]) && !$noWrite;
+	$chain = array_merge(BtChainFromRequest(), array((int)$colId));
+	try{
+		if($action["type"] === "prompt"){
+			$job = array(
+				"message" => BtBuildPrompt($action, $ctx, $col["name"], $write),
+				"context" => array("page" => "table", "table_id" => $rec["type"], "object_id" => $recId, "label" => "Кнопка «".$col["name"]."»"),
+				"trigger" => array("rec" => $recId, "type" => $rec["type"], "col" => (int)$colId, "colName" => $col["name"], "event" => "PRESS"
+					, "write" => $write, "chain" => $chain, "start" => isset($rec["values"][(int)$colId]) ? $rec["values"][(int)$colId] : ""
+					, "key" => "$recId:$colId"),
+				"runAs" => $runAs,
+				"viewer" => aiAgentCurrentUser()
+			);
+			$res = BtPromptSubmit($job);
+			if(empty($res["job"]))
+				my_die(t9n("[RU]Задача ИИ-агента не поставлена: не оплачено или по записи уже идёт задача[EN]The AI agent job was not queued: not paid or a job is already running"));
+			if(isset($res["content"]))
+				BtAsUser($runAs, function() use ($port, $job, $res, $runAs){ BtApplyAnswer($port, $job["trigger"], $res["content"], $runAs); });
+			return array("job" => aiAgentJobPublic(aiAgentJobGet(BtJobsStore(), $res["job"])));
+		}
+		if($action["type"] === "formula")
+			$value = BtFormulaFormat(BtFormulaEval(isset($action["formula"]) ? $action["formula"] : "", $ctx));
+		else
+			$value = BtAsUser($runAs, function() use ($action, $ctx, $runAs, $chain){
+				$params = ltrim(BtSubstitute(isset($action["params"]) ? $action["params"] : "", $ctx, "BtEncodeUriComponent"), "?&");
+				return BtFirstValue(BtQueryLoopback(isset($action["query"]) ? $action["query"] : "", $params, $runAs, $chain));
+			});
+		$written = FALSE;
+		if($write)
+			$written = BtWrite($port, $recId, $rec["type"], $col, $value, $chain, $runAs, FALSE, null);
+		return array("result" => $value, "written" => $written, "warnings" => BtDrainWarnings());
+	}
+	catch(BtFormulaError $e){
+		my_die($col["name"].": ".$e->getMessage());
+	}
+}
+# </button-triggers-866>
+
 # ################# Start here #################
 $time_start = microtime(TRUE);
 $blocks = array();
@@ -13296,6 +13818,9 @@ switch($a)  # Check actions, which don't require authentication
 		break;
 }
 
+# python2node#866: callback агента с ответом для поля записи (см. handleAiAgentCallback)
+if(isset($GLOBALS["BT_CALLBACK"]))
+	BtCallbackApply();
 $GLOBALS["GLOBAL_VARS"]["uri"] = htmlentities($_SERVER["REQUEST_URI"]);
 if(Validate_Token())
 {
@@ -13409,7 +13934,16 @@ if(Validate_Token())
 			break;
 
 		case "_m_set":
+			$btHook = BtHookBefore("set", $id);	# python2node#866: триггеры колонок-кнопок
 			$id = ApplyMSet($id, $_REQUEST, $_FILES);
+			BtHookAfterWarn($btHook);
+			break;
+
+		# python2node#866: действие колонки-кнопки на сервере от имени action.user
+		# URL: /{db}/_m_action/{запись}?col={колонка}  (POST, _xsrf; nowrite=1 — без записи)
+		case "_m_action":
+			api_dump(json_encode(BtActionRequest((int)$id, isset($_REQUEST["col"]) ? (int)$_REQUEST["col"] : 0, !empty($_REQUEST["nowrite"]))
+				, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "action.json");
 			break;
 
 		# Issue #4981: пакетная запись — _m_save и _m_set одним запросом.
@@ -13427,7 +13961,9 @@ if(Validate_Token())
 			break;
 
 		case "_m_save":
+			$btHook = BtHookBefore("save", $id);
 			$id = ApplyMSave($id, $_REQUEST, $_FILES);
+			BtHookAfterWarn($btHook, isset($_REQUEST["copybtn"]) ? $obj : null);
 			break;
 
 		case "_m_move":
@@ -13471,7 +14007,9 @@ if(Validate_Token())
 			break;
 
 		case "_m_del":
+			$btHook = BtHookBefore("del", $id);
 			$id = ApplyMDel($id);
+			BtHookAfterWarn($btHook);
 			break;
 
 		case "_m_del_batch":
@@ -13570,9 +14108,14 @@ if(Validate_Token())
 			break;
 
 		case "_m_new":
+			$btHook = BtHookBefore("new", $id);
 			$res = ApplyMNew($id, $up, $_FILES);
-			if(isApi() && ($res["json"] !== ""))
+			$btWarn = BtHookAfterWarn($btHook, ($res["json"] !== "" && !isset($res["warning"])) ? $res["rec"] : null);
+			if(isApi() && ($res["json"] !== "")){
+				if($btWarn !== "" && is_array($btJson = json_decode($res["json"], TRUE)))
+					$res["json"] = json_encode($btJson + array("warnings" => $btWarn), JSON_UNESCAPED_UNICODE);
 			    die($res["json"]);
+			}
 			$id = $res["id"];
 			break;
 # Type editor commands
@@ -13771,9 +14314,17 @@ if(Validate_Token())
 		# Issue #5116: действие колонки-кнопки (ссылка / промпт ИИ / формула / запрос)
 		# пишется в модификатор под ключом "action"; пустое action — снять действие.
 		case "_d_action":
-			$action = FieldAttrsNormalizeAction(isset($_REQUEST["action"]) ? $_REQUEST["action"] : "");
+			$action = FieldAttrsNormalizeAction(isset($_REQUEST["action"]) ? $_REQUEST["action"] : "", $actionError);
 			if($action === false)
-				my_die(t9n("[RU]Неверное описание действия кнопки [EN]Invalid button action"));
+				my_die(t9n("[RU]Неверное описание действия кнопки: $actionError[EN]Invalid button action: $actionError"));
+			# python2node#866: исполнитель хранится id записи пользователя (логин переименовывают)
+			if(is_array($action) && isset($action["user"])){
+				$userWhere = is_int($action["user"]) ? "id=".$action["user"] : "val='".addslashes($action["user"])."'";
+				if($userRow = mysqli_fetch_array(Exec_sql("SELECT id FROM $z WHERE t=".USER." AND $userWhere LIMIT 1", "Find the button action user")))
+					$action["user"] = (int)$userRow["id"];
+				else
+					my_die(t9n("[RU]Пользователь «".$action["user"]."» не найден[EN]User '".$action["user"]."' not found"));
+			}
 			$result = Exec_sql("SELECT obj.id, req.val FROM $z req LEFT JOIN $z obj ON obj.id=req.up WHERE req.id=$id and obj.up=0"
 							, "Check the req and obj");
 			if($row = mysqli_fetch_array($result))

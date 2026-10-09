@@ -16,6 +16,7 @@ experiments/*
 !experiments/*-test.js
 !experiments/*_test.js
 !experiments/*.fixture.html
+!experiments/*.fixture.json
 !experiments/quarantine.txt
 !experiments/README.md
 
