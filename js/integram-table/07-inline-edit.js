@@ -455,6 +455,14 @@
                 const td = e.target.closest('td');
                 if (!td) return;
 
+                // Issue #5116: action buttons of BUTTON columns (run / recalc / clear)
+                const btnActionEl = e.target.closest('[data-btn-action]');
+                if (btnActionEl && td.contains(btnActionEl) && typeof this.handleButtonActionClick === 'function') {
+                    e.stopPropagation();
+                    this.handleButtonActionClick(btnActionEl, td);
+                    return;
+                }
+
                 // Handle onCellClick callback for all cells
                 if (this.options.onCellClick) {
                     const row = parseInt(td.dataset.row);

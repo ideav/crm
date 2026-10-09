@@ -171,6 +171,11 @@
                 case 'HTML':
                     return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }"${ dataTypeAttrs }${ customStyle }>${ displayValue }</td>`;
                 case 'BUTTON': {
+                    // Issue #5116: prompt / formula / query actions and links with options
+                    const btnAction = typeof IntegramButtonAction !== 'undefined' ? IntegramButtonAction.parseConfig(column.attrs) : null;
+                    if (btnAction && !btnAction.legacy) {
+                        return `<td class="${ cellClass } it-btn-cell" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }"${ dataTypeAttrs }${ customStyle } style="text-align: center;">${ this.renderButtonActionCell(column, btnAction.type === 'link' ? '' : value, btnAction) }</td>`;
+                    }
                     const pathParts = window.location.pathname.split('/');
                     const dbName = pathParts.length >= 2 ? pathParts[1] : '';
                     let recordId = null;

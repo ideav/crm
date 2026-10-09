@@ -156,15 +156,73 @@ function FieldAttrsSetAlias($attrs, $alias)
 	return FieldAttrsSerialize($parsed);
 }
 
-function FieldAttrsBuild($default="", $required=false, $multi=false, $alias=null, $key=false)
+function FieldAttrsBuild($default="", $required=false, $multi=false, $alias=null, $key=false, $previous="")
 {
-	return FieldAttrsSerialize(array(
+	// Keys outside the five standard ones (e.g. a button column's "action")
+	// are carried over from the previous attrs: the structure editor only
+	// knows the standard fields and must not wipe the rest.
+	$attrs = array();
+	foreach(FieldAttrsParse($previous) as $k => $v)
+		if(!in_array($k, array("required", "multi", "key", "alias", "default"), true))
+			$attrs[$k] = $v;
+	return FieldAttrsSerialize(array_merge($attrs, array(
 		"required" => $required,
 		"multi" => $multi,
 		"key" => $key,
 		"alias" => $alias,
 		"default" => $default
-	));
+	)));
+}
+
+// Button column action (issue #5116): a self-contained description of what
+// the button does, stored under the "action" key of the column's attrs.
+//   link    — {"type":"link","url":"report/1?FR_X=[ID]","newTab":true}
+//   prompt  — {"type":"prompt","prompt":"…{Поле}…","write":true}
+//   formula — {"type":"formula","formula":"{Цена} * {Кол-во}","write":true}
+//   query   — {"type":"query","query":"Имя запроса","params":"FR_X=[ID]","write":true}
+// "label" (button caption) is optional for every type. The link URL is also
+// kept as the attrs default, which the server substitutes [ID]/[VAL] into for
+// the record card and the API; other types leave the default empty, so the
+// cell carries either nothing (show the button) or a written result.
+function FieldAttrsNormalizeAction($action)
+{
+	if(is_string($action)){
+		if(trim($action) === "")
+			return null;
+		$action = json_decode($action, true);
+	}
+	if(!is_array($action) || !isset($action["type"]))
+		return false;
+	$type = (string)$action["type"];
+	$fields = array(
+		"link" => array("url"),
+		"prompt" => array("prompt"),
+		"formula" => array("formula"),
+		"query" => array("query", "params")
+	);
+	if(!isset($fields[$type]))
+		return false;
+	$result = array("type" => $type);
+	foreach(array_merge(array("label"), $fields[$type]) as $f)
+		if(isset($action[$f]) && !is_array($action[$f]) && trim((string)$action[$f]) !== "")
+			$result[$f] = mb_substr((string)$action[$f], 0, 8000);
+	if($type === "link")
+		$result["newTab"] = !isset($action["newTab"]) || FieldAttrsBool($action["newTab"]);
+	else
+		$result["write"] = isset($action["write"]) && FieldAttrsBool($action["write"]);
+	return $result;
+}
+
+function FieldAttrsSetAction($attrs, $action)
+{
+	$parsed = FieldAttrsParse($attrs);
+	if(is_null($action)){
+		unset($parsed["action"]);
+		return FieldAttrsSerialize($parsed);
+	}
+	$parsed["action"] = $action;
+	$parsed["default"] = $action["type"] === "link" && isset($action["url"]) ? $action["url"] : "";
+	return FieldAttrsSerialize($parsed);
 }
 
 function FieldAttrsJsonProperty($attrs)
