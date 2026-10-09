@@ -406,6 +406,7 @@
                         </label>
                     </div>
                     ` : '' }
+                    ${ !isRef && !isFreeLink && !isFirstColumn ? this.buttonActionEditorHtml(col, instanceName, String(col.type) === '7') : '' }
                 </div>
                 ${ isRef ? `<div class="col-edit-go-dict-row">
                     <a class="col-edit-go-dict-link" id="col-edit-go-dict-${instanceName}" href="#" role="button">
@@ -462,6 +463,19 @@
 
             colEditOverlay.addEventListener('click', closeColEdit);
             colEditModal.querySelector(`#col-edit-cancel-${instanceName}`).addEventListener('click', closeColEdit);
+
+            // Issue #5116: button action editor follows the selected base type
+            const actionSection = colEditModal.querySelector(`#col-edit-action-${instanceName}`);
+            const typeSelect = colEditModal.querySelector(`#col-edit-type-${instanceName}`);
+            const initialAction = actionSection ? JSON.stringify(this.readButtonActionEditor(colEditModal, instanceName)) : null;
+            if (actionSection) {
+                this.bindButtonActionEditor(colEditModal, instanceName);
+                if (typeSelect) {
+                    typeSelect.addEventListener('change', () => {
+                        actionSection.style.display = typeSelect.value === '7' ? '' : 'none';
+                    });
+                }
+            }
 
             // Close on Enter key; stop propagation so the parent column-settings-modal is not affected (issue #1568)
             colEditModal.addEventListener('keydown', (e) => {
@@ -583,6 +597,20 @@
                                 return;
                             }
                             col.attrs = setIntegramAttrFlag(col.attrs, 'multi', newMulti);
+                        }
+                    }
+
+                    // 6. Button action (issue #5116): saved only when it changed, so
+                    // results already written to records are not touched
+                    if (actionSection && typeSelect && typeSelect.value === '7') {
+                        const action = this.readButtonActionEditor(colEditModal, instanceName);
+                        if (JSON.stringify(action) !== initialAction || String(col.type) !== '7') {
+                            const result = await this.saveButtonAction(col.id, action);
+                            if (!result.success) {
+                                showStatus('Ошибка сохранения действия кнопки: ' + result.error, true);
+                                saveBtn.disabled = false;
+                                return;
+                            }
                         }
                     }
 

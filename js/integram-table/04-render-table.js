@@ -88,6 +88,7 @@
                                 Удалить (${ this.selectedRows.size })
                             </button>
                             ` : '' }
+                            ${ typeof this.renderButtonActionBulkButtons === 'function' ? this.renderButtonActionBulkButtons(instanceName) : '' }
                             ${ this.isTableDeletable() && this.isTableWritable() ? `
                             <div class="integram-table-settings integram-table-settings-filter-delete" onclick="window.${ instanceName }.showFilterDeleteConfirm(event)" title="Удалить записи, удовлетворяющие заданному фильтру">
                                 <i class="pi pi-trash"></i>

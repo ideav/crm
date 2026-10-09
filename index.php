@@ -8755,6 +8755,10 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 			if(isset($blocks["BUTTONS"]))
 				foreach($blocks["BUTTONS"] as $key => $value)
 				{
+				    # Issue #5116: промпт/формула/запрос выполняются в гриде, ссылки на них нет
+				    $btnAttrs = FieldAttrsParse($value);
+				    if(isset($btnAttrs["action"]["type"]) && $btnAttrs["action"]["type"] !== "link")
+				        continue;
 				    $value = FieldAttrsDefaultValue($value);
 					$blocks[$block]["val"][] = $key;
 					$blocks[$block]["attrs"][] = str_replace("[ID]", $GLOBALS["cur_id"]
@@ -13749,15 +13753,34 @@ if(Validate_Token())
 
 		case "_d_attrs":
 		case "_modifiers":
+			$prevAttrs = "";
+			if($row = mysqli_fetch_array(Exec_sql("SELECT val FROM $z WHERE id=$id", "Get req attrs")))
+				$prevAttrs = $row["val"];
 			$val = FieldAttrsBuild(
 				$val,
 				isset($_REQUEST["set_null"]),
 				isset($_REQUEST["multi"]),
 				isset($_REQUEST["alias"]) ? $_REQUEST["alias"] : null,
-				isset($_REQUEST["key"])
+				isset($_REQUEST["key"]),
+				$prevAttrs
 			);
 			Update_Val($id, $val);
 			$obj = $up;
+			break;
+
+		# Issue #5116: действие колонки-кнопки (ссылка / промпт ИИ / формула / запрос)
+		# пишется в модификатор под ключом "action"; пустое action — снять действие.
+		case "_d_action":
+			$action = FieldAttrsNormalizeAction(isset($_REQUEST["action"]) ? $_REQUEST["action"] : "");
+			if($action === false)
+				my_die(t9n("[RU]Неверное описание действия кнопки [EN]Invalid button action"));
+			$result = Exec_sql("SELECT obj.id, req.val FROM $z req LEFT JOIN $z obj ON obj.id=req.up WHERE req.id=$id and obj.up=0"
+							, "Check the req and obj");
+			if($row = mysqli_fetch_array($result))
+				Update_Val($id, FieldAttrsSetAction($row["val"], $action));
+			else
+				my_die(t9n("[RU]Неверный реквизит $id [EN]Invalid requisite $id "));
+			$obj = $row["id"];
 			break;
 
 		case "_d_up":
