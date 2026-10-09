@@ -12041,7 +12041,7 @@ function updateBilling(){
 		return;
 	mysqli_query($connection, "UPDATE my SET ord=ord+".min(50, max(1, floor(substr(microtime(TRUE) - $time_start, 0, 6)*50)))." WHERE t=".DATABASE." AND val='$z'");
 }
-# <m-batch-4981> Пакетная запись: _m_save и _m_set одним запросом (issue #4981)
+# <m-batch-4981> Пакетная запись: _m_save, _m_set, _m_new и _m_del одним запросом (issue #4981, #4988)
 # Ошибка одной операции пакета.
 class IntegramOpError extends Exception {}
 
@@ -13953,12 +13953,18 @@ if(Validate_Token())
 				, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "action.json");
 			break;
 
-		# Issue #4981: пакетная запись — _m_save и _m_set одним запросом.
+		# Issue #4981, #4988: пакетная запись — _m_save, _m_set, _m_new и _m_del одним запросом.
 		# URL:  /{db}/_m_batch  (POST)
-		# Тело: _xsrf=<токен>&ops=<массив JSON>, по объекту на операцию:
+		# Тело: _xsrf=<токен>&ops=<массив JSON>, по объекту на операцию (op: save|set|new|del):
 		#   [{"op":"save","id":831921,"fields":{"t1078":"1790106240"}}
-		#   ,{"op":"set", "id":824686,"fields":{"t1085":"12"}}]
-		# Ответ: {"results":[{"n":0,"op":"save","id":831921,"ok":true} ...],"ok":N,"failed":M}
+		#   ,{"op":"set", "id":824686,"fields":{"t1085":"12"}}
+		#   ,{"op":"new", "id":1078,"up":1,"fields":{"t1078":"Чай"}}		# id — таблица
+		#   ,{"op":"new", "id":1081,"up":1,"fields":{"t1083":":id2"}}		# ссылка на запись операции 2
+		#   ,{"op":"del", "id":824687}]
+		# ":id" — запись последней new, ":idN" — запись new с номером N (BatchRefs). Не больше
+		# BATCH_OPS_LIMIT операций, пакет не атомарен: у каждой операции свой ok/error.
+		# Ответ: {"results":[{"n":0,"op":"save","id":831921,"ok":true}
+		#   ,{"n":2,"op":"new","type":1078,"id":<новая запись>,"ok":true} ...],"ok":N,"failed":M}
 		case "_m_batch":
 			$GLOBALS["dumpAPI"] = 1;	# Ответ всегда JSON, без ?JSON в адресе
 			if($_SERVER["REQUEST_METHOD"] !== "POST")
