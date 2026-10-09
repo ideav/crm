@@ -13149,12 +13149,14 @@ function BtCoreWrite($rec, $col, $value, $runAs, $asAi, $chain){
 		}
 	});
 }
-# Адрес этого сервера для запросов к самому себе (отчёт триггера)
+# Адрес этого сервера для запросов к самому себе (отчёт триггера). Запрос несёт токен
+# исполнителя, поэтому адрес берётся из настройки или из имени сервера в конфигурации
+# веб-сервера (SERVER_NAME), а не из заголовка Host, который присылает клиент.
 function BtLoopbackBase(){
 	$base = aiConfigValue(array("BUTTON_TRIGGER_BASE_URL", "AI_AGENT_CALLBACK_BASE_URL", "INTEGRAM_AGENT_CALLBACK_BASE_URL"));
 	if($base === ""){
-		$host = isset($_SERVER["HTTP_HOST"]) ? preg_replace('/[^a-z0-9.\-:]/i', '', (string)$_SERVER["HTTP_HOST"]) : "";
-		if($host === "")
+		$host = isset($_SERVER["SERVER_NAME"]) ? preg_replace('/[^a-z0-9.\-:]/i', '', (string)$_SERVER["SERVER_NAME"]) : "";
+		if($host === "" || strpos($host, ".") === false)
 			return "";
 		$base = "https://".$host;
 	}
