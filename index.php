@@ -10408,6 +10408,10 @@ function aiAgentSubmitRequest($com){
         # Асинхронный (вариант B1) отвечает 202 {status:queued} -> задача остаётся
         # processing, результат придёт в callback; клиентский опрос это поддерживает.
         $extra = $action !== "" ? array("action" => $action, "plan_id" => $planId) : array();
+        # crm#5118: галка «Применить автоматически» — агент исполняет план без подтверждения
+        # (python2node#869). Только для вопроса; галку CRM не хранит.
+        if($action === "" && isset($_POST["auto_apply"]) && $_POST["auto_apply"] === "1")
+            $extra["auto_apply"] = true;
         $context = aiAgentScreenContext(isset($_POST["context"]) ? (string)$_POST["context"] : "");
         $response = callIntegramAgent($z, $message, $attachments, $payment, $jobId, $callbackUrl, $callbackSecret, $context, $extra);
         if(!empty($response["pending"])){

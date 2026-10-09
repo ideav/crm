@@ -52,6 +52,8 @@
             this.messages = document.getElementById('ai-agent-messages');
             this.attachmentsList = document.getElementById('ai-agent-attachments');
             this.statusEl = document.getElementById('ai-agent-status');
+            // crm#5118: «Применить автоматически» — состояние только в этой странице, нигде не хранится.
+            this.autoApply = document.getElementById('ai-agent-auto-apply');
 
             // Без панели и кнопки вызова работать нечему — тихо выходим.
             if (!this.toggle || !this.panel) return false;
@@ -486,6 +488,7 @@
             form.append('message', text);
             var context = this.renderContext();
             if (context) form.append('context', JSON.stringify(context));
+            if (this.autoApply && this.autoApply.checked) form.append('auto_apply', '1');
             if (!fromAction) {
                 this.attachments.forEach(function (file) {
                     form.append('files[]', file, file.name);
