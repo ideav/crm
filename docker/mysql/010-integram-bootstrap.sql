@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS en LIKE my;
 CREATE TEMPORARY TABLE integram_seed LIKE my;
 
 INSERT INTO integram_seed (id, up, ord, t, val) VALUES
-    (1, 0, 0, 1, 'FREE_LINK'),
+    (1, 1, 0, 1, 'ROOT'),
     (2, 0, 0, 2, 'HTML'),
     (3, 0, 0, 3, 'SHORT'),
     (4, 0, 0, 4, 'DATETIME'),
