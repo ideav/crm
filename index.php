@@ -158,6 +158,10 @@ define("LOGS_DIR", "logs/");  # Logs files folder
 define("LOG_VAL_MAX", 2048);  # значение длиннее — обрезается, полная длина в old_len/new_len
 define("LOG_IMPORT_ROWS", 16);  # импорт с большим числом изменений пишется одной сводкой
 define("LOG_ROWS_MAX", 1000);  # изменение, задевшее больше строк, пишется op:"sql" без old/new
+define("LOG_READ_LIMIT", 10000);  # чтение журнала (#5103): строк на страницу
+define("LOG_READ_BLOCK", 65536);  # файл читается с конца блоками этого размера
+define("LOG_READ_SCAN_MB", 256);  # больше за один запрос не просматривается — продолжение по курсору
+define("LOG_READ_SKEW_S", 300);  # запас since на строки, записанные не по порядку ts
 # The kind of a row queued by Insert_batch() - see its comment. Defined up here because the top-level
 # code calling it runs before the line the function is declared on: functions hoist, define() does not.
 define("BATCH_ASIS", -1);
@@ -1618,6 +1622,146 @@ function logChangeAfter($ch, $time, $err = ""){
         $rec["ms"] = $ms;
         logChange($rec);
     }
+}
+# Чтение журнала (issue #5103): GET /<db>/journal?JSON&mode=log|sql — строки от новых к старым,
+# страницами по LOG_READ_LIMIT. Только admin базы: в журнале действия всех пользователей и их IP.
+function logJournalAllowed(){
+    $gv = isset($GLOBALS["GLOBAL_VARS"]) ? $GLOBALS["GLOBAL_VARS"] : array();
+    $user = isset($gv["user"]) ? (string)$gv["user"] : "";
+    return ($user === "admin") || ($user === (string)$GLOBALS["z"])
+        || (isset($gv["role_id"]) && ((int)$gv["role_id"] === ADMINROLE));
+}
+# Файлы журнала от новых к старым: имя в курсоре => файл. Текущий <db>_<mode>.jsonl в курсоре
+# называется именем, которое получит при ротации (<db>_<mode>.N+1.jsonl), поэтому курсор,
+# выданный до ротации, после неё указывает в тот же файл. Дальше — архивы по убыванию номера.
+# Старые <db>_<mode>.txt не читаются: в них токены открытым текстом.
+function logJournalFiles($mode){
+    $base = $GLOBALS["z"]."_$mode";
+    $archives = array();
+    foreach(glob(LOGS_DIR.$base.".*.jsonl") as $file)
+        if(preg_match('/^'.preg_quote($base, '/').'\.(\d+)\.jsonl$/', basename($file), $m))
+            $archives[(int)$m[1]] = basename($file);
+    krsort($archives);
+    $files = array();
+    if(is_file(LOGS_DIR.$base.".jsonl"))
+        $files[$base.".".(count($archives) ? max(array_keys($archives)) + 1 : 1).".jsonl"] = $base.".jsonl";
+    foreach($archives as $file)
+        $files[$file] = $file;
+    return $files;
+}
+# Фильтры из параметров запроса: user (~ai — все запросы ИИ), ai_job, rid, op, id, since/until (по ts)
+function logJournalFilter(){
+    $f = array();
+    foreach(array("user", "ai_job", "rid", "op") as $k)
+        if(isset($_REQUEST[$k]) && is_string($_REQUEST[$k]) && strlen($_REQUEST[$k]))
+            $f[$k] = $_REQUEST[$k];
+    if(isset($_REQUEST["id"]) && strlen((string)$_REQUEST["id"])){
+        if(!ctype_digit((string)$_REQUEST["id"]))
+            return array("error" => t9n("[RU]id: ожидается число[EN]id: a number expected"));
+        $f["id"] = (int)$_REQUEST["id"];
+    }
+    foreach(array("since", "until") as $k)
+        if(isset($_REQUEST[$k]) && is_string($_REQUEST[$k]) && strlen($_REQUEST[$k])){
+            $ts = strtotime($_REQUEST[$k]);
+            if($ts === FALSE)
+                return array("error" => t9n("[RU]$k: не распознана дата[EN]$k: invalid date"));
+            $f[$k] = (float)$ts;
+        }
+    return $f;
+}
+# Подходит ли строка под фильтры. $stop — строка старше since: дальше вниз подходящих нет
+# (запас LOG_READ_SKEW_S на строки параллельных запросов, записанные не по порядку ts).
+function logJournalMatch($rec, $f, &$stop){
+    if(isset($f["since"]) || isset($f["until"])){
+        $ts = isset($rec["ts"]) && is_string($rec["ts"]) ? strtotime($rec["ts"]) : FALSE;
+        if($ts === FALSE)
+            return FALSE;
+        if(isset($f["since"]) && ($ts < $f["since"])){
+            if($ts < $f["since"] - LOG_READ_SKEW_S)
+                $stop = TRUE;
+            return FALSE;
+        }
+        if(isset($f["until"]) && ($ts > $f["until"]))
+            return FALSE;
+    }
+    if(isset($f["user"])){
+        $user = isset($rec["user"]) ? (string)$rec["user"] : "";
+        if($f["user"] === "~ai" ? (substr($user, -3) !== "~ai") : ($user !== $f["user"]))
+            return FALSE;
+    }
+    foreach(array("ai_job", "rid", "op") as $k)
+        if(isset($f[$k]) && (!isset($rec[$k]) || ((string)$rec[$k] !== $f[$k])))
+            return FALSE;
+    if(isset($f["id"]) && (!isset($rec["id"]) || ((int)$rec["id"] !== $f["id"])))
+        return FALSE;
+    return TRUE;
+}
+# Читает журнал с конца блоками по LOG_READ_BLOCK, начиная с курсора «файл:смещение» (пустой —
+# с конца текущего файла). Собирает до $limit+1 подходящих строк: limit+1-я значит, что есть
+# продолжение. Возвращает rows (исходные строки JSON, от новых к старым), more и next — курсор
+# для следующей страницы (начало последней выданной строки). За один вызов просматривается не
+# больше LOG_READ_SCAN_MB: исчерпав его, чтение останавливается с more и next на месте остановки.
+function logJournalRead($mode, $f, $cursor, $limit){
+    $names = logJournalFiles($mode);
+    $files = array_values($names);
+    $keys = array_keys($names);
+    $fi = 0;
+    $pos = NULL;
+    if(strlen($cursor)){
+        if(!preg_match('/^([A-Za-z0-9_]+\.\d+\.jsonl):(\d+)$/', $cursor, $m)
+                || (($fi = array_search($m[1], $keys, TRUE)) === FALSE)
+                || ((int)$m[2] > filesize(LOGS_DIR.$files[$fi])))
+            return array("error" => t9n("[RU]Неверный курсор журнала[EN]Invalid journal cursor"));
+        $pos = (int)$m[2];
+    }
+    $rows = array();
+    $next = NULL;
+    $more = $stop = FALSE;
+    $budget = LOG_READ_SCAN_MB * 1048576;
+    for(; ($fi < count($files)) && !$stop; $fi++, $pos = NULL){
+        $name = $keys[$fi];
+        $fh = @fopen(LOGS_DIR.$files[$fi], "r");
+        if(!$fh)
+            continue;
+        $at = ($pos === NULL) ? fstat($fh)["size"] : $pos;
+        $buf = "";  # байты файла [$at, $at + $hi) ещё не разобраны
+        $hi = 0;
+        while(!$stop){
+            $nl = $hi > 0 ? strrpos($buf, "\n", $hi - strlen($buf) - 1) : FALSE;
+            if(($nl === FALSE) && ($at > 0)){
+                if($budget <= 0){
+                    $more = $stop = TRUE;
+                    $next = "$name:".($at + $hi);
+                    break;
+                }
+                $n = min(LOG_READ_BLOCK, $at);
+                $at -= $n;
+                fseek($fh, $at);
+                $buf = fread($fh, $n).substr($buf, 0, $hi);
+                $hi = strlen($buf);
+                $budget -= $n;
+                continue;
+            }
+            $start = ($nl === FALSE) ? 0 : $nl + 1;
+            $line = substr($buf, $start, $hi - $start);
+            $hi = ($nl === FALSE) ? 0 : $nl;
+            if(strlen($line)){
+                $rec = json_decode($line, TRUE);
+                if(is_array($rec) && logJournalMatch($rec, $f, $stop)){
+                    if(count($rows) === $limit){
+                        $more = $stop = TRUE;
+                        break;
+                    }
+                    $rows[] = $line;
+                    $next = "$name:".($at + $start);
+                }
+            }
+            if($nl === FALSE)
+                break;
+        }
+        fclose($fh);
+    }
+    return array("rows" => $rows, "more" => $more, "next" => $more ? $next : NULL);
 }
 function trace($text){
     global $logFile;
@@ -13810,6 +13954,29 @@ if(Validate_Token())
     			die("<script>document.location.href='/$z/$next_act'</script>");
             login($z);
     		break;
+
+		# #5103: журнал базы (формат — docs/kb/logs.md). Только admin базы.
+		case "journal":
+			if(!logJournalAllowed()){
+				header("HTTP/1.0 403 Forbidden");
+				api_dump(json_encode(array("error" => t9n("[RU]Журнал доступен только администратору базы[EN]The journal is available to the DB administrator only")), JSON_UNESCAPED_UNICODE), "journal.json");
+			}
+			$jMode = isset($_REQUEST["mode"]) ? (string)$_REQUEST["mode"] : "log";
+			$jLimit = isset($_REQUEST["limit"]) ? (int)$_REQUEST["limit"] : LOG_READ_LIMIT;
+			$jFilter = logJournalFilter();
+			if(!in_array($jMode, array("log", "sql"), TRUE))
+				$jFilter = array("error" => t9n("[RU]mode: log или sql[EN]mode: log or sql"));
+			elseif(($jLimit < 1) || ($jLimit > LOG_READ_LIMIT))
+				$jFilter = array("error" => t9n("[RU]limit: от 1 до ".LOG_READ_LIMIT."[EN]limit: 1 to ".LOG_READ_LIMIT));
+			$jPage = isset($jFilter["error"]) ? $jFilter
+				: logJournalRead($jMode, $jFilter, isset($_REQUEST["cursor"]) ? (string)$_REQUEST["cursor"] : "", $jLimit);
+			if(isset($jPage["error"])){
+				header("HTTP/1.0 400 Bad Request");
+				api_dump(json_encode(array("error" => $jPage["error"]), JSON_UNESCAPED_UNICODE), "journal.json");
+			}
+			api_dump("{\"rows\":[".implode(",", $jPage["rows"])."],\"more\":".($jPage["more"] ? "true" : "false")
+				.",\"next\":".json_encode($jPage["next"])."}", "journal.json");
+			break;
 
 		case "xsrf":
 			api_dump(json_encode(array("_xsrf"=>$GLOBALS["GLOBAL_VARS"]["xsrf"],"token"=>$GLOBALS["GLOBAL_VARS"]["token"],"user"=>$GLOBALS["GLOBAL_VARS"]["user"]

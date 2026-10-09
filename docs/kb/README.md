@@ -24,7 +24,7 @@
 | Компонент таблиц (data-grid) | [table-component.md](table-component.md) | integram-table, data-integram-table, data-api-url, фильтры, инлайн-правка, экспорт, вставка из буфера, paste-data-btn, build.sh |
 | Импорт батчем `import=1` | [import.md](import.md) | bki_file, DATA, plain_data, формат строк, завершающий `;`, чанки 8МБ, upsert |
 | Архив таблицы: BKI и JSON | [json-archive.md](json-archive.md) | json_export, integram-archive, метаданные+данные, types, reqs, target, сведение колонок, перенос между базами |
-| Журнал базы (JSON Lines) | [logs.md](logs.md) | _log.jsonl, _sql.jsonl, rid, uid, ~ai, ai_job, old/new, op, import, маскировка секретов, LOG_ROTATE_MB, ротация |
+| Журнал базы (JSON Lines) | [logs.md](logs.md) | _log.jsonl, _sql.jsonl, rid, uid, ~ai, ai_job, old/new, op, import, маскировка секретов, LOG_ROTATE_MB, ротация, чтение journal, cursor, more |
 | Иерархический OLTP (разрезы) | [hierarchical-oltp.md](hierarchical-oltp.md) | разрез, частотность групп, накопитель меры, агрегаты, up-уровни |
 
 **Соседние справочники (не дублируем — ссылаемся):**
