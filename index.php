@@ -9986,6 +9986,15 @@ function handleAiAgentCallback($db){
     }
 
     $status = isset($data["status"]) ? strtolower(trim((string)$data["status"])) : "done";
+    # python2node#849: ход работы агента — клиент показывает последнюю строку, задача
+    # остаётся в работе. Поздний progress по готовой задаче отсечён проверкой выше.
+    if($status === "progress"){
+        $progress = aiAgentProgressClean(isset($data["progress"]) ? $data["progress"] : "");
+        if($progress !== "")
+            aiAgentJobUpdate($db, $jobId, array("progress" => $progress));
+        api_dump(json_encode(array("ok" => true, "status" => "processing"), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "ai-agent.json");
+        return;
+    }
     if($status === "error"){
         $error = (isset($data["error"]) && trim((string)$data["error"]) !== "")
             ? (string)$data["error"]
@@ -9998,7 +10007,11 @@ function handleAiAgentCallback($db){
     $content = isset($data["content"]) ? (string)$data["content"] : "";
     if(trim($content) === "")
         aiAgentError(t9n("[RU]В callback пустой content[EN]Callback content is empty"), 400);
-    $result = array("assistant" => array("content" => $content), "status" => "ok");
+    $assistant = array("content" => $content);
+    $blocks = aiAgentBlocksClean(isset($data["blocks"]) ? $data["blocks"] : null);
+    if($blocks)
+        $assistant["blocks"] = $blocks;
+    $result = array("assistant" => $assistant, "status" => "ok");
     # python2node#846: ответ с планом изменений — кнопки «Применить»/«Отменить» в чате.
     $plan = isset($data["plan"]) ? aiAgentPlanPublic($data["plan"]) : null;
     if($plan)
@@ -10006,7 +10019,8 @@ function handleAiAgentCallback($db){
     aiAgentJobUpdate($db, $jobId, array(
         "status" => "done",
         "result" => $result,
-        "error" => null
+        "error" => null,
+        "progress" => null
     ));
     # План принадлежит задаче, в которой агент его предложил (id плана = id той задачи).
     # Ответ на «Применить»/«Отменить» обновляет план и там, чтобы старые кнопки не ожили
@@ -10019,6 +10033,30 @@ function handleAiAgentCallback($db){
         }
     }
     api_dump(json_encode(array("ok" => true, "status" => "done"), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "ai-agent.json");
+}
+# python2node#849: структурный ответ агента. Сервер оставляет только блоки известных
+# типов и ограничивает объём; поля блоков проверяет и экранирует клиент
+# (js/ai-agent-chat.js renderBlocks): текст — только textContent, ссылки — только внутрь базы.
+function aiAgentBlocksClean($blocks){
+    if(!is_array($blocks))
+        return array();
+    $known = array("text" => 1, "table" => 1, "records" => 1, "actions" => 1);
+    $out = array();
+    foreach(array_values($blocks) as $b){
+        if(is_array($b) && isset($b["type"]) && is_string($b["type"]) && isset($known[$b["type"]]))
+            $out[] = $b;
+        if(count($out) >= 20)
+            break;
+    }
+    $json = json_encode($out, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    return ($json === false || strlen($json) > 200000) ? array() : $out;
+}
+# Строка хода работы: одна строка печатного текста, не длиннее 300 символов.
+function aiAgentProgressClean($text){
+    $text = is_string($text) ? $text : "";
+    $text = preg_replace('/[\x00-\x1F\x7F]+/u', " ", $text);
+    $text = trim(preg_replace('/ {2,}/u', " ", (string)$text));
+    return mb_substr($text, 0, 300, "UTF-8");
 }
 # python2node#846: план из callback агента в том виде, в каком его получает клиент: id, статус, строки
 # описания и доступность отмены. Команды и снимки записей остаются у агента.
@@ -10484,7 +10522,9 @@ function aiAgentJobPublic($job){
         "message" => isset($job["message"]) ? (string)$job["message"] : "",
         "attachments" => (isset($job["attachments"]) && is_array($job["attachments"])) ? array_values($job["attachments"]) : array(),
         "result" => $result,
-        "error" => isset($job["error"]) ? $job["error"] : null
+        "error" => isset($job["error"]) ? $job["error"] : null,
+        # python2node#849: последняя строка хода работы — пока задача не завершена.
+        "progress" => (($status === "processing" || $status === "queued") && !empty($job["progress"])) ? (string)$job["progress"] : null
     );
 }
 function aiAgentJobsEncode($jobs){

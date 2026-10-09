@@ -37,6 +37,7 @@
         rendered: {},           // id задач, уже показанных в ленте
         localActivity: false,   // были ли отправки в этой сессии вкладки
         resumeChecked: false,   // восстановление выполняем один раз за загрузку
+        progressText: '',       // python2node#849: последняя строка хода работы агента
 
         init: function () {
             this.rendered = {};
@@ -469,10 +470,13 @@
             return 'Задача в очереди, ответ скоро будет…';
         },
 
-        send: function () {
+        // python2node#849: preset — текст кнопки действия из ответа агента; поле ввода и
+        // вложения при этом не трогаем.
+        send: function (preset) {
             if (this.sending) return;
-            var text = this.input ? this.input.value.trim() : '';
-            if (!text && !this.attachments.length) return;
+            var fromAction = typeof preset === 'string';
+            var text = fromAction ? preset.trim() : (this.input ? this.input.value.trim() : '');
+            if (!text && (fromAction || !this.attachments.length)) return;
 
             this.localActivity = true;
             this.addMessage('user', text || '(вложения)');
@@ -482,13 +486,14 @@
             form.append('message', text);
             var context = this.renderContext();
             if (context) form.append('context', JSON.stringify(context));
-            this.attachments.forEach(function (file) {
-                form.append('files[]', file, file.name);
-            });
-
-            if (this.input) this.input.value = '';
-            this.attachments = [];
-            this.renderAttachments();
+            if (!fromAction) {
+                this.attachments.forEach(function (file) {
+                    form.append('files[]', file, file.name);
+                });
+                if (this.input) this.input.value = '';
+                this.attachments = [];
+                this.renderAttachments();
+            }
 
             this.submit(form);
         },
@@ -637,13 +642,21 @@
             if (!this.currentBubble) this.currentBubble = this.addThinkingBubble();
             if (!this.sending) this.beginWaiting(job.id);
             this.ensurePolling(job.id);
+            this.setProgress(job.progress);
         },
 
         finalizeAnswer: function (job) {
             var content = this.getAssistantContent(job.result) || 'ИИ-агент не вернул ответ.';
-            var wrap = this.replaceThinking(content);
+            var wrap = this.replaceThinking(content, null, this.getAssistantBlocks(job.result));
             if (job.result && job.result.plan) this.renderPlan(wrap, job.result.plan);
             if (job.id) this.rendered[job.id] = true;
+        },
+
+        // python2node#849: последняя строка хода работы агента вместо общего «думаю».
+        setProgress: function (text) {
+            if (typeof text !== 'string' || !text.trim()) return;
+            this.progressText = text.trim().slice(0, 300);
+            this.updateWaiting();
         },
 
         // --- ожидание и индикатор «думает» ---
@@ -653,6 +666,7 @@
             if (this.sendBtn) this.sendBtn.disabled = true;
             if (this.attachBtn) this.attachBtn.disabled = true;
             this.thinkStart = this.now();
+            this.progressText = '';
             if (!this.currentBubble) this.currentBubble = this.addThinkingBubble();
             this.activeJobId = jobId || this.activeJobId;
             this.updateWaiting();
@@ -688,7 +702,7 @@
             if (this.statusEl) this.statusEl.classList.add('is-waiting');
             this.setStatus(this.statusMessage(elapsed));
             if (this.currentBubble && this.currentBubble.label)
-                this.currentBubble.label.textContent = this.waitMessage(elapsed);
+                this.currentBubble.label.textContent = this.progressText || this.waitMessage(elapsed);
         },
 
         ensurePolling: function (jobId) {
@@ -752,7 +766,8 @@
             this.rendered[job.id] = true;
 
             if (job.status === 'done') {
-                var wrap = this.addMessage('assistant', this.getAssistantContent(job.result) || 'ИИ-агент не вернул ответ.');
+                var wrap = this.addMessage('assistant', this.getAssistantContent(job.result) || 'ИИ-агент не вернул ответ.',
+                    null, this.getAssistantBlocks(job.result));
                 if (job.result && job.result.plan) this.renderPlan(wrap, job.result.plan);
                 return;
             }
@@ -764,6 +779,7 @@
             this.currentBubble = this.addThinkingBubble();
             this.beginWaiting(job.id);
             this.ensurePolling(job.id);
+            this.setProgress(job.progress);
         },
 
         // --- сообщения ленты ---
@@ -776,6 +792,11 @@
             return '';
         },
 
+        getAssistantBlocks: function (data) {
+            var blocks = data && data.assistant ? data.assistant.blocks : (data ? data.blocks : null);
+            return Array.isArray(blocks) ? blocks : null;
+        },
+
         getErrorText: function (data) {
             if (!data) return '';
             if (typeof data.error === 'string') return data.error;
@@ -783,7 +804,7 @@
             return '';
         },
 
-        addMessage: function (role, text, payUrl) {
+        addMessage: function (role, text, payUrl, blocks) {
             if (!this.messages) return null;
             var wrap = document.createElement('div');
             wrap.className = 'ai-chat-message ' + (role === 'user' ? 'ai-chat-message-user' : 'ai-chat-message-assistant');
@@ -795,7 +816,7 @@
 
             var body = document.createElement('div');
             body.className = 'ai-chat-message-text';
-            body.textContent = text;
+            this.fillBody(body, text, blocks);
             wrap.appendChild(body);
 
             if (payUrl) this.appendPayLink(wrap, payUrl);
@@ -848,7 +869,7 @@
 
         // Заменяет «думает»-пузырь готовым ответом (или создаёт новое сообщение) и
         // возвращает элемент сообщения.
-        replaceThinking: function (text, payUrl) {
+        replaceThinking: function (text, payUrl, blocks) {
             var bubble = this.currentBubble;
             var wrap = null;
             if (bubble && bubble.el) {
@@ -857,15 +878,169 @@
                 var body = bubble.el.querySelector('.ai-chat-message-text');
                 if (body) {
                     body.innerHTML = '';
-                    body.textContent = text;
+                    this.fillBody(body, text, blocks);
                 }
                 if (payUrl) this.appendPayLink(bubble.el, payUrl);
                 this.scrollToBottom();
             } else {
-                wrap = this.addMessage('assistant', text, payUrl);
+                wrap = this.addMessage('assistant', text, payUrl, blocks);
             }
             this.currentBubble = null;
             return wrap;
+        },
+
+        // --- python2node#849: структурный ответ агента ---
+        //
+        // Блоки рисуются только известных типов (text, table, records, actions) и только через
+        // textContent/setAttribute: строки агента в innerHTML не попадают никогда. Ссылки —
+        // только пути внутри текущей базы (object|report|edit_obj/<id>…). Нет годных блоков —
+        // показываем content, как раньше.
+
+        maxBlocks: 20,
+        maxTableRows: 50,
+        dbPathRe: /^(?:object|report|edit_obj)\/[0-9]{1,12}\/?(?:\?[^\s"'<>#\\`]*)?$/,
+
+        fillBody: function (body, text, blocks) {
+            var nodes = this.renderBlocks(blocks);
+            body.textContent = nodes.length ? '' : text;
+            if (!nodes.length) return;
+            body.classList.add('ai-chat-message-rich');
+            for (var i = 0; i < nodes.length; i++) body.appendChild(nodes[i]);
+        },
+
+        dbHref: function (path) {
+            path = typeof path === 'string' ? path.trim() : '';
+            if (!this.dbPathRe.test(path)) return null;
+            return '/' + encodeURIComponent(this.getCurrentDbName()) + '/' + path;
+        },
+
+        positiveId: function (v) {
+            if (typeof v === 'number' && v > 0 && v < 1e12 && Math.floor(v) === v) return v;
+            if (typeof v === 'string' && /^[0-9]{1,12}$/.test(v) && +v > 0) return +v;
+            return 0;
+        },
+
+        blockText: function (v, limit) {
+            if (v === null || v === undefined || typeof v === 'object') return '';
+            return String(v).slice(0, limit || 500);
+        },
+
+        el: function (tag, className, text) {
+            var node = document.createElement(tag);
+            if (className) node.className = className;
+            if (text !== undefined) node.textContent = text;
+            return node;
+        },
+
+        link: function (href, text, className) {
+            var a = this.el('a', className, text);
+            a.setAttribute('href', href);
+            a.setAttribute('target', '_blank');
+            a.setAttribute('rel', 'noopener');
+            return a;
+        },
+
+        renderBlocks: function (blocks) {
+            var out = [];
+            if (!Array.isArray(blocks)) return out;
+            for (var i = 0; i < blocks.length && out.length < this.maxBlocks; i++) {
+                var b = blocks[i], node = null;
+                if (!b || typeof b !== 'object') continue;
+                if (b.type === 'text') node = this.renderTextBlock(b);
+                else if (b.type === 'table') node = this.renderTableBlock(b);
+                else if (b.type === 'records') node = this.renderRecordsBlock(b);
+                else if (b.type === 'actions') node = this.renderActionsBlock(b);
+                if (node) out.push(node);
+            }
+            return out;
+        },
+
+        renderTextBlock: function (b) {
+            var text = this.blockText(b.text, 4000);
+            return text ? this.el('div', 'ai-chat-block ai-chat-block-text', text) : null;
+        },
+
+        renderTableBlock: function (b) {
+            var self = this;
+            var columns = Array.isArray(b.columns) ? b.columns.slice(0, 20).map(function (c) { return self.blockText(c, 100); }) : [];
+            if (!columns.length) return null;
+            var rows = Array.isArray(b.rows) ? b.rows.slice(0, this.maxTableRows) : [];
+            var wrap = this.el('div', 'ai-chat-block ai-chat-block-table');
+            var title = this.blockText(b.title, 200);
+            if (title) wrap.appendChild(this.el('div', 'ai-chat-block-title', title));
+
+            var scroller = this.el('div', 'ai-chat-table-scroll');
+            var table = this.el('table', 'ai-chat-table');
+            var head = this.el('thead'), headRow = this.el('tr');
+            columns.forEach(function (c) { headRow.appendChild(self.el('th', '', c)); });
+            head.appendChild(headRow);
+            table.appendChild(head);
+            var tbody = this.el('tbody');
+            rows.forEach(function (r) {
+                var cells = Array.isArray(r) ? r : [r];
+                var tr = self.el('tr');
+                for (var c = 0; c < columns.length; c++) tr.appendChild(self.el('td', '', self.blockText(cells[c])));
+                tbody.appendChild(tr);
+            });
+            table.appendChild(tbody);
+            scroller.appendChild(table);
+            wrap.appendChild(scroller);
+
+            var total = this.positiveId(b.total);
+            var more = this.dbHref(b.more);
+            if (more) {
+                wrap.appendChild(this.link(more, 'Показать всё' + (total ? ' (' + total + ')' : ''), 'ai-chat-block-more'));
+            } else if (total > rows.length) {
+                wrap.appendChild(this.el('div', 'ai-chat-block-note', 'Показано ' + rows.length + ' из ' + total));
+            }
+            return wrap;
+        },
+
+        renderRecordsBlock: function (b) {
+            var self = this;
+            var list = this.el('ul', 'ai-chat-records');
+            (Array.isArray(b.items) ? b.items.slice(0, 50) : []).forEach(function (it) {
+                if (!it || typeof it !== 'object') return;
+                var t = self.positiveId(it.t), id = self.positiveId(it.id);
+                var href = t && id ? self.dbHref('object/' + t + '/?F_I=' + id) : null;
+                if (!href) return;
+                var li = self.el('li');
+                li.appendChild(self.link(href, self.blockText(it.label, 200) || '#' + id));
+                list.appendChild(li);
+            });
+            if (!list.children.length) return null;
+            var wrap = this.el('div', 'ai-chat-block ai-chat-block-records');
+            var title = this.blockText(b.title, 200);
+            if (title) wrap.appendChild(this.el('div', 'ai-chat-block-title', title));
+            wrap.appendChild(list);
+            return wrap;
+        },
+
+        renderActionsBlock: function (b) {
+            var self = this;
+            var wrap = this.el('div', 'ai-chat-block ai-chat-block-actions');
+            var buttons = [];
+            (Array.isArray(b.items) ? b.items.slice(0, 6) : []).forEach(function (it) {
+                if (!it || typeof it !== 'object') return;
+                var label = self.blockText(it.label, 60);
+                var message = self.blockText(it.message, 1000).trim();
+                var href = self.dbHref(it.href);
+                if (!label) return;
+                if (message) {
+                    var btn = self.el('button', 'ai-chat-action', label);
+                    btn.setAttribute('type', 'button');
+                    btn.addEventListener('click', function () {
+                        if (self.sending) return;
+                        buttons.forEach(function (x) { x.disabled = true; });
+                        self.send(message);
+                    });
+                    buttons.push(btn);
+                    wrap.appendChild(btn);
+                } else if (href) {
+                    wrap.appendChild(self.link(href, label, 'ai-chat-action'));
+                }
+            });
+            return wrap.children.length ? wrap : null;
         },
 
         scrollToBottom: function () {

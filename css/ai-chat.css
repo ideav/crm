@@ -279,6 +279,106 @@ body.ai-agent-resizing iframe {
     white-space: pre-wrap;
 }
 
+/* python2node#849: структурный ответ агента — текст, таблицы, ссылки на записи, кнопки. */
+.ai-chat-message-rich {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    white-space: normal;
+    min-width: 0;
+}
+
+.ai-chat-block-text {
+    white-space: pre-wrap;
+}
+
+.ai-chat-block-title {
+    margin-bottom: 0.3rem;
+    font-weight: 600;
+}
+
+.ai-chat-table-scroll {
+    max-width: 100%;
+    max-height: 22rem;
+    overflow: auto;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+}
+
+.ai-chat-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+}
+
+.ai-chat-table th,
+.ai-chat-table td {
+    padding: 0.3rem 0.5rem;
+    border-bottom: 1px solid var(--border-color);
+    text-align: left;
+    vertical-align: top;
+}
+
+.ai-chat-table th {
+    position: sticky;
+    top: 0;
+    background-color: var(--card-bg);
+    color: var(--text-secondary);
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.ai-chat-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.ai-chat-block-more,
+.ai-chat-block-note {
+    display: inline-block;
+    margin-top: 0.35rem;
+    font-size: 0.8rem;
+}
+
+.ai-chat-block-note {
+    color: var(--text-secondary);
+}
+
+.ai-chat-records {
+    margin: 0;
+    padding-left: 1.1rem;
+}
+
+.ai-chat-block a {
+    color: var(--button-primary);
+}
+
+.ai-chat-block-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+
+.ai-chat-action {
+    padding: 0.35rem 0.75rem;
+    border: 1px solid var(--button-primary);
+    border-radius: 6px;
+    background-color: var(--card-bg);
+    color: var(--button-primary);
+    font-size: 0.82rem;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.ai-chat-action:hover:not(:disabled) {
+    background-color: var(--button-primary);
+    color: #fff;
+}
+
+.ai-chat-action:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
 .ai-command-queue {
     flex: 0 0 auto;
     display: flex;
