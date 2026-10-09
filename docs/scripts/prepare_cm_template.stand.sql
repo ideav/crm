@@ -6,7 +6,7 @@
 --     mysql -u root -p stand < docs/scripts/prepare_cm_template.sql
 --
 -- Ожидание после прогона: остались Роль 2, Запрос 1, Меню 1, «Настройка
--- сопоставления» 1; строк с секретами 0; типов (up=0) 12; таблица-источник цела.
+-- сопоставления» 1; строк с секретами 0; типов (up=0) 11; таблица-источник цела.
 DROP TABLE IF EXISTS xcom;
 CREATE TABLE xcom (
     id INT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -20,7 +20,7 @@ CREATE TABLE xcom (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 INSERT INTO xcom (id, up, ord, t, val) VALUES
-    (1, 0, 0, 1, 'FREE_LINK'),
+    (1, 1, 0, 1, 'ROOT'),
     (3, 0, 0, 3, 'SHORT'),
     -- типы платформы
     (18, 0, 1, 3, 'Пользователь'),

@@ -93,6 +93,7 @@ SELECT COALESCE(typ.val, CONCAT('тип ', rec.t)) AS `Таблица`,
   FROM cm rec
   LEFT JOIN cm typ ON typ.id = rec.t AND typ.up = 0
  WHERE rec.up = 1
+   AND rec.id <> 1   -- корень ROOT (id = up = t = 1) — не запись таблицы
  GROUP BY rec.t, typ.val
  ORDER BY `Записей` DESC, `Таблица`;
 
