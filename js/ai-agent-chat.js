@@ -330,10 +330,180 @@
             return el ? el.textContent : '';
         },
 
+        // --- crm#5113: что на экране рабочего места ---
+        //
+        // Рабочее место (планирование, канбан, калькулятор…) рисует своё состояние само, и по
+        // одному имени страницы агент не знает, какой станок и день открыты. Поэтому чат снимает
+        // экран любого рабочего места сам: заголовок, значения полей и фильтров, активные
+        // вкладки и видимый текст области <main class="app-content">. Делать на рабочем месте
+        // ничего не нужно. Рабочее место может дополнить снимок тем, чего на экране нет (id
+        // записей, служебные отметки): функция window.integramAgentContext() возвращает плоский
+        // объект {label?, поле: значение | [значения]}, её поля перекрывают снятые с экрана.
+
+        maxScreenFields: 20,
+        maxScreenItems: 30,
+        maxScreenText: 3000,
+        maxScreenChars: 6000,
+
+        screenLine: function (v, max) {
+            return String(v == null ? '' : v).replace(/\s+/g, ' ').trim().slice(0, max);
+        },
+
+        screenValue: function (v, max) {
+            if (typeof v === 'boolean') return v;
+            if (typeof v === 'number') return isFinite(v) ? v : null;
+            if (typeof v !== 'string') return null;
+            var s = this.screenLine(v, max);
+            return s === '' ? null : s;
+        },
+
+        // Чистая функция: ctx + описание экрана → ctx с полем screen (и подписью из label).
+        // Ключи — латиница в нижнем регистре; значения — строки (200 символов, text — до
+        // maxScreenText), числа, логические, списки скаляров (до maxScreenItems). Целиком
+        // screen не больше maxScreenChars: сначала ужимается text, потом хвосты списков.
+        mergePageScreen: function (ctx, screen) {
+            if (!ctx || !screen || typeof screen !== 'object' || Array.isArray(screen)) return ctx;
+            var self = this;
+            var out = {}, n = 0;
+            Object.keys(screen).forEach(function (key) {
+                if (key === 'label' || n >= self.maxScreenFields || !/^[a-z][a-z0-9_]{0,39}$/.test(key)) return;
+                var max = key === 'text' ? self.maxScreenText : 200;
+                var v = screen[key], clean;
+                if (Array.isArray(v)) {
+                    clean = [];
+                    v.forEach(function (item) {
+                        var c = self.screenValue(item, 200);
+                        if (c !== null && clean.length < self.maxScreenItems) clean.push(c);
+                    });
+                    if (!clean.length) return;
+                } else {
+                    clean = self.screenValue(v, max);
+                    if (clean === null) return;
+                }
+                out[key] = clean;
+                n++;
+            });
+            var label = this.screenLine(screen.label, 120);
+            if (label) ctx.label = label;
+            if (!n) return ctx;
+            var size = function () { return JSON.stringify(out).length; };
+            if (size() > this.maxScreenChars && typeof out.text === 'string') {
+                out.text = out.text.slice(0, Math.max(0, out.text.length - (size() - this.maxScreenChars)));
+                if (!out.text) delete out.text;
+            }
+            while (size() > this.maxScreenChars) {
+                var longest = null;
+                Object.keys(out).forEach(function (k) {
+                    if (Array.isArray(out[k]) && (!longest || out[k].length > out[longest].length)) longest = k;
+                });
+                if (!longest) break;
+                out[longest].pop();
+                if (!out[longest].length) delete out[longest];
+            }
+            ctx.screen = out;
+            return ctx;
+        },
+
+        // Подпись поля формы: <label for>, aria-label, ближайший <label> у предков (обёртка
+        // «подпись + поле»), title, placeholder, name.
+        controlLabel: function (el) {
+            var self = this;
+            if (el.labels && el.labels.length && this.screenLine(el.labels[0].textContent, 60)) {
+                return this.screenLine(el.labels[0].textContent, 60);
+            }
+            var aria = el.getAttribute && el.getAttribute('aria-label');
+            if (aria) return this.screenLine(aria, 60);
+            var p = el.parentNode;
+            for (var depth = 0; p && depth < 3; depth++, p = p.parentNode) {
+                var lab = p.querySelector ? p.querySelector('label') : null;
+                if (lab && self.screenLine(lab.textContent, 60)) return self.screenLine(lab.textContent, 60);
+            }
+            var attrs = ['title', 'placeholder', 'name'];
+            for (var i = 0; i < attrs.length; i++) {
+                var a = el.getAttribute && el.getAttribute(attrs[i]);
+                if (a) return this.screenLine(a, 60);
+            }
+            return '';
+        },
+
+        // Снимок экрана рабочего места из DOM: {title, fields, active, text}.
+        collectPageScreen: function (root) {
+            if (!root || !root.querySelectorAll) return null;
+            var self = this;
+            var seen = {};
+            var push = function (list, s) {
+                if (s && !seen[s] && list.length < self.maxScreenItems) { seen[s] = 1; list.push(s); }
+            };
+            var visible = function (el) {
+                return !el.hidden && !(typeof el.getClientRects === 'function' && !el.getClientRects().length);
+            };
+            var fields = [];
+            var controls = root.querySelectorAll('input, select, textarea');
+            for (var i = 0; i < controls.length; i++) {
+                var el = controls[i];
+                var type = String(el.type || '').toLowerCase();
+                if (!visible(el) || /^(hidden|password|file|submit|button|reset|image)$/.test(type)) continue;
+                var value;
+                if (String(el.tagName).toUpperCase() === 'SELECT') {
+                    var opt = el.options && el.selectedIndex >= 0 ? el.options[el.selectedIndex] : null;
+                    value = opt ? opt.textContent : '';
+                } else if (type === 'checkbox' || type === 'radio') {
+                    if (!el.checked) continue;
+                    value = 'да';
+                } else {
+                    value = el.value;
+                }
+                value = this.screenLine(value, 120);
+                if (value === '') continue;
+                var label = this.controlLabel(el);
+                push(fields, label ? label + ': ' + value : value);
+            }
+            var active = [];
+            var tabs = root.querySelectorAll('[aria-selected="true"], [aria-current], .active, .is-active');
+            for (var t = 0; t < tabs.length; t++) {
+                if (visible(tabs[t])) push(active, this.screenLine(tabs[t].textContent, 60));
+            }
+            var heading = root.querySelector ? root.querySelector('h1, h2, h3') : null;
+            var navbar = typeof document !== 'undefined' && document.querySelector
+                ? document.querySelector('.navbar-workspace') : null;
+            // В шапке до подмены скриптом стоит имя действия (production-planning) — не заголовок.
+            var navTitle = this.screenLine(navbar && navbar.textContent, 120);
+            if (navTitle === String(this.pageGlobal('action') || '')) navTitle = '';
+            var title = navTitle || this.screenLine(heading && heading.textContent, 120);
+            var screen = {};
+            if (title) screen.title = title;
+            if (fields.length) screen.fields = fields;
+            if (active.length) screen.active = active;
+            var text = String(root.innerText || '').replace(/[ \t]+/g, ' ').replace(/\s*\n\s*/g, '\n').trim();
+            if (text) screen.text = text.slice(0, this.maxScreenText);
+            return Object.keys(screen).length ? screen : null;
+        },
+
+        // Экран рабочего места: снимок DOM, поверх — поля хука страницы.
+        pageScreen: function () {
+            var screen = null;
+            try {
+                var root = typeof document !== 'undefined' && document.querySelector
+                    ? document.querySelector('main.app-content') : null;
+                screen = this.collectPageScreen(root);
+            } catch (e) { screen = null; }
+            var hook = this.pageGlobal('integramAgentContext');
+            if (typeof hook === 'function') {
+                var extra = null;
+                try { extra = hook(); } catch (e) { extra = null; }
+                if (extra && typeof extra === 'object' && !Array.isArray(extra)) {
+                    screen = screen || {};
+                    Object.keys(extra).forEach(function (k) { screen[k] = extra[k]; });
+                }
+            }
+            if (screen && !screen.label && screen.title) screen.label = screen.title;
+            return screen;
+        },
+
         getScreenContext: function () {
             if (this.contextDismissed) return null;
             var loc = (typeof window !== 'undefined' && window.location) || {};
-            return this.buildScreenContext({
+            var ctx = this.buildScreenContext({
                 action: typeof action !== 'undefined' ? action : this.pageGlobal('action'),
                 id: typeof id !== 'undefined' ? id : this.pageGlobal('id'),
                 typeId: this.pageGlobal('type'),
@@ -343,6 +513,8 @@
                 search: loc.search || '',
                 selection: this.collectSelection()
             });
+            if (ctx && ctx.page === 'workplace') ctx = this.mergePageScreen(ctx, this.pageScreen());
+            return ctx;
         },
 
         // Строка «Контекст: Сделка №5231» над полем ввода; крестик снимает контекст.
