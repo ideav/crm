@@ -10667,6 +10667,11 @@ function collectAiAgentAttachments(){
     return $attachments;
 }
 function checkAiAgentPayment($db){
+    # Issue #5117: ИИ-агент открыт всем без оплаты. Требование оплаты c2ai включается
+    # константой или переменной окружения AI_AGENT_PAYMENT_REQUIRED=1.
+    if(aiConfigValue(array("AI_AGENT_PAYMENT_REQUIRED")) !== "1")
+        return array("ok" => true, "status" => "free", "message" => "", "payUrl" => "",
+            "amount" => 0, "paidAt" => 0, "paidUntil" => 0);
     $ttl = (int)aiConfigValue(array("AI_AGENT_PAYMENT_CACHE_TTL"));
     if($ttl <= 0)
         $ttl = 3600; # кеш на 1 час
