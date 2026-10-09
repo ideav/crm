@@ -9853,13 +9853,27 @@ function aiAgentSubmitRequest($com){
     check(); # XSRF
     aiAgentRequireUser();
 
+    # python2node#846: кнопки плана агента — «Применить» (apply), «Отменить» план (cancel) и
+    # «Отменить» выполненное (undo). Это не вопрос агенту, а действие над его планом: агент
+    # исполняет его сам токеном этого же пользователя.
+    $action = isset($_POST["action"]) ? strtolower(trim((string)$_POST["action"])) : "";
+    $planId = isset($_POST["plan"]) ? (string)$_POST["plan"] : "";
+    $actionLabels = array(   # подписи действий в ленте чата
+        "apply" => t9n("[RU]Применить план[EN]Apply the plan"),
+        "cancel" => t9n("[RU]Отменить план[EN]Cancel the plan"),
+        "undo" => t9n("[RU]Отменить действие агента[EN]Undo the agent's action")
+    );
+    if($action !== "" && (!isset($actionLabels[$action]) || !preg_match('/^[a-z0-9]{1,64}$/i', $planId)))
+        aiAgentError(t9n("[RU]Неизвестное действие с планом ИИ-агента[EN]Unknown AI agent plan action"), 400);
+
     # Проверка оплаты (закеширована). При отсутствии/истечении оплаты — ссылка на оплату.
+    # Отказаться от плана и вернуть базу как была можно и без оплаты.
     $payment = checkAiAgentPayment($z);
-    if(empty($payment["ok"]))
+    if(empty($payment["ok"]) && $action !== "cancel" && $action !== "undo")
         aiAgentError($payment["message"], 402, array("paymentStatus" => $payment["status"], "payUrl" => $payment["payUrl"]));
 
-    $message = isset($_POST["message"]) ? trim((string)$_POST["message"]) : "";
-    $attachments = collectAiAgentAttachments();
+    $message = $action !== "" ? $actionLabels[$action] : (isset($_POST["message"]) ? trim((string)$_POST["message"]) : "");
+    $attachments = $action !== "" ? array() : collectAiAgentAttachments();
     if($message === "" && !count($attachments))
         aiAgentError(t9n("[RU]Сообщение для ИИ-агента не передано[EN]No message provided for the AI agent"), 400);
 
@@ -9884,8 +9898,9 @@ function aiAgentSubmitRequest($com){
         # Синхронный агент (вариант A) отвечает сразу content -> задача done.
         # Асинхронный (вариант B1) отвечает 202 {status:queued} -> задача остаётся
         # processing, результат придёт в callback; клиентский опрос это поддерживает.
+        $extra = $action !== "" ? array("action" => $action, "plan_id" => $planId) : array();
         $context = aiAgentScreenContext(isset($_POST["context"]) ? (string)$_POST["context"] : "");
-        $response = callIntegramAgent($z, $message, $attachments, $payment, $jobId, $callbackUrl, $callbackSecret, $context);
+        $response = callIntegramAgent($z, $message, $attachments, $payment, $jobId, $callbackUrl, $callbackSecret, $context, $extra);
         if(!empty($response["pending"])){
             $changes = array("status" => "processing");
             if(!empty($response["agentJobId"]))
@@ -9983,12 +9998,46 @@ function handleAiAgentCallback($db){
     $content = isset($data["content"]) ? (string)$data["content"] : "";
     if(trim($content) === "")
         aiAgentError(t9n("[RU]В callback пустой content[EN]Callback content is empty"), 400);
+    $result = array("assistant" => array("content" => $content), "status" => "ok");
+    # python2node#846: ответ с планом изменений — кнопки «Применить»/«Отменить» в чате.
+    $plan = isset($data["plan"]) ? aiAgentPlanPublic($data["plan"]) : null;
+    if($plan)
+        $result["plan"] = $plan;
     aiAgentJobUpdate($db, $jobId, array(
         "status" => "done",
-        "result" => array("assistant" => array("content" => $content), "status" => "ok"),
+        "result" => $result,
         "error" => null
     ));
+    # План принадлежит задаче, в которой агент его предложил (id плана = id той задачи).
+    # Ответ на «Применить»/«Отменить» обновляет план и там, чтобы старые кнопки не ожили
+    # при восстановлении ленты; чужую задачу не трогаем.
+    if($plan && $plan["id"] !== $jobId){
+        $origin = aiAgentJobGet($db, $plan["id"]);
+        if($origin && isset($origin["result"]["plan"]) && aiAgentJobIsOf($origin, isset($job["user"]) ? $job["user"] : "")){
+            $origin["result"]["plan"] = $plan;
+            aiAgentJobUpdate($db, $plan["id"], array("result" => $origin["result"]));
+        }
+    }
     api_dump(json_encode(array("ok" => true, "status" => "done"), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "ai-agent.json");
+}
+# python2node#846: план из callback агента в том виде, в каком его получает клиент: id, статус, строки
+# описания и доступность отмены. Команды и снимки записей остаются у агента.
+function aiAgentPlanPublic($plan){
+    if(!is_array($plan) || !isset($plan["id"]) || !preg_match('/^[a-z0-9]{1,64}$/i', (string)$plan["id"]))
+        return null;
+    $status = isset($plan["status"]) ? strtolower((string)$plan["status"]) : "";
+    if(!in_array($status, array("pending", "applied", "failed", "cancelled", "undone", "expired"), true))
+        return null;
+    $summary = array();
+    if(isset($plan["summary"]) && is_array($plan["summary"]))
+        foreach(array_slice(array_values($plan["summary"]), 0, 50) as $line)
+            if(is_scalar($line))
+                $summary[] = mb_substr((string)$line, 0, 500);
+    $out = array("id" => (string)$plan["id"], "status" => $status, "summary" => $summary, "undo" => !empty($plan["undo"]));
+    foreach(array("expires_at", "undo_until") as $k)
+        if(isset($plan[$k]) && is_numeric($plan[$k]))
+            $out[$k] = (int)$plan[$k];
+    return $out;
 }
 # Абсолютный HTTPS-URL callback для текущей базы. По умолчанию строится из Host
 # запроса; можно переопределить за прокси через AI_AGENT_CALLBACK_BASE_URL.
@@ -10224,7 +10273,7 @@ function aiAgentScreenContext($raw){
     }
     return $ctx;
 }
-function callIntegramAgent($db, $message, $attachments, $payment, $jobId="", $callbackUrl="", $callbackSecret="", $context=null){
+function callIntegramAgent($db, $message, $attachments, $payment, $jobId="", $callbackUrl="", $callbackSecret="", $context=null, $extra=array()){
     # Отправка данных фиксированному ИИ-агенту (см. docs/ai-agent-endpoint.md).
     # Endpoint берётся из конфигурации; при его отсутствии возвращается подтверждение
     # готовности без вызова. $jobId/$callbackUrl/$callbackSecret включают async-режим
@@ -10260,6 +10309,10 @@ function callIntegramAgent($db, $message, $attachments, $payment, $jobId="", $ca
     # Где сейчас пользователь (python2node#847); без контекста поле не передаётся.
     if(is_array($context) && count($context))
         $request["context"] = $context;
+    # python2node#846: действие над планом агента (action = apply|cancel|undo, plan_id).
+    if(is_array($extra))
+        foreach($extra as $k => $v)
+            $request[$k] = $v;
     # Async-режим (вариант B1): сообщаем агенту, куда вернуть результат. Для
     # синхронного агента поля безвредны — он их игнорирует и отвечает content сразу.
     if($jobId !== "" && $callbackUrl !== ""){

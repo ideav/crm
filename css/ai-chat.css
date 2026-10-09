@@ -484,6 +484,36 @@ body.ai-agent-resizing iframe {
     color: var(--button-primary);
 }
 
+/* python2node#846: кнопки плана агента — «Применить» / «Отменить». */
+.ai-agent-plan-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.6rem;
+}
+
+.ai-agent-plan-btn {
+    padding: 0.35rem 0.9rem;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.ai-agent-plan-apply {
+    border-color: var(--button-primary);
+    background-color: var(--button-primary);
+    color: #fff;
+}
+
+.ai-agent-plan-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
 @media (max-width: 600px) {
     .ai-chat-panel {
         width: 100vw !important;
