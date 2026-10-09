@@ -41,6 +41,7 @@
 
         init: function () {
             this.rendered = {};
+            this.planButtons = {};
             this.toggle = document.getElementById('ai-chat-toggle');
             this.panel = document.getElementById('ai-agent-panel');
             this.closeBtn = document.getElementById('ai-agent-close');
@@ -494,6 +495,64 @@
                 this.renderAttachments();
             }
 
+            this.submit(form);
+        },
+
+        // --- python2node#846: план изменений агента ---
+        //
+        // Просьба изменить данные даёт план (result.plan): агент ничего не записал и ждёт
+        // «Применить» или «Отменить». Выполненный план можно вернуть кнопкой «Отменить»
+        // (plan.undo). Кнопка — не вопрос агенту, а действие: POST action + plan.
+
+        planActions: {
+            apply: { label: 'Применить', said: 'Применить план' },
+            cancel: { label: 'Отменить', said: 'Отменить план' },
+            undo: { label: 'Отменить', said: 'Отменить действие агента' }
+        },
+        planButtons: {},        // id плана -> его кнопки во всей ленте
+
+        // Кнопки под ответом агента по состоянию плана. Прежние кнопки того же плана гаснут:
+        // действует только последнее состояние.
+        renderPlan: function (wrap, plan) {
+            if (!wrap || !plan || !plan.id) return;
+            this.disablePlan(plan.id);
+            var actions = plan.status === 'pending' ? ['apply', 'cancel']
+                : (plan.status === 'applied' && plan.undo) ? ['undo'] : [];
+            if (!actions.length) return;
+            var self = this;
+            var bar = document.createElement('div');
+            bar.className = 'ai-agent-plan-actions';
+            actions.forEach(function (action) {
+                var btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'ai-agent-plan-btn ai-agent-plan-' + action;
+                btn.textContent = self.planActions[action].label;
+                if (action === 'undo') btn.title = 'Вернуть записи как были до действия агента';
+                btn.addEventListener('click', function () { self.sendPlanAction(action, plan.id); });
+                bar.appendChild(btn);
+                (self.planButtons[plan.id] = self.planButtons[plan.id] || []).push(btn);
+            });
+            wrap.appendChild(bar);
+            this.scrollToBottom();
+        },
+
+        disablePlan: function (planId) {
+            (this.planButtons[planId] || []).forEach(function (btn) { btn.disabled = true; });
+        },
+
+        sendPlanAction: function (action, planId) {
+            if (this.sending || !this.planActions[action]) return;
+            this.localActivity = true;
+            this.disablePlan(planId);
+            this.addMessage('user', this.planActions[action].said);
+            var form = new FormData();
+            form.append('_xsrf', this.getXsrfToken());
+            form.append('action', action);
+            form.append('plan', planId);
+            this.submit(form);
+        },
+
+        submit: function (form) {
             // Показываем «думает» сразу — ещё до того, как сервер вернул job.
             this.beginWaiting(null);
 
@@ -588,7 +647,8 @@
 
         finalizeAnswer: function (job) {
             var content = this.getAssistantContent(job.result) || 'ИИ-агент не вернул ответ.';
-            this.replaceThinking(content, null, this.getAssistantBlocks(job.result));
+            var wrap = this.replaceThinking(content, null, this.getAssistantBlocks(job.result));
+            if (job.result && job.result.plan) this.renderPlan(wrap, job.result.plan);
             if (job.id) this.rendered[job.id] = true;
         },
 
@@ -706,8 +766,9 @@
             this.rendered[job.id] = true;
 
             if (job.status === 'done') {
-                this.addMessage('assistant', this.getAssistantContent(job.result) || 'ИИ-агент не вернул ответ.',
+                var wrap = this.addMessage('assistant', this.getAssistantContent(job.result) || 'ИИ-агент не вернул ответ.',
                     null, this.getAssistantBlocks(job.result));
+                if (job.result && job.result.plan) this.renderPlan(wrap, job.result.plan);
                 return;
             }
             if (job.status === 'error') {
@@ -806,10 +867,13 @@
             return { el: wrap, label: label };
         },
 
-        // Заменяет «думает»-пузырь готовым ответом (или создаёт новое сообщение).
+        // Заменяет «думает»-пузырь готовым ответом (или создаёт новое сообщение) и
+        // возвращает элемент сообщения.
         replaceThinking: function (text, payUrl, blocks) {
             var bubble = this.currentBubble;
+            var wrap = null;
             if (bubble && bubble.el) {
+                wrap = bubble.el;
                 bubble.el.className = 'ai-chat-message ai-chat-message-assistant';
                 var body = bubble.el.querySelector('.ai-chat-message-text');
                 if (body) {
@@ -819,9 +883,10 @@
                 if (payUrl) this.appendPayLink(bubble.el, payUrl);
                 this.scrollToBottom();
             } else {
-                this.addMessage('assistant', text, payUrl, blocks);
+                wrap = this.addMessage('assistant', text, payUrl, blocks);
             }
             this.currentBubble = null;
+            return wrap;
         },
 
         // --- python2node#849: структурный ответ агента ---
