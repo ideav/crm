@@ -117,6 +117,7 @@
             this.panel.removeAttribute('inert');
             if (this.toggle) this.toggle.setAttribute('aria-expanded', 'true');
             if (this.input) this.input.focus();
+            this.renderContext();
             this.resume();
             this.scrollToBottom();
         },
@@ -235,6 +236,149 @@
             return u !== '' && u !== 'guest';
         },
 
+        // --- python2node#847: контекст экрана ---
+        //
+        // Агенту уходит, где сейчас пользователь: карточка записи, список таблицы, отчёт,
+        // рабочее место, плюс фильтры из адреса и выделенные строки integram-table. Тогда
+        // «что тут не так?» и «добавь колонку в этот отчёт» понятны без уточнений. На главной
+        // контекста нет — запрос прежний. Пользователь может снять контекст крестиком.
+
+        contextDismissed: false,
+        maxSelection: 50,
+
+        // Глобаль страницы (main.html/шаблоны действия объявляют их через var).
+        pageGlobal: function (name) {
+            if (typeof window === 'undefined') return undefined;
+            return window[name];
+        },
+
+        // Чистая функция: env = {action, id, pathname, search, typeId, typeName, title, selection}.
+        buildScreenContext: function (env) {
+            env = env || {};
+            var action = String(env.action || '').toLowerCase();
+            var id = parseInt(env.id, 10) > 0 ? parseInt(env.id, 10) : 0;
+            var ctx = null;
+            var title = String(env.title || '').replace(/\s+/g, ' ').trim();
+            if (action === 'edit_obj' && id) {
+                ctx = { page: 'object', object_id: id };
+                var typeId = parseInt(env.typeId, 10);
+                if (typeId > 0) ctx.table_id = typeId;
+                ctx.label = (String(env.typeName || '').trim() || 'Запись') + ' №' + id;
+            } else if ((action === 'object' || action === 'table') && id) {
+                ctx = { page: 'table', table_id: id, label: 'Таблица ' + (title || id) };
+            } else if (action === 'report' && id) {
+                ctx = { page: 'report', report_id: id, label: 'Отчёт ' + (title || id) };
+            } else if (action === 'dir_admin') {
+                ctx = { page: 'dir_admin', label: 'Файлы базы' };
+            } else if (action && /^[\w-]{1,64}$/.test(action)
+                && ['main', 'edit_obj', 'object', 'table', 'report'].indexOf(action) < 0) {
+                ctx = { page: 'workplace', workplace: action, label: 'Рабочее место ' + action };
+            }
+            if (!ctx) return null;
+
+            var filters = {}, nFilters = 0;
+            String(env.search || '').replace(/^\?/, '').split('&').forEach(function (pair) {
+                if (!pair || nFilters >= 20) return;
+                var eq = pair.indexOf('=');
+                var key, val;
+                try {
+                    key = decodeURIComponent((eq < 0 ? pair : pair.slice(0, eq)).replace(/\+/g, ' '));
+                    val = eq < 0 ? '' : decodeURIComponent(pair.slice(eq + 1).replace(/\+/g, ' '));
+                } catch (e) { return; }
+                if (!/^(F|FR|TO)_[\wА-Яа-яЁё]+$/.test(key) || val === '') return;
+                if (key === 'F_I' && ctx.page === 'table' && parseInt(val, 10) > 0) {
+                    ctx.object_id = parseInt(val, 10);
+                }
+                filters[key] = val.slice(0, 200);
+                nFilters++;
+            });
+            if (nFilters) ctx.filters = filters;
+
+            var sel = [];
+            (env.selection || []).forEach(function (v) {
+                var n = parseInt(v, 10);
+                if (n > 0 && sel.indexOf(n) < 0 && sel.length < IntegramAiAgentChat.maxSelection) sel.push(n);
+            });
+            if (sel.length) {
+                ctx.selection = sel;
+                ctx.label += ' · выделено ' + sel.length;
+            }
+            if (env.pathname) ctx.url = String(env.pathname) + String(env.search || '');
+            return ctx;
+        },
+
+        // id выделенных строк всех integram-table на странице.
+        collectSelection: function () {
+            var list = this.pageGlobal('_integramTableInstances') || [];
+            var ids = [];
+            for (var t = 0; t < list.length; t++) {
+                var inst = list[t];
+                if (!inst || !inst.selectedRows || !inst.selectedRows.size) continue;
+                var rows = inst.rawObjectData || [];
+                inst.selectedRows.forEach(function (idx) {
+                    if (rows[idx] && rows[idx].i) ids.push(rows[idx].i);
+                });
+            }
+            return ids;
+        },
+
+        // Название таблицы/отчёта со страницы — последний пункт «хлебных крошек».
+        pageTitle: function () {
+            if (typeof document === 'undefined' || !document.querySelector) return '';
+            var el = document.querySelector('.breadcrumb-item.active');
+            return el ? el.textContent : '';
+        },
+
+        getScreenContext: function () {
+            if (this.contextDismissed) return null;
+            var loc = (typeof window !== 'undefined' && window.location) || {};
+            return this.buildScreenContext({
+                action: typeof action !== 'undefined' ? action : this.pageGlobal('action'),
+                id: typeof id !== 'undefined' ? id : this.pageGlobal('id'),
+                typeId: this.pageGlobal('type'),
+                typeName: this.pageGlobal('typeName'),
+                title: this.pageTitle(),
+                pathname: loc.pathname || '',
+                search: loc.search || '',
+                selection: this.collectSelection()
+            });
+        },
+
+        // Строка «Контекст: Сделка №5231» над полем ввода; крестик снимает контекст.
+        renderContext: function () {
+            var ctx = this.getScreenContext();
+            if (!this.contextEl) {
+                var anchor = this.attachmentsList;
+                var parent = anchor && anchor.parentNode;
+                if (!ctx || !parent || !parent.insertBefore) return ctx;
+                var self = this;
+                var el = document.createElement('div');
+                el.className = 'ai-agent-context';
+                var label = document.createElement('span');
+                label.className = 'ai-agent-context-label';
+                el.appendChild(label);
+                var remove = document.createElement('button');
+                remove.type = 'button';
+                remove.className = 'ai-agent-context-remove';
+                remove.title = 'Не передавать контекст страницы';
+                remove.setAttribute('aria-label', 'Не передавать контекст страницы');
+                remove.innerHTML = '<i class="pi pi-times"></i>';
+                remove.addEventListener('click', function () { self.dismissContext(); });
+                el.appendChild(remove);
+                parent.insertBefore(el, anchor);
+                this.contextEl = el;
+                this.contextLabel = label;
+            }
+            this.contextEl.hidden = !ctx;
+            if (ctx) this.contextLabel.textContent = 'Контекст: ' + ctx.label;
+            return ctx;
+        },
+
+        dismissContext: function () {
+            this.contextDismissed = true;
+            this.renderContext();
+        },
+
         getXsrfToken: function () {
             if (typeof xsrf !== 'undefined' && xsrf) return String(xsrf);
             if (typeof window !== 'undefined' && window.xsrf) return String(window.xsrf);
@@ -339,6 +483,8 @@
             var form = new FormData();
             form.append('_xsrf', this.getXsrfToken());
             form.append('message', text);
+            var context = this.renderContext();
+            if (context) form.append('context', JSON.stringify(context));
             if (!fromAction) {
                 this.attachments.forEach(function (file) {
                     form.append('files[]', file, file.name);
