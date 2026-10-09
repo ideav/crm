@@ -68,7 +68,7 @@ curl -s -H "X-Authorization: <token>" "https://ideav.ru/{db}/xsrf?JSON"
 
 Исчерпание предела — ответ **`504 Gateway Timeout`**: браузеру текст «Запрос прерван: превышен
 предел времени N c», API (`?JSON…`) — `[{"error": …}]`. Прерванный SQL пишется в лог базы
-(`logs/{db}_log.txt`, метка `[time limit Nc]`). Экспорт/импорт базы (`csv_all`, `backup`,
+(`logs/{db}_log.jsonl`, поле `msg` с меткой `[time limit Nc]`, [logs.md](logs.md)). Экспорт/импорт базы (`csv_all`, `backup`,
 `restore`) поднимает предел до 300 c сам.
 
 ## Грабли

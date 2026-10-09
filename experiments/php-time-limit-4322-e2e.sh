@@ -67,13 +67,13 @@ fi
 # на сервере — он короткий, KILL QUERY ему не нужен. В логе от него остаётся строка
 # «SQL прерван [DB check]» и НЕ должно быть «KILL QUERY».
 echo "5. Проверочный запрос не добивается (KILL QUERY по [DB check] нет)"
-if docker exec "$APP" sh -c 'grep -q "KILL QUERY" /var/www/html/logs/*_log.txt 2>/dev/null'; then
+if docker exec "$APP" sh -c 'grep -q "KILL QUERY" /var/www/html/logs/*_log.jsonl 2>/dev/null'; then
     echo "   FAIL — в логе есть KILL QUERY, хотя добивать проверочный запрос не должны"
-    docker exec "$APP" sh -c 'grep -n "KILL QUERY" /var/www/html/logs/*_log.txt | head -3'
+    docker exec "$APP" sh -c 'grep -n "KILL QUERY" /var/www/html/logs/*_log.jsonl | head -3'
 else
     echo "   ok — KILL QUERY не звался"
 fi
 
 echo
 echo "Хвост лога PHP:"
-docker exec "$APP" sh -c 'tail -5 /var/www/html/logs/*_log.txt 2>/dev/null || true'
+docker exec "$APP" sh -c 'tail -5 /var/www/html/logs/*_log.jsonl 2>/dev/null || true'

@@ -133,6 +133,8 @@ register_shutdown_function(function() {
             'line' => $error['line'],
             'time_limit' => isset($GLOBALS["TIME_LIMIT"]) ? $GLOBALS["TIME_LIMIT"] : NULL
         ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if(function_exists("logRequest"))  # exit отменяет остальные обработчики — строку запроса пишем здесь
+            logRequest();
         exit;
     }
 });
@@ -151,6 +153,11 @@ define("USER_DB_MASK", "/^[a-z]\w{2,14}$/i");  # Mask for the DB name validation
 define("DIR_MASK", "/^[a-z0-9_-]+$/i");  # Mask for the dir name validation
 define("FILE_MASK", "/^[a-z0-9_.-]+$/i");
 define("LOGS_DIR", "logs/");  # Logs files folder
+# Журнал JSON Lines (#5104). Предел ротации — LOG_ROTATE_MB (по умолчанию 50), можно задать в
+# include/connection.php.
+define("LOG_VAL_MAX", 2048);  # значение длиннее — обрезается, полная длина в old_len/new_len
+define("LOG_IMPORT_ROWS", 16);  # импорт с большим числом изменений пишется одной сводкой
+define("LOG_ROWS_MAX", 1000);  # изменение, задевшее больше строк, пишется op:"sql" без old/new
 # The kind of a row queued by Insert_batch() - see its comment. Defined up here because the top-level
 # code calling it runs before the line the function is declared on: functions hoist, define() does not.
 define("BATCH_ASIS", -1);
@@ -298,8 +305,7 @@ if(isset($_GET["TRACE_IT"]) || isset($_COOKIE["TRACE_IT"])){
 $row = mysqli_fetch_assoc($billing);
 if(isset($row["val"]) && ((int)$row["val"] < 0.01))
 	trace("Billing: read only");
-# Fetch all the parameters from the body and log them
-$params = "";
+# Fetch all the parameters from the body
 $rawInput = file_get_contents('php://input');
 if(strlen($rawInput)){
     $json = json_decode($rawInput, true);
@@ -307,19 +313,9 @@ if(strlen($rawInput)){
         foreach($json AS $key => $value)
             $_POST[$key] = $_REQUEST[$key] = $value;
 }
-# `c`/`s` — код и секрет входа по QR: секрет отпирает выдачу ПОСТОЯННОГО токена,
-# поэтому в лог не попадает ни телом, ни строкой запроса (#4677).
-$sensitivePostKeys = ['pwd', 'password', 'token', 'secret', 'reset', 'regpwd', 'regpwd1', 'c', 's'];
-foreach($_POST AS $key => $value){
-    $value = maskSensitiveLogValue($key, $value, $sensitivePostKeys);
-	if(is_array($value))
-		$params .= "\n $key " . print_r($value, true) . "\n";
-	else
-		if(strlen($value) && !in_array(strtolower($key), $sensitivePostKeys))
-			$params .= " $key=$value;";
-}
-$safeUri = preg_replace('/([?&](secret|token|c|s|code|reset)=)[^&]*/i', '$1***', $_SERVER["REQUEST_URI"]);
-wlog($_SERVER["REMOTE_ADDR"]." ".$safeUri." $params", "log");
+# Строка запроса пишется при завершении PHP — с пользователем, кодом ответа и временем (#5104).
+# Секреты в параметрах маскирует logParams(): `c`/`s` — код и секрет входа по QR (#4677).
+register_shutdown_function("logRequest");
 if(($z === "my") && ((isset($com[2]) ? $com[2] : "") === "register")){ # Register the user
     # Check if this is a confirmation request
     if(isset($_GET["c"]) && isset($_GET["u"])){
@@ -1255,10 +1251,373 @@ function aiLogUser(){
     $client = isset($_REQUEST["client"]) && is_string($_REQUEST["client"]) ? strtolower($_REQUEST["client"]) : "";
     return $client === "ai" ? $user."~ai" : $user;
 }
+# Журнал базы в JSON Lines (issue #5104): logs/<db>_log.jsonl — строка на HTTP-запрос
+# (logRequest) и служебные заметки (wlog), logs/<db>_sql.jsonl — строка на изменение данных
+# (Exec_sql). Строки одного запроса связывает rid. Формат — docs/kb/logs.md.
 function wlog($text, $mode="log"){
-    $file = fopen(LOGS_DIR.$GLOBALS["z"]."_$mode.txt", "a+");
-    fwrite ($file, date("d/m/Y H:i:s")." $text\n");
-    fclose($file);
+    $rec = logHead();
+    $rec["msg"] = logCut((string)$text);
+    logWrite($mode === "sql" ? "sql" : "log", $rec);
+}
+# id запроса: один на все строки журнала, которые запрос пишет
+function logRid(){
+    if(!isset($GLOBALS["LOG_RID"]))
+        $GLOBALS["LOG_RID"] = substr(base_convert(bin2hex(random_bytes(5)), 16, 36), 0, 7);
+    return str_pad($GLOBALS["LOG_RID"], 6, "0", STR_PAD_LEFT);
+}
+function logTs(){
+    $now = microtime(TRUE);
+    $sec = (int)$now;
+    return date("Y-m-d\\TH:i:s", $sec).sprintf(".%03d", (int)(($now - $sec) * 1000)).date("P", $sec);
+}
+# id задачи ИИ-чата, который прокси agent-chat передаёт вместе с client=ai (python2node#845)
+function logAiJob(){
+    if(!isset($_REQUEST["ai_job"]) || !is_string($_REQUEST["ai_job"]))
+        return "";
+    return substr(preg_replace('/[^A-Za-z0-9_.:-]/', "", $_REQUEST["ai_job"]), 0, 64);
+}
+function logHead(){
+    $gv = isset($GLOBALS["GLOBAL_VARS"]) ? $GLOBALS["GLOBAL_VARS"] : array();
+    return array("v" => 1, "ts" => logTs(), "rid" => logRid(), "user" => aiLogUser()
+                , "uid" => isset($gv["user_id"]) && is_numeric($gv["user_id"]) ? (int)$gv["user_id"] : NULL);
+}
+# Строка длиннее LOG_VAL_MAX байт обрезается по границе символа UTF-8
+function logCut($val){
+    return strlen($val) > LOG_VAL_MAX ? mb_strcut($val, 0, LOG_VAL_MAX, "UTF-8") : $val;
+}
+# Значение строки ядра в запись журнала: секреты — "***", длинное — обрезано, полная длина в <key>_len
+function logPutVal(&$rec, $key, $val, $t){
+    if($val === NULL)
+        return;
+    if(in_array((int)$t, array(PASSWORD, XSRF, TOKEN, SECRET), TRUE)){
+        $rec[$key] = "***";
+        return;
+    }
+    $val = (string)$val;
+    $rec[$key] = logCut($val);
+    if(strlen($val) > LOG_VAL_MAX)
+        $rec[$key."_len"] = strlen($val);
+}
+# Текст SQL для op:"sql"/"ddl": строковые литералы скрыты — в них могут быть токены и пароли
+function logMaskSql($sql){
+    return logCut(preg_replace("/'(?:[^'\\\\]|\\\\.)*'/s", "'***'", $sql));
+}
+function logRotateBytes(){
+    return (int)((defined("LOG_ROTATE_MB") ? LOG_ROTATE_MB : 50) * 1048576);
+}
+# Ротация: <db>_sql.jsonl → <db>_sql.N.jsonl, N — следующий свободный номер. Номера архивов
+# не сдвигаются, поэтому курсор чтения (файл, смещение) остаётся верным после ротации.
+function logRotate($file){
+    $base = substr($file, 0, -strlen(".jsonl"));
+    $n = 0;
+    foreach(glob($base.".*.jsonl") as $old)
+        if(preg_match('/\.(\d+)\.jsonl$/', $old, $m))
+            $n = max($n, (int)$m[1]);
+    rename($file, $base.".".($n + 1).".jsonl");
+}
+# Одна строка — одна fwrite под flock: строки параллельных запросов не перемешиваются
+function logWrite($mode, $rec){
+    if(!isset($GLOBALS["z"]) || !strlen($GLOBALS["z"]) || !defined("LOGS_DIR"))
+        return;
+    $job = logAiJob();
+    if(strlen($job))
+        $rec["ai_job"] = $job;
+    $line = json_encode($rec, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR)."\n";
+    $file = LOGS_DIR.$GLOBALS["z"]."_$mode.jsonl";
+    $limit = logRotateBytes();
+    for($try = 0; $try < 3; $try++){
+        $fh = @fopen($file, "a");
+        if(!$fh)
+            return;
+        if(!flock($fh, LOCK_EX)){
+            fclose($fh);
+            return;
+        }
+        clearstatcache(TRUE, $file);
+        $mine = fstat($fh);
+        $now = @stat($file);
+        if(!$now || ($now["ino"] !== $mine["ino"])){ # файл ротировали, пока ждали блокировку
+            flock($fh, LOCK_UN);
+            fclose($fh);
+            continue;
+        }
+        if(($limit > 0) && ($mine["size"] > 0) && ($mine["size"] + strlen($line) > $limit)){
+            logRotate($file);
+            flock($fh, LOCK_UN);
+            fclose($fh);
+            continue;
+        }
+        fwrite($fh, $line);
+        fflush($fh);
+        flock($fh, LOCK_UN);
+        fclose($fh);
+        return;
+    }
+}
+# Строка запроса — пишется при завершении PHP, когда известны пользователь, ответ и время
+function logRequest(){
+    if(isset($GLOBALS["LOG_IMPORT"]))
+        logImportEnd("interrupted");
+    $rec = logHead();
+    $gv = isset($GLOBALS["GLOBAL_VARS"]) ? $GLOBALS["GLOBAL_VARS"] : array();
+    if(isset($gv["role"]))
+        $rec["role"] = (string)$gv["role"];
+    $rec["ip"] = isset($_SERVER["REMOTE_ADDR"]) ? $_SERVER["REMOTE_ADDR"] : "";
+    $rec["m"] = isset($_SERVER["REQUEST_METHOD"]) ? $_SERVER["REQUEST_METHOD"] : "";
+    $rec["path"] = isset($_SERVER["REQUEST_URI"]) ? (string)parse_url($_SERVER["REQUEST_URI"], PHP_URL_PATH) : "";
+    $params = logParams();
+    if(count($params))
+        $rec["params"] = $params;
+    $st = http_response_code();
+    $rec["st"] = $st ? $st : 200;
+    $start = isset($_SERVER["REQUEST_TIME_FLOAT"]) ? $_SERVER["REQUEST_TIME_FLOAT"] : microtime(TRUE);
+    $rec["ms"] = (int)round((microtime(TRUE) - $start) * 1000);
+    $rec["sqls"] = isset($GLOBALS["sqls"]) ? $GLOBALS["sqls"] : 0;
+    $rec["sql_ms"] = isset($GLOBALS["sql_time"]) ? round($GLOBALS["sql_time"] * 1000, 1) : 0;
+    logWrite("log", $rec);
+}
+# Параметры запроса (GET и тело) для строки запроса. Секретные — "***": ключи из списка и по
+# маске maskSensitiveLogValue, xsrf, а также tN реквизитов-секретов (t20 — пароль в _m_set).
+function logParams(){
+    # `c`/`s` — код и секрет входа по QR: секрет отпирает выдачу ПОСТОЯННОГО токена (#4677)
+    $sensitivePostKeys = ['pwd', 'password', 'token', 'secret', 'reset', 'regpwd', 'regpwd1', 'c', 's', 'code', '_xsrf', 'xsrf'
+                        , 't'.PASSWORD, 't'.XSRF, 't'.TOKEN, 't'.SECRET];
+    $out = array();
+    foreach(array_merge(is_array($_GET) ? $_GET : array(), is_array($_POST) ? $_POST : array()) as $key => $value){
+        if(!is_array($value) && !strlen((string)$value))
+            continue;
+        $value = maskSensitiveLogValue($key, $value, $sensitivePostKeys);
+        if(is_array($value)){
+            $json = json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR);
+            if(strlen($json) > LOG_VAL_MAX)
+                $value = logCut($json);
+        }
+        else
+            $value = logCut((string)$value);
+        $out[$key] = $value;
+    }
+    return $out;
+}
+# Массовый импорт: больше LOG_IMPORT_ROWS изменений — одна строка op:"import" со счётчиками,
+# до LOG_IMPORT_ROWS включительно — построчно, как обычные изменения.
+function logImportBegin($kind, $table, $file){
+    $GLOBALS["LOG_IMPORT"] = array("kind" => $kind, "table" => (int)$table, "file" => (string)$file
+                                    , "inserted" => 0, "updated" => 0, "deleted" => 0, "errors" => 0
+                                    , "start" => microtime(TRUE), "rows" => array(), "over" => FALSE);
+}
+function logImportKind($kind){
+    if(isset($GLOBALS["LOG_IMPORT"]))
+        $GLOBALS["LOG_IMPORT"]["kind"] = $kind;
+}
+function logImportEnd($err = ""){
+    if(!isset($GLOBALS["LOG_IMPORT"]))
+        return;
+    $imp = $GLOBALS["LOG_IMPORT"];
+    unset($GLOBALS["LOG_IMPORT"]);
+    if(!$imp["over"]){
+        foreach($imp["rows"] as $rec)
+            logWrite("sql", $rec);
+        return;
+    }
+    $rec = logHead();
+    $rec["op"] = "import";
+    foreach(array("kind", "table", "file", "inserted", "updated", "deleted", "errors") as $k)
+        $rec[$k] = $imp[$k];
+    $rec["ms"] = (int)round((microtime(TRUE) - $imp["start"]) * 1000);
+    if(strlen($err))
+        $rec["err"] = $err;
+    logWrite("sql", $rec);
+}
+# Изменение данных: в журнал, а во время импорта — в счётчики сводки
+function logChange($rec){
+    if(isset($GLOBALS["LOG_IMPORT"])){
+        $imp = &$GLOBALS["LOG_IMPORT"];
+        if(isset($rec["err"]))
+            $imp["errors"]++;
+        elseif($rec["op"] === "insert")
+            $imp["inserted"]++;
+        elseif($rec["op"] === "update")
+            $imp["updated"]++;
+        elseif($rec["op"] === "delete")
+            $imp["deleted"]++;
+        if(!$imp["over"]){
+            $imp["rows"][] = $rec;
+            if(count($imp["rows"]) > LOG_IMPORT_ROWS){
+                $imp["over"] = TRUE;
+                $imp["rows"] = array();
+            }
+        }
+        return;
+    }
+    logWrite("sql", $rec);
+}
+# Позиция первого WHERE вне кавычек и скобок (FALSE, если его нет)
+function logWherePos($sql){
+    $len = strlen($sql);
+    $depth = 0;
+    $quote = "";
+    for($i = 0; $i < $len; $i++){
+        $c = $sql[$i];
+        if($quote !== ""){
+            if($c === "\\")
+                $i++;
+            elseif($c === $quote)
+                $quote = "";
+        }
+        elseif(($c === "'") || ($c === '"'))
+            $quote = $c;
+        elseif($c === "(")
+            $depth++;
+        elseif($c === ")")
+            $depth--;
+        elseif(($depth === 0) && (($c === "W") || ($c === "w")) && preg_match('/\GWHERE\b/i', $sql, $m, 0, $i)
+                && (($i === 0) || ctype_space($sql[$i - 1])))
+            return $i;
+    }
+    return FALSE;
+}
+function logRows($where){
+    global $connection, $z;
+    $res = mysqli_query($connection, "SELECT id, up, ord, t, val FROM $z WHERE $where LIMIT ".(LOG_ROWS_MAX + 1));
+    if(!$res)
+        return FALSE;
+    $rows = array();
+    while($row = mysqli_fetch_assoc($res))
+        $rows[(int)$row["id"]] = $row;
+    return count($rows) > LOG_ROWS_MAX ? FALSE : $rows;
+}
+# До выполнения изменяющего SQL: что это за изменение и строки, которые оно заденет (для old).
+# NULL — не изменение данных (SELECT, SET и т. п.).
+function logChangeBefore($sql){
+    global $z;
+    $s = ltrim($sql);
+    if(!preg_match('/^(INSERT|UPDATE|DELETE|REPLACE|CREATE|ALTER|DROP|TRUNCATE|RENAME)\b/i', $s, $m))
+        return NULL;
+    $verb = strtoupper($m[1]);
+    $ch = array("verb" => $verb, "kind" => "sql", "sql" => $s);
+    if(in_array($verb, array("CREATE", "ALTER", "DROP", "TRUNCATE", "RENAME"))){
+        $ch["kind"] = "ddl";
+        return $ch;
+    }
+    $tbl = '`?'.preg_quote($z, '/').'`?';
+    $light = isset($GLOBALS["LOG_IMPORT"]) && $GLOBALS["LOG_IMPORT"]["over"];  # сводка: нужны только счётчики
+    if(($verb === "INSERT") && preg_match("/^INSERT\\s+INTO\\s+$tbl\\s*\\(\\s*up\\s*,\\s*ord\\s*,\\s*t\\s*,\\s*val\\s*\\)\\s*VALUES\\s*\\(/i", $s))
+        $ch["kind"] = $light ? "count" : "insert";
+    elseif(($verb === "INSERT") && preg_match("/^INSERT\\s+INTO\\s+$tbl\\s*\\(\\s*id\\s*,\\s*up\\s*,\\s*ord\\s*,\\s*t\\s*,\\s*val\\s*\\)\\s*VALUES\\s*\\(\\s*(\\d+)\\s*,/i", $s, $m)){
+        $ch["kind"] = $light ? "count" : "insert_id";
+        $ch["id"] = (int)$m[1];
+    }
+    elseif(($verb === "UPDATE") || ($verb === "DELETE")){
+        $head = $verb === "UPDATE" ? "/^UPDATE\\s+$tbl\\s+SET\\s/i" : "/^DELETE\\s+FROM\\s+$tbl\\s+WHERE\\s/i";
+        $pos = logWherePos($s);
+        if(preg_match($head, $s) && ($pos !== FALSE)){
+            $set = substr($s, 0, $pos);
+            if(($verb === "UPDATE") && preg_match("/[\\s,]id\\s*=/i", preg_replace("/'(?:[^'\\\\]|\\\\.)*'/s", "''", $set)))
+                return $ch;  # меняется сам id — строку после изменения по id не найти
+            if($light){
+                $ch["kind"] = "count";
+                return $ch;
+            }
+            $rows = logRows(substr($s, $pos + 5));
+            if($rows !== FALSE){
+                $ch["kind"] = strtolower($verb);
+                $ch["rows"] = $rows;
+            }
+        }
+    }
+    if($light && ($ch["kind"] === "sql"))
+        $ch["kind"] = "count";
+    return $ch;
+}
+function logRowRec($op, $row){
+    $rec = logHead();
+    $rec["op"] = $op;
+    $rec["id"] = (int)$row["id"];
+    $rec["up"] = (int)$row["up"];
+    $rec["t"] = (int)$row["t"];
+    return $rec;
+}
+# После выполнения: строки журнала по изменению ($err — текст ошибки, если оно не прошло)
+function logChangeAfter($ch, $time, $err = ""){
+    global $connection, $z;
+    $ms = round($time * 1000, 1);
+    if(($ch["kind"] === "count") && !strlen($err)){  # импорт в режиме сводки
+        $n = max(0, (int)mysqli_affected_rows($connection));
+        $imp = &$GLOBALS["LOG_IMPORT"];
+        $key = array("INSERT" => "inserted", "REPLACE" => "inserted", "UPDATE" => "updated", "DELETE" => "deleted");
+        if(isset($key[$ch["verb"]]))
+            $imp[$key[$ch["verb"]]] += $n;
+        return;
+    }
+    if(strlen($err) || in_array($ch["kind"], array("sql", "ddl", "count"))){
+        $rec = logHead();
+        $rec["op"] = $ch["kind"] === "ddl" ? "ddl" : "sql";
+        $rec["sql"] = logMaskSql($ch["sql"]);
+        if(strlen($err))
+            $rec["err"] = logCut($err);
+        else
+            $rec["n"] = (int)mysqli_affected_rows($connection);
+        $rec["ms"] = $ms;
+        logChange($rec);
+        return;
+    }
+    if($ch["kind"] === "delete"){
+        foreach($ch["rows"] as $row){
+            $rec = logRowRec("delete", $row);
+            logPutVal($rec, "old", $row["val"], $row["t"]);
+            $rec["ms"] = $ms;
+            logChange($rec);
+        }
+        return;
+    }
+    if($ch["kind"] === "update"){
+        if(!count($ch["rows"]))
+            return;
+        $now = logRows("id IN (".implode(",", array_keys($ch["rows"])).")");
+        foreach($ch["rows"] as $id => $old){
+            if(!$now || !isset($now[$id]))
+                continue;
+            $new = $now[$id];
+            if(($old["val"] === $new["val"]) && ($old["up"] == $new["up"]) && ($old["t"] == $new["t"]) && ($old["ord"] == $new["ord"]))
+                continue;
+            $rec = logRowRec("update", $new);
+            logPutVal($rec, "old", $old["val"], $old["t"]);
+            logPutVal($rec, "new", $new["val"], $new["t"]);
+            if($old["up"] != $new["up"])
+                $rec["old_up"] = (int)$old["up"];
+            if($old["t"] != $new["t"])
+                $rec["old_t"] = (int)$old["t"];
+            if($old["ord"] != $new["ord"]){
+                $rec["old_ord"] = (int)$old["ord"];
+                $rec["ord"] = (int)$new["ord"];
+            }
+            $rec["ms"] = $ms;
+            logChange($rec);
+        }
+        return;
+    }
+    # insert: строки читаются по id — одна или подряд идущие id многострочной вставки
+    if($ch["kind"] === "insert_id")
+        $first = $ch["id"];
+    else
+        $first = (int)mysqli_insert_id($connection);
+    $n = (int)mysqli_affected_rows($connection);
+    $rows = ($first > 0) && ($n > 0) && ($n <= LOG_ROWS_MAX) ? logRows("id BETWEEN $first AND ".($first + $n - 1)) : FALSE;
+    if(!$rows){
+        $rec = logHead();
+        $rec["op"] = "sql";
+        $rec["sql"] = logMaskSql($ch["sql"]);
+        $rec["n"] = $n;
+        $rec["ms"] = $ms;
+        logChange($rec);
+        return;
+    }
+    foreach($rows as $row){
+        $rec = logRowRec("insert", $row);
+        logPutVal($rec, "new", $row["val"], $row["t"]);
+        $rec["ms"] = $ms;
+        logChange($rec);
+    }
 }
 function trace($text){
     global $logFile;
@@ -1289,6 +1648,8 @@ function Exec_sql($sql, $err_msg, $log=TRUE, $fatal=TRUE){
 	global $connection, $z;
 	$time_start = microtime(TRUE);
 	trace("Try Exec_sql $sql [$err_msg]");
+	$change = $log ? logChangeBefore($sql) : NULL;  # #5104: изменение данных — в <db>_sql.jsonl
+	$time_start = microtime(TRUE);
 	Sql_running($sql);  # #4322: пока запрос в работе, его можно добить при завершении PHP
 	$result = mysqli_query($connection, $sql);
 	Sql_running_done();
@@ -1298,17 +1659,15 @@ function Exec_sql($sql, $err_msg, $log=TRUE, $fatal=TRUE){
     	if(mysqli_errno($connection)===1146)
     	    login("", "", "dBNotExists", t9n("[RU]База $z не существует[EN]The $z DB does not exist")." [$err_msg]");
     	$msg = "Couldn't execute query [$err_msg] ".mysqli_error($connection)." ($sql; )";
+    	if($change)
+    	    logChangeAfter($change, microtime(TRUE) - $time_start, "[$err_msg] ".mysqli_error($connection));
     	if(!$fatal)
     	    return $msg;
 		die_info($msg);
 	}
 	$time = microtime(TRUE) - $time_start;
-	if($log && ((strtoupper(substr($sql, 0, 6)) != "SELECT") && (strtoupper(substr($sql, 0, 4)) != "SET "))){
-	    if(strtoupper(substr($sql, 0, 6)) === "INSERT")
-	        $sql = str_replace("INSERT INTO $z (up, ord, t, val) VALUES ("
-	                        , "INSERT INTO $z (up, ord, t, val) VALUES (/*". mysqli_insert_id($connection)."*/ ", $sql);
-	    wlog(aiLogUser()."@".$_SERVER["REMOTE_ADDR"]."[".round($time, 4)."]$sql;[$err_msg]","sql");
-	}
+	if($change)
+	    logChangeAfter($change, $time);
 	trace("[".round($time, 4)."] $sql; [$err_msg]");
 	if(isset($GLOBALS["sqls"])){
     	$GLOBALS["sqls"]++;
@@ -6648,6 +7007,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 					die(t9n("[RU]Ошибка. Максимальный размер файла: $max_size Б[EN]The maximum file size is $max_size B)"));
 				$up = ($GLOBALS["parent_id"] > 1) ? $GLOBALS["parent_id"] : 1;
 				$handle = fopen($_FILES["bki_file"]["tmp_name"], "r");
+				logImportBegin("bki", $id, $_FILES["bki_file"]["name"]);  # #5104: импорт — одной сводкой
 				$plain_data = $json_import = false;
 				$buffer = fgets($handle);
                 # Remove BOM, if exists
@@ -6656,6 +7016,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                 if(substr($buffer, 0, 4) === "DATA")
                 {
 				    $plain_data = true; // Plain data with no definitions - the exact structure is already in place
+				    logImportKind("csv");
 				    trace("Plain DATA");
 				    $i = $id;
                 }
@@ -6668,6 +7029,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                         my_die(t9n("[RU]Архив не загружен: [EN]Archive not loaded: ").$e->getMessage());
                     }
                     $json_import = true;
+                    logImportKind("json");
                     $plain_data = true;	// Строки архива едут в общий разбор данных
                     trace("JSON archive, ".count($archive["rows"])." rows");
                     $i = $id;
@@ -7407,6 +7769,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 #					echo $buffer;
 				}
 				Insert_batch("", "", "", "", "Import");
+				logImportEnd();
 				fclose($handle);
 #				print_r($GLOBALS["parents"]);print_r($GLOBALS["local_struct"]);die("$ftell=".$buffer);
 #print($header);#print_r($blocks["typ"]);print_r($blocks["typ"]);print_r($GLOBALS);die();
@@ -12113,16 +12476,13 @@ switch($a)  # Check actions, which don't require authentication
 			}
 		}
 		else
-			wlog("Authenticate user: $sql", "log");
+			wlog("Authenticate user: $u not found", "log");
 		if(!$row){ # Check the user Cabinet
 		    $prevz = $z;
 		    $z = "my";
     		$pwd = hash("sha512", Salt($u, $p));
 		    $z = $prevz;
-			wlog("Authenticate $u / $pwd in Cabinet", "log");
-			wlog("SELECT 1 FROM my email JOIN my pwd ON pwd.up=email.up AND pwd.val='$pwd'"
-                					."     JOIN my db ON db.up=email.up AND db.val='$z' AND db.t=".DATABASE
-                					." WHERE email.t=".EMAIL." AND email.val='$u'", "log");
+			wlog("Authenticate $u in Cabinet", "log");
     		$data_set = Exec_sql("SELECT 1 FROM my email JOIN my pwd ON pwd.up=email.up AND pwd.val='$pwd'"
                 					."     JOIN my db ON db.up=email.up AND db.val='$z' AND db.t=".DATABASE
                 					." WHERE email.t=".EMAIL." AND email.val='$u'"
@@ -13816,7 +14176,6 @@ if(Validate_Token())
         	$scount = $GLOBALS["sqls"];
         	$tzone = $GLOBALS["tzone"];
 			updateBilling();
-    		wlog(aiLogUser()."@".$_SERVER["REMOTE_ADDR"]."[$scount/$time/$stime]", "log");
 			if(isApi())
 			    if(isset($_REQUEST["JSON_DATA"]))
     				die("[".implode(",", $GLOBALS["GLOBAL_VARS"]["newapi"])."]");

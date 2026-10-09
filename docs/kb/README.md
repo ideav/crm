@@ -24,6 +24,7 @@
 | Компонент таблиц (data-grid) | [table-component.md](table-component.md) | integram-table, data-integram-table, data-api-url, фильтры, инлайн-правка, экспорт, вставка из буфера, paste-data-btn, build.sh |
 | Импорт батчем `import=1` | [import.md](import.md) | bki_file, DATA, plain_data, формат строк, завершающий `;`, чанки 8МБ, upsert |
 | Архив таблицы: BKI и JSON | [json-archive.md](json-archive.md) | json_export, integram-archive, метаданные+данные, types, reqs, target, сведение колонок, перенос между базами |
+| Журнал базы (JSON Lines) | [logs.md](logs.md) | _log.jsonl, _sql.jsonl, rid, uid, ~ai, ai_job, old/new, op, import, маскировка секретов, LOG_ROTATE_MB, ротация |
 | Иерархический OLTP (разрезы) | [hierarchical-oltp.md](hierarchical-oltp.md) | разрез, частотность групп, накопитель меры, агрегаты, up-уровни |
 
 **Соседние справочники (не дублируем — ссылаемся):**
@@ -38,6 +39,7 @@
 
 | Симптом / ключ | Тема | Файл |
 |---|---|---|
+| в `<db>_log.jsonl` нет строки запроса, упавшего с фатальной ошибкой | `exit` в обработчике завершения отменяет остальные — звать `logRequest()` перед `exit` | [logs.md](logs.md) |
 | `_m_set` отбит целиком, «полусделанная» запись, повтор упирается в уже записанное | реквизит без гранта в общем запросе — грант на колонку + изоляция шага | [roles.md](roles.md) |
 | значение при импорте переехало в соседнюю колонку, текст обрезан по середине | `;` внутри значения — разделитель колонок BKI; экранировать `\;` | [import.md](import.md) |
 | `metadata?JSON` битый после переименования | `_d_alias` нельзя на id таблицы | [schema.md](schema.md) |
