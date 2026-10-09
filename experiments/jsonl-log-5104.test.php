@@ -42,6 +42,7 @@ function mysqli_query($c, $sql){
     if(preg_match('/^\s*SELECT/i', $q)){
         $st = $pdo->query($q);
         if(!$st){ $GLOBALS["FAKE"]["errno"] = 1064; $GLOBALS["FAKE"]["error"] = implode(" ", $pdo->errorInfo()); return false; }
+        $GLOBALS["FAKE"]["insert_id"] = 0;  # как MySQL: любой следующий запрос, в том числе SELECT, сбрасывает insert_id
         return new FakeResult($st->fetchAll(\PDO::FETCH_ASSOC));
     }
     $n = $pdo->exec($q);
@@ -132,6 +133,16 @@ $obj = Insert(1, 1, 118, "В работе", "Test new");
 Update_Val($obj, "Закрыта");
 $recs = since("sql", $mk);
 $ins = by_op($recs, "insert"); $upd = by_op($recs, "update");
+$real = (int)$GLOBALS["PDO"]->query("SELECT MAX(id) FROM z WHERE t=118 AND up=1")->fetchColumn();
+check($obj === $real && $obj > 1, "Insert() возвращает id новой строки, хотя журнал после вставки читает её SELECT-ом (получено $obj, в таблице $real)");
+$kid = Insert($obj, 1, 119, "реквизит", "Test req");
+$kidUp = (int)$GLOBALS["PDO"]->query("SELECT up FROM z WHERE id=".(int)$kid)->fetchColumn();
+check($kid > $obj && $kidUp === $obj, "реквизит новой записи (_m_new) встаёт под неё, а не под up=0");
+Delete($kid);
+$recs = since("sql", $mk);
+$ins = by_op($recs, "insert"); $upd = by_op($recs, "update");
+$recs = array_values(array_filter($recs, function($r) use ($kid){ return $r["id"] !== $kid; }));
+$ins = by_op($recs, "insert");
 check(count($ins) === 1 && $ins[0]["id"] === $obj && $ins[0]["up"] === 1 && $ins[0]["t"] === 118 && $ins[0]["new"] === "В работе", "insert: id, up, t, new");
 check(count($upd) === 1 && $upd[0]["id"] === $obj && $upd[0]["old"] === "В работе" && $upd[0]["new"] === "Закрыта" && $upd[0]["t"] === 118, "update: old до правки, new после");
 check(count($recs) === 2 && $recs[0]["rid"] === $recs[1]["rid"] && strlen($recs[0]["rid"]) >= 6 && strlen($recs[0]["rid"]) <= 8, "один rid на все изменения запроса (6–8 символов)");
