@@ -11943,6 +11943,9 @@ function authJWT($u){
 }
 function updateBilling(){
 	global $connection, $z, $time_start;
+	# Callback ИИ-агента отвечает через api_dump() до подключения к БД — биллинга нет.
+	if(!$connection)
+		return;
 	mysqli_query($connection, "UPDATE my SET ord=ord+".min(50, max(1, floor(substr(microtime(TRUE) - $time_start, 0, 6)*50)))." WHERE t=".DATABASE." AND val='$z'");
 }
 # <m-batch-4981> Пакетная запись: _m_save и _m_set одним запросом (issue #4981)
