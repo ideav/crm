@@ -152,7 +152,7 @@ define("DB_MASK", "/^[a-z0-9_]{1,15}$/i");
 define("USER_DB_MASK", "/^[a-z]\w{2,14}$/i");  # Mask for the DB name validation
 define("DIR_MASK", "/^[a-z0-9_-]+$/i");  # Mask for the dir name validation
 define("FILE_MASK", "/^[a-z0-9_.-]+$/i");
-define("LOGS_DIR", "logs/");  # Logs files folder
+define("LOGS_DIR", __DIR__."/logs/");  # Logs files folder: абсолютный путь — при CGI функции завершения (register_shutdown_function) работают не из корня сайта (python2node#866)
 # Журнал JSON Lines (#5104). Предел ротации — LOG_ROTATE_MB (по умолчанию 50), можно задать в
 # include/connection.php.
 define("LOG_VAL_MAX", 2048);  # значение длиннее — обрезается, полная длина в old_len/new_len
