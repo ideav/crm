@@ -10818,6 +10818,62 @@ function aiAgentScreenContext($raw){
         if($v !== "" && ($k !== "url" || $v[0] === "/"))
             $ctx[$k] = $v;
     }
+    # crm#5113: экран рабочего места — плоский объект: строки (text — до 3000 символов),
+    # числа, логические, списки скаляров до 30. Не больше 20 полей и 6000 символов JSON.
+    if($page === "workplace" && isset($src["screen"]) && is_array($src["screen"])){
+        $scalar = function($v, $max) use ($line){
+            if(is_bool($v))
+                return $v;
+            if(is_int($v) || (is_float($v) && is_finite($v)))
+                return $v;
+            if(!is_string($v))
+                return null;
+            $s = $line($v, $max);
+            return $s === "" ? null : $s;
+        };
+        $screen = array();
+        foreach($src["screen"] as $k => $v){
+            if(count($screen) >= 20)
+                break;
+            if(!is_string($k) || !preg_match('/^[a-z][a-z0-9_]{0,39}$/', $k))
+                continue;
+            if(is_array($v)){
+                $list = array();
+                foreach($v as $item){
+                    $c = is_array($item) ? null : $scalar($item, 200);
+                    if($c !== null && count($list) < 30)
+                        $list[] = $c;
+                }
+                if(count($list))
+                    $screen[$k] = $list;
+            }else{
+                $c = $scalar($v, $k === "text" ? 3000 : 200);
+                if($c !== null)
+                    $screen[$k] = $c;
+            }
+        }
+        $size = function() use (&$screen){ return mb_strlen((string)json_encode($screen, JSON_UNESCAPED_UNICODE), "UTF-8"); };
+        if(isset($screen["text"]) && is_string($screen["text"]) && $size() > 6000){
+            $screen["text"] = mb_substr($screen["text"], 0, max(0, mb_strlen($screen["text"], "UTF-8") - ($size() - 6000)), "UTF-8");
+            if($screen["text"] === "")
+                unset($screen["text"]);
+        }
+        while(count($screen) && $size() > 6000){
+            $longest = null;
+            foreach($screen as $k => $v)
+                if(is_array($v) && ($longest === null || count($v) > count($screen[$longest])))
+                    $longest = $k;
+            if($longest === null){
+                $screen = array();
+                break;
+            }
+            array_pop($screen[$longest]);
+            if(!count($screen[$longest]))
+                unset($screen[$longest]);
+        }
+        if(count($screen))
+            $ctx["screen"] = $screen;
+    }
     return $ctx;
 }
 function callIntegramAgent($db, $message, $attachments, $payment, $jobId="", $callbackUrl="", $callbackSecret="", $context=null, $extra=array()){
