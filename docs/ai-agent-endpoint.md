@@ -30,6 +30,7 @@ Authorization: Bearer <INTEGRAM_AGENT_TOKEN>      # только если ток
   "db": "acme",                 // имя текущей базы — ВСЯ работа только в ней
   "user": "petrov",             // кто пишет в чат — любой вошедший пользователь базы
   "token": "<токен petrov в acme>", // агент работает ЭТИМ токеном и с правами petrov
+  "core_token": "<JWT petrov в ядре>", // необязательно: токен ядра для задачника (issue #5131)
   "message": "текст запроса пользователя",
   "attachments": [
     { "name": "f.csv", "type": "text/csv", "size": 1234, "content": "<base64>" }
@@ -85,6 +86,11 @@ Authorization: Bearer <INTEGRAM_AGENT_TOKEN>      # только если ток
   может этот пользователь. Служебный или admin-токен вместо него не подставлять: тогда
   пользователь получит через чат чужие права.
 - `token` — секрет: не писать в журналы и не показывать в ответе.
+- **`core_token` — тот же пользователь в ядре** (python2node, задачник `/api/v1/{db}/tasks/*`).
+  Поле есть, когда задан `CORE_JWT_PRIVATE_KEY`: CRM подписывает RS256-JWT
+  `{username: user, iss: "crm", aud: db, iat, exp}` сроком до 15 минут, ядро проверяет его
+  публичным ключом (`CRM_JWT_PUBLIC_KEY` в env ядра). Агент шлёт его ядру как
+  `Authorization: Bearer`. Секрет того же уровня, что `token`.
 - **Каждый запрос агента к API — с параметром `client=ai`** (в строке запроса или в теле). Своего
   пользователя у ИИ нет; в журнале базы `<db>_log.jsonl` и `<db>_sql.jsonl` ([docs/kb/logs.md](kb/logs.md)) такой запрос пишется под
   логином с суффиксом `~ai` (`ivanov~ai` — ИИ под пользователем ivanov), `aiLogUser()` в `index.php`.
@@ -308,6 +314,9 @@ callback-ом с `content` (итог) и `plan` (новое состояние).
 | `INTEGRAM_AGENT_ENDPOINT` (или `AI_AGENT_ENDPOINT`) | HTTPS-URL агента | — (пусто = заглушка) |
 | `INTEGRAM_AGENT_TOKEN` (или `AI_AGENT_TOKEN`) | Bearer-токен авторизации | — |
 | `AI_AGENT_TIMEOUT` (или `INTEGRAM_AGENT_TIMEOUT`) | таймаут вызова, сек | 60 (макс 600) |
+| `CORE_JWT_PRIVATE_KEY` | приватный RS256-ключ издателя CRM в PEM (переводы строк можно `\n`); выпускает `core_token` | — (пусто = поля нет) |
+| `CORE_JWT_ISS` | claim `iss` у `core_token`, совпадает с `CRM_JWT_ISS` ядра | `crm` |
+| `CORE_JWT_TTL` | жизнь `core_token`, сек | 900 (макс 900) |
 
 > Реальный таймаут ограничен ещё и `max_execution_time` / `request_terminate_timeout`
 > / `fastcgi_read_timeout` сервера — учитывайте это для варианта A.
