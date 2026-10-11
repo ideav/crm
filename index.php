@@ -10941,6 +10941,26 @@ function callIntegramAgent($db, $message, $attachments, $payment, $jobId="", $ca
         "message" => $message,
         "attachments" => $attachments
     );
+    # Токен ядра для задачника (issue #5131): короткий RS256-JWT доверенного издателя CRM
+    # {username, iss, aud = база, iat, exp}; ядро проверяет его публичным ключом
+    # (CRM_JWT_PUBLIC_KEY). Ключа нет или он не читается — поля нет, поведение прежнее.
+    $coreKey = aiConfigValue(array("CORE_JWT_PRIVATE_KEY"));
+    if($coreKey !== "" && $request["user"] !== ""){
+        $coreKey = openssl_pkey_get_private(str_replace("\\n", "\n", $coreKey));
+        if($coreKey){
+            $ttl = (int)aiConfigValue(array("CORE_JWT_TTL"));
+            if($ttl <= 0 || $ttl > 900)
+                $ttl = 900;
+            $iss = aiConfigValue(array("CORE_JWT_ISS"));
+            $now = time();
+            $b64 = function($s){ return rtrim(strtr(base64_encode($s), "+/", "-_"), "="); };
+            $jwt = $b64(json_encode(array("alg" => "RS256", "typ" => "JWT")))
+                .".".$b64(json_encode(array("username" => (string)$request["user"], "iss" => $iss !== "" ? $iss : "crm",
+                    "aud" => $db, "iat" => $now, "exp" => $now + $ttl), JSON_UNESCAPED_UNICODE));
+            if(openssl_sign($jwt, $signature, $coreKey, OPENSSL_ALGO_SHA256))
+                $request["core_token"] = $jwt.".".$b64($signature);
+        }
+    }
     # Где сейчас пользователь (python2node#847); без контекста поле не передаётся.
     if(is_array($context) && count($context))
         $request["context"] = $context;
