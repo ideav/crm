@@ -114,4 +114,7 @@ The script uses the GitHub API which has rate limits:
 - **Unauthenticated**: 60 requests per hour
 - **Authenticated**: 5,000 requests per hour
 
-For larger deployments, consider adding GitHub token authentication.
+For larger deployments, consider adding GitHub token authentication. Public
+repositories need no token: an invalid or expired token makes GitHub answer
+401 where anonymous access would succeed (issue #5137). Add a token only for
+private repositories or real rate-limit needs.

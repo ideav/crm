@@ -94,7 +94,7 @@ function describeApiFailure($what, $url, $r) {
     } elseif ($code === 404) {
         $msg .= ' — not found (check repository and branch in update.conf)';
     } elseif ($code === 401) {
-        $msg .= ' — unauthorized (invalid token in update.conf)';
+        $msg .= ' — unauthorized (invalid/expired token in update.conf; a public repo needs no token — remove the token line)';
     } elseif ($code === 403) {
         $msg .= ' — forbidden (rate limit, or token lacks access)';
     }
@@ -102,9 +102,31 @@ function describeApiFailure($what, $url, $r) {
     return $msg;
 }
 
+// GitHub answers 401 — instead of falling back to anonymous access — when a
+// request carries an invalid/expired credential, even for a public repo. A
+// stale token in update.conf therefore breaks sync entirely (issue #5137);
+// detect that case so the API helper can retry without the header.
+function shouldRetryWithoutToken($r, $token) {
+    return isset($r['http_code']) && (int)$r['http_code'] === 401
+        && !empty($token) && $token !== TOKEN_PLACEHOLDER;
+}
+
+// Single entry point for GitHub API GETs. On 401 with a credential attached,
+// retry once without it — public repositories need no token (issue #5137).
+function ghApi($url, $token, $timeout) {
+    $r = httpGet($url, ghHeaders($token), $timeout);
+    if (shouldRetryWithoutToken($r, $token)) {
+        $anon = httpGet($url, ghHeaders(''), $timeout);
+        if ($anon['http_code'] === 200) {
+            return $anon;
+        }
+    }
+    return $r;
+}
+
 function ghCommit($info, $branch, $token) {
     $url = "https://api.github.com/repos/{$info['owner']}/{$info['repo']}/commits/" . urlBranch($branch);
-    $r = httpGet($url, ghHeaders($token), 30);
+    $r = ghApi($url, $token, 30);
     if ($r['body'] === false || $r['http_code'] !== 200) {
         return ['error' => describeApiFailure("HEAD commit for branch '{$branch}'", $url, $r)];
     }
@@ -117,7 +139,7 @@ function ghCommit($info, $branch, $token) {
 
 function ghTree($info, $treeSha, $token) {
     $url = "https://api.github.com/repos/{$info['owner']}/{$info['repo']}/git/trees/{$treeSha}?recursive=1";
-    $r = httpGet($url, ghHeaders($token), HTTP_TIMEOUT);
+    $r = ghApi($url, $token, HTTP_TIMEOUT);
     if ($r['body'] === false || $r['http_code'] !== 200) {
         return ['error' => describeApiFailure('repository tree', $url, $r)];
     }
