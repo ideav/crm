@@ -325,6 +325,13 @@
     min-height: 44px;
 }
 .atex-pk-input.is-required { border-color: var(--pk-warn); }
+/* #5086: справа от количества — два поля склада неполных коробов, чуть уже. */
+.atex-pk-qty-row { display: flex; gap: 10px; align-items: flex-end; }
+.atex-pk-qty-row > .atex-pk-field { flex: 1 1 0; min-width: 0; }
+.atex-pk-qty-row > .atex-pk-field-nk { flex: 0 1 120px; }
+.atex-pk-qty-row .atex-pk-input { width: 100%; box-sizing: border-box; }
+.atex-pk-nk-stock { font-size: 13px; color: var(--pk-muted); }
+.atex-pk-nk { margin-left: 6px; font-weight: 700; color: var(--pk-accent); }
 .atex-pk-hint { font-size: 13px; color: var(--pk-muted); }
 .atex-pk-error { font-size: 13px; color: var(--pk-warn); }
 
