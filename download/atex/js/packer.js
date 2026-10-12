@@ -14,6 +14,8 @@
 //   art          — артикул (#4799), плашкой внизу карточки; бывает пустым;
 //   qty/qty_fact — «Кол-во рулонов» и «Кол-во факт» Партии ГП;
 //   packed/notes — «Упаковано шт» (673786) и «Примечание» (673789) Партии ГП;
+//   nk/nk_stock  — «Склад НК» Партии ГП (движение склада неполных коробов: + на склад,
+//                  − со склада) и сальдо склада НК по артикулу за всё время (#5086);
 //   events       — id одного из событий «Резка» задания; пусто — резок ещё не было;
 //   slitter/slitter_id — станок задания;
 //   jumbos       — номера джамбо задания (записи «Номер джамбо», 82374) одной строкой:
@@ -103,7 +105,8 @@
     // Имена таблиц и реквизитов схемы ateh: по ним рабочее место находит числовые id
     // в метаданных текущей сборки.
     var TABLE = { gp: 'Партия ГП', event: 'Событие смены', place: 'Упаковочное место' };
-    var GP_REQ = { packed: 'Упаковано шт', notes: 'Примечание' };
+    // #5086: «Склад НК» — движение склада неполных коробов (целое: + на склад, − со склада).
+    var GP_REQ = { packed: 'Упаковано шт', notes: 'Примечание', nk: 'Склад НК' };
     var EVENT_REQ = {
         type: 'Тип события',
         task: 'Задание в производство',
@@ -133,7 +136,9 @@
         // #4799: артикул (плашка внизу карточки) и лидер (в подписи ролика).
         art: 'art', leader: 'leader',
         // #5041: вес коробки с заказанным количеством («Заказанное количество -> Вес»).
-        packKg: 'pack_kg'
+        packKg: 'pack_kg',
+        // #5086: «Склад НК» этой Партии ГП и сальдо склада НК по артикулу за всё время.
+        nk: 'nk', nkStock: 'nk_stock'
     };
     // #4914: номера джамбо задания. Колонка `jumbos` раскладывается в записи вида
     // {task_id, jumbo_no, cuts_count, defect_qty} — по одной на джамбо (jumboRowsFromReport).
@@ -244,6 +249,11 @@
             leader: str(kvVal(r[COL.leader])).trim(),
             // #5041: вес коробки, кг; пусто или 0 — веса нет, строка без скобок.
             packKg: toNumber(kvVal(r[COL.packKg])) > 0 ? formatNumber(r[COL.packKg]) : '',
+            // #5086: движение склада НК позиции (текущее и то, что учтено в сальдо
+            // отчёта) и сальдо её артикула. Правку упаковщика держит editedNk.
+            nk: toNumber(kvVal(r[COL.nk])),
+            nkReported: toNumber(kvVal(r[COL.nk])),
+            nkStock: toNumber(kvVal(r[COL.nkStock])),
             // #4914: номера джамбо задания подставляет applyJumbos() после загрузки
             // (карточка без них просто без плашки).
             jumbo: ''
@@ -543,7 +553,7 @@
     function hasUnsavedEdits(items) {
         return (items || []).some(function(it) {
             if (!it || isPacked(it)) return false;
-            return isEdited(it) || str(it.editedNote).trim() !== '';
+            return isEdited(it) || str(it.editedNote).trim() !== '' || isNkEdited(it);
         });
     }
 
@@ -699,13 +709,101 @@
 
     // Проверка формы количества: пустой текст = всё в порядке, иначе — что не так.
     // Поправил количество — обязан объяснить почему (решение заказчика по #4658).
+    // #5086: взятое со склада НК (nkFrom) — законный повод упаковать больше факта:
+    // количество «подсказка + взятое» примечания не требует.
     function validatePack(form) {
         var f = form || {};
         var qty = toNumber(f.qty);
         if (!(qty > 0)) return 'Количество должно быть больше нуля';
-        if (noteRequired(qty, f.suggested) && !str(f.note).trim()) {
+        if (noteRequired(qty, toNumber(f.suggested) + toNumber(f.nkFrom)) && !str(f.note).trim()) {
             return 'Количество изменено — напишите примечание';
         }
+        return '';
+    }
+
+    // ── #5086: склад неполных коробов (НК) ──
+    // Движение позиции — одно число в «Склад НК» Партии ГП: на склад — как есть, со
+    // склада — с минусом. Сальдо артикула (nk_stock) отчёт считает за всё время.
+
+    // Движение из пары полей формы: заполнено одно из двух (validateNk).
+    function nkValue(to, from) {
+        var t = toNumber(to), f = toNumber(from);
+        if (t > 0) return t;
+        if (f > 0) return -f;
+        return 0;
+    }
+
+    // Действующее движение позиции: правка упаковщика сильнее записанного.
+    function nkOf(item) {
+        var it = item || {};
+        return it.editedNk != null ? toNumber(it.editedNk) : toNumber(it.nk);
+    }
+
+    function isNkEdited(item) {
+        var it = item || {};
+        return it.editedNk != null && toNumber(it.editedNk) !== toNumber(it.nk);
+    }
+
+    // Сколько взято со склада НК (положительное число; 0 — не брали).
+    function nkFromOf(nk) {
+        var n = toNumber(nk);
+        return n < 0 ? -n : 0;
+    }
+
+    // Сальдо склада НК по артикулу с учётом движений на экране: сальдо отчёта плюс
+    // разница между действующим движением позиции и тем, что отчёт уже учёл. Так
+    // несохранённая правка и записанное, но ещё не перечитанное движение видны сразу,
+    // а после перечитывания не считаются дважды. Позиция без артикула не участвует.
+    function nkStockByArt(items) {
+        var stock = {};
+        (items || []).forEach(function(it) {
+            var art = str(it && it.art).trim();
+            if (!art) return;
+            if (!(art in stock)) stock[art] = toNumber(it.nkStock);
+            stock[art] += nkOf(it) - toNumber(it.nkReported);
+        });
+        return stock;
+    }
+
+    // Проверка пары полей. available — сколько на складе НК может взять эта позиция.
+    function validateNk(form) {
+        var f = form || {};
+        var to = str(f.to).trim(), from = str(f.from).trim();
+        if (to && from) return 'Заполните только одно поле: «На склад НК» или «Со склада НК»';
+        var raw = to || from;
+        if (!raw) return '';
+        var n = Number(raw.replace(',', '.'));
+        if (!(n > 0) || Math.floor(n) !== n) return 'Склад НК: целое число больше нуля';
+        if (from && n > toNumber(f.available)) return 'На складе НК только ' + toNumber(f.available) + ' шт';
+        return '';
+    }
+
+    // Проверка движений нескольких позиций одной формы. rows — [{art, current, to, from}],
+    // current — действующее движение позиции до правки (nkOf). Своё прежнее «взял»
+    // возвращается в свободный остаток, а позиции одного артикула берут из него по
+    // очереди: в сумме — не больше, чем лежит на складе НК. Без артикула — не проверяется.
+    function validateNkRows(rows, stockByArt) {
+        var free = {};
+        (rows || []).forEach(function(r) {
+            if (!r.art) return;
+            if (!(r.art in free)) free[r.art] = toNumber((stockByArt || {})[r.art]);
+            free[r.art] -= toNumber(r.current);
+        });
+        for (var i = 0; i < (rows || []).length; i++) {
+            var r = rows[i];
+            if (!r.art) continue;
+            var problem = validateNk({ to: r.to, from: r.from, available: free[r.art] });
+            if (problem) return problem;
+            free[r.art] += nkValue(r.to, r.from);
+        }
+        return '';
+    }
+
+    // Подпись движения — в примечания события смены и в мету карточки.
+    function nkNote(nk) {
+        var n = toNumber(nk);
+        if (n > 0) return 'на склад НК ' + n + ' шт';
+        if (n < 0) return 'со склада НК ' + (-n) + ' шт';
         return '';
     }
 
@@ -892,6 +990,11 @@
         var fields = {};
         var packedRid = reqIdByName(gpMeta, GP_REQ.packed);
         if (packedRid) fields['t' + packedRid] = toNumber(d.qty);
+        // #5086: движение склада НК; нулевое очищает поле. Не передано — не трогаем.
+        if (d.nk != null) {
+            var nkRid = reqIdByName(gpMeta, GP_REQ.nk);
+            if (nkRid) fields['t' + nkRid] = toNumber(d.nk) || '';
+        }
         var note = str(d.note).trim();
         if (note) {
             var notesRid = reqIdByName(gpMeta, GP_REQ.notes);
@@ -958,6 +1061,13 @@
         noteRequired: noteRequired,
         itemsPath: itemsPath,
         validatePack: validatePack,
+        nkValue: nkValue,
+        nkOf: nkOf,
+        nkFromOf: nkFromOf,
+        nkStockByArt: nkStockByArt,
+        validateNk: validateNk,
+        validateNkRows: validateNkRows,
+        nkNote: nkNote,
         groupByTask: groupByTask,
         groupByOrder: groupByOrder,
         toGroup: toGroup,
@@ -1003,16 +1113,27 @@
     // артикулы ЕЁ позиций (уникальные непустые), а не общий список у последней
     // строки: на слитой плашке позиции разные, и артикул должен стоять напротив
     // своей. Артикула нет — плашки нет (null).
-    function artBadge(items) {
+    // #5086: nkStock (core.nkStockByArt) — ненулевое сальдо склада НК артикула идёт
+    // в плашку хвостом «НК 27».
+    function artBadge(items, nkStock) {
         var arts = [];
         (items || []).forEach(function(item) {
             if (item.art && arts.indexOf(item.art) === -1) arts.push(item.art);
         });
         if (!arts.length) return null;
-        return el('span', { class: 'atex-pk-art' }, [
+        var badge = el('span', { class: 'atex-pk-art' }, [
             el('span', { class: 'atex-pk-art-label', text: 'Артикул' }),
             el('span', { class: 'atex-pk-art-value', text: arts.join(', ') })
         ]);
+        var stocks = [];
+        arts.forEach(function(art) {
+            var n = nkStock ? core.toNumber(nkStock[art]) : 0;
+            if (n) stocks.push(arts.length > 1 ? art + ': ' + n : String(n));
+        });
+        if (stocks.length) {
+            badge.appendChild(el('span', { class: 'atex-pk-nk', title: 'Остаток на складе неполных коробов, шт', text: 'НК ' + stocks.join(', ') }));
+        }
+        return badge;
     }
 
     function AtexPacker(root) {
@@ -1322,6 +1443,8 @@
         var rest = items.filter(function(item) { return !core.isPacked(item); });
         var packed = !rest.length;
         var partial = core.orderPartial(group);
+        // #5086: сальдо склада НК — по всем позициям экрана, с движениями на нём.
+        var nkStock = core.nkStockByArt(this.items || items);
         var card = el('div', { class: 'atex-pk-card' + (packed ? ' is-packed' : '') });
 
         var title = core.orderTitle(single || items[0]);
@@ -1368,6 +1491,9 @@
             if (single.factQty) meta.push('факт ' + single.factQty);
             var note = single.editedNote || single.notes;
             if (note) meta.push(note);
+            // #5086: движение склада НК позиции, если есть.
+            var nkText = core.nkNote(core.nkOf(single));
+            if (nkText) meta.push(nkText);
             // #4665: в какой короб и по сколько штук — из справочника «Типоразмер».
             var size = core.sizeForItem(single, this.sizes);
             var packLabel = core.packingLabel(size, packed ? single.packedQty : core.packQtyFor(single));
@@ -1434,7 +1560,7 @@
                 // #5041: у одиночной позиции количества в строке нет — вес сам по себе.
                 div.appendChild(el('span', { class: 'atex-pk-desc-kg', text: ' (' + line.kg + ' кг)' }));
             }
-            var art = artBadge(line.items);
+            var art = artBadge(line.items, nkStock);
             if (art) div.appendChild(art);
             // #5011: у неупакованной строки слитой плашки — своя кнопка «Упаковано»:
             // размер уезжает в свой момент, и отмечают его не дожидаясь остальных.
@@ -1631,9 +1757,11 @@
         var noteInput = el('input', { class: 'atex-pk-input', type: 'text', value: noteValue || '', placeholder: 'например: 10 шт в брак' });
         var hint = el('div', { class: 'atex-pk-hint' });
         var error = el('div', { class: 'atex-pk-error' });
+        // #5086: склад НК — у той позиции, которую пишет диалог.
+        var nk = this.nkControls(single || lastUnpacked, qtyInput, suggested, function() { error.textContent = ''; syncHint(); });
 
         function syncHint() {
-            var changed = core.noteRequired(qtyInput.value, suggested);
+            var changed = core.noteRequired(qtyInput.value, nk ? nk.suggested() : suggested);
             hint.textContent = changed ? 'Количество изменено — примечание обязательно' : '';
             noteInput.classList.toggle('is-required', changed);
         }
@@ -1651,23 +1779,25 @@
             var d = core.describeItem(item);
             if (d && descParts.indexOf(d) === -1) descParts.push(d);
         });
-        var overlay = this.modal('Количество · заказ ' + core.orderTitle(head).main, [
-            el('div', { class: 'atex-pk-modal-desc', text: descParts.join(' · ') }),
-            el('label', { class: 'atex-pk-field' }, [el('span', { text: packed ? 'Упаковано, шт' : (single ? 'Количество, шт' : 'Общее количество, шт') }), qtyInput]),
-            el('label', { class: 'atex-pk-field' }, [el('span', { text: 'Примечание' }), noteInput]),
-            hint, error
-        ], [cancel, save]);
+        var qtyField = el('label', { class: 'atex-pk-field' }, [el('span', { text: packed ? 'Упаковано, шт' : (single ? 'Количество, шт' : 'Общее количество, шт') }), qtyInput]);
+        var body = [el('div', { class: 'atex-pk-modal-desc', text: descParts.join(' · ') })];
+        if (nk) body.push(el('div', { class: 'atex-pk-qty-row' }, [qtyField].concat(nk.fields)), nk.stockNode);
+        else body.push(qtyField);
+        body.push(el('label', { class: 'atex-pk-field' }, [el('span', { text: 'Примечание' }), noteInput]), hint, error);
+        var overlay = this.modal('Количество · заказ ' + core.orderTitle(head).main, body, [cancel, save]);
 
         cancel.addEventListener('click', function() { overlay.close(); });
         save.addEventListener('click', function() {
-            var form = { qty: qtyInput.value, suggested: suggested, note: noteInput.value };
-            var problem = core.validatePack(form);
+            var form = { qty: qtyInput.value, suggested: nk ? nk.suggested() : suggested, note: noteInput.value };
+            var problem = nk ? core.validateNkRows([nk.row()], core.nkStockByArt(self.items || items)) : '';
+            if (!problem) problem = core.validatePack(form);
             error.textContent = problem;
             // Пока висит ошибка, подсказку убираем — иначе одно и то же сказано дважды.
             if (problem) { hint.textContent = ''; return; }
             overlay.close();
             var qty = core.toNumber(form.qty);
             var note = str(form.note).trim();
+            if (nk) nk.apply();
             if (packed) { self.markPacked(single, qty, note); return; }
             if (single) {
                 single.editedQty = qty;
@@ -1690,20 +1820,25 @@
     // «Упаковано» — каждая Партия ГП своим (#4918), запись тут не участвует.
     AtexPacker.prototype.openSizesDialog = function(group, unpacked) {
         var self = this;
-        var rows = unpacked.map(function(item) {
-            return {
-                item: item,
-                suggested: core.baseQty(item),
-                input: el('input', { class: 'atex-pk-input', type: 'number', min: '0', step: '1', inputmode: 'numeric', value: String(core.currentQty(item)) })
-            };
-        });
         var noteInput = el('input', { class: 'atex-pk-input', type: 'text', value: '', placeholder: 'например: 10 шт в брак' });
         var hint = el('div', { class: 'atex-pk-hint' });
         var error = el('div', { class: 'atex-pk-error' });
+        var rows = unpacked.map(function(item) {
+            var input = el('input', { class: 'atex-pk-input', type: 'number', min: '0', step: '1', inputmode: 'numeric', value: String(core.currentQty(item)) });
+            var suggested = core.baseQty(item);
+            return {
+                item: item,
+                suggested: suggested,
+                input: input,
+                // #5086: пара полей склада НК у каждой позиции с артикулом.
+                nk: self.nkControls(item, input, suggested, function() { error.textContent = ''; syncHint(); })
+            };
+        });
+        function suggestedOf(r) { return r.nk ? r.nk.suggested() : r.suggested; }
 
         function changedAny() {
             for (var i = 0; i < rows.length; i++) {
-                if (core.noteRequired(rows[i].input.value, rows[i].suggested)) return true;
+                if (core.noteRequired(rows[i].input.value, suggestedOf(rows[i]))) return true;
             }
             return false;
         }
@@ -1722,10 +1857,16 @@
         var cancel = el('button', { class: 'atex-pk-btn', type: 'button', text: 'Отмена' });
 
         var fields = rows.map(function(r) {
-            return el('label', { class: 'atex-pk-field' }, [
+            var qtyField = el('label', { class: 'atex-pk-field' }, [
                 el('span', { text: core.describeItem(r.item) || 'Позиция' }),
                 r.input
             ]);
+            return r.nk ? el('div', { class: 'atex-pk-qty-row' }, [qtyField].concat(r.nk.fields)) : qtyField;
+        });
+        // #5086: сальдо склада НК — по разу на артикул.
+        var stockArts = [];
+        rows.forEach(function(r) {
+            if (r.nk && stockArts.indexOf(r.item.art) === -1) { stockArts.push(r.item.art); fields.push(r.nk.stockNode); }
         });
         fields.push(el('label', { class: 'atex-pk-field' }, [el('span', { text: 'Примечание' }), noteInput]));
 
@@ -1735,8 +1876,11 @@
 
         cancel.addEventListener('click', function() { overlay.close(); });
         save.addEventListener('click', function() {
+            var nkProblem = core.validateNkRows(rows.filter(function(r) { return r.nk; }).map(function(r) { return r.nk.row(); }),
+                core.nkStockByArt(self.items || group.items));
+            if (nkProblem) { error.textContent = nkProblem; hint.textContent = ''; return; }
             for (var i = 0; i < rows.length; i++) {
-                var problem = core.validatePack({ qty: rows[i].input.value, suggested: rows[i].suggested, note: noteInput.value });
+                var problem = core.validatePack({ qty: rows[i].input.value, suggested: suggestedOf(rows[i]), note: noteInput.value });
                 if (problem) {
                     error.textContent = problem;
                     // Пока висит ошибка, подсказку убираем — иначе одно и то же сказано дважды.
@@ -1746,8 +1890,51 @@
             }
             overlay.close();
             core.applySizesQty(group, rows.map(function(r) { return r.input.value; }), str(noteInput.value).trim());
+            rows.forEach(function(r) { if (r.nk) r.nk.apply(); });
             self.renderList();
         });
+    };
+
+    // #5086: пара полей склада НК позиции — «На склад НК» и «Со склада НК», уже поля
+    // количества. Позиция без артикула — без полей (null). Взятое со склада сразу
+    // добавляется к количеству (qtyInput сдвигается на разницу), сданное его не
+    // меняет: «Упаковано шт» — полный факт. suggested() — от какого количества теперь
+    // требуется примечание: подсказка плюс взятое; у упакованной позиции записанное
+    // «Упаковано шт» уже включает прежнее взятое, и оно из подсказки вычитается.
+    // apply() кладёт движение в позицию (editedNk) — в базу его уносит запись отметки.
+    AtexPacker.prototype.nkControls = function(item, qtyInput, suggested, onChange) {
+        var it = item || {};
+        var art = str(it.art).trim();
+        if (!art) return null;
+        var current = core.nkOf(it);
+        function numInput(cls, value) {
+            return el('input', { class: 'atex-pk-input ' + cls, type: 'number', min: '1', step: '1', inputmode: 'numeric', value: value > 0 ? String(value) : '' });
+        }
+        var to = numInput('atex-pk-nk-to', current);
+        var from = numInput('atex-pk-nk-from', -current);
+        var base = core.toNumber(suggested) - (core.isPacked(it) ? core.nkFromOf(it.nk) : 0);
+        var lastFrom = core.nkFromOf(current);
+        from.addEventListener('input', function() {
+            var now = core.nkFromOf(core.nkValue('', from.value));
+            if (str(qtyInput.value).trim() !== '') qtyInput.value = String(core.toNumber(qtyInput.value) + now - lastFrom);
+            lastFrom = now;
+            if (onChange) onChange();
+        });
+        to.addEventListener('input', function() { if (onChange) onChange(); });
+        var stock = core.toNumber(core.nkStockByArt(this.items || [it])[art]);
+        return {
+            fields: [
+                el('label', { class: 'atex-pk-field atex-pk-field-nk' }, [el('span', { text: 'На склад НК' }), to]),
+                el('label', { class: 'atex-pk-field atex-pk-field-nk' }, [el('span', { text: 'Со склада НК' }), from])
+            ],
+            stockNode: el('div', { class: 'atex-pk-nk-stock', text: 'Склад НК · артикул ' + art + ': ' + stock + ' шт' }),
+            suggested: function() { return base + core.nkFromOf(core.nkValue(to.value, from.value)); },
+            row: function() { return { art: art, current: current, to: to.value, from: from.value }; },
+            apply: function() {
+                var value = core.nkValue(to.value, from.value);
+                it.editedNk = value === core.toNumber(it.nk) ? null : value;
+            }
+        };
     };
 
     // Общая модалка (alert/confirm/prompt запрещены — раздел 8 гайда).
@@ -1858,14 +2045,19 @@
     // обновляет вызывающий (markPacked — одна позиция, packScopeNow — серия).
     AtexPacker.prototype._writePack = function(item, qty, note) {
         var self = this;
-        var gpFields = core.gpPackFields(this.meta.gp, { qty: qty, note: note });
+        // #5086: движение склада НК едет той же записью в Партию ГП и примечанием в
+        // событие смены. Нет ни движения, ни прежнего — поле «Склад НК» не трогаем.
+        var nk = core.nkOf(item);
+        var withNk = !!str(item.art).trim() && (nk !== 0 || core.toNumber(item.nk) !== 0);
+        var gpFields = core.gpPackFields(this.meta.gp, { qty: qty, note: note, nk: withNk ? nk : null });
+        var eventNote = [str(note).trim(), withNk ? core.nkNote(nk) : ''].filter(Boolean).join('; ');
         return this.post('_m_set/' + item.gpId + '?JSON', gpFields).then(function() {
             return self.post('_m_new/' + self.meta.event.id + '?JSON&up=1', core.eventFields(self.meta.event, {
                 when: core.eventStamp(new Date()),
                 taskId: item.taskId,
                 userId: self.userId,
                 qty: qty,
-                note: note
+                note: eventNote
             }));
         });
     };
@@ -1916,16 +2108,21 @@
         var targets = [item];
         var live = this.itemById(item && item.gpId);
         if (live && live !== item) targets.push(live);
+        // #5086: записанное движение склада НК — действующее; сальдо отчёта его ещё не
+        // учло (nkReported прежний), поэтому остаток на экране сходится сразу.
+        var nk = core.nkOf(item);
         targets.forEach(function(it) {
             if (!it) return;
             it.packedQty = qty;
+            it.nk = nk;
+            it.editedNk = null;
             if (note) it.notes = note;
             // Правка доехала до базы — дальше карточка живёт записанным значением.
             it.editedQty = null;
             it.editedNote = '';
         });
         var id = str(item && item.gpId);
-        if (id) { this.written = this.written || {}; this.written[id] = { qty: qty, note: note }; }
+        if (id) { this.written = this.written || {}; this.written[id] = { qty: qty, note: note, nk: nk }; }
     };
 
     // #5016: отчёт, прочитанный сразу после записи, успевает отдать ещё старое
@@ -1938,8 +2135,11 @@
         Object.keys(written).forEach(function(id) {
             var live = self.itemById(id);
             // Позиции нет в отчёте или отчёт уже подтвердил запись — помнить нечего.
-            if (!live || core.isPacked(live)) { delete written[id]; return; }
+            // #5086: подтверждение — это и упаковка, и записанное движение склада НК.
+            var nk = core.toNumber(written[id].nk);
+            if (!live || (core.isPacked(live) && core.toNumber(live.nk) === nk)) { delete written[id]; return; }
             live.packedQty = written[id].qty;
+            live.nk = nk;
             if (written[id].note) live.notes = written[id].note;
         });
     };
