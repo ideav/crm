@@ -153,12 +153,25 @@
         });
     }
 
+    // #5134: транспорт свой, кеш общий — sharedOnce хранит ответы на document
+    // страницы, где с ними же работают сторож пульта и скрипт пульта.
+    function sharedJson(ctx, path) {
+        var guard = root.AtexPadGuard;
+        if (!guard || typeof guard.sharedOnce !== 'function') return getJson(ctx, path);
+        return guard.sharedOnce(root.document, ctx.db, path, function() {
+            return getJson(ctx, path);
+        });
+    }
+
     // Планшет по токену устройства: та же таблица и тот же фильтр, что у сторожа.
+    // #5134: через общую шину GET — сторож пульта и скрипт пульта читают те же
+    // метаданные и тот же поиск планшета; ходить на сервер трижды за одними
+    // данными не нужно.
     function loadPad(ctx, guard, token) {
-        return getJson(ctx, 'metadata').then(function(metadata) {
+        return sharedJson(ctx, 'metadata').then(function(metadata) {
             var table = guard.findTable(metadata);
             if (!table) throw new Error('В базе нет таблицы «' + TABLE_NAME + '»');
-            return getJson(ctx, guard.buildLookupPath(table.id, token)).then(function(rows) {
+            return sharedJson(ctx, guard.buildLookupPath(table.id, token)).then(function(rows) {
                 return {
                     table: table, metadata: metadata,   // #4944: в них же «Планшет-кандидат»
                     pad: guard.padFromRows(rows, token, guard.nameColIndex(table), table)
@@ -176,7 +189,7 @@
         var card = screen && screen.childNodes[0];
         if (!card || !guard.publishCandidate || !guard.isToken(token)) return;
         var status = null;
-        (metadata ? Promise.resolve(metadata) : getJson(ctx, 'metadata')).then(function(meta) {
+        (metadata ? Promise.resolve(metadata) : sharedJson(ctx, 'metadata')).then(function(meta) {
             if (!guard.findCandidateTable(meta)) return null;
             status = el('div', { class: 'atex-pad-status', text: 'Передаём код администратору…' });
             card.appendChild(status);
