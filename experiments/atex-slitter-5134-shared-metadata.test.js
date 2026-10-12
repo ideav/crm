@@ -87,7 +87,11 @@ var PAD_TABLE = {
 var PAD_ROW = { i: '673900', r: [TOKEN, 'Планшет слиттера №1', '501:Слиттер №1', '', '', 'слиттер'] };
 var METADATA = [
     { id: '1078', val: 'Задание в производство', granted: 'WRITE', reqs: [{ id: '1', val: 'Номер' }] },
-    PAD_TABLE
+    PAD_TABLE,
+    { id: '1080', val: 'Партия ГП', granted: 'WRITE', reqs: [] },          // packer
+    { id: '1081', val: 'Событие смены', granted: 'WRITE', reqs: [] },      // packer
+    { id: '1082', val: 'Задание на втулки', granted: 'WRITE', reqs: [] },  // sleeve-cutter
+    { id: '1083', val: 'Втулкорез', granted: 'WRITE', reqs: [] }           // sleeve-cutter
 ];
 
 function freshRequire(p) {
@@ -247,6 +251,24 @@ function bootPadHome(s) {
         '#5134: loadMetadata пульта взял метаданные из шины — третий GET не ушёл');
     assert(!!c.meta.cut, 'loadMetadata нашла таблицу «Задание в производство»');
 
+    // ── 3б) то же у упаковщика и втулкореза («то же у упаковщика», комментарий к #5134) ──
+    var packer = freshRequire(path.join(__dirname, '..', 'download', 'atex', 'js', 'packer.js'));
+    var pc = Object.create(packer.Controller.prototype);
+    pc.root = s.rootEl;
+    pc.db = 'ateh';
+    pc.meta = {};
+    await pc.loadMetadata();
+    assertEqual(countUrl(s.calls, '/ateh/metadata'), 1, '#5134: loadMetadata упаковщика взяла метаданные из шины');
+    assert(!!pc.meta.gp && !!pc.meta.event, 'loadMetadata упаковщика нашла «Партию ГП» и «Событие смены»');
+    var cutter = freshRequire(path.join(__dirname, '..', 'download', 'atex', 'js', 'sleeve-cutter.js'));
+    var cc = Object.create(cutter.Controller.prototype);
+    cc.root = s.rootEl;
+    cc.db = 'ateh';
+    cc.meta = {};
+    await cc.loadMetadata();
+    assertEqual(countUrl(s.calls, '/ateh/metadata'), 1, '#5134: loadMetadata втулкореза взяла метаданные из шины');
+    assert(!!cc.meta.task && !!cc.meta.cutter, 'loadMetadata втулкореза нашла «Задание на втулки» и «Втулкорез»');
+
     // ── 4) без pad-guard на странице пульт по-прежнему сам читает метаданные ─────
     cleanup();
     s = page();
@@ -283,7 +305,8 @@ function bootPadHome(s) {
     fail = false;
     var third = await guard2.sharedGet({ db: 'ateh' }, 'metadata');
     assertEqual(countUrl(s.calls, '/ateh/metadata'), 2, '#5134: после отказа шина повторяет GET');
-    assert(Array.isArray(third) && third.length === 2, '#5134: повторный GET возвращает данные');
+    assert(Array.isArray(third) && third.some(function(t) { return t && t.val === 'Планшет'; }),
+        '#5134: повторный GET возвращает данные (в них есть таблица «Планшет»)');
 
     cleanup();
     console.log('\nИтого: ' + passed + '/' + total);
