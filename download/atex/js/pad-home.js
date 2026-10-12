@@ -155,8 +155,7 @@
 
     // #5134: транспорт свой, кеш общий — sharedOnce хранит ответы на document
     // страницы, где с ними же работают сторож пульта и скрипт пульта.
-    function sharedJson(ctx, path) {
-        var guard = root.AtexPadGuard;
+    function sharedJson(ctx, guard, path) {
         if (!guard || typeof guard.sharedOnce !== 'function') return getJson(ctx, path);
         return guard.sharedOnce(root.document, ctx.db, path, function() {
             return getJson(ctx, path);
@@ -168,10 +167,10 @@
     // метаданные и тот же поиск планшета; ходить на сервер трижды за одними
     // данными не нужно.
     function loadPad(ctx, guard, token) {
-        return sharedJson(ctx, 'metadata').then(function(metadata) {
+        return sharedJson(ctx, guard, 'metadata').then(function(metadata) {
             var table = guard.findTable(metadata);
             if (!table) throw new Error('В базе нет таблицы «' + TABLE_NAME + '»');
-            return sharedJson(ctx, guard.buildLookupPath(table.id, token)).then(function(rows) {
+            return sharedJson(ctx, guard, guard.buildLookupPath(table.id, token)).then(function(rows) {
                 return {
                     table: table, metadata: metadata,   // #4944: в них же «Планшет-кандидат»
                     pad: guard.padFromRows(rows, token, guard.nameColIndex(table), table)
@@ -189,7 +188,7 @@
         var card = screen && screen.childNodes[0];
         if (!card || !guard.publishCandidate || !guard.isToken(token)) return;
         var status = null;
-        (metadata ? Promise.resolve(metadata) : sharedJson(ctx, 'metadata')).then(function(meta) {
+        (metadata ? Promise.resolve(metadata) : sharedJson(ctx, guard, 'metadata')).then(function(meta) {
             if (!guard.findCandidateTable(meta)) return null;
             status = el('div', { class: 'atex-pad-status', text: 'Передаём код администратору…' });
             card.appendChild(status);
