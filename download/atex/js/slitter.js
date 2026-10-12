@@ -2028,7 +2028,14 @@
 
     AtexSlitter.prototype.loadMetadata = function() {
         var self = this;
-        return this.getJson('metadata').then(function(all) {
+        // #5134: метаданные на странице уже читают pad-home.js и сторож планшета
+        // (pad-guard.js) — без них пульт вообще не загружается. Берём ответ из общей
+        // шины GET сторожа; сторожа нет (пульт открыт вне связки) — читаем сами.
+        var guard = (typeof window !== 'undefined') && window.AtexPadGuard;
+        var ready = guard && typeof guard.sharedGet === 'function'
+            ? guard.sharedGet({ db: this.db }, 'metadata')
+            : this.getJson('metadata');
+        return ready.then(function(all) {
             var list = Array.isArray(all) ? all : [all];
             function byName(name) {
                 return list.filter(function(t) {

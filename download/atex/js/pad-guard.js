@@ -618,6 +618,41 @@
         });
     }
 
+    // #5134: общая шина GET одной страницы. На пульте оператора одни и те же
+    // запросы (метаданные, поиск планшета по токену) нужны троим: pad-home.js
+    // из main.html, самому сторожу из шаблона пульта и скрипту пульта — раньше
+    // каждый ходил на сервер сам, и GET /metadata уходил трижды, а поиск
+    // планшета — дважды. Идентичный запрос исполняется один раз, остальные
+    // читают тот же промис. Неудача кеш вымывает — повтор возможен.
+    //
+    // Кеш живёт на document, а не в замке модуля: pad-guard.js исполняется на
+    // странице ДВАЖДЫ (голова main.html — библиотека для pad-home, шаблон
+    // пульта — с data-pad-root), кеш в замке умер бы вместе с первой копией.
+    // Документ и транспорт даёт вызывающий: у pad-home и сторожа свой root/fetch,
+    // общим остаётся только хранилище страницы.
+    //
+    // Ответ ОБЩИЙ для всех читателей страницы — мутировать его нельзя (только
+    // читать; сегодня никто не мутирует, см. ревью #5135). Нужны правки —
+    // копируйте у себя, чужой объект не трогайте.
+    function sharedOnce(doc, db, path, run) {
+        var store = doc && (doc.__atexPadGets || (doc.__atexPadGets = {}));
+        if (!store) return run();
+        var key = encodeURIComponent(trimText(db)) + '/' + path;
+        if (!store[key]) {
+            store[key] = Promise.resolve().then(run).catch(function(err) {
+                delete store[key];
+                throw err;
+            });
+        }
+        return store[key];
+    }
+
+    function sharedGet(ctx, path) {
+        return sharedOnce(root.document, ctx && ctx.db, path, function() {
+            return getJson(ctx, path);
+        });
+    }
+
     // keepEmpty — пустое значение уходит на сервер и СТИРАЕТ реквизит (#4366); без
     // флага пустые поля просто не отправляются (регистрация нового планшета).
     function post(ctx, path, params, keepEmpty) {
@@ -711,7 +746,9 @@
     // не прочитались — экран всё равно показываем, код на нём остаётся.
     function denyDevice(ctx) {
         showNote(ctx.root, 'Проверка устройства…', '');
-        return getJson(ctx, 'metadata')
+        // #5134: через общую шину — на одной странице метаданные уже могли читать
+        // pad-home.js или сторож пульта; отказ и так приходит с экрана.
+        return sharedGet(ctx, 'metadata')
             .then(function(metadata) { ctx.metadata = metadata; }, function() { ctx.metadata = null; })
             .then(function() {
                 showBlocked(ctx, 'Устройство не разрешено', DEVICE_DENIED_TEXT,
@@ -786,7 +823,7 @@
         }
         showNote(container, 'Проверка устройства…', '');
 
-        getJson(ctx, 'metadata')
+        sharedGet(ctx, 'metadata')
             .then(function(metadata) {
                 ctx.metadata = metadata;   // #4944: в них же таблица «Планшет-кандидат»
                 ctx.table = findTable(metadata);
@@ -794,7 +831,7 @@
                     throw new Error('В базе нет таблицы «' + TABLE_NAME + '» — обратитесь к администратору');
                 var token = readToken(root.localStorage);
                 if (!isToken(token)) return null;
-                return getJson(ctx, buildLookupPath(ctx.table.id, token)).then(function(rows) {
+                return sharedGet(ctx, buildLookupPath(ctx.table.id, token)).then(function(rows) {
                     return padFromRows(rows, token, nameColIndex(ctx.table), ctx.table);
                 });
             })
@@ -858,6 +895,8 @@
         makeToken: makeToken,
         isToken: isToken,
         buildLookupPath: buildLookupPath,
+        sharedGet: sharedGet,               // #5134: общая шина GET страницы
+        sharedOnce: sharedOnce,             // #5134: тот же кеш со своим транспортом
         padFromRows: padFromRows,
         registerParams: registerParams,
         apiError: apiError,
