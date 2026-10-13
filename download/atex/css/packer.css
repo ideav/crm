@@ -331,6 +331,11 @@
 .atex-pk-qty-row > .atex-pk-field-nk { flex: 0 1 120px; }
 .atex-pk-qty-row .atex-pk-input { width: 100%; box-sizing: border-box; }
 .atex-pk-nk-stock { font-size: 13px; color: var(--pk-muted); }
+/* #5139: ненулевое сальдо склада НК упаковщик должен заметить — число крупно, янтарным
+   (та же роль «внимания», что у бейджа «частично»; в тёмной теме --pk-partial уже свой). */
+.atex-pk-nk-stock.is-nonzero { color: var(--pk-partial); }
+.atex-pk-nk-stock .atex-pk-nk-stock-num { font-weight: 700; }
+.atex-pk-nk-stock.is-nonzero .atex-pk-nk-stock-num { font-size: 16px; }
 .atex-pk-nk { margin-left: 6px; font-weight: 700; color: var(--pk-accent); }
 .atex-pk-hint { font-size: 13px; color: var(--pk-muted); }
 .atex-pk-error { font-size: 13px; color: var(--pk-warn); }
