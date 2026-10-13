@@ -240,6 +240,25 @@ section('#5086: оба поля — ошибка', function() {
     overlay.close();
 });
 
+// #5139: при ненулевом сальдо упаковщик должен заметить строку склада НК —
+// число выделено (модификатор is-nonzero, число отдельным узлом).
+section('#5139: ненулевое сальдо выделено, нулевое — нет', function() {
+    var inst = makeList([item({})]);
+    var overlay = openDialog(inst, inst.items[0]);
+    var stock = overlay.querySelector('.atex-pk-nk-stock');
+    assert(stock.classList.contains('is-nonzero'), 'сальдо 27 — есть is-nonzero');
+    var num = stock.querySelector('.atex-pk-nk-stock-num');
+    assert(!!num && num.textContent === '27 шт', 'число — отдельным узлом');
+    overlay.close();
+
+    var zero = makeList([item({ nk_stock: '' })]);
+    var overlay0 = openDialog(zero, zero.items[0]);
+    var stock0 = overlay0.querySelector('.atex-pk-nk-stock');
+    assert(!!stock0 && !stock0.classList.contains('is-nonzero'), 'сальдо 0 — без is-nonzero');
+    assert(!!stock0.querySelector('.atex-pk-nk-stock-num'), 'разметка числа одинакова в обоих случаях');
+    overlay0.close();
+});
+
 section('#5086: «Со склада НК» добавляет к количеству и пересчитывает сальдо', function() {
     var inst = makeList([item({})]);
     var overlay = openDialog(inst, inst.items[0]);

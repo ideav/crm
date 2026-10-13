@@ -1921,13 +1921,16 @@
             if (onChange) onChange();
         });
         to.addEventListener('input', function() { if (onChange) onChange(); });
+        // #5139: ненулевое сальдо упаковщик должен заметить — строка получает is-nonzero,
+        // число выделено отдельным узлом (см. .atex-pk-nk-stock.is-nonzero в css).
         var stock = core.toNumber(core.nkStockByArt(this.items || [it])[art]);
         return {
             fields: [
                 el('label', { class: 'atex-pk-field atex-pk-field-nk' }, [el('span', { text: 'На склад НК' }), to]),
                 el('label', { class: 'atex-pk-field atex-pk-field-nk' }, [el('span', { text: 'Со склада НК' }), from])
             ],
-            stockNode: el('div', { class: 'atex-pk-nk-stock', text: 'Склад НК · артикул ' + art + ': ' + stock + ' шт' }),
+            stockNode: el('div', { class: 'atex-pk-nk-stock' + (stock ? ' is-nonzero' : '') },
+                ['Склад НК · артикул ' + art + ': ', el('b', { class: 'atex-pk-nk-stock-num', text: stock + ' шт' })]),
             suggested: function() { return base + core.nkFromOf(core.nkValue(to.value, from.value)); },
             row: function() { return { art: art, current: current, to: to.value, from: from.value }; },
             apply: function() {
