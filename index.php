@@ -7762,12 +7762,19 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
     				trace("");
 					$typ = UnHideDelimiters(explode(":", HideDelimiters($object[0])));	# Get Type's attributes
     				trace("Object: ".$object[0].", typ: ".$typ[0]);
-                    if(count($typ) == 4) # Reference attribute
+                    $orig = Import_data_line_type($typ, $isref);	# Get the imported Type
+                    $isref = CheckSubst($isref);
+                    # issue #963: строка данных с типом вне схемы файла - мусор в обрезанной
+                    # выгрузке (в кейсе #963 в хвосте файла после строк данных ехала целая
+                    # HTML-страница логина). Раньше count(null) ниже ронял импорт фатально,
+                    # а отложенный батч реквизитов (флаш - только в конце фазы) пропадал:
+                    # запросы приезжали с пустыми «Имя в отчете»/«Формула». Флашим
+                    # накопленное и останавливаемся с внятным диагнозом.
+                    if(!isset($GLOBALS["imported"][$orig]))
                     {
-					    trace("Reference attribute ".$object[0]);
-                        $isref = CheckSubst((int)array_shift($typ)); # Remember the Ref attribute
+					    Insert_batch("", "", "", "", "Import flush: unrecognized data line");
+					    my_die(t9n("[RU]Строка $count: тип $orig отсутствует в схеме файла - файл обрезан или повреждён, разобранная часть импортирована[EN]Line $count: type $orig is not in the file schema - the file is truncated or corrupted, the parsed part has been imported")." (".htmlspecialchars(substr($object[0], 0, 60)).")");
                     }
-    				$orig = (int)$typ[0];	# Get the imported Type
 					while(count($object) <= count($GLOBALS["imported"][$orig]))	# There might be line breaks
 					{
 					    if(feof($handle))
