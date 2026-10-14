@@ -13,9 +13,13 @@
 //   • id 946622 (Станок 1): план 08:00, наладка 15, резка+лидер 19 → окно до 08:34;
 //     финиш 09:00:11 — ПОЗЖЕ окна, «С опозданием» честно и после фикса.
 //
-// Правило: дедлайн = конец планового окна задания — те же минуты, что рисует бар
-// (наладка + «Резка и Лидер»). Легаси без cut_time — прежнее окно «план + намотка»
-// (согласовано с баром #3705). Геометрия бара (окно, обед-зазоры #3846/#4007) не меняется.
+// Правило (уточнено заказчиком 14.10.2026, второй раунд): «С опозданием» = сорван СРОК
+// ГОТОВНОСТИ ЗАКАЗА (due_date): финиш/«сейчас» в ДЕНЬ срока или раньше — не опоздание
+// (дедлайн = конец дня срока; опоздание меряем днями, как планировщик #4064). «Старт
+// просрочен» (план уехал, срок не сорван) — янтарный, не красный. Срока нет — дедлайн =
+// конец планового окна задания (наладка + «Резка и Лидер»); легаси без cut_time — прежнее
+// окно «план + намотка» (согласовано с баром #3705). Геометрия бара (окно, обед-зазоры
+// #3846/#4007) не меняется.
 //
 // Run with: node experiments/atex-cut-gantt-5145.test.js
 
@@ -90,15 +94,42 @@ assertEqual(g.cutStatus(bounded('2026-10-14 08:34'), NOW).key, 'on-time',
 assertEqual(g.cutStatus(bounded('2026-10-14 08:35'), NOW).key, 'late',
     '#5145 финиш на минуту позже конца окна → с опозданием');
 
-// ── 4) Честное опоздание остаётся красным (живой случай 946622) ──
-var reallyLate = cutFromRow(liveRow({
-    cut_id: '946622', cut_slitter: 'Станок 1', cut_slitter_id: '101',
-    cut_duration: '9', cut_time: '19.00', cut_knife_setup_min: '0.00', cut_material_winding_min: '15.00',
-    cut_start_date: '1791957610', cut_end_date: '1791957611',   // 09:00:10–09:00:11
-    order_no: '5924', client_order_no: '3634', cut_material: 'MWR113L'
+// ── 4) Срок готовности заказа (due_date) — главный дедлайн (уточнение заказчика 14.10.2026:
+//       «5924 стоит в плане сегодня, дата готовности сегодня, а он красный»). Финиш в ДЕНЬ
+//       срока или раньше — не опоздание, даже если плановое окно резки уже прошло. ──
+function dueRow(over) {
+    return cutFromRow(liveRow(Object.assign({
+        cut_id: '946622', cut_slitter: 'Станок 1', cut_slitter_id: '101',
+        cut_duration: '9', cut_time: '19.00', cut_knife_setup_min: '0.00', cut_material_winding_min: '15.00',
+        cut_start_date: '1791957610', cut_end_date: '1791957611',   // 09:00:10–09:00:11, окно до 08:34
+        order_no: '5924', client_order_no: '3634', cut_material: 'MWR113L'
+    }, over || {})));
+}
+assertEqual(g.cutStatus(dueRow({ due_date: '14.10.2026' }), NOW).key, 'on-time',
+    '#5145 финиш сегодня, срок готовности сегодня → в срок (окно резки не при чём)');
+assertEqual(g.cutStatus(dueRow({ due_date: '21.10.2026' }), NOW).key, 'on-time',
+    '#5145 финиш за неделю до срока (живой случай 5977) → в срок');
+assertEqual(g.cutStatus(dueRow({ due_date: '13.10.2026' }), NOW).key, 'late',
+    '#5145 финиш 14.10 при сроке 13.10 → с опозданием (сорван срок заказа)');
+// Граница дня: 23:59 дня срока — в срок, полночь следующего — опоздание.
+var dueDayEnd = g.parseDateTimeMs('15.10.2026') - 60000;   // 23:59 14.10
+assertEqual(g.cutStatus(dueRow({ due_date: '14.10.2026', cut_end_date: String(dueDayEnd / 1000) }), NOW).key, 'on-time',
+    '#5145 финиш 23:59 дня срока → в срок');
+assertEqual(g.cutStatus(dueRow({ due_date: '14.10.2026', cut_end_date: String((dueDayEnd + 60000) / 1000) }), NOW).key, 'late',
+    '#5145 финиш 00:00 следующего дня → с опозданием');
+// Незавершённые: срок ещё не прошёл → не красная (окно прошло — «Старт просрочен»); срок прошёл → красная.
+var undoneDue = cutFromRow(liveRow({
+    cut_id: '958553', cut_slitter: 'Станок 2', cut_slitter_id: '102',
+    cut_plan_date: String(g.parseDateTimeMs('13.10.2026 08:00') / 1000),   // план вчера
+    cut_start_date: '', cut_end_date: '',
+    cut_duration: '45', cut_time: '105.00', cut_knife_setup_min: '0.00', cut_material_winding_min: '0.00'
 }));
-assertEqual(g.cutStatus(reallyLate, NOW).key, 'late',
-    '#5145 финиш позже окна (08:34 < 09:00) → по-прежнему с опозданием');
+assertEqual(g.cutStatus(undoneDue, NOW).key, 'late',
+    '#5145 срока нет, плановое окно вчера прошло, не начато → с опозданием (fallback: окно — единственный дедлайн)');
+assertEqual(g.cutStatus(Object.assign({}, undoneDue, { dueDate: '13.10.2026' }), NOW).key, 'late',
+    '#5145 срок готовности вчера, не выполнено → с опозданием');
+assertEqual(g.cutStatus(Object.assign({}, undoneDue, { dueDate: '15.10.2026' }), NOW).key, 'late-start',
+    '#5145 срок готовности завтра, план вчера → «Старт просрочен»');
 
 // ── 5) Геометрия бара не меняется: окно = наладка + резка/лидер (#4572/#4334 не задеты) ──
 assertEqual(g.cutBarSpanMin(running, g.cutSetupMin(running).total, null, null), 323,
@@ -142,6 +173,17 @@ assertEqual([mcCuts[0].cutTimeMin, mcCuts[0].storedKnifeMin, mcCuts[0].storedMat
     '#5145 machine-calendar: rowsToCuts читает cut_time и наладку');
 assertEqual(mc.cutCalendarStatus(mcCuts[0], NOW).key, 'on-time',
     '#5145 machine-calendar: финиш внутри окна → в срок');
+assertEqual(mc.rowsToCuts([liveRow({ due_date: '14.10.2026' })])[0].dueDate, '14.10.2026',
+    '#5145 machine-calendar: rowsToCuts читает срок готовности заказа');
+var mcDue = mc.rowsToCuts([liveRow({
+    cut_id: '946622', cut_duration: '9', cut_time: '19.00',
+    cut_knife_setup_min: '0.00', cut_material_winding_min: '15.00',
+    cut_start_date: '1791957610', cut_end_date: '1791957611', due_date: '14.10.2026'
+})])[0];
+assertEqual(mc.cutCalendarStatus(mcDue, NOW).key, 'on-time',
+    '#5145 machine-calendar: финиш в день срока готовности → в срок');
+assertEqual(mc.cutCalendarStatus(Object.assign({}, mcDue, { dueDate: '13.10.2026' }), NOW).key, 'late',
+    '#5145 machine-calendar: финиш после дня срока → с опозданием');
 var mcRunning = mc.rowsToCuts([liveRow({
     cut_id: '953233', cut_plan_date: '1791961860', cut_start_date: '', cut_end_date: '',
     cut_duration: '132', cut_time: '308.00', cut_knife_setup_min: '0.00', cut_material_winding_min: '15.00'

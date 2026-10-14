@@ -105,6 +105,7 @@
 .atex-cg-legend-item.is-unfinished::before { background: var(--cg-unfinished); }
 .atex-cg-legend-item.is-on-time::before { background: var(--cg-ok); }
 .atex-cg-legend-item.is-late::before { background: var(--cg-late); }
+.atex-cg-legend-item.is-late-start::before { background: var(--cg-unfinished); }
 /* #4052: обед/перерыв — единый серый пункт (накладка поверх баров).
    #4061: светло-серым, как сама накладка-«дырка» (.atex-cg-brk). */
 .atex-cg-legend-item.is-break::before {
@@ -277,8 +278,9 @@
 .atex-cg-bar.is-unfinished { --cg-bar-color: var(--cg-unfinished); }
 .atex-cg-bar.is-on-time,
 .atex-cg-bar.is-done { --cg-bar-color: var(--cg-ok); }
-.atex-cg-bar.is-late,
-.atex-cg-bar.is-late-start { --cg-bar-color: var(--cg-late); }
+.atex-cg-bar.is-late { --cg-bar-color: var(--cg-late); }
+/* #5145: план уехал, срок заказа не сорван — «Старт просрочен» янтарный (не красный). */
+.atex-cg-bar.is-late-start { --cg-bar-color: var(--cg-unfinished); }
 .atex-cg-bar.is-unknown { --cg-bar-color: var(--cg-unknown); }
 
 /* #4229: «Отпуск» станка — серый бар ОТДЕЛЬНОЙ строкой (не накладка обеда/перерыва): станок стоит,

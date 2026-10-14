@@ -395,13 +395,17 @@
         return { fromIso: fromIso, toIso: toIso };
     }
 
-    // #5145: дедлайн задания = конец ПЛАНОВОГО ОКНА — те же минуты, что рисует бар:
-    // наладка (ножи + смена сырья) + «Резка и Лидер» (#3700). Раньше дедлайном было
-    // «план + намотка» (cut_duration) без наладки и лидера: идеально выполненный по плану
-    // красился «С опозданием» (типовая наладка 30+15 мин = +45 мин красного), а незавершённое
-    // краснело задолго до конца своего окна. Нет резки в тайминге (cut_time=0) — дедлайна нет,
-    // как раньше при нулевой намотке: наладку без резки окном задания не считаем. Чистая — тест.
+    // #5145: «С опозданием» = сорван СРОК ГОТОВНОСТИ ЗАКАЗА (due_date; уточнение заказчика
+    // 14.10.2026: «стоит в плане сегодня, дата готовности сегодня, а он красный» — красным
+    // меряем срыв срока заказа, а не сдвиг внутри планового расписания). due_date приходит
+    // датой без времени («14.10.2026») → дедлайн = конец этого дня: финиш/«сейчас» в ДЕНЬ
+    // срока или раньше — не опоздание (планировщик считает опоздание днями, #4064, день
+    // в-притык дешевле опоздания). Срока нет — прежний дедлайн: конец планового окна
+    // (наладка + «Резка и Лидер» #3700), у легаси без cut_time — «план + намотка» (#3705);
+    // нет ни резки, ни намотки — дедлайна нет. Чистая — тест.
     function cutDeadlineMs(cut) {
+        var dueMs = parseDateTimeMs(cut && cut.dueDate);
+        if (dueMs != null) return startOfLocalDayMs(dueMs) + GANTT_DAY_MS - 1;
         var planMs = parseDateTimeMs(cut && cut.planDate);
         if (planMs == null) return null;
         if (cut && cut.cutTimeMin != null) {
@@ -1213,6 +1217,7 @@
                 leader: str(row.cut_leader),
                 orderNo: str(row.order_no),
                 clientOrderNo: str(row.client_order_no),   // #4847: номер заказа клиента — первый слот подписи
+                dueDate: str(row.due_date),   // #5145: срок готовности заказа — вход дедлайна окраски
                 materialId: str(row.cut_material_id),
                 materialName: str(row.cut_material),
                 // #4998: альтернативное название Вида сырья (alt_material из cut_planning,
@@ -2200,6 +2205,9 @@
             el('span', { class: 'atex-cg-legend-item is-running', text: STATUS_LABELS.running }),
             el('span', { class: 'atex-cg-legend-item is-unfinished', text: STATUS_LABELS.unfinished }),
             el('span', { class: 'atex-cg-legend-item is-on-time', text: STATUS_LABELS['on-time'] }),
+            // #5145: план уехал, срок заказа не сорван — операционное, не красное; в легенде
+            // статус жил и раньше (bars .is-late-start), пункта не было.
+            el('span', { class: 'atex-cg-legend-item is-late-start', text: STATUS_LABELS['late-start'] }),
             el('span', { class: 'atex-cg-legend-item is-late', text: STATUS_LABELS.late }),
             // #4052: обед и перерывы — единый серый пункт легенды (рисуются накладками поверх баров).
             el('span', { class: 'atex-cg-legend-item is-break', text: 'Обед / перерыв' }),

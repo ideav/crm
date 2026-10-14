@@ -51,10 +51,11 @@ assertEqual(cuts, [
     { id: '10', number: '06.05.2026', planDate: '06.05.2026', status: 'В работе',
       startDate: '06.05.2026 08:10', endDate: '06.05.2026 09:20', duration: 70, length: 600,
       plannedRuns: 6, rollerWidth: 88, knifeWidths: [], knifeCount: 0, leader: 'MONOCHROME', orderNo: '3700', clientOrderNo: '',
+      dueDate: '',   // #5145: срок готовности заказа — вход дедлайна окраски
       materialId: '5', materialName: 'MR194', materialAlt: '', winding: 'OUT', storedKnifeMin: null, storedMaterialMin: null, cutTimeMin: null, slitter: { id: '101', label: 'Станок 1' } },
     { id: '20', number: '27.05.2026', planDate: '27.05.2026', status: 'Ожидает',
       startDate: '', endDate: '', duration: 0, length: 0, plannedRuns: 0, rollerWidth: 0, knifeWidths: [], knifeCount: 0,
-      leader: '', orderNo: '3701', clientOrderNo: '',
+      leader: '', orderNo: '3701', clientOrderNo: '', dueDate: '',   // #5145
       materialId: '', materialName: '', materialAlt: '', winding: '', storedKnifeMin: null, storedMaterialMin: null, cutTimeMin: null, slitter: { id: null, label: '' } }
 ], 'rowsToCuts: dedup, поля order/sequence/leader/намотка/length/резок/ролик, длительность');
 
