@@ -9383,11 +9383,19 @@ function Kill_processlist($pid)
 # ставит сам Интеграм: параметр db=<база> (b24ig.php?db=…, CLI --db=…), первый сегмент адреса
 # https://сервер/<база>/… и папки базы templates/custom/<база>/, download/<база>/.
 # «Отдельным словом», как у сессий MySQL, искать нельзя: база ru совпала бы с каждым адресом
-# ideav.ru, база data — с каждым путём /var/www/www-root/data/. Видна только текущая база, без
-# исключений: «admin» — логин внутри базы, а crontab у всех баз общий (#5150).
+# ideav.ru, база data — с каждым путём /var/www/www-root/data/. Все задачи видит только супер-админ
+# сервера — вошедший с паролем ADMINHASH (user_id 0); «admin» по логину — обычный пользователь базы,
+# ему видна только его база (#5150).
 # Секреты маскируются ДО обрезки строки, значения экранируются от HTML.
 
 define("CRONTAB_TEXT_CHARS", 300);   # сколько символов команды показываем
+
+# Супер-админ сервера: вошёл с паролем ADMINHASH (логин «admin», user_id 0). Тёзка «admin» внутри
+# базы — обычный пользователь, не он (#5150).
+function Crontab_sees_all()
+{
+    return isset($GLOBALS["GLOBAL_VARS"]["user_id"]) && (string)$GLOBALS["GLOBAL_VARS"]["user_id"] === "0";
+}
 
 # Строки crontab → задачи: расписание, команда и пояснение (комментарий строкой выше).
 # Пустые строки, комментарии и переменные окружения (MAILTO=…) задачами не считаются.
@@ -9479,17 +9487,18 @@ function Crontab_read()
     return $rc === 0 ? $out : array();
 }
 
-# Задачи, которые вправе видеть текущий пользователь: только текущая база, без исключений (#5150).
-# Нужны дважды (счётчик и таблица) — запоминаем. $lines — готовые строки crontab (для мерки); без
-# них читается crontab сервера.
+# Задачи, которые вправе видеть текущий пользователь: только текущая база; все задачи видит
+# супер-админ сервера (#5150). Нужны дважды (счётчик и таблица) — запоминаем. $lines — готовые
+# строки crontab (для мерки); без них читается crontab сервера.
 function Get_crontab($reload = FALSE, $lines = NULL)
 {
     global $z;
     if(!$reload && isset($GLOBALS["CRONTAB"]))
         return $GLOBALS["CRONTAB"];
+    $all = Crontab_sees_all();
     $tasks = array();
     foreach(Crontab_parse($lines === NULL ? Crontab_read() : $lines) as $task)
-        if(Crontab_is_own($task["command"], $z))
+        if($all || Crontab_is_own($task["command"], $z))
             $tasks[] = $task;
     $GLOBALS["CRONTAB"] = $tasks;
     return $tasks;

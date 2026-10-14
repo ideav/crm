@@ -116,9 +116,15 @@ $mine = Get_crontab(TRUE, $lines);
 ok(count($mine) === 2, "владельцу spz — только задачи spz", count($mine));
 ok(strpos($mine[1]["command"], "/spz/gssync") !== FALSE, "адрес /spz/… тоже его");
 ok(Get_crontab() === $mine, "список запоминается на время запроса");
-$GLOBALS["GLOBAL_VARS"] = array("user" => "admin");
-ok(count(Get_crontab(TRUE, $lines)) === 2, "admin в базе spz видит только задачи spz, не весь crontab (#5150)", count(Get_crontab(TRUE, $lines)));
+$GLOBALS["GLOBAL_VARS"] = array("user" => "admin", "user_id" => 5);
+ok(count(Get_crontab(TRUE, $lines)) === 2, "тёзка admin внутри базы (id 5) — только задачи своей базы (#5150)", count(Get_crontab(TRUE, $lines)));
+$GLOBALS["GLOBAL_VARS"] = array("user" => "admin", "user_id" => 0);
+ok(count(Get_crontab(TRUE, $lines)) === 4, "супер-админ (пароль ADMINHASH, user_id 0) видит все задачи", count(Get_crontab(TRUE, $lines)));
+$GLOBALS["GLOBAL_VARS"] = array("user" => "admin", "user_id" => "0");
+ok(count(Get_crontab(TRUE, $lines)) === 4, "user_id строкой «0» — тоже супер-админ", count(Get_crontab(TRUE, $lines)));
 $z = "ru";
+$GLOBALS["GLOBAL_VARS"] = array("user" => "ru", "user_id" => 0);
+ok(count(Get_crontab(TRUE, $lines)) === 4, "супер-админ видит все задачи в любой базе", count(Get_crontab(TRUE, $lines)));
 $GLOBALS["GLOBAL_VARS"] = array("user" => "ru");
 ok(count(Get_crontab(TRUE, $lines)) === 0, "база ru не видит чужих задач на ideav.ru");
 
