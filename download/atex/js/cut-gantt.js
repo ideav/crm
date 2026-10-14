@@ -1169,6 +1169,160 @@
         return s;
     }
 
+    // ── #5147: сводка полос задания для title метки строки Ганта ─────────────
+    // Формат строки — как в «Планировании» (#3354 п.1):
+    // «{сырьё} {номинал} x {длина} {намотка} — {факт}мм х {резок} x {полос} = {мотков} шт. (срок: ДД.ММ.ГГГГ)».
+    // Полосы — knifeWidths (развёрнут по qty из cut_strips), номинал — обратный резолв
+    // факт.ширины по справочнику «Фактическая ширина резки» (#3408), срок — due_date
+    // отчёта cut_planning («Заказанное количество → Срок изготовления», #4051).
+
+    // Колонки срока cut_planning (как SUPPLY_DUE_DATE_COLUMNS планирования): первая непустая.
+    var GANTT_DUE_DATE_COLUMNS = ['due_date', 'position_due_date', 'supply_due_date', 'supply_position_due_date'];
+
+    // Дата (ISO «YYYY-MM-DD…» или «ДД.ММ.ГГГГ») → числовой ключ YYYYMMDD; не дата → null.
+    function dueDateKey(value) {
+        var s = String(value == null ? '' : value).trim();
+        if (!s) return null;
+        var iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (iso) return Number(iso[1]) * 10000 + Number(iso[2]) * 100 + Number(iso[3]);
+        var dmy = s.match(/^(\d{1,2})[.\\/](\d{1,2})[.\\/](\d{4})/);
+        if (dmy) return Number(dmy[3]) * 10000 + Number(dmy[2]) * 100 + Number(dmy[1]);
+        return null;
+    }
+
+    // Ключ YYYYMMDD → «ДД.ММ.ГГГГ»; не ключ → ''.
+    function formatDueDayKey(key) {
+        var n = Number(key);
+        if (!isFinite(n) || n < 10000101 || n > 99991231) return '';
+        var y = Math.floor(n / 10000), m = Math.floor(n / 100) % 100, d = n % 100;
+        if (m < 1 || m > 12 || d < 1 || d > 31) return '';
+        var p2 = function(x) { return (x < 10 ? '0' : '') + x; };
+        return p2(d) + '.' + p2(m) + '.' + y;
+    }
+
+    // Хвост строки полос: « (срок: ДД.ММ.ГГГГ)», при нескольких — « (сроки: …, …)» по возрастанию.
+    function cutDueSuffix(cut) {
+        var labels = ((cut && cut.dueKeys) || []).slice()
+            .sort(function(a, b) { return a - b; })
+            .map(formatDueDayKey)
+            .filter(function(s) { return s; });
+        if (!labels.length) return '';
+        return ' (' + (labels.length > 1 ? 'сроки: ' : 'срок: ') + labels.join(', ') + ')';
+    }
+
+    function stripWidthKey(width) {
+        return String(round3(Number(width) || 0));
+    }
+
+    // Полосы резки, сгруппированные по ширине → [{ width, count }] (порт cutStripGroups
+    // планирования, #3354 п.1): по строке на ширину, сортировка по ширине убыв.
+    function cutStripGroups(cut) {
+        var byKey = {}, order = [];
+        ((cut && cut.knifeWidths) || []).forEach(function(wRaw) {
+            var w = stripNum(wRaw);
+            if (!(w > 0)) return;
+            var key = stripWidthKey(w);
+            if (!byKey[key]) { byKey[key] = { width: w, count: 0 }; order.push(key); }
+            byKey[key].count += 1;
+        });
+        return order.map(function(k) { return byKey[k]; })
+            .sort(function(a, b) { return b.width - a.width; });
+    }
+
+    // ── #3372: справочник «Фактическая ширина резки» — порт машинерии планирования ──
+    // Код правила: '' — безусловно; 'j=910'/'j>1000' — по номинальной ширине джамбо
+    // вида сырья; 's=0.5' — по дюймам втулки; 'w<=30' — по ширине полосы (#4501).
+    function parseActualWidthCode(code) {
+        var c = String(code == null ? '' : code).trim().toLowerCase().replace(/\s+/g, '');
+        if (!c) return { key: '', op: '', val: 0 };           // безусловно
+        var m = c.match(/^([jsw])(>=|<=|=|>|<)(\d+(?:\.\d+)?)$/);
+        if (!m) return { key: '?', op: '', val: 0 };          // нераспознан → не применяем
+        return { key: m[1], op: m[2], val: Number(m[3]) };
+    }
+
+    // ctx: { jumbo, inches, width } (любое поле может быть null/undefined). '?' — жёсткий фильтр.
+    function actualWidthCodeMatches(parsed, ctx) {
+        if (!parsed || parsed.key === '') return true;
+        if (parsed.key === '?') return false;
+        var v = parsed.key === 'j' ? (ctx && ctx.jumbo)
+            : (parsed.key === 'w' ? (ctx && ctx.width) : (ctx && ctx.inches));
+        if (v == null || v === '' || !isFinite(Number(v))) return false;
+        v = Number(v);
+        switch (parsed.op) {
+            case '=':  return Math.abs(v - parsed.val) < 1e-6;
+            case '>':  return v > parsed.val + 1e-9;
+            case '<':  return v < parsed.val - 1e-9;
+            case '>=': return v >= parsed.val - 1e-9;
+            case '<=': return v <= parsed.val + 1e-9;
+        }
+        return false;
+    }
+
+    // rows: [{ actual, order, code }] справочника → индекс { stripWidthKey(order): [{ order, actual, parsed }] }.
+    function buildActualWidthIndex(rows) {
+        var index = {};
+        (rows || []).forEach(function(row) {
+            var order = Number(row && row.order);
+            var actual = Number(row && row.actual);
+            if (!isFinite(order) || order <= 0 || !isFinite(actual) || actual <= 0) return;
+            var key = stripWidthKey(order);
+            (index[key] || (index[key] = [])).push({ order: order, actual: actual, parsed: parseActualWidthCode(row.code) });
+        });
+        return index;
+    }
+
+    // Обратный резолв (#3408): по факт.ширине вернуть номинал заказа. Правило — факт.ширина
+    // записи равна заданной и условие «Кода» выполнено; условные приоритетнее безусловных.
+    function resolveNominalWidth(actualWidth, ctx, index) {
+        var a = Number(actualWidth);
+        if (!isFinite(a) || a <= 0) return actualWidth;
+        var best = null, bestConditional = -1;
+        Object.keys(index || {}).forEach(function(key) {
+            (index[key] || []).forEach(function(entry) {
+                if (Math.abs(Number(entry.actual) - a) > 1e-6) return;
+                if (!actualWidthCodeMatches(entry.parsed, ctx)) return;
+                var cond = (entry.parsed && entry.parsed.key !== '') ? 1 : 0;
+                if (cond > bestConditional) { bestConditional = cond; best = entry.order; }
+            });
+        });
+        return best != null ? best : a;
+    }
+
+    // Строка сводки (порт formatStripSummaryLine планирования): длина — сохранённый
+    // «Метраж, м» резки (runLength планирования Гант не читает), мотков = резок × полос.
+    // «х» между мм и резками — кириллическая; «x» между резками и полосами — латинская.
+    function formatGanttStripLine(cut, group, actualWidth) {
+        var material = (cut && cut.materialName) || (cut && cut.materialId != null && String(cut.materialId) !== '' ? '#' + cut.materialId : '—');
+        var width = stripNum(group && group.width);
+        var count = Math.max(0, Math.floor(stripNum(group && group.count)));
+        var len = stripNum(cut && cut.length);
+        var winding = ganttNormWinding(cut && cut.winding) || String((cut && cut.winding) == null ? '' : cut.winding).trim();
+        var runs = stripNum(cut && cut.plannedRuns);
+        var actual = stripNum(actualWidth);
+        if (!(actual > 0)) actual = width;
+        var rolls = round3((runs > 0 ? runs : 0) * count);
+        var line = material + ' ' + round3(width) + ' x ' + (len > 0 ? round3(len) : '—');
+        if (winding) line += ' ' + winding;
+        line += ' — ' + round3(actual) + 'мм х ' + (runs > 0 ? round3(runs) : '—') +
+                ' x ' + count + ' = ' + rolls + ' шт.';
+        return line;
+    }
+
+    // Title метки строки: по строке на ширину полос + срок. refs — { nominalWidthByMaterial,
+    // actualWidthIndex } (наполняют loadNominalWidths/loadActualWidths); нет справочников —
+    // номинал = факт.width. Нет полос → '' (метка показывает свой label, как раньше).
+    function cutStripsTitle(cut, refs) {
+        var index = (refs && refs.actualWidthIndex) || {};
+        var nomByMaterial = (refs && refs.nominalWidthByMaterial) || {};
+        var jumbo = (cut && cut.materialId != null) ? nomByMaterial[String(cut.materialId)] : null;
+        var ctx = { jumbo: jumbo, inches: null };
+        var due = cutDueSuffix(cut);
+        return cutStripGroups(cut).map(function(g) {
+            var nominal = resolveNominalWidth(g.width, ctx, index);
+            return formatGanttStripLine(cut, { width: nominal, count: g.count }, g.width) + due;
+        }).join('\n');
+    }
+
     // Строки отчёта cut_planning → задания (dedup по cut_id). Несколько строк на
     // одно задание (join с обеспечением) схлопываются в одну.
     function rowsToCuts(rows) {
@@ -1339,6 +1493,30 @@
         (cuts || []).forEach(function(cut) {
             var rec = cut && byCut[String(cut.id)];
             if (rec) { cut.knifeWidths = rec.widths; cut.knifeCount = rec.count; }
+        });
+        return cuts;
+    }
+
+    // #5147: сроки («Заказанное количество → Срок изготовления») со ВСЕХ строк cut_planning
+    // (join с обеспечением даёт несколько строк на задание), без дублей → cut.dueKeys
+    // (числовые ключи YYYYMMDD; сортирует cutDueSuffix). Отдельно от rowsToCuts, чтобы не
+    // менять форму записи задания (глубокие сравнения существующих тестов). Мутирует cuts.
+    function attachDueKeys(cuts, rows) {
+        var byId = {};
+        (cuts || []).forEach(function(c) { if (c && c.id != null) byId[String(c.id)] = c; });
+        (rows || []).forEach(function(row) {
+            if (!row) return;
+            var rec = byId[String(row.cut_id == null ? '' : row.cut_id)];
+            if (!rec) return;
+            for (var i = 0; i < GANTT_DUE_DATE_COLUMNS.length; i++) {
+                var raw = row[GANTT_DUE_DATE_COLUMNS[i]];
+                if (raw == null || raw === '') continue;
+                var k = dueDateKey(raw);
+                if (k == null) return;
+                rec.dueKeys = rec.dueKeys || [];
+                if (rec.dueKeys.indexOf(k) < 0) rec.dueKeys.push(k);
+                return;
+            }
         });
         return cuts;
     }
@@ -1762,6 +1940,14 @@
         downtimeNotesText: downtimeNotesText,       // #4229
         mergeGroupRows: mergeGroupRows,             // #4238
         cutRowLabel: cutRowLabel,
+        cutStripsTitle: cutStripsTitle,             // #5147
+        cutStripGroups: cutStripGroups,             // #5147
+        formatGanttStripLine: formatGanttStripLine, // #5147
+        cutDueSuffix: cutDueSuffix,                 // #5147
+        dueDateKey: dueDateKey,                     // #5147
+        formatDueDayKey: formatDueDayKey,           // #5147
+        buildActualWidthIndex: buildActualWidthIndex,   // #5147
+        resolveNominalWidth: resolveNominalWidth,       // #5147
         cutBarTitle: cutBarTitle,       // #4394
         cutBarTime: cutBarTime,
         cutBarSpanMin: cutBarSpanMin,   // #3770
@@ -1774,6 +1960,7 @@
         cutChangeoverMinutes: cutChangeoverMinutes,
         ganttFirstSetupKnifeMin: ganttFirstSetupKnifeMin,
         attachStrips: attachStrips,
+        attachDueKeys: attachDueKeys,               // #5147
         attachSetupMinutes: attachSetupMinutes,
         rowsToCuts: rowsToCuts,
         orderCutsInGroup: orderCutsInGroup,
@@ -2042,6 +2229,62 @@
         }).catch(function() { /* метаданные не читаются — ссылки остаются */ });
     };
 
+    // #5147: «Вид сырья» → номинальные ширины рулона (materialId → мм) — контекст j= правил
+    // обратного резолва. Нет колонки «Номинальная ширина» → деградируем к «Ширина, мм»
+    // (как loadJumboWidths планирования, #3686). Таблицы/доступа нет → пустая карта.
+    AtexCutGantt.prototype.loadNominalWidths = function() {
+        var self = this;
+        this.nominalWidthByMaterial = {};
+        return this.getJson('metadata').then(function(all) {
+            var meta = ganttTableByName(Array.isArray(all) ? all : [all], 'Вид сырья');
+            if (!meta) return;
+            var widthIdx = ganttColumnIndex(meta, 'Ширина, мм');
+            var nomIdx = ganttColumnIndex(meta, 'Номинальная ширина');
+            return self.getJson('object/' + encodeURIComponent(meta.id) + '/?JSON_OBJ&LIMIT=0,5000').then(function(rows) {
+                var nom = {};
+                (rows || []).forEach(function(rec) {
+                    var r = (rec && rec.r) || [];
+                    var w = widthIdx >= 0 ? (Number(r[widthIdx]) || 0) : 0;
+                    var nw = nomIdx >= 0 ? (Number(r[nomIdx]) || 0) : 0;
+                    nom[String(rec.i)] = nw > 0 ? nw : w;
+                });
+                self.nominalWidthByMaterial = nom;
+            });
+        }).catch(function() { self.nominalWidthByMaterial = {}; });
+    };
+
+    // #5147: «Фактическая ширина резки» → индекс правил факт→номинал (как loadActualWidths
+    // планирования, #3372). Таблицы/доступа нет → пустой индекс (номинал = факт).
+    AtexCutGantt.prototype.loadActualWidths = function() {
+        var self = this;
+        this.actualWidthIndex = {};
+        return this.getJson('metadata').then(function(all) {
+            var meta = ganttTableByName(Array.isArray(all) ? all : [all], 'Фактическая ширина резки');
+            if (!meta) return;
+            var orderIdx = ganttColumnIndex(meta, 'Ширина в заказе');
+            var codeIdx = ganttColumnIndex(meta, 'Код');
+            return self.getJson('object/' + encodeURIComponent(meta.id) + '/?JSON_OBJ&LIMIT=0,5000').then(function(rows) {
+                var list = (rows || []).map(function(rec) {
+                    var r = (rec && rec.r) || [];
+                    return {
+                        actual: r[0],
+                        order: orderIdx >= 0 ? r[orderIdx] : null,
+                        code: codeIdx >= 0 ? r[codeIdx] : ''
+                    };
+                });
+                self.actualWidthIndex = buildActualWidthIndex(list);
+            });
+        }).catch(function() { self.actualWidthIndex = {}; });
+    };
+
+    // #5147: сводка полос задания для title метки строки (чистое ядро — gantt.cutStripsTitle).
+    AtexCutGantt.prototype.cutStripsTitle = function(cut) {
+        return gantt.cutStripsTitle(cut, {
+            nominalWidthByMaterial: this.nominalWidthByMaterial,
+            actualWidthIndex: this.actualWidthIndex
+        });
+    };
+
     AtexCutGantt.prototype.collect = function() {
         var self = this;
         return Promise.all([
@@ -2051,7 +2294,9 @@
             this.loadOpTimes(),
             this.loadLunchSettings(),  // #3846: длительность обеда для маркеров обеда
             this.loadCalendar(),       // #3875: «Календарь» (#3788) — нерабочие дни для подсветки
-            this.loadCutWriteGrant()   // #4847: WRITE на «Задание в производство» — рисовать ли ссылки
+            this.loadCutWriteGrant(),  // #4847: WRITE на «Задание в производство» — рисовать ли ссылки
+            this.loadNominalWidths(),  // #5147: номинальные ширины «Вида сырья» — контекст j= правил
+            this.loadActualWidths()    // #5147: «Фактическая ширина резки» — номинал полос в title
         ]).then(function(res) {
             var lunchCfg = res[4] || {};   // #3846/#3904/#4007: { durationMin, startMin, breaks } из «Настройки»
             self.lunchDurationMin = lunchCfg.durationMin || 0;   // #3846: LUNCH_DURATION (мин), 0 = обед выключен
@@ -2060,6 +2305,7 @@
             self.cuts = rowsToCuts(res[0] || []);
             // #3675 п.3: раскладка ножей + минуты наладки по переналадке с предыдущей резкой станка.
             attachStrips(self.cuts, res[2] || []);
+            attachDueKeys(self.cuts, res[0] || []);   // #5147: сроки строк cut_planning → cut.dueKeys
             self.opTimes = res[3] || GANTT_OP_TIMES;
             attachSetupMinutes(self.cuts, self.opTimes);
             // #3705: лидер «между резками» — фолбэк для cutBarMinutes, когда нет cut_time в отчёте.
@@ -2375,7 +2621,9 @@
                 }
                 var t = row.task, taskIdx = row.taskIdx;
                 var statusKey = t.status && t.status.key || 'unknown';
-                var labelCell = el('div', { class: 'atex-cg-label', title: t.label }, [
+                // #5147: title метки — сводка полос задания (как в «Планировании»); нет полос —
+                // прежний title (сам label).
+                var labelCell = el('div', { class: 'atex-cg-label', title: self.cutStripsTitle(t.cut) || t.label }, [
                     el('span', { class: 'atex-cg-label-main', text: t.label })
                 ]);
                 var track = el('div', { class: 'atex-cg-track' });
