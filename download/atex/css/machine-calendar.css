@@ -271,8 +271,9 @@
 .atex-pp-cal-item.is-unfinished { background: var(--pp-cal-unfinished); }
 .atex-pp-cal-item.is-on-time,
 .atex-pp-cal-item.is-done { background: var(--pp-cal-ok); }
-.atex-pp-cal-item.is-late,
-.atex-pp-cal-item.is-late-start { background: var(--pp-cal-late); }
+.atex-pp-cal-item.is-late { background: var(--pp-cal-late); }
+/* #5145: план уехал, срок заказа не сорван — «Старт просрочен» янтарный (не красный). */
+.atex-pp-cal-item.is-late-start { background: var(--pp-cal-unfinished); }
 .atex-pp-cal-item.is-unknown { background: var(--pp-cal-unknown); }
 .atex-pp-cal-item-main,
 .atex-pp-cal-item-status {
@@ -380,8 +381,9 @@
 .atex-mc-cut-block.is-unfinished { background: var(--pp-cal-unfinished); }
 .atex-mc-cut-block.is-on-time,
 .atex-mc-cut-block.is-done { background: var(--pp-cal-ok); }
-.atex-mc-cut-block.is-late,
-.atex-mc-cut-block.is-late-start { background: var(--pp-cal-late); }
+.atex-mc-cut-block.is-late { background: var(--pp-cal-late); }
+/* #5145: план уехал, срок заказа не сорван — янтарный (не красный). */
+.atex-mc-cut-block.is-late-start { background: var(--pp-cal-unfinished); }
 
 @media (max-width: 920px) {
     .atex-pp-cal-head { grid-template-columns: 1fr; }

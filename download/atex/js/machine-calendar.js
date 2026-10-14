@@ -248,12 +248,15 @@
         return shiftIsoDate(range.startIso, dir * step);
     }
 
-    // #5145: дедлайн = конец ПЛАНОВОГО ОКНА — план + наладка + «Резка и Лидер» (как у Ганта,
-    // cutDeadlineMs). Раньше было «план + намотка» (cut_duration): идеально выполненный по
-    // плану красился «С опозданием», а незавершённое краснело задолго до конца своего окна.
-    // Наладка — из хранимых колонок (#3698, без пересчёта по соседям, как у календаря принято).
-    // Нет резки в тайминге (cut_time=0) — дедлайна нет, как раньше при нулевой намотке.
+    // #5145: «С опозданием» = сорван СРОК ГОТОВНОСТИ ЗАКАЗА (due_date; как у Ганта,
+    // cutDeadlineMs — уточнение заказчика 14.10.2026). due_date приходит датой без времени
+    // («14.10.2026») → дедлайн = конец этого дня: финиш/«сейчас» в ДЕНЬ срока или раньше —
+    // не опоздание (планировщик считает опоздание днями, #4064). Срока нет — прежний дедлайн:
+    // план + наладка + «Резка и Лидер»; наладка — из хранимых колонок (#3698, без пересчёта
+    // по соседям). Нет резки в тайминге (cut_time=0) — дедлайна нет.
     function cutCalendarDeadlineMs(cut) {
+        var dueMs = parseCalendarDateTimeMs(cut && cut.dueDate);
+        if (dueMs != null) return startOfLocalDayMs(dueMs) + CALENDAR_DAY_MS - 1;
         var planMs = parseCalendarDateTimeMs(cut && cut.planDate);
         if (planMs == null) return null;
         if (cut && cut.cutTimeMin != null) {
@@ -455,6 +458,7 @@
                 startDate: str(row.cut_start_date),
                 endDate: str(row.cut_end_date),
                 duration: durationOf(row),
+                dueDate: str(row.due_date),   // #5145: срок готовности заказа — вход дедлайна окраски
                 // #5145: «Резка и Лидер» и хранимая наладка — вход дедлайна (конец планового окна).
                 cutTimeMin: storedMin(row, CUT_TIME_COLUMNS),
                 storedKnifeMin: storedMin(row, CUT_KNIFE_SETUP_COLUMNS),

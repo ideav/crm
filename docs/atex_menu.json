@@ -22,7 +22,8 @@
     {
       "role": "Менеджер",
       "menus": [
-        { "name": "Приём и ведение заказов", "href": "orders", "icon": "<i class=\"pi pi-shopping-cart\"></i>" }
+        { "name": "Приём и ведение заказов", "href": "orders", "icon": "<i class=\"pi pi-shopping-cart\"></i>" },
+        { "name": "Диаграмма Ганта (задания)", "href": "cut-gantt", "icon": "<i class=\"pi pi-bars\"></i>", "_comment": "#5145: менеджеру — окраска продаж (план к сроку / запланировано с задержкой / выполнено)" }
       ]
     },
     {

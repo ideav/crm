@@ -43,10 +43,12 @@ var cuts = calendar.rowsToCuts([
 assertEqual(cuts, [
     { id: '10', number: '06.05.2026', planDate: '06.05.2026', status: 'В работе',
       startDate: '06.05.2026 08:10', endDate: '06.05.2026 09:20', duration: 70,
+      dueDate: '',   // #5145: срок готовности заказа — вход дедлайна окраски
       cutTimeMin: null, storedKnifeMin: null, storedMaterialMin: null,   // #5145: вход дедлайна
       materialId: '5', materialName: 'MR194', slitter: { id: '101', label: 'Станок 1' } },
     { id: '20', number: '27.05.2026', planDate: '27.05.2026', status: 'Ожидает',
       startDate: '', endDate: '', duration: 0,
+      dueDate: '',   // #5145
       cutTimeMin: null, storedKnifeMin: null, storedMaterialMin: null,   // #5145
       materialId: '', materialName: '', slitter: { id: null, label: '' } }
 ], 'rowsToCuts: dedup по cut_id, нужные поля и длительность');
