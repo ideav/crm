@@ -26,6 +26,13 @@
  *       ]
  *     }
  *
+ * Формат v2 (issue #4983): шапка — с отступами, записи "rows" — по одной строке файла,
+ * ключ строки — короткое имя колонки (алиас, иначе имя; одноимённым добавляется "#id"),
+ * каноничное целое (без ведущих нулей, до 15 цифр) — числом, пустых ключей в строке нет,
+ * в шапке поле "readme" — одной строкой о том, как читать строки. Документ v1 кодируется
+ * как раньше. Импорт понимает v1 и v2: v2 нормализуется к виду v1 (JsonArchiveNormalize),
+ * поэтому разбор данных про v2 не знает.
+ *
  * Значения в `fields` — как есть, без экранирования. Ссылки задаются ИМЕНАМИ целевых записей
  * (как в сокращённом формате BKI), мульти-ссылка — массивом имён. Ключ колонки — её имя;
  * при совпадении имён в одной таблице — «имя#id»; принимается и голый id колонки.
@@ -41,14 +48,16 @@
  *   "val": ""             — строка удаляется по ключу уникальности (в BKI — пустая первая колонка).
  *
  * Файл чистый: работы с базой и с $GLOBALS здесь нет — всё поведение проверяется
- * experiments/json-archive-4968.test.php.
+ * experiments/json-archive-4968.test.php (формат, кодирование, сведение) и
+ * experiments/json-archive-4983.test.php (v2: строка-запись, короткие имена, нормализация).
+ *
  */
 
 require_once __DIR__ . "/delimiters.php";
 require_once __DIR__ . "/field_attrs.php";
 
 defined("JSON_ARCHIVE_FORMAT")  || define("JSON_ARCHIVE_FORMAT", "integram-archive");
-defined("JSON_ARCHIVE_VERSION") || define("JSON_ARCHIVE_VERSION", 1);
+defined("JSON_ARCHIVE_VERSION") || define("JSON_ARCHIVE_VERSION", 2);
 # Значение-сигнал «очистить реквизит», которое понимает разбор данных в index.php
 defined("JSON_ARCHIVE_CLEAR")   || define("JSON_ARCHIVE_CLEAR", " ");
 
@@ -148,6 +157,32 @@ function JsonArchiveColumnKey($col, $columns){
 		if(isset($other["name"]) && $other["name"] === $name)
 			$same++;
 	return $same > 1 ? $name."#".$col["id"] : $name;
+}
+
+# Короткое имя колонки v2 (issue #4983): явный "alias" из types, иначе алиас из attrs,
+# иначе полное имя. Под этим именем значение колонки лежит в строке архива.
+function JsonArchiveShortName($col){
+	$alias = isset($col["alias"]) ? trim((string)$col["alias"]) : "";
+	if($alias !== "")
+		return $alias;
+	if(isset($col["attrs"]) && (string)$col["attrs"] !== ""){
+		$parsed = FieldAttrsParse((string)$col["attrs"]);
+		if($parsed["alias"] !== null && $parsed["alias"] !== "")
+			return $parsed["alias"];
+	}
+	return isset($col["name"]) ? $col["name"] : "";
+}
+
+# Ключ колонки в строке v2: короткое имя, при совпадении коротких имён — "имя#id"
+function JsonArchiveShortKey($col, $columns){
+	$short = JsonArchiveShortName($col);
+	if($short === "")
+		return (string)$col["id"];
+	$same = 0;
+	foreach($columns as $other)
+		if(JsonArchiveShortName($other) === $short)
+			$same++;
+	return $same > 1 ? $short."#".$col["id"] : $short;
 }
 
 /**
@@ -310,7 +345,8 @@ function JsonArchiveWantedColumns($doc){
 			"target" => isset($req["target"]) ? (string)$req["target"] : "",
 			"multi" => isset($req["multi"]) ? (bool)$req["multi"] : false,
 			"key" => isset($req["key"]) ? (bool)$req["key"] : false,
-			"attrs" => isset($req["attrs"]) ? (string)$req["attrs"] : ""
+			"attrs" => isset($req["attrs"]) ? (string)$req["attrs"] : "",
+			"alias" => isset($req["alias"]) ? (string)$req["alias"] : ""	# issue #4983
 		);
 	}
 	return $columns;
@@ -370,6 +406,65 @@ function JsonArchiveScalar($value, $where){
 	throw new JsonArchiveError("Недопустимое значение в \"$where\": ожидается строка, число или null");
 }
 
+/**
+ * Привести документ к внутреннему виду v1: строка — {"val", "fields"}, ключ поля — имя
+ * колонки (у одноимённых — "имя#id"), значения — строками. Документ v1 возвращается как
+ * есть: дальше разбор данных про v2 не знает (issue #4983). Числа в строки приводит
+ * JsonArchiveScalar — так же, как для рукописных документов с числами.
+ */
+function JsonArchiveNormalize($doc){
+	if(!isset($doc["version"]) || ((int)$doc["version"] < 2))
+		return $doc;
+	$wanted = JsonArchiveWantedColumns($doc);
+	$map = array();
+	foreach($wanted as $col){
+		$full = JsonArchiveColumnKey($col, $wanted);
+		$short = JsonArchiveShortName($col);
+		$same = 0;
+		foreach($wanted as $other)
+			if(JsonArchiveShortName($other) === $short)
+				$same++;
+		$shortKey = $same > 1 ? $short."#".$col["id"] : $short;
+		if($shortKey !== $full)
+			$map[$shortKey] = $full;
+		$map[(string)$col["id"]] = $full;	# голый id колонки принимается, как в v1
+	}
+	$rows = array();
+	foreach($doc["rows"] as $row){
+		$record = array();
+		$fields = array();
+		foreach($row as $key => $value){
+			if($key === "val"){
+				$record["val"] = JsonArchiveV1Value($value, "val");
+				continue;
+			}
+			if($key === "id" || $key === "parent"){	# служебные ключи v1 проходят как есть
+				$record[$key] = $value;
+				continue;
+			}
+			$fields[isset($map[$key]) ? $map[$key] : $key] = JsonArchiveV1Value($value, $key);
+		}
+		$record["fields"] = $fields;
+		$rows[] = $record;
+	}
+	$doc["rows"] = $rows;
+	return $doc;
+}
+
+# Значение v2 во внутреннее представление v1: число и булево — строкой, мульти-ссылка —
+# массивом строк; null (очистить) и пустая строка — как есть, семантика v1.
+function JsonArchiveV1Value($value, $where){
+	if($value === null)
+		return null;
+	if(is_array($value)){
+		$out = array();
+		foreach($value as $item)
+			$out[] = JsonArchiveScalar($item, $where);
+		return $out;
+	}
+	return JsonArchiveScalar($value, $where);
+}
+
 # ---------------------------------------------------------------------------
 # Мост с разбором данных импорта
 # ---------------------------------------------------------------------------
@@ -401,6 +496,34 @@ function ImportHasValue($object, $n){
 # ---------------------------------------------------------------------------
 # Сборка архива
 # ---------------------------------------------------------------------------
+
+# Каноничное целое (без ведущих нулей, до 15 цифр) выводится числом; остальное —
+# строкой как есть (коды, "007", даты), чтобы обратная загрузка не исказила значение.
+function JsonArchiveV2Number($value){
+	if(!is_string($value) || !preg_match("/^(0|-?[1-9][0-9]{0,14})$/", $value))
+		return $value;
+	return (int)$value;
+}
+
+/**
+ * Строка v2 (issue #4983): {"val": ..., "<короткое имя>": значение, ...} — без обёртки
+ * "fields". Пустое значение ключа не получает: ключа нет = колонка пуста.
+ */
+function JsonArchiveV2Row($val, $fields){
+	$row = array();
+	$row["val"] = JsonArchiveV2Number($val);
+	foreach($fields as $key => $value){
+		if(is_array($value)){
+			if(count($value))
+				$row[$key] = array_map("JsonArchiveV2Number", array_values($value));
+			continue;
+		}
+		if((string)$value === "")
+			continue;
+		$row[$key] = JsonArchiveV2Number($value);
+	}
+	return $row;
+}
 
 # Метаданные всех типов, до которых дотянулась выгрузка, в виде "types" документа
 function JsonArchiveTypesFromStruct($localStruct){
@@ -435,6 +558,9 @@ function JsonArchiveTypesFromStruct($localStruct){
 				$req["key"] = true;
 			if($col["attrs"] !== "")
 				$req["attrs"] = $col["attrs"];
+			$short = JsonArchiveShortName($col);	# issue #4983: короткое имя рядом с полным
+			if($short !== "" && $short !== $req["name"])
+				$req["alias"] = $short;
 			$type["reqs"][] = $req;
 		}
 		$types[(string)$typeId] = $type;
@@ -457,5 +583,34 @@ function JsonArchiveAttrs($col){
 }
 
 function JsonArchiveEncode($doc){
+	if(isset($doc["version"]) && ((int)$doc["version"] >= 2))
+		return JsonArchiveEncodeV2($doc);
 	return json_encode($doc, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+}
+
+/**
+ * Документ v2 (issue #4983): шапка (format … types) — с отступами, как в v1, записи
+ * "rows" — по одной строке файла: читается глазами, грепается, сравнивается построчно.
+ * "rows" пишется последним ключом — документ и собирается с "rows" в конце.
+ */
+function JsonArchiveEncodeV2($doc){
+	$header = $doc;
+	$rows = array();
+	if(isset($header["rows"]) && is_array($header["rows"]))
+		$rows = $header["rows"];
+	unset($header["rows"]);
+	$head = json_encode($header, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+	if($head === false)
+		throw new JsonArchiveError("Шапка архива не кодируется: ".json_last_error_msg());
+	$head = rtrim(substr($head, 0, -1));	# документ закроет скобка ниже
+	$lines = array();
+	foreach($rows as $row){
+		$line = json_encode($row, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+		if($line === false)
+			throw new JsonArchiveError("Строка архива не кодируется: ".json_last_error_msg());
+		$lines[] = "        ".$line;
+	}
+	$rowsJson = count($lines) ? "[\n".implode(",\n", $lines)."\n    ]" : "[]";
+	$sep = ($head === "{") ? "\n" : ",\n";
+	return $head.$sep."    \"rows\": ".$rowsJson."\n}";
 }

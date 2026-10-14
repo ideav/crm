@@ -3270,9 +3270,9 @@ function Export_json_record($id, $obj, $val){
 		$value = $reqs[$col["id"]];
 		if($col["kind"] === "ref")
 			$value = $col["multi"] ? array_values($value) : $value[0];
-		$fields[JsonArchiveColumnKey($col, $columns)] = $value;
+		$fields[JsonArchiveShortKey($col, $columns)] = $value;	# issue #4983: ключ строки — короткое имя
 	}
-	return array("val" => $val, "fields" => $fields);
+	return JsonArchiveV2Row($val, $fields);	# issue #4983: строка v2 — без "fields", числа, без пустых
 }
 /**
  * issue #4968: свести колонки JSON-архива с колонками таблицы $id, недостающие — создать.
@@ -7171,6 +7171,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                 {	# issue #4968: JSON-архив — метаданные и данные одним документом
                     try{
                         $archive = JsonArchiveDecode(file_get_contents($_FILES["bki_file"]["tmp_name"]));
+                        $archive = JsonArchiveNormalize($archive);	# issue #4983: v2 сводится к виду v1
                     }
                     catch(JsonArchiveError $e){
                         my_die(t9n("[RU]Архив не загружен: [EN]Archive not loaded: ").$e->getMessage());
@@ -8409,17 +8410,27 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 				die();
 			}
 			elseif(isset($GLOBALS["jsonExport"])){	# issue #4968: метаданные и данные одним JSON-документом
-				sendJsonHeaders("data_export.json");
-				while(ob_get_level())	# в файл уходит ровно документ, без разметки страницы
-					ob_end_clean();
-				echo JsonArchiveEncode(array(
+				$archive = JsonArchiveEncode(array(
 					"format" => JSON_ARCHIVE_FORMAT,
 					"version" => JSON_ARCHIVE_VERSION,
+					"readme" => "rows: одна запись на строку; ключ val — значение главной колонки, остальные ключи — реквизиты по алиасам из types; отсутствующий ключ = пусто",	# issue #4983
 					"db" => $z,
 					"exported" => date("c"),
 					"table" => (int)$id,
 					"types" => JsonArchiveTypesFromStruct($GLOBALS["local_struct"]),
 					"rows" => $GLOBALS["dataExport"]));
+				while(ob_get_level())	# в файл уходит ровно документ, без разметки страницы
+					ob_end_clean();
+				if(isset($_REQUEST["gzip"])){	# issue #4983: тяжёлые выгрузки — сразу .json.gz
+					header("Content-Type: application/gzip");
+					header("Content-Disposition: attachment;filename=".rawurlencode("data_export.json.gz"));
+					header("Content-Transfer-Encoding: binary");
+					echo gzencode($archive);
+				}
+				else{
+					sendJsonHeaders("data_export.json");
+					echo $archive;
+				}
 				die();
 			}
 			elseif(isset($GLOBALS["dataExport"])){
