@@ -106,6 +106,11 @@
 
     // Колонки отчёта, в которых может прийти длительность резки (минуты).
     var CUT_DURATION_COLUMNS = ['cut_duration', 'cut_duration_min', 'cut_duration_minutes'];
+    // #5145: хранимые активности для дедлайна — те же, что у Ганта: наладка (#3698) и
+    // «Резка и Лидер» (#3700). Дедлайн = план + наладка + резка/лидер (конец планового окна).
+    var CUT_KNIFE_SETUP_COLUMNS = ['cut_knife_setup_min', 'cut_knife_setup', 'cut_setup_knife_min'];
+    var CUT_MATERIAL_WINDING_COLUMNS = ['cut_material_winding_min', 'cut_material_setup_min', 'cut_setup_material_min'];
+    var CUT_TIME_COLUMNS = ['cut_time', 'cut_cut_leader_min', 'cut_run_leader_min'];
 
     function todayISO() {
         var d = new Date();
@@ -243,10 +248,23 @@
         return shiftIsoDate(range.startIso, dir * step);
     }
 
+    // #5145: дедлайн = конец ПЛАНОВОГО ОКНА — план + наладка + «Резка и Лидер» (как у Ганта,
+    // cutDeadlineMs). Раньше было «план + намотка» (cut_duration): идеально выполненный по
+    // плану красился «С опозданием», а незавершённое краснело задолго до конца своего окна.
+    // Наладка — из хранимых колонок (#3698, без пересчёта по соседям, как у календаря принято).
+    // Нет резки в тайминге (cut_time=0) — дедлайна нет, как раньше при нулевой намотке.
     function cutCalendarDeadlineMs(cut) {
         var planMs = parseCalendarDateTimeMs(cut && cut.planDate);
+        if (planMs == null) return null;
+        if (cut && cut.cutTimeMin != null) {
+            var cutMin = Math.max(0, stripNum(cut.cutTimeMin));
+            if (!(cutMin > 0)) return null;
+            var knife = cut.storedKnifeMin != null ? Math.max(0, stripNum(cut.storedKnifeMin)) : 0;
+            var material = cut.storedMaterialMin != null ? Math.max(0, stripNum(cut.storedMaterialMin)) : 0;
+            return planMs + (cutMin + knife + material) * 60000;
+        }
         var duration = stripNum(cut && cut.duration);
-        if (planMs == null || !(duration > 0)) return null;
+        if (!(duration > 0)) return null;
         return planMs + duration * 60000;
     }
 
@@ -417,6 +435,15 @@
             }
             return 0;
         }
+        // #3698/#3700/#5145: хранимые активности (минуты) или null, если колонки нет/пусто —
+        // «сохранён 0» отличаем от «не сохранено» (в дедлайне нет тайминга → нет дедлайна).
+        function storedMin(row, cols) {
+            for (var i = 0; i < cols.length; i++) {
+                var v = row && row[cols[i]];
+                if (v != null && v !== '') return stripNum(v);
+            }
+            return null;
+        }
         (rows || []).forEach(function(row) {
             var id = str(row && row.cut_id);
             if (!id || byId[id]) return;
@@ -428,6 +455,10 @@
                 startDate: str(row.cut_start_date),
                 endDate: str(row.cut_end_date),
                 duration: durationOf(row),
+                // #5145: «Резка и Лидер» и хранимая наладка — вход дедлайна (конец планового окна).
+                cutTimeMin: storedMin(row, CUT_TIME_COLUMNS),
+                storedKnifeMin: storedMin(row, CUT_KNIFE_SETUP_COLUMNS),
+                storedMaterialMin: storedMin(row, CUT_MATERIAL_WINDING_COLUMNS),
                 materialId: str(row.cut_material_id),
                 materialName: str(row.cut_material),
                 slitter: { id: row.cut_slitter_id ? String(row.cut_slitter_id) : null, label: str(row.cut_slitter) }
