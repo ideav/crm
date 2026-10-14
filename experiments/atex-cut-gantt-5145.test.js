@@ -196,5 +196,37 @@ var mcLegacy = mc.cutCalendarStatus({ planDate: '2026-06-11 08:00', endDate: '20
     Date.parse('2026-06-11T09:40:00Z'));
 assertEqual(mcLegacy.key, 'late', '#5145 machine-calendar: легаси без cut_time — прежнее окно');
 
+// ── 10) Режим продаж (роль «Менеджер…»): план к сроку, выполнено — зелёным (#5145) ──
+assertEqual(g.isSalesManagerRole('Менеджер по продажам'), true, '#5145 роль «Менеджер по продажам» → режим продаж');
+assertEqual(g.isSalesManagerRole('Менеджер'), true, '#5145 роль «Менеджер» → режим продаж');
+assertEqual(g.isSalesManagerRole('менеджер  по продажам'), true, '#5145 регистр и двойной пробел не мешают');
+assertEqual(g.isSalesManagerRole('Диспетчер'), false, '#5145 «Диспетчер» → производственный режим');
+assertEqual(g.isSalesManagerRole('Руководитель'), false, '#5145 «Руководитель» → производственный режим');
+assertEqual(g.isSalesManagerRole('Начальник смены'), false, '#5145 «Начальник…» → не менеджер');
+assertEqual(g.isSalesManagerRole(''), false, '#5145 пустая роль → производственный режим');
+
+// Выполнено — всегда зелёное, даже позже планового окна (живой случай 5924: финиш 09:00, окно до 08:34).
+var mgrDone = dueRow({ due_date: '14.10.2026' });
+assertEqual(g.cutStatus(mgrDone, NOW, true), { key: 'done', label: 'Выполнено' },
+    '#5145 менеджер: выполнено → «Выполнено» (зелёное)');
+// Запланировано в срок: план сегодня, срок сегодня, окно кончается в пределах дня срока.
+var mgrPlanned = cutFromRow(liveRow({
+    cut_id: '953233', cut_plan_date: '1791961860', cut_start_date: '', cut_end_date: '',
+    cut_duration: '132', cut_time: '308.00', cut_knife_setup_min: '0.00', cut_material_winding_min: '15.00',
+    due_date: '14.10.2026'
+}));
+assertEqual(g.cutStatus(mgrPlanned, NOW, true), { key: 'planned', label: 'Запланировано в срок' },
+    '#5145 менеджер: окно до 15:34 в день срока → «Запланировано в срок» (синее)');
+// Запланировано с задержкой: конец планового окна за днём срока (срок вчера, план сегодня).
+var mgrLate = cutFromRow(liveRow({ due_date: '13.10.2026', cut_start_date: '', cut_end_date: '' }));
+assertEqual(g.cutStatus(mgrLate, NOW, true), { key: 'late', label: 'Запланировано с задержкой' },
+    '#5145 менеджер: план сегодня при сроке вчера → «Запланировано с задержкой» (красное)');
+// Срок не заполнен → «Запланировано в срок» (мерять не от чего, не красим).
+assertEqual(g.cutStatus(Object.assign({}, mgrLate, { dueDate: '' }), NOW, true).key, 'planned',
+    '#5145 менеджер: нет срока готовности → не красим');
+// Начатое (running) и незавершённое для менеджера — по плану: та же развилка срок/окно.
+assertEqual(g.cutStatus(Object.assign({}, mgrLate, { startDate: '2026-10-14 09:00' }), NOW, true).key, 'late',
+    '#5145 менеджер: начатое при сроке вчера → тоже «Запланировано с задержкой»');
+
 console.log('\n' + passed + '/' + total + ' passed');
 if (passed !== total) process.exitCode = 1;

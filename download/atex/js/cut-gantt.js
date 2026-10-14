@@ -143,6 +143,24 @@
         unknown: 'Без даты'
     };
 
+    // #5145: окраска для роли продаж («Менеджер», «Менеджер по продажам») — три состояния
+    // на языке заказа, без производственной детализации: запланировано в срок (синее),
+    // запланировано с задержкой (красное — план уже за днём срока готовности), выполнено
+    // (зелёное). Решение заказчика 14.10.2026.
+    var STATUS_LABELS_MANAGER = {
+        planned: 'Запланировано в срок',
+        late: 'Запланировано с задержкой',
+        done: 'Выполнено'
+    };
+
+    // Роль из шаблона (data-role, {_global_.role}) → режим продаж. По ИМЕНИ: role_id
+    // у инсталляций свои. «Менеджер…» (в т.ч. «Менеджер по продажам») — да, прочие
+    // («Начальник», «Диспетчер», «Оператор», «Руководитель») — нет. Чистая — тест.
+    function isSalesManagerRole(name) {
+        var s = String(name == null ? '' : name).toLowerCase().replace(/\s+/g, ' ').trim();
+        return s.indexOf('менеджер') === 0;
+    }
+
     function todayISO() {
         var d = new Date();
         function pad(n) { return (n < 10 ? '0' : '') + n; }
@@ -418,9 +436,21 @@
         return planMs + duration * 60000;
     }
 
-    function cutStatus(cut, nowMs) {
+    function cutStatus(cut, nowMs, managerMode) {
         var now = Number(nowMs);
         if (!isFinite(now)) now = Date.now();
+        // #5145: режим продаж — план к сроку и факт, без производственных статусов.
+        if (managerMode) {
+            var managerEndMs = parseDateTimeMs(cut && cut.endDate);
+            if (managerEndMs != null) return { key: 'done', label: STATUS_LABELS_MANAGER.done };
+            var managerDueMs = parseDateTimeMs(cut && cut.dueDate);
+            if (managerDueMs != null) {
+                var planEndMs = cutBarEndMs(cut);   // конец планового окна (наладка + резка/лидер)
+                if (planEndMs != null && planEndMs > startOfLocalDayMs(managerDueMs) + GANTT_DAY_MS - 1)
+                    return { key: 'late', label: STATUS_LABELS_MANAGER.late };
+            }
+            return { key: 'planned', label: STATUS_LABELS_MANAGER.planned };
+        }
         var planMs = parseDateTimeMs(cut && cut.planDate);
         var startMs = parseDateTimeMs(cut && cut.startDate);
         var endMs = parseDateTimeMs(cut && cut.endDate);
@@ -1454,13 +1484,14 @@
         var o = opts || {};
         var statusFilter = String(f.status == null ? '' : f.status).trim();
         var slitterFilter = String(f.slitter == null ? '' : f.slitter).trim();
+        var managerMode = !!o.managerMode;   // #5145: окраска роли продаж
 
         var visible = (cuts || []).filter(function(cut) {
             var s = cut && cut.slitter || { id: null, label: '' };
             var sid = s.id == null ? '' : String(s.id);
             if (slitterFilter && sid !== slitterFilter) return false;
             if (!cutInRange(cut, range)) return false;
-            if (statusFilter && cutStatus(cut, nowMs).key !== statusFilter) return false;
+            if (statusFilter && cutStatus(cut, nowMs, managerMode).key !== statusFilter) return false;
             return true;
         });
 
@@ -1554,7 +1585,7 @@
             g.tasks = ordered.map(function(cut, i) {
                 var tr = cutTimeRange(cut) || { startMs: win.startMs, endMs: win.startMs };
                 var startMs = barStarts[i] != null ? barStarts[i] : tr.startMs;   // #4099: сохранённый старт как есть
-                var status = cutStatus(cut, nowMs);
+                var status = cutStatus(cut, nowMs, managerMode);
                 // #3675 п.3 / #3680: ширина бара = наладка + резка; подпись времени — ВСЁ окно задания
                 // (от начала наладки до конца резки), а не только резка.
                 var seg = cutBarSegments(cut, pxPerMin, minPx);
@@ -1759,6 +1790,8 @@
         daySpanToMode: daySpanToMode,         // #3713
         shiftAnchor: shiftAnchor,
         cutStatus: cutStatus,
+        isSalesManagerRole: isSalesManagerRole,   // #5145
+        statusLabelsManager: STATUS_LABELS_MANAGER,   // #5145
         cutTimeRange: cutTimeRange,
         cutInRange: cutInRange,
         downtimeInRange: downtimeInRange,           // #4229
@@ -1832,6 +1865,8 @@
     function AtexCutGantt(root) {
         this.root = root;
         this.db = (typeof window !== 'undefined' && window.db) || root.getAttribute('data-db') || '';
+        // #5145: роль вошедшего (data-role из шаблона, {_global_.role}) — режим окраски продаж.
+        this.managerMode = isSalesManagerRole(root.getAttribute('data-role'));
         this.slitterTable = root.getAttribute('data-slitter-table') || '1070';
         this.planningUrl = root.getAttribute('data-planning-url') || planningBaseFromLocation();
         this.busy = false;
@@ -2166,8 +2201,13 @@
 
         var statusSelect = el('select', { class: 'atex-cg-input atex-cg-status', title: 'Статус' });
         statusSelect.appendChild(el('option', { value: '', text: 'Все статусы' }));
-        ['planned', 'running', 'unfinished', 'on-time', 'late', 'late-start', 'done'].forEach(function(key) {
-            var opt = el('option', { value: key, text: STATUS_LABELS[key] });
+        // #5145: у роли продаж свои три статуса и свои подписи.
+        var statusKeys = this.managerMode
+            ? ['planned', 'late', 'done']
+            : ['planned', 'running', 'unfinished', 'on-time', 'late', 'late-start', 'done'];
+        var statusLabels = this.managerMode ? STATUS_LABELS_MANAGER : STATUS_LABELS;
+        statusKeys.forEach(function(key) {
+            var opt = el('option', { value: key, text: statusLabels[key] });
             if (st.status === key) opt.setAttribute('selected', 'selected');
             statusSelect.appendChild(opt);
         });
@@ -2200,20 +2240,32 @@
     };
 
     AtexCutGantt.prototype._buildLegend = function() {
-        return el('div', { class: 'atex-cg-legend' }, [
-            el('span', { class: 'atex-cg-legend-item is-planned', text: STATUS_LABELS.planned }),
-            el('span', { class: 'atex-cg-legend-item is-running', text: STATUS_LABELS.running }),
-            el('span', { class: 'atex-cg-legend-item is-unfinished', text: STATUS_LABELS.unfinished }),
-            el('span', { class: 'atex-cg-legend-item is-on-time', text: STATUS_LABELS['on-time'] }),
-            // #5145: план уехал, срок заказа не сорван — операционное, не красное; в легенде
-            // статус жил и раньше (bars .is-late-start), пункта не было.
-            el('span', { class: 'atex-cg-legend-item is-late-start', text: STATUS_LABELS['late-start'] }),
-            el('span', { class: 'atex-cg-legend-item is-late', text: STATUS_LABELS.late }),
+        // #5145: легенда своя у режима продаж (3 статуса) и у производственных ролей.
+        var legendItems;
+        if (this.managerMode) {
+            legendItems = [
+                el('span', { class: 'atex-cg-legend-item is-planned', text: STATUS_LABELS_MANAGER.planned }),
+                el('span', { class: 'atex-cg-legend-item is-late', text: STATUS_LABELS_MANAGER.late }),
+                el('span', { class: 'atex-cg-legend-item is-done', text: STATUS_LABELS_MANAGER.done })
+            ];
+        } else {
+            legendItems = [
+                el('span', { class: 'atex-cg-legend-item is-planned', text: STATUS_LABELS.planned }),
+                el('span', { class: 'atex-cg-legend-item is-running', text: STATUS_LABELS.running }),
+                el('span', { class: 'atex-cg-legend-item is-unfinished', text: STATUS_LABELS.unfinished }),
+                el('span', { class: 'atex-cg-legend-item is-on-time', text: STATUS_LABELS['on-time'] }),
+                // #5145: план уехал, срок заказа не сорван — операционное, не красное; в легенде
+                // статус жил и раньше (bars .is-late-start), пункта не было.
+                el('span', { class: 'atex-cg-legend-item is-late-start', text: STATUS_LABELS['late-start'] }),
+                el('span', { class: 'atex-cg-legend-item is-late', text: STATUS_LABELS.late })
+            ];
+        }
+        return el('div', { class: 'atex-cg-legend' }, legendItems.concat([
             // #4052: обед и перерывы — единый серый пункт легенды (рисуются накладками поверх баров).
             el('span', { class: 'atex-cg-legend-item is-break', text: 'Обед / перерыв' }),
             // #4229: отпуск станка — серый бар отдельной строкой.
             el('span', { class: 'atex-cg-legend-item is-downtime', text: 'Отпуск' })
-        ]);
+        ]));
     };
 
     AtexCutGantt.prototype._buildBody = function(range, nowMs) {
@@ -2222,7 +2274,8 @@
         // #3668: задания размещаются по реальному времени на общей шкале окна.
         // #3704: зум по горизонтали + нижняя граница «вписать в экран» (дорожка не уже видимой области).
         var data = layoutGroups(this.cuts, range, nowMs, { status: st.status, slitter: st.slitter },
-            { zoom: st.zoom, fitTrackPx: this._fitTrackPx(), lunchDurationMin: this.lunchDurationMin,
+            { zoom: st.zoom, fitTrackPx: this._fitTrackPx(), managerMode: this.managerMode,
+              lunchDurationMin: this.lunchDurationMin,
               lunchStartMin: this.lunchStartMin,   // #3904: время обеда — чтобы утренний зазор не помечался обедом
               breaks: this.breaks,   // #4007 (ТЗ §5): короткие перерывы 10:00/15:00 — рисуются на Ганте
               downtimesBySlitter: this.downtimesBySlitter,   // #4229: окна простоя («Отпуск») — серой строкой
