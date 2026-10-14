@@ -1,3 +1,47 @@
+        /**
+         * URL старого интерфейса (/{db}/object/{id}) с текущими параметрами (issue #5143).
+         * Переносятся те же параметры, что loadData() шлёт в API: F_U (родитель),
+         * F_I (точная запись), фильтры колонок — тем же сериализатором applyFilter —
+         * и сортировка ORDER (минус = по убыванию). Размер страницы — одиночный LIMIT
+         * (в старом интерфейсе это размер страницы, смещение даёт pg). Группировки
+         * и настройка колонок в старом интерфейсе аналога не имеют — не переносятся.
+         */
+        getOldInterfaceUrl() {
+            const tableId = this.objectTableId || this.options.tableTypeId;
+            if (!tableId) return null;
+            const dbName = window.db || (window.location.pathname.split('/')[1] || '');
+            const params = new URLSearchParams();
+
+            const parentId = this.options.parentId && parseInt(this.options.parentId) > 1 ? this.options.parentId : null;
+            if (parentId) params.set('F_U', parentId);
+
+            if (this.options.recordId) params.set('F_I', this.options.recordId);
+
+            const columns = this.columns || [];
+            const filters = this.filters || {};
+            Object.keys(filters).forEach(colId => {
+                const filter = filters[colId];
+                if (filter.value || filter.type === '%' || filter.type === '!%') {
+                    const column = columns.find(c => c.id === colId);
+                    if (column) {
+                        this.applyFilter(params, column, filter);
+                    }
+                }
+            });
+
+            const orderValue = this.getOrderParamValue();
+            if (orderValue !== null) {
+                params.set('ORDER', orderValue);
+            }
+
+            if (this.settings && this.settings.pageSize) {
+                params.set('LIMIT', this.settings.pageSize);
+            }
+
+            const qs = params.toString();
+            return `/${dbName}/object/${tableId}${qs ? '?' + qs : ''}`;
+        }
+
         openTableSettings() {
             const overlay = document.createElement('div');
             overlay.className = 'column-settings-overlay';
@@ -9,7 +53,7 @@
             modal.innerHTML = `
                 <h3>Настройка представления</h3>
                 <div class="column-settings-list">
-                    ${ this.getDataSourceType() === 'table' && (this.objectTableId || this.options.tableTypeId) ? (() => { const tableId = this.objectTableId || this.options.tableTypeId; const parentId = this.options.parentId && parseInt(this.options.parentId) > 1 ? this.options.parentId : null; const parentSuffix = parentId ? `?F_U=${parentId}` : ''; return `<div class="table-settings-item"><a href="/${window.db}/cards/${tableId}${parentSuffix}">В виде карточек</a></div><div class="table-settings-item"><a href="/${window.db}/object/${tableId}${parentSuffix}">Перейти в старый интерфейс</a></div>`; })() : '' }
+                    ${ this.getDataSourceType() === 'table' && (this.objectTableId || this.options.tableTypeId) ? (() => { const tableId = this.objectTableId || this.options.tableTypeId; const parentId = this.options.parentId && parseInt(this.options.parentId) > 1 ? this.options.parentId : null; const parentSuffix = parentId ? `?F_U=${parentId}` : ''; return `<div class="table-settings-item"><a href="/${window.db}/cards/${tableId}${parentSuffix}">В виде карточек</a></div><div class="table-settings-item"><a href="${this.getOldInterfaceUrl()}">Перейти в старый интерфейс</a></div>`; })() : '' }
 
                     <div class="table-settings-item">
                         <label>Отступы:</label>
