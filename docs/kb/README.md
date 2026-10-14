@@ -24,7 +24,7 @@
 | Колонки-кнопки: ссылка, промпт ИИ, формула, запрос | [button-columns.md](button-columns.md) | BUTTON, тип 7, _d_action, action, промпт, формула, ИИ-колонка, [ID], [VAL], {Колонка}, записать результат, триггер, при создании, при изменении, при удалении, при показе, CREATE, UPDATE, DELETE, READ, on, when, recompute, от имени, user, _m_action, конфликты |
 | Компонент таблиц (data-grid) | [table-component.md](table-component.md) | integram-table, data-integram-table, data-api-url, фильтры, инлайн-правка, экспорт, вставка из буфера, paste-data-btn, build.sh |
 | Импорт батчем `import=1` | [import.md](import.md) | bki_file, DATA, plain_data, формат строк, завершающий `;`, чанки 8МБ, upsert |
-| Архив таблицы: BKI и JSON | [json-archive.md](json-archive.md) | json_export, integram-archive, метаданные+данные, types, reqs, target, сведение колонок, перенос между базами |
+| Архив таблицы: BKI и JSON | [json-archive.md](json-archive.md) | json_export, integram-archive v2, метаданные+данные, types, reqs, target, одна запись на строку, алиасы колонок, gzip, сведение колонок, перенос между базами |
 | Журнал базы (JSON Lines) | [logs.md](logs.md) | _log.jsonl, _sql.jsonl, rid, uid, ~ai, ai_job, old/new, op, import, маскировка секретов, LOG_ROTATE_MB, ротация, чтение journal, cursor, more |
 | Иерархический OLTP (разрезы) | [hierarchical-oltp.md](hierarchical-oltp.md) | разрез, частотность групп, накопитель меры, агрегаты, up-уровни |
 
