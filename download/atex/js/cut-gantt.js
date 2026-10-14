@@ -395,10 +395,22 @@
         return { fromIso: fromIso, toIso: toIso };
     }
 
+    // #5145: дедлайн задания = конец ПЛАНОВОГО ОКНА — те же минуты, что рисует бар:
+    // наладка (ножи + смена сырья) + «Резка и Лидер» (#3700). Раньше дедлайном было
+    // «план + намотка» (cut_duration) без наладки и лидера: идеально выполненный по плану
+    // красился «С опозданием» (типовая наладка 30+15 мин = +45 мин красного), а незавершённое
+    // краснело задолго до конца своего окна. Нет резки в тайминге (cut_time=0) — дедлайна нет,
+    // как раньше при нулевой намотке: наладку без резки окном задания не считаем. Чистая — тест.
     function cutDeadlineMs(cut) {
         var planMs = parseDateTimeMs(cut && cut.planDate);
+        if (planMs == null) return null;
+        if (cut && cut.cutTimeMin != null) {
+            var cutMin = Math.max(0, stripNum(cut.cutTimeMin));
+            if (!(cutMin > 0)) return null;
+            return planMs + (cutMin + cutSetupMin(cut).total) * 60000;
+        }
         var duration = stripNum(cut && cut.duration);
-        if (planMs == null || !(duration > 0)) return null;
+        if (!(duration > 0)) return null;
         return planMs + duration * 60000;
     }
 
@@ -437,7 +449,11 @@
         var deadlineMs = cutDeadlineMs(cut);
         // Окно (endMs) — грубый фолбэк длительности для легаси-данных без cut_time (см.
         // cutBarMinutes): срок или +30 мин от планового старта. Фактический финиш сюда не идёт.
-        var visualEndMs = deadlineMs != null && deadlineMs > visualStartMs ? deadlineMs : visualStartMs + 30 * 60000;
+        // #5145: геометрия (бар, обед-зазоры) живёт по прежнему окну «план + намотка»;
+        // дедлайн для окраски и тултипа — конец планового окна (cutDeadlineMs), он не сюда.
+        var duration = stripNum(cut && cut.duration);
+        var legacyEndMs = planMs != null && duration > 0 ? planMs + duration * 60000 : null;
+        var visualEndMs = legacyEndMs != null && legacyEndMs > visualStartMs ? legacyEndMs : visualStartMs + 30 * 60000;
         return {
             startMs: visualStartMs, endMs: visualEndMs, planMs: planMs,
             actualStartMs: startMs, actualEndMs: endMs, deadlineMs: deadlineMs

@@ -64,9 +64,13 @@ assertEqual(geom(doneLate), gp, 'layoutGroups #4334: сделана позже �
 assertEqual(gp.segments.setupMin, 45, 'layoutGroups #4334: плановая наладка на баре есть и у начатой/завершённой');
 
 // ── а вот ОКРАСКА (cutStatus) по-прежнему отражает факт ──
-assertEqual(g.cutStatus(planned, NOW).key, 'late-start', 'cutStatus: план прошёл, не начата → late-start (факт красит)');
-assertEqual(g.cutStatus(startedEarly, NOW).key, 'running', 'cutStatus: есть факт. старт → running');
-assertEqual(g.cutStatus(doneLate, NOW).key, 'done', 'cutStatus: есть факт. финиш → done');
+// #5145: у резок с «Резка и Лидер»/наладкой появился реальный дедлайн (конец планового окна,
+// 10:00 + 105 мин = 11:45), поэтому при NOW = 20:00, когда окно давно прошло, все три судьбы
+// факта красятся «С опозданием» (раньше дедлайна не было — уходили в late-start/running/done).
+// «В работе» при живом окне покрыто в atex-cut-gantt-5145.test.js (§8).
+assertEqual(g.cutStatus(planned, NOW).key, 'late', 'cutStatus: окно (до 11:45) прошло, не начата → с опозданием');
+assertEqual(g.cutStatus(startedEarly, NOW).key, 'late', 'cutStatus: начата раньше плана, но окно прошло без финиша → с опозданием');
+assertEqual(g.cutStatus(doneLate, NOW).key, 'late', 'cutStatus: финиш 13:30 позже конца окна 11:45 → с опозданием');
 
 console.log('\n' + passed + '/' + total + ' assertions passed');
 if (passed !== total) process.exitCode = 1;
