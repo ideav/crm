@@ -217,6 +217,14 @@
 </div>
 </div>
 <script src="/js/js.js"></script>
+<!-- Восстановление из архива .dmp.zip (#5166): окно с SQL архива и подтверждением, затем заливка в базу -->
+<script src="/js/restore-backup.js?5166" defer></script>
+<script>
+    window.addEventListener('load', function() {
+        if (window.RestoreBackup && document.view_dir)
+            RestoreBackup.init({ db: db, xsrf: document.view_dir._xsrf ? document.view_dir._xsrf.value : '' });
+    });
+</script>
 <script>
     if(search.download)
         $('.menu-name').remove();
