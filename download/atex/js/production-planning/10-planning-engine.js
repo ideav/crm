@@ -2811,7 +2811,8 @@
     // 4576. Оба дня страж считал набитыми законно, объектив «Упорядочить» дыры не видел, и закрыть
     // её было нечем (issue #4638). Неприкосновенность (`immovable`) послаблению НЕ подлежит: там
     // работа уже идёт, и её проходы не наши (#4381).
-    // → [{ day, freeMin, needMin, donorCutId }] по возрастанию дня. Чистая, вход не мутирует.
+    // → [{ day, freeMin, needMin, donorCutId, setupOnly? }] по возрастанию дня (setupOnly — добор одной
+    // наладкой донора без проходов, #5157; needMin тогда = наладка). Чистая, вход не мутирует.
     function underfilledLayoutDays(segs, opts) {
         opts = opts || {};
         var freeFn = typeof opts.freeMinFor === 'function' ? opts.freeMinFor : null;
@@ -2869,13 +2870,17 @@
                 out.push({ day: day, freeMin: free, needMin: need, donorCutId: String(donor.cutId) });
                 continue;
             }
-            // #5157: НАЛАДКА БЕЗ ЕДИНОГО ПРОХОДА — ТОЖЕ ДОБОР (решение заказчика 15.10.2026).
-            // Если в свободный остаток дня не влезает ни одного прохода донора (free < need),
-            // но САМА наладка влезает в хвост дня под потолок нахлёста НАСТРОЙКИ — день обязан
-            // забрать хвост-настройку (#3635/#3955: настройка в конец дня N, все проходы — на
-            // день N+1). Раньше такой день молча считался законно недобранным, добор
-            // (DAY_FILL #4743) не запускался, и оператор видел «(407 мин)» рядом с заданием,
-            // которое в этот день помещается (ideav/crm#5157).
+            // #5157: НАЛАДКА БЕЗ ЕДИНОГО ПРОХОДА — ТОЖЕ ДОБОР (решение заказчика 15.10.2026:
+            // «ноль проходов тоже нормально — в этот день ложится одна настройка, а все проходы на
+            // следующий день»). Это правило САМОГО упаковщика с #3635 п.5 / #3955 / #4144: проход не
+            // влез — в хвост дня кладётся настройка под потолок нахлёста НАСТРОЙКИ, проходы уезжают.
+            // Мерка до #5157 знала только шаблон «наладка + проход» и с этим правилом расходилась:
+            // день, куда влезает одна настройка донора, она называла законно недобранным. На
+            // раскладке самого упаковщика расхождение не видно (он кладёт такую настройку сам — в
+            // трассе ateh 15.10.2026: «в хвост дня положена настройка 45 мин», день 16.10 полон),
+            // зато видно на чужом плане: хранимом и кандидатах «Упорядочить» (planUnderfilledDays).
+            // Потолок — нахлёст НАСТРОЙКИ (freeTuneFor), как у упаковщика; без него — потолок резки
+            // (строже, молчание не разрешает больше, чем разрешено). ideav/crm#5157, разбор — #5162.
             var freeTune = (freeTuneFn ? round3(Number(freeTuneFn(day)) || 0) : free);
             if (donorSetup > 0 && freeTune + 1e-6 >= donorSetup) {
                 out.push({ day: day, freeMin: free, needMin: donorSetup, donorCutId: String(donor.cutId), setupOnly: true });
@@ -4311,7 +4316,7 @@
             });
             (segments.underfilled || []).forEach(function(u) {
                 ppTraceWarn('#4469 ДЕНЬ НЕДОУПАКОВАН: день ' + u.day + ' — свободно ' + Math.round(u.freeMin) +
-                    ' мин, а проход задания ' + u.donorCutId + ' следующего дня стоит ' + round3(u.needMin) +
+                    ' мин, а ' + (u.setupOnly ? 'наладка' : 'проход') + ' задания ' + u.donorCutId + ' следующего дня стоит ' + round3(u.needMin) +
                     ' мин: его надо было затянуть сюда.');
             });
             // #3914: итог генерации (gapFill) по дням — какие дни превысили бюджет.
@@ -6056,7 +6061,8 @@
             });
             (segs.underfilled || []).forEach(function(u){
                 dayFill.push({ key: String(key) + '|' + Number(u.day), slitterId: String(key), day: Number(u.day),
-                               freeMin: u.freeMin, needMin: u.needMin, donorCutId: u.donorCutId });
+                               freeMin: u.freeMin, needMin: u.needMin, donorCutId: u.donorCutId,
+                               setupOnly: u.setupOnly === true });   // #5162: добор одной наладкой (#5157)
             });
             (segs.fixedHeld || []).forEach(function(h){
                 fixedDayHeld.push({ key: String(key) + '|' + Number(h.day), slitterId: String(key),

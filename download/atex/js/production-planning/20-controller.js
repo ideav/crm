@@ -3848,6 +3848,8 @@
     // минуты кандидата даёт упаковщик, удалённые записи выброшены, новые сегменты добавлены.
     // Потолок дня — ёмкость смены (окно резки минус обед) плюс нахлёст РЕЗКИ, минус «Отпуск»/
     // выходной этого дня (blockedRangesBySlitter — как ёмкость считает сам упаковщик, #3978).
+    // Добор одной наладкой без проходов (#5157) меряется потолком нахлёста НАСТРОЙКИ — тем же, под
+    // который упаковщик кладёт хвост-настройку (availFor(day,'tune'), #3847/#4144; issue #5162).
     // Правило и исключения — общие с движком: underfilledLayoutDays (чужая 🔒 не донор, замороженный
     // день не трогаем, проход атомарен; #4638: продолжение СВОЕЙ цепочки донор и под 🔒 — день
     // каждого звена сохраняется, двигается лишь точка разбиения). → массив ключей «станок|ГГГГММДД».
@@ -3860,6 +3862,7 @@
         var w = this.workingWindow();
         var dayStartMin = Number(w.startMin) || 0, cutEndMin = Number(w.cutEndMin) || 0;
         var capacity = dayCapacityMinutes(w, 'cuts');   // #4563: один потолок на всех
+        var capacityTune = dayCapacityMinutes(w, 'tune');   // #5162: потолок хвост-настройки (#5157)
         var ceiling = capacity;
         if (!(capacity > 0)) return [];
         // #3978: минуты «Отпуска»/выходного внутри окна дня уменьшают его ёмкость.
@@ -3899,6 +3902,7 @@
             });
             underfilledLayoutDays(items, {
                 freeMinFor: function(d){ return ceiling - (loadByDay[d] || 0) - lostToBlock(sid, d); },
+                freeTuneFor: function(d){ return capacityTune - (loadByDay[d] || 0) - lostToBlock(sid, d); },   // #5162
                 isFrozenDay: function(d){ return !!frozenByDay[d]; },
                 // #4740: в отработанный станко-день (прошедший / закрывший смену) не затаскиваем.
                 dayIsOver: (typeof self.dayIsWorkedOutFn === 'function') ? self.dayIsWorkedOutFn(sid, base) : null
@@ -5776,7 +5780,7 @@
                     + (u.donorCutId == null ? '?' : u.donorCutId) + ' стои́т в следующих днях';
             }
             return where + ' — свободно ' + Math.round(Number(u.freeMin) || 0)
-                + ' мин, проход задания ' + (u.donorCutId == null ? '?' : u.donorCutId) + ' следующего дня '
+                + ' мин, ' + (u.setupOnly ? 'наладка' : 'проход') + ' задания ' + (u.donorCutId == null ? '?' : u.donorCutId) + ' следующего дня '
                 + 'стои́т ' + (Math.round((Number(u.needMin) || 0) * 10) / 10) + ' мин';
         });
         console.warn('[pp] ⚠️ #4638/#4745 DAY_FILL: упаковщик оставил станко-дни недобранными: '
@@ -11542,7 +11546,7 @@
                     return ((ops && ops.dayFill) || []).map(function(u){
                         var dayKey = planDateDayKey(String(Math.floor((planBaseMidnightMs + Number(u.day) * 86400000) / 1000)));
                         return { key: String(u.slitterId) + '|' + dayKey, freeMin: u.freeMin,
-                                 needMin: u.needMin, donorCutId: u.donorCutId };
+                                 needMin: u.needMin, donorCutId: u.donorCutId, setupOnly: u.setupOnly === true };
                     });
                 },
                 // #4464: ХРАНИМЫЙ план — по нему правило FIXED_BLOCK видит, какие 🔒 стояли подряд
