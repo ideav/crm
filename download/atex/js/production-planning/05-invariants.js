@@ -759,7 +759,7 @@
             // дни — член выше переналадки, иначе плотный план выбрасывался как «не лучше», #4413).
             // Шлюз — АУДИТ: ловит регрессию на любом пути записи и кричит.
             //
-            // ctx.underfilledDays() → [{ key:'станок|ГГГГММДД', freeMin, needMin, donorCutId }].
+            // ctx.underfilledDays() → [{ key:'станок|ГГГГММДД', freeMin, needMin, donorCutId, setupOnly }].
             // Источник — сам движок (`planCutOperations` → `ops.dayFill`): остаток дня меряется тем же
             // гейтом потолка, которым паковали. Нет предиката → правило не срабатывает (конвенция реестра).
             check: function(ops, ctx) {
@@ -770,7 +770,7 @@
                     var parts = String((u && u.key) || '').split('|');
                     return ppViolation('DAY_FILL', null,
                         'станок ' + parts[0] + ', день ' + parts[1] + ': свободно ' + Math.round(Number(u.freeMin) || 0)
-                        + ' мин, а проход задания ' + (u.donorCutId == null ? '?' : u.donorCutId)
+                        + ' мин, а ' + (u && u.setupOnly ? 'наладка' : 'проход') + ' задания ' + (u.donorCutId == null ? '?' : u.donorCutId)
                         + ' следующего дня стои́т ' + Math.round((Number(u.needMin) || 0) * 100) / 100
                         + ' мин — день недоупакован',
                         { slitterId: parts[0], dayKey: Number(parts[1]),
