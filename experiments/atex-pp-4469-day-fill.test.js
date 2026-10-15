@@ -66,10 +66,14 @@ function assertEqual(actual, expected, name) {
     assertEqual(P.underfilledLayoutDays(layout, { freeMinFor: function (d) { return d === 0 ? 2 : 399; } }), [],
         'остаток 2 мин при проходе 2.33 — не нарушение');
 
-    // Донору нужна ещё и наладка: 30 (ножи) + 2.33 не влезают в 31 — не нарушение.
+    // Донору нужна ещё и наладка: 30 (ножи) + 2.33 не влезают в 31 — но САМА наладка влезает.
+    // #5157 (решение заказчика 15.10.2026): «ноль проходов тоже нормально — в этот день
+    // ложится одна настройка, а все проходы на следующий день». День добирается настройкой.
     var withSetup = [seg('T1', 0, 0, 100, 30, 394), seg('N1', 1, 0, 24, 30, 56)];
-    assertEqual(P.underfilledLayoutDays(withSetup, { freeMinFor: freeMinFor }), [],
-        'наладка донора считается: 30 + 2.33 в 31 мин не влезают');
+    var setupRows = P.underfilledLayoutDays(withSetup, { freeMinFor: freeMinFor });
+    assertEqual(setupRows.map(function (u) { return u.day; }), [0],
+        "наладка донора влезает без проходов — день добирается хвост-настройкой (#5157)");
+    assert(setupRows[0] && setupRows[0].setupOnly === true, 'добор помечен setupOnly (проходы уезжают целиком)');
 
     // 🔒 замок дня абсолютен (#4434): зафиксированное задание проходов вчерашнему дню не отдаёт.
     var fixedDonor = [seg('T1', 0, 0, 100, 30, 353), seg('T8', 0, 383, 11, 15, 26),
