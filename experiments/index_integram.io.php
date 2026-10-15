@@ -7677,13 +7677,13 @@ function smtpmail($to, $mail_to, $subject, $message, $headers='') {
 
 	 if( !$socket = fsockopen($mail_config['smtp_host'], $mail_config['smtp_port'], $errno, $errstr, 30) ) {
 		if ($mail_config['smtp_debug']) echo $errno."<br>".$errstr;
-		echo "fsockopen failed";
+		if ($mail_config['smtp_debug']) echo "fsockopen failed";
 		return false;
 	 }
  
 	if (!server_parse($socket, "220", __LINE__)) return false;
  
-	fputs($socket, "HELO " . $mail_config['smtp_host'] . "\r\n");
+	fputs($socket, "EHLO " . $mail_config['smtp_host'] . "\r\n");
 	if (!server_parse($socket, "250", __LINE__)) {
 		if ($mail_config['smtp_debug']) echo '<p>Не могу отправить HELO!</p>';
 		fclose($socket);
@@ -7756,8 +7756,9 @@ function server_parse($socket, $response, $line = __LINE__) {
 function mysendmail($to,$subj,$msg){
     global $mail_config;
     wlog("===== ".date("d.m.y H:m:s ")."\nTo $to\nSubj: $subj\nMsg: $msg", "log");
-    $res = "id:".smtpmail($to, $to, $subj, $msg);
-    wlog("\nResult: ".($res ? " Ok" : " Failed")."\n=====\n", "log");
+    $ok = smtpmail($to, $to, $subj, $msg);
+    $res = "id:".$ok;
+    wlog("\nResult: ".($ok ? " Ok" : " Failed")."\n=====\n", "log");
     return $res;
 }
 function pwd_reset($u)
