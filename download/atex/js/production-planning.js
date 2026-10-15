@@ -4547,7 +4547,7 @@
             // дни — член выше переналадки, иначе плотный план выбрасывался как «не лучше», #4413).
             // Шлюз — АУДИТ: ловит регрессию на любом пути записи и кричит.
             //
-            // ctx.underfilledDays() → [{ key:'станок|ГГГГММДД', freeMin, needMin, donorCutId }].
+            // ctx.underfilledDays() → [{ key:'станок|ГГГГММДД', freeMin, needMin, donorCutId, setupOnly }].
             // Источник — сам движок (`planCutOperations` → `ops.dayFill`): остаток дня меряется тем же
             // гейтом потолка, которым паковали. Нет предиката → правило не срабатывает (конвенция реестра).
             check: function(ops, ctx) {
@@ -4558,7 +4558,7 @@
                     var parts = String((u && u.key) || '').split('|');
                     return ppViolation('DAY_FILL', null,
                         'станок ' + parts[0] + ', день ' + parts[1] + ': свободно ' + Math.round(Number(u.freeMin) || 0)
-                        + ' мин, а проход задания ' + (u.donorCutId == null ? '?' : u.donorCutId)
+                        + ' мин, а ' + (u && u.setupOnly ? 'наладка' : 'проход') + ' задания ' + (u.donorCutId == null ? '?' : u.donorCutId)
                         + ' следующего дня стои́т ' + Math.round((Number(u.needMin) || 0) * 100) / 100
                         + ' мин — день недоупакован',
                         { slitterId: parts[0], dayKey: Number(parts[1]),
@@ -8213,7 +8213,8 @@
     // 4576. Оба дня страж считал набитыми законно, объектив «Упорядочить» дыры не видел, и закрыть
     // её было нечем (issue #4638). Неприкосновенность (`immovable`) послаблению НЕ подлежит: там
     // работа уже идёт, и её проходы не наши (#4381).
-    // → [{ day, freeMin, needMin, donorCutId }] по возрастанию дня. Чистая, вход не мутирует.
+    // → [{ day, freeMin, needMin, donorCutId, setupOnly? }] по возрастанию дня (setupOnly — добор одной
+    // наладкой донора без проходов, #5157; needMin тогда = наладка). Чистая, вход не мутирует.
     function underfilledLayoutDays(segs, opts) {
         opts = opts || {};
         var freeFn = typeof opts.freeMinFor === 'function' ? opts.freeMinFor : null;
@@ -9723,7 +9724,7 @@
             });
             (segments.underfilled || []).forEach(function(u) {
                 ppTraceWarn('#4469 ДЕНЬ НЕДОУПАКОВАН: день ' + u.day + ' — свободно ' + Math.round(u.freeMin) +
-                    ' мин, а проход задания ' + u.donorCutId + ' следующего дня стоит ' + round3(u.needMin) +
+                    ' мин, а ' + (u.setupOnly ? 'наладка' : 'проход') + ' задания ' + u.donorCutId + ' следующего дня стоит ' + round3(u.needMin) +
                     ' мин: его надо было затянуть сюда.');
             });
             // #3914: итог генерации (gapFill) по дням — какие дни превысили бюджет.
@@ -11468,7 +11469,8 @@
             });
             (segs.underfilled || []).forEach(function(u){
                 dayFill.push({ key: String(key) + '|' + Number(u.day), slitterId: String(key), day: Number(u.day),
-                               freeMin: u.freeMin, needMin: u.needMin, donorCutId: u.donorCutId });
+                               freeMin: u.freeMin, needMin: u.needMin, donorCutId: u.donorCutId,
+                               setupOnly: u.setupOnly === true });   // #5162: добор одной наладкой (#5157)
             });
             (segs.fixedHeld || []).forEach(function(h){
                 fixedDayHeld.push({ key: String(key) + '|' + Number(h.day), slitterId: String(key),
@@ -20713,7 +20715,7 @@
                     + (u.donorCutId == null ? '?' : u.donorCutId) + ' стои́т в следующих днях';
             }
             return where + ' — свободно ' + Math.round(Number(u.freeMin) || 0)
-                + ' мин, проход задания ' + (u.donorCutId == null ? '?' : u.donorCutId) + ' следующего дня '
+                + ' мин, ' + (u.setupOnly ? 'наладка' : 'проход') + ' задания ' + (u.donorCutId == null ? '?' : u.donorCutId) + ' следующего дня '
                 + 'стои́т ' + (Math.round((Number(u.needMin) || 0) * 10) / 10) + ' мин';
         });
         console.warn('[pp] ⚠️ #4638/#4745 DAY_FILL: упаковщик оставил станко-дни недобранными: '
@@ -26479,7 +26481,7 @@
                     return ((ops && ops.dayFill) || []).map(function(u){
                         var dayKey = planDateDayKey(String(Math.floor((planBaseMidnightMs + Number(u.day) * 86400000) / 1000)));
                         return { key: String(u.slitterId) + '|' + dayKey, freeMin: u.freeMin,
-                                 needMin: u.needMin, donorCutId: u.donorCutId };
+                                 needMin: u.needMin, donorCutId: u.donorCutId, setupOnly: u.setupOnly === true };
                     });
                 },
                 // #4464: ХРАНИМЫЙ план — по нему правило FIXED_BLOCK видит, какие 🔒 стояли подряд
