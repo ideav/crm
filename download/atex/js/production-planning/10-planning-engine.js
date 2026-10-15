@@ -3942,6 +3942,12 @@
                 else if (headPinToday.length && !inProgress.length) pick = selectByConfig(headPinToday);
                 else if (fixedNow.length && !yieldToFixedFree
                     && (forceFixedDay[day] || dayExhausted || !inProgress.length)) pick = selectByConfig(fixedNow);
+                // #5158 (#4434 п.1): ОТКАЗ УЙТИ С ДНЯ ОБЯЗАН ВЕСТИ К ЕГО 🔒. leaveDay() держит указатель,
+                // пока на дне есть ЛЮБАЯ неразмещённая 🔒 (fixedPendingOn), а пул fixedNow не содержит
+                // 🔒, приколотую «в конец дня» (#4464). Конец дня наступил — остальное в него не
+                // влезло, поэтому кладём её сейчас. Без этой ветки продолжение «целиком на следующий
+                // день» выбиралось снова и снова до guardMax, а 🔒 и всё за ней уходили в unplaced.
+                else if (forceFixedDay[day] && fixedToday.length) pick = selectByConfig(fixedToday);
                 else if (inProgress.length) pick = selectByConfig(inProgress);
                 else {
                     // #3974: набиваем день от «С» — selectByConfig ставит нефольгу раньше фольги
