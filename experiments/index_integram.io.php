@@ -270,6 +270,9 @@ foreach($com as $k => $v)
     }
 # Check the DB existence
 include_once "include/connection.php";
+# issue #5154: хелперы BKI-импорта (подмена терминов, опознание строки данных).
+# Тот же модуль, что у ядра main (#5096, #5153); при выкладке класть рядом с index.php.
+require_once __DIR__ . "/include/import_reconcile.php";
 $GLOBALS["GLOBAL_VARS"]["z"] = $z;
 $GLOBALS["sqls"] = $GLOBALS["sql_time"] = 0;
 # Fill in the global array of the basic data types
@@ -4205,6 +4208,14 @@ function CheckSubst($i)
             return $GLOBALS["local_struct"]["subst"][$i];
     return $i;
 }
+function ImportTypeBase($t)
+{
+	global $z;
+	if(isset($GLOBALS["base"][$t]))
+		return $GLOBALS["base"][$t];
+	$row = mysqli_fetch_array(Exec_sql("SELECT t FROM $z WHERE id=$t", "Get type base"));
+	return $GLOBALS["base"][$t] = $row ? (string)$row["t"] : "0";
+}
 function CheckObjSubst($i)
 {
     if(isset($GLOBALS["obj_subst"]))
@@ -5510,7 +5521,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
     				# Validate Parent ID
     				if($up != 1)
     				{
-    					$data_set = Exec_sql("SELECT reqs.t req, a.t par FROM $z a LEFT JOIN $z reqs ON reqs.up=a.t AND reqs.t=$i WHERE a.id=$up"
+    					$data_set = Exec_sql("SELECT reqs.t req, a.t par FROM $z a LEFT JOIN $z reqs ON reqs.up=a.t AND reqs.t!=reqs.up AND reqs.t=$i WHERE a.id=$up"
     										, "Validate Parent ID");
     					if($row = mysqli_fetch_array($data_set))
     					{
@@ -5533,6 +5544,14 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
     			        trace("typ ".$object[0]);
     					$typ = explode(":",  $object[0]);	# Get Type's attributes
     					$obj = $typ[0];
+					if($obj == "subst")	# issue #5154/#5095: термин - "subst:ТЕРМИН:ВЛАДЕЛЕЦ:<подпись реквизита>"
+					{
+						$GLOBALS["imported_terms"][] = $typ;
+						if(feof($handle))
+							    break;
+						$buffer = fgets($handle);
+						continue;
+					}
     					foreach($object as $value)
     					    $GLOBALS["imported"][$obj][$order++] = UnHideDelimiters($value);
     			        trace("(".$count++.") check $obj");
@@ -5547,8 +5566,8 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
         				    else # The ID is free - create the Object with this ID
         				    {
         				        trace(" create the Object ".$obj);
-                                exec_sql("INSERT INTO $z (id, up, ord, t, val) VALUES ($obj, 0, ".(isset($typ[3])?"1":"0").", ".$GLOBALS["BT"][$typ[2]].", '".addslashes($typ[1])."')"
-                                            , "Import Obj with ID");
+                                exec_sql("INSERT INTO $z (id, up, ord, t, val) VALUES ($obj, 0, ".(isset($typ[3])?"1":"0").", ".$GLOBALS["BT"][$typ[2]].", '".addslashes(ImportDbName($typ[1]))."'"
+                                            , "Import Obj with ID");	# Имя в базе лежит без экранирования
                                 $GLOBALS["local_struct"][$obj][0] = $GLOBALS["imported"][$obj][0];
         				    }
         				if(feof($handle))
@@ -5567,30 +5586,19 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
     				            continue;
     				        trace(" Imported req $order ".$reqs[$order]);
     			            $typ = UnHideDelimiters(explode(":",  HideDelimiters($req)));
-    			            $value = $typ[0].":".CheckSubst($typ[1]);
-    			            if($typ[0] == "ref")
-    			            {
-    			                trace($typ[1]." is a ref");
-    	    		            $value .= $typ[2];
-    			            }
-    			            $found = false;
-    			            foreach($GLOBALS["local_struct"][$parent] as $local_type => $local_value)
-    			                if($found = ($value == substr($local_value, 0, strlen($value))))
-    			                    break;
-    				        if($found)
+    			            # Сверка подписью через хелперы import_reconcile (#5154/#5096):
+    			            # старый инлайн-матчер сравнивал по префиксу и записывал в local_types
+    			            # id ref-СТРОКИ (typ[2]), а не id местного реквизита
+    			            $subst = isset($GLOBALS["local_struct"]["subst"]) ? $GLOBALS["local_struct"]["subst"] : Array();
+    			            $value = ImportReqSignature($typ, $subst);
+    			            $local_type = ImportMatchLocalReq($value, $GLOBALS["local_struct"][$parent]);
+    				        if($local_type)
     				        {
-        				        trace("  match found for $value");
-        				        if($req == $local_value)
-            				        trace("   this is a full match $req => $local_value");
-        				        else
-        				        {
-            				        trace("   adjust $req => $local_value");
-        				            $local = UnHideDelimiters(explode(":",  HideDelimiters($local_value)));
-        				        }
-        				        if($typ[0] == "ref")
-            				        $GLOBALS["local_types"][$par][$order] = $typ[2];
-            				    else
-            				        $GLOBALS["local_types"][$par][$order] = $local_type;
+        				        $local_value = $GLOBALS["local_struct"][$parent][$local_type];
+        				        trace("  match found for $value: $req => $local_value");
+        				        # Разбор данных ждёт здесь id РЕКВИЗИТА: он идёт в t/val строки данных
+        				        # (Insert_batch) и по нему же старые ветки смотрели $GLOBALS["refs"] и ["MULTI"].
+        				        $GLOBALS["local_types"][$par][$order] = $local_type;
     				        }
     				        elseif($typ[0] == "ref")
     				        {
@@ -5630,12 +5638,14 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
     							}
                                 else
                                     exec_sql("INSERT INTO $z (id, up, ord, t, val) VALUES ($reqID, $parent, $order, $refID, '')", "Import ref Req with ID");
-                                trace("  attrs:".(isset($typ[3])?UnMaskDelimiters($typ[3]):""). " - ".MULTI_MASK);
+                                trace("  attrs:".(isset($typ[3])?UnMaskDelimiters($typ[3]):""). " - multi");
                         		if(strpos(isset($typ[3])?UnMaskDelimiters($typ[3]):"", MULTI_MASK) !== FALSE){
-                        			$GLOBALS["MULTI"][$reqID] = $refID;
-                        			trace("set $reqID = $refID MULTI");
+                        			$GLOBALS["MULTI"][$reqID] = $obj;
+                        			trace("set $reqID = $obj MULTI");
                         		}
-    	    		            $GLOBALS["refs"][$reqID] = $refID;
+    	    		            # По id реквизита лежит ЦЕЛЕВОЙ ТИП ссылки — так же, как это делает
+    	    		            # constructHeader; разбор данных берёт отсюда тип создаваемой записи.
+    	    		            $GLOBALS["refs"][$reqID] = $obj;
                                 $GLOBALS["local_types"][$par][$order] = CheckSubst($reqID);
     				        }
     				        elseif($typ[0] == "arr")
@@ -5650,17 +5660,25 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
         				    else # A plain req - find an analogue or register the new one
         				    {
         				        trace("   $req is a plain req - find an analogue or register the new one");
-    							$data_set = Exec_sql("SELECT id FROM $z WHERE val='".addslashes($typ[0])."' AND up=0 AND id!=t AND t=".$GLOBALS["BT"][$typ[1]], "Seek Req Typ");
+    							# Имя реквизита сравнивается с базой снятым: в файле оно экранировано,
+    							# а разбор строки спрятал экранированные разделители в маркеры.
+    							$name = ImportDbName($typ[0]);
+    							$data_set = Exec_sql("SELECT id FROM $z WHERE val='".addslashes($name)."' AND up=0 AND id!=t AND t=".$GLOBALS["BT"][$typ[1]], "Seek Req Typ");
     							if($row = mysqli_fetch_array($data_set))	# The Type of the Req exists - add the Req to the Type
     								$i = $row["id"];
     							else	# No analogue, register the new one
-    								$i = Insert(0, 0, $GLOBALS["BT"][$typ[1]], $typ[0], "Import new Type for Req");
+    								$i = Insert(0, 0, $GLOBALS["BT"][$typ[1]], $name, "Import new Type for Req");
     							$i = Insert($parent, Get_Ord($parent), $i, isset($typ[2])?UnMaskDelimiters($typ[2]):"", "Import new Req");
     							$GLOBALS["local_struct"][$parent][$i] = $req;	# Register the new Req
         				        $GLOBALS["local_types"][$par][$order] = $i;
         				    }
         		        }
     				}
+				# issue #5154/#5095: связать термины файла (subst:...) с местными реквизитами
+				# и разметить реквизиты, несущие литералы-значения справочников
+				if(isset($GLOBALS["imported_terms"]))
+					Import_map_terms($GLOBALS["imported_terms"], $GLOBALS["imported"], $GLOBALS["local_types"], $GLOBALS["local_struct"], $GLOBALS["warning"]);
+				$GLOBALS["lit_fields"] = Import_lit_fields($GLOBALS["imported"]);
 				}
 				trace("Data");
 #print_r($GLOBALS);my_die();
@@ -5857,12 +5875,18 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
     				trace("");
 					$typ = UnHideDelimiters(explode(":", HideDelimiters($object[0])));	# Get Type's attributes
     				trace("Object: ".$object[0].", typ: ".$typ[0]);
-                    if(count($typ) == 4) # Reference attribute
+                    $orig = Import_data_line_type($typ, $isref);	# Get the imported Type
+                    $isref = CheckSubst($isref);
+                    # issue #963: строка данных с типом вне схемы файла - мусор в обрезанной
+                    # выгрузке. Раньше count(null) ниже ронял импорт фатально, а отложенный
+                    # батч реквизитов (флаш - только в конце фазы) пропадал: запросы приезжали
+                    # с пустыми «Имя в отчете»/«Формула». Флашим накопленное и останавливаемся
+                    # с внятным диагнозом (import_reconcile, #5154/#5153).
+                    if(!isset($GLOBALS["imported"][$orig]))
                     {
-					    trace("Reference attribute ".$object[0]);
-                        $isref = CheckSubst((int)array_shift($typ)); # Remember the Ref attribute
+					    Insert_batch("", "", "", "", "Import flush: unrecognized data line");
+					    my_die(t9n("[RU]Строка $count: тип $orig отсутствует в схеме файла - файл обрезан или повреждён, разобранная часть импортирована[EN]Line $count: type $orig is not in the file schema - the file is truncated or corrupted, the parsed part has been imported")." (".htmlspecialchars(substr($object[0], 0, 60)).")");
                     }
-    				$orig = (int)$typ[0];	# Get the imported Type
 					while(count($object) <= count($GLOBALS["imported"][$orig]))	# There might be line breaks
 					{
 					    if(feof($handle))
@@ -5874,6 +5898,13 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
     				$t = CheckSubst($orig);	# Detect the target Type
 					if(!isset($GLOBALS["local_struct"][$t]))
 						my_die(t9n("[RU]Строка $count: Недопустимый тип $t, остутствующий в мета-данных[EN]Line $count: Invalid type $t that is not present in the metadata")." ($buffer)");
+					# issue #5095: у записи колонки отчёта (base REPORT_COLUMN) значение - id термина
+					# файла; свод структуры уже нашёл ему местный реквизит - подменяем до вставки
+					if(isset($typ[2]) && (int)$typ[2] != 0 && ImportTypeBase($t) == (string)$GLOBALS["BT"]["REPORT_COLUMN"])
+						if(isset($GLOBALS["local_struct"]["subst"][(int)$typ[2]]))
+							$typ[2] = $GLOBALS["local_struct"]["subst"][(int)$typ[2]];
+						elseif(!mysqli_fetch_array(Exec_sql("SELECT 1 FROM $z WHERE id=".(int)$typ[2], "Check term of report column")))
+							$GLOBALS["warning"] .= t9n("[RU]Строка $count: термин ".$typ[2]." (колонка отчёта) отсутствует в базе[EN]Line $count: term ".$typ[2]." (report column) is missing from the DB")."<br>";
     				trace("(".$count++.") Buffer: $buffer");
 #print_r($GLOBALS);my_die();
 					array_pop($object);	# Cut off the empty item after the last semi-colon
@@ -5891,7 +5922,15 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                                 my_die(t9n("[RU]Тип $orig ($t) не имеет реквизита №$order (дано слишком много реквизитов)[EN]The type $orig ($t) does not have attribute #$order (too many attributes)"));
 							if(strlen($value))
 								if(!isset($GLOBALS["refs"][$key])) // Ordinary attribute of some base type
-									Insert_batch($new_id, 1, $key, UnMaskDelimiters($value), "Import req");
+								{
+									$value = UnMaskDelimiters($value);
+									if(isset($GLOBALS["lit_fields"][$orig][$order]))	# issue #5154/#5095: литералы-значения справочников
+										$value = Import_subst_literals($value
+											, isset($GLOBALS["obj_subst"]) ? $GLOBALS["obj_subst"] : Array()
+											, function($id) use ($z){ return (bool)mysqli_fetch_array(Exec_sql("SELECT 1 FROM $z WHERE id=$id", "Check literal value")); }
+											, $count, $GLOBALS["warning"]);
+									Insert_batch($new_id, 1, $key, $value, "Import req");
+								}
 								elseif(isset($GLOBALS["MULTI"][$key])){ // Reference might be set by multi ID
 						            $multies = explode(",", $value);	# Get multiselect items set
     					            $ord = 1;
@@ -5915,8 +5954,15 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 								    }
 								    if(!isset($GLOBALS["local_types"][$key])) // Remember the $key to fetch it faster
 								    {
-    								    $tmp = explode(":", $GLOBALS["local_struct"][$key][0]);
-								        $GLOBALS["local_types"][$key] = $tmp[1];
+								    # $key — id реквизита, и целевой тип ссылки лежит по нему в refs
+								    # (constructHeader). Запись в local_struct есть у строки-посредника,
+								    # поэтому она остаётся запасным путём (import_reconcile, #5154).
+								    $refType = (int)$GLOBALS["refs"][$key];
+								    if(!$refType && isset($GLOBALS["local_struct"][$key][0])){
+								        $tmp = explode(":", $GLOBALS["local_struct"][$key][0]);
+								        $refType = (int)$tmp[1];
+								    }
+								    $GLOBALS["local_types"][$key] = $refType;
 								    }
 								    $refType = $GLOBALS["local_types"][$key];
 								    if(!($refType > 0))
