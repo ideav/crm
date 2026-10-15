@@ -8216,6 +8216,7 @@
     function underfilledLayoutDays(segs, opts) {
         opts = opts || {};
         var freeFn = typeof opts.freeMinFor === 'function' ? opts.freeMinFor : null;
+        var freeTuneFn = typeof opts.freeTuneFor === 'function' ? opts.freeTuneFor : null;   // #5157
         if (!freeFn) return [];
         var frozen = typeof opts.isFrozenDay === 'function' ? opts.isFrozenDay : function() { return false; };
         // #4638: цепочка дробления — «ID первой части» (chainId); нет его → звено само себе цепочка
@@ -8262,10 +8263,24 @@
             if (typeof opts.overtakesFixedAt === 'function' && opts.overtakesFixedAt(String(donor.cutId), day)) continue;
             var runs = Number(donor.runs) || 0, dur = Number(donor.durationMin) || 0;
             if (!(runs > 0) || !(dur > 0)) continue;                           // #3635 п.5: хвост без проходов
-            var need = round3((Number(donor.setupMin) || 0) + dur / runs);     // наладка донора + ОДИН проход
+            var donorSetup = round3(Number(donor.setupMin) || 0);
+            var need = round3(donorSetup + dur / runs);     // наладка донора + ОДИН проход
             var free = round3(Number(freeFn(day)) || 0);
-            if (free + 1e-6 < need) continue;
-            out.push({ day: day, freeMin: free, needMin: need, donorCutId: String(donor.cutId) });
+            if (free + 1e-6 >= need) {
+                out.push({ day: day, freeMin: free, needMin: need, donorCutId: String(donor.cutId) });
+                continue;
+            }
+            // #5157: НАЛАДКА БЕЗ ЕДИНОГО ПРОХОДА — ТОЖЕ ДОБОР (решение заказчика 15.10.2026).
+            // Если в свободный остаток дня не влезает ни одного прохода донора (free < need),
+            // но САМА наладка влезает в хвост дня под потолок нахлёста НАСТРОЙКИ — день обязан
+            // забрать хвост-настройку (#3635/#3955: настройка в конец дня N, все проходы — на
+            // день N+1). Раньше такой день молча считался законно недобранным, добор
+            // (DAY_FILL #4743) не запускался, и оператор видел «(407 мин)» рядом с заданием,
+            // которое в этот день помещается (ideav/crm#5157).
+            var freeTune = (freeTuneFn ? round3(Number(freeTuneFn(day)) || 0) : free);
+            if (donorSetup > 0 && freeTune + 1e-6 >= donorSetup) {
+                out.push({ day: day, freeMin: free, needMin: donorSetup, donorCutId: String(donor.cutId), setupOnly: true });
+            }
         }
         return out;
     }
@@ -9690,6 +9705,7 @@
             // этого ops.dayFill — ровно как ops.dayLoad для DAY_CAPACITY (#4467).
             segments.underfilled = underfilledLayoutDays(segments, {
                 freeMinFor: function(d) { return availFor(d, 'cuts'); },
+                freeTuneFor: function(d) { return availFor(d, 'tune'); },   // #5157: хвост-настройка
                 isFrozenDay: opts.frozenDayFor,
                 dayIsOver: opts.workedDayFor,   // #4740: отработанный день не добиваем
                 overtakesFixedAt: function(id, d) { return !floorAllows(id, d); }   // #4542: замок сильнее набивки
