@@ -261,6 +261,14 @@
      в адресе — при правках файла поднимать вручную. #4876: инициализация в try/catch —
      любая ошибка видна текстом в панели, а не только в консоли планшета. -->
 <script src="/js/repo-update.js?4876.1" defer></script>
+<!-- Восстановление из архива .dmp.zip (#5166): окно с SQL архива и подтверждением, затем заливка в базу -->
+<script src="/js/restore-backup.js?5166" defer></script>
+<script>
+    window.addEventListener('load', function() {
+        if (window.RestoreBackup && document.view_dir)
+            RestoreBackup.init({ db: db, xsrf: document.view_dir._xsrf ? document.view_dir._xsrf.value : '' });
+    });
+</script>
 <script>
     window.addEventListener('load', function() {
         if (!window.RepoUpdate || !document.view_dir) return;

@@ -6071,12 +6071,11 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 					break;
 				case "restore":
 				    Limit_time(300);  # #4322: длинная операция — поднять предел (потолок 600 c)
-				    $limit = 500000;
 					if(!isset($GLOBALS["GRANTS"]["EXPORT"][1]) && ($GLOBALS["GLOBAL_VARS"]["user"] != "admin") && ($GLOBALS["GLOBAL_VARS"]["user"] != $z))
 						die(t9n("[RU]У вас нет прав на импорт базы[EN]You do not have grants to import the database"));
             		if(!is_dir($path="templates/custom/$z/backups"))
             			die("No path $path");
-    				if(!isset($_GET["backup_file"])||!is_file("$path/".$_GET["backup_file"]))
+    				if(!isset($_GET["backup_file"]) || (basename($_GET["backup_file"]) !== $_GET["backup_file"]) || !is_file("$path/".$_GET["backup_file"]))
     					die(t9n("[RU]Загрузите файл для восстановления[EN]Please provide the backup file"));
             		$name = substr($_GET["backup_file"], 0, -4);
                     $zip = new ZipArchive;
@@ -6086,48 +6085,13 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                     }
                     else
                         echo 'failed';
-                    $output = "";
-                    $file = fopen("$path/$name",'r');
-                    $last = 0;
-                    while(!feof($file)){
-                        $line = fgets($file);
-                        if(strlen(trim($line)) === 0)
-                            continue;
-                    	if($last === 0 && substr($line, 0, 3) == pack('CCC', 0xef, 0xbb, 0xbf))
-                            $line = substr($line, 3);
-                        if(substr($line, 0, 1) === "/"){
-                            $last++;
-                            $line = substr($line, 1);
-                        }
-                        else{
-                            if(substr($line, 0, 1) === ";"){
-                                $last++;
-                                $line = substr($line, 1);
-                            }
-                            else{
-                                $delim = strpos($line, ";");
-                                $last = $last + (int)base_convert(substr($line, 0, $delim), 36, 10);
-                                $line = substr($line, $delim+1);
-                            }
-                            $delim = strpos($line, ";");
-                            if($delim !== 0)
-                                $lastup = (int)base_convert(substr($line, 0, $delim), 36, 10);
-                            $line = substr($line, $delim+1);
-                        }
-                        $delim = strpos($line, ";");
-                        if($delim !== 0)
-                            $lastt = (int)base_convert(substr($line, 0, $delim), 36, 10);
-                        $line = substr($line, $delim+1);
-                        $delim = strpos($line, ";");
-                        if($delim !== 0)
-                            $ord = substr($line, 0, $delim);
-                        else
-                            $ord = 1;
-                        $line = substr($line, $delim+1, -1);
-                        $output .= "($last,$lastt,$lastup,$ord,'".addslashes($line)."'),";
+                    $rows = Restore_dump_rows("$path/$name");
+                    # #5166: POST с подтверждением — не показать, а залить дамп в эту базу
+                    if($_SERVER["REQUEST_METHOD"] === "POST"){
+                        check();
+                        api_dump(json_encode(Restore_apply($rows, $_GET["backup_file"]), JSON_UNESCAPED_UNICODE), "restore.json");
                     }
-                    $output = substr(str_replace("&ritrn;", "\n",str_replace("&ritrr;", "\r", $output)), 0, -1);
-                    fclose($file);
+                    $output = implode(",", $rows);
                     # #4544: отдаём ДАННЫЕ, а не страницу. Без явного типа PHP ставит text/html,
                     # и браузер разбирает дамп как разметку: значение-тег исчезает из показанного
                     # текста (иконка меню `<i class="pi pi-upload"></i>` → пусто), а числовая
@@ -6140,49 +6104,11 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 					break;
 				case "backup":
 				    Limit_time(300);  # #4322: длинная операция — поднять предел (потолок 600 c)
-				    $limit = 500000;
 					if(!isset($GLOBALS["GRANTS"]["EXPORT"][1]) && ($GLOBALS["GLOBAL_VARS"]["user"] != "admin") && ($GLOBALS["GLOBAL_VARS"]["user"] != $z))
 						die(t9n("[RU]У вас нет прав на выгрузку базы[EN]You do not have grants to export the database"));
-            		if(!is_dir($path="templates/custom/$z/backups"))
-            			mkdir($path);
-            		$name = $z."_".date("Ymd_His").".dmp";
-                    $file = fopen("$path/$name", "a+");
-					fwrite($file, pack('CCC', 0xef, 0xbb, 0xbf));
-            		$last = 0;
-            		$lastup = $lastt = "";
-            		do{
-                		$h = "";
-    					$data_set = Exec_sql("SELECT id,up,t,ord,val FROM $z WHERE id>$last ORDER BY id LIMIT $limit", "Get Objects list for export");
-                    	$rows_number = mysqli_num_rows($data_set);
-                		while($row = mysqli_fetch_assoc($data_set)){
-                		    if($last + 1 == $row["id"])
-                		        $t = ";";
-                		    else
-                    	        $t = base_convert($row["id"] - $last, 10, 36).";";
-            		        $last = $row["id"];
-            		        if($lastup !== $row["up"])
-                    		    $t .= base_convert($lastup = $row["up"], 10, 36).";";
-                		    elseif($t === ";")
-                	            $t = "/";
-                		    else
-                	            $t .= ";";
-                		    if($lastt === $row["t"])
-                	            $t .= ";";
-                		    else
-                    		    $t .= base_convert($lastt = $row["t"], 10, 36).";";
-                		    if($row["ord"] !== "1")
-                	            $t .= $row["ord"];
-                		    $h .= "$t;".str_replace("\n", "&ritrn;",str_replace("\r", "&ritrr;", $row["val"]))."\n";
-                		}
-    					fwrite($file, $h);
-            		} while ($rows_number == $limit);
-					fclose($file);
-                    $zip = new ZipArchive();
-                    $zip->open("$path/$name.zip", ZipArchive::CREATE);
-                    $zip->addFile("$path/$name", $name);
-                    $zip->close();
-                    unlink("$path/$name");
-                    header("Location: /$z/dir_admin/?templates=1&add_path=/backups&gf=$name.zip");
+            		if(!($name = Backup_dump()))
+            		    die(t9n("[RU]Не удалось записать бэкап в templates/custom/$z/backups[EN]Could not write the backup to templates/custom/$z/backups"));
+                    header("Location: /$z/dir_admin/?templates=1&add_path=/backups&gf=$name");
 					die();
 					break;
 
@@ -10247,6 +10173,190 @@ function pwd_reset($u){
 	}
 	login($z, $u,"WRONG_CONT", t9n("[RU]Неверное имя, email или телефон в ЛК[EN]The user name, email or phone invalid set in your Space"));
 }
+# <restore-5166>
+# Бэкап базы (.dmp) и восстановление из него. Формат строки дампа: разница id в base36 (пусто = +1),
+# up и t в base36 (пусто = как в прошлой строке), ord (пусто = 1), значение; "/" в начале строки —
+# следующий id с тем же up. Переводы строк в значении закодированы &ritrn; / &ritrr;.
+#
+# Восстановить (залить дамп ВМЕСТО текущих данных) может владелец базы — пользователь с именем базы —
+# или супер-админ сервера (вход паролем ADMINHASH, user_id 0). Дамп может быть снят с любой базы этого
+# сервера: база остаётся под тем же ЛК, владельцу сохраняется его вход и назначается роль admin.
+
+# Снимает дамп всей таблицы базы в templates/custom/<база>/backups, возвращает имя архива .dmp.zip
+function Backup_dump(){
+	global $z;
+	$limit = 500000;
+	if(!is_dir($path="templates/custom/$z/backups"))
+		@mkdir($path, 0777, TRUE);
+	$name = $z."_".date("Ymd_His").".dmp";
+	if(!($file = @fopen("$path/$name", "a+")))
+		return "";  # каталог не создать или не записать — бэкапа нет
+	fwrite($file, pack('CCC', 0xef, 0xbb, 0xbf));
+	$last = 0;
+	$lastup = $lastt = "";
+	do{
+		$h = "";
+		$data_set = Exec_sql("SELECT id,up,t,ord,val FROM $z WHERE id>$last ORDER BY id LIMIT $limit", "Get Objects list for export");
+		$rows_number = mysqli_num_rows($data_set);
+		while($row = mysqli_fetch_assoc($data_set)){
+		    if($last + 1 == $row["id"])
+		        $t = ";";
+		    else
+		        $t = base_convert($row["id"] - $last, 10, 36).";";
+		    $last = $row["id"];
+		    if($lastup !== $row["up"])
+		        $t .= base_convert($lastup = $row["up"], 10, 36).";";
+		    elseif($t === ";")
+		        $t = "/";
+		    else
+		        $t .= ";";
+		    if($lastt === $row["t"])
+		        $t .= ";";
+		    else
+		        $t .= base_convert($lastt = $row["t"], 10, 36).";";
+		    if($row["ord"] !== "1")
+		        $t .= $row["ord"];
+		    $h .= "$t;".str_replace("\n", "&ritrn;",str_replace("\r", "&ritrr;", $row["val"]))."\n";
+		}
+		fwrite($file, $h);
+	} while ($rows_number == $limit);
+	fclose($file);
+	$zip = new ZipArchive();
+	$zip->open("$path/$name.zip", ZipArchive::CREATE);
+	$zip->addFile("$path/$name", $name);
+	$zip->close();
+	unlink("$path/$name");
+	return "$name.zip";
+}
+# Разбирает распакованный дамп в строки VALUES: "(id,t,up,ord,'val')". Распакованный файл удаляется.
+function Restore_dump_rows($name){
+	$rows = array();
+	$file = fopen($name, 'r');
+	$last = 0;
+	while(!feof($file)){
+		$line = fgets($file);
+		if(strlen(trim($line)) === 0)
+			continue;
+		if($last === 0 && substr($line, 0, 3) == pack('CCC', 0xef, 0xbb, 0xbf))
+			$line = substr($line, 3);
+		if(substr($line, 0, 1) === "/"){
+			$last++;
+			$line = substr($line, 1);
+		}
+		else{
+			if(substr($line, 0, 1) === ";"){
+				$last++;
+				$line = substr($line, 1);
+			}
+			else{
+				$delim = strpos($line, ";");
+				$last = $last + (int)base_convert(substr($line, 0, $delim), 36, 10);
+				$line = substr($line, $delim+1);
+			}
+			$delim = strpos($line, ";");
+			if($delim !== 0)
+				$lastup = (int)base_convert(substr($line, 0, $delim), 36, 10);
+			$line = substr($line, $delim+1);
+		}
+		$delim = strpos($line, ";");
+		if($delim !== 0)
+			$lastt = (int)base_convert(substr($line, 0, $delim), 36, 10);
+		$line = substr($line, $delim+1);
+		$delim = strpos($line, ";");
+		if($delim !== 0)
+			$ord = substr($line, 0, $delim);
+		else
+			$ord = 1;
+		$line = substr($line, $delim+1, -1);
+		$rows[] = str_replace("&ritrn;", "\n", str_replace("&ritrr;", "\r", "($last,$lastt,$lastup,$ord,'".addslashes($line)."')"));
+	}
+	fclose($file);
+	unlink($name);
+	return $rows;
+}
+# Владелец базы (пользователь с её именем) или супер-админ сервера
+function Restore_allowed(){
+	global $z;
+	return isset($GLOBALS["GLOBAL_VARS"]["user_id"]) && (((string)$GLOBALS["GLOBAL_VARS"]["user_id"] === "0")
+		|| ($GLOBALS["GLOBAL_VARS"]["user"] === $z));
+}
+function Restore_id($sql, $msg){
+	$row = mysqli_fetch_array(Exec_sql($sql, $msg));
+	return $row ? $row[0] : 0;
+}
+# Роль admin: найти, а если её нет — создать с правом WRITE на все объекты (таблицы), структуру и файлы
+function Restore_admin_role(){
+	global $z;
+	if($id = Restore_id("SELECT id FROM $z WHERE t=".ROLE." AND val='admin' AND up!=0 ORDER BY id LIMIT 1", "Restore: find the admin role"))
+		return $id;
+	$role = Insert(1, 1, ROLE, "admin", "Restore: create the admin role");
+	$write = Restore_id("SELECT id FROM $z WHERE t=".LEVEL." AND val='WRITE' AND up!=0 ORDER BY id LIMIT 1", "Restore: find WRITE");
+	if(!$write)
+		$write = Insert(1, 1, LEVEL, "WRITE", "Restore: create WRITE");
+	$ord = 0;
+	foreach(array("1", "0", "10") as $obj){  # все объекты, редактор типов, файлы
+		$grant = Insert($role, ++$ord, ROLE_OBJECT, $obj, "Restore: admin grant");
+		Insert($grant, 1, $write, "", "Restore: admin grant level");
+		if($obj === "1"){
+			Insert($grant, 1, EXPORT, "1", "Restore: admin grant export");
+			Insert($grant, 1, DELETE, "1", "Restore: admin grant delete");
+		}
+	}
+	return $role;
+}
+# Заливает строки дампа вместо данных базы. Перед очисткой снимает страховочный бэкап текущей базы.
+# Владельцу базы возвращает его пароль, токен и xsrf (вход и сессия не теряются) и роль admin.
+function Restore_apply($rows, $source){
+	global $z;
+	if(!Restore_allowed()){
+		header("HTTP/1.0 403 Forbidden");
+		return array("error" => t9n("[RU]Восстановить базу может только её владелец ($z) или администратор сервера"
+			."[EN]Only the DB owner ($z) or the server administrator can restore the database"));
+	}
+	if(!count($rows))
+		return array("error" => t9n("[RU]Архив пуст[EN]The archive is empty"));
+	$keep = array();
+	$data_set = Exec_sql("SELECT c.t, c.val FROM $z u JOIN $z c ON c.up=u.id AND c.t IN (".PASSWORD.",".TOKEN.",".XSRF.")"
+		." WHERE u.t=".USER." AND u.val='$z' AND u.up!=0", "Restore: keep the owner's login");
+	while($row = mysqli_fetch_assoc($data_set))
+		$keep[$row["t"]] = $row["val"];
+	$safety = Backup_dump();
+	if(!is_file("templates/custom/$z/backups/$safety") || !filesize("templates/custom/$z/backups/$safety"))
+		return array("error" => t9n("[RU]Не удалось сохранить текущую базу в backups — восстановление не начато, база не тронута"
+			."[EN]Could not save the current DB to backups — the restore has not started, the DB is intact"));
+	wlog("Restore $source into $z by ".$GLOBALS["GLOBAL_VARS"]["user"].": ".count($rows)." rows, safety backup $safety", "log");
+	Exec_sql("TRUNCATE TABLE $z", "Restore: clear the DB");
+	$head = "INSERT INTO `$z` (`id`, `t`, `up`, `ord`, `val`) VALUES ";
+	$chunk = "";
+	foreach($rows as $i => $v){
+		$chunk .= ($chunk === "" ? "" : ",").$v;
+		if((strlen($chunk) < 1000000) && ($i < count($rows) - 1))  # пачка ~1 МБ — меньше max_allowed_packet
+			continue;
+		$res = Exec_sql($head.$chunk, "Restore: insert", FALSE, FALSE);
+		if(is_string($res))
+			return array("error" => t9n("[RU]Восстановление прервано, база неполная. Верните её из страховочного бэкапа $safety"
+				."[EN]The restore failed, the DB is incomplete. Restore it from the safety backup $safety").": ".mb_substr($res, 0, 500)
+				, "backup" => $safety);
+		$chunk = "";
+	}
+	$uid = Restore_id("SELECT id FROM $z WHERE t=".USER." AND val='$z' AND up!=0 ORDER BY id LIMIT 1", "Restore: find the owner");
+	if(!$uid)
+		$uid = Insert(1, 1, USER, $z, "Restore: create the owner");
+	foreach($keep as $t => $val)
+		if($id = Restore_id("SELECT id FROM $z WHERE up=$uid AND t=$t ORDER BY id LIMIT 1", "Restore: find the owner's req"))
+			Update_Val($id, $val);
+		else
+			Insert($uid, 1, $t, $val, "Restore: keep the owner's login");
+	$role = Restore_admin_role();
+	if($link = Restore_id("SELECT r.id FROM $z r JOIN $z def ON def.id=r.t AND def.t=".ROLE." WHERE r.up=$uid ORDER BY r.id LIMIT 1", "Restore: find the owner's role"))
+		UpdateTyp($link, $role);
+	else{
+		$col = Restore_id("SELECT req.id FROM $z req JOIN $z ref ON ref.id=req.t AND ref.up=0 AND ref.t=".ROLE." WHERE req.up=".USER." LIMIT 1", "Restore: find the role column");
+		Insert($uid, 1, $role, $col ? $col : "115", "Restore: set the admin role");
+	}
+	return array("result" => "ok", "rows" => count($rows), "backup" => $safety, "user" => $z, "role" => (int)$role);
+}
+# </restore-5166>
 function check()
 {
     if(isset($_POST["_xsrf"]))
