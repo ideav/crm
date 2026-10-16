@@ -5907,6 +5907,18 @@ function maskCsvDelimiters($v){
         return "\"".$v."\"";
     return $v;
 }
+# Меню роли (блок MyRoleMenu) отбирается по записи текущего пользователя, а у суперпользователя
+# (вход по ADMINHASH) записи нет, user_id=0 — показываем ему меню роли admin (issue #5173).
+# Явно выбранную роль (FR_RoleID из настройки меню) не перекрываем.
+function Superuser_role_menu_request($block_name)
+{
+    $gv = isset($GLOBALS["GLOBAL_VARS"]) ? $GLOBALS["GLOBAL_VARS"] : array();
+    if(($block_name !== "MyRoleMenu") || isset($_REQUEST["FR_RoleID"]))
+        return;
+    if(!isset($gv["user"]) || ($gv["user"] !== "admin") || !isset($gv["user_id"]) || ((string)$gv["user_id"] !== "0"))
+        return;
+    $_REQUEST["FR_RoleID"] = !empty($gv["role_id"]) ? $gv["role_id"] : ADMINROLE;
+}
 # Подготовка фильтра по родителю для листинга объекта (issue #5170).
 # Выделено из case "&uni_obj_all" без изменения поведения: явный F_U применяется
 # только когда у типа определён parent_obj (реквизит, связывающий тип с родителем).
