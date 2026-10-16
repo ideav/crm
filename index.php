@@ -9191,6 +9191,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 
 			if($rep_id)	# If we got a Report
 			{
+				Superuser_role_menu_request($block_name);
 				Compile_Report($rep_id, $block, $exe, FALSE, $noFilters);
 				if(!$exe)
 					return $rep_id;
