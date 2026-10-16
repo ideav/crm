@@ -5919,6 +5919,25 @@ function Superuser_role_menu_request($block_name)
         return;
     $_REQUEST["FR_RoleID"] = !empty($gv["role_id"]) ? $gv["role_id"] : ADMINROLE;
 }
+# Подготовка фильтра по родителю для листинга объекта (issue #5170).
+# Выделено из case "&uni_obj_all" без изменения поведения: явный F_U применяется
+# только когда у типа определён parent_obj (реквизит, связывающий тип с родителем).
+function Prepare_parent_filter(&$filter_cond, &$parent_cond, $parent_obj){
+	# F_U>1 задан явно — фильтруем по родителю даже без parent_obj (реквизит-массив
+	# типа потерян, issue #5170): иначе листинг детей молча подменяется «детьми корня»
+	# и конструктор запросов пустеет при живых данных отчёта.
+	if(isset($_REQUEST["F_U"]) && (((int)$_REQUEST["F_U"] > 1) || $parent_obj)) {
+	    if((int)$_REQUEST["F_U"] > 0)
+	    	$filter_cond .= " AND vals.up=".(int)$_REQUEST["F_U"]." ";
+	    else
+	    	$filter_cond .= " AND vals.up!=0 ";
+	}
+	elseif(isset($_REQUEST["F_I"]) && ((int)$_REQUEST["F_I"] > 0))
+		$parent_cond = " ";  # skip the parent cond in case the exact filter is set
+	else
+		$parent_cond = " AND vals.up=1 ";  # By default for Root's children
+}
+
 function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 {
     $tmp = explode(".", $block);
@@ -8048,16 +8067,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 			$cur_base_typ = $blocks["&main"]["CUR_VARS"]["typ"];
 			$filter_by_id_off = FALSE;
 			$GLOBALS["where"] = $GLOBALS["join"] = $GLOBALS["join_cond"] = "";
-			if(isset($_REQUEST["F_U"]) && $blocks["&main"]["CUR_VARS"]["parent_obj"]){
-			    if((int)$_REQUEST["F_U"] > 0)
-			    	$filter_cond .= " AND vals.up=".(int)$_REQUEST["F_U"]." ";
-			    else
-			    	$filter_cond .= " AND vals.up!=0 ";
-			}
-			elseif(isset($_REQUEST["F_I"]) && ((int)$_REQUEST["F_I"] > 0))
-				$parent_cond = " ";  # skip the parent cond in case the exact filter is set
-			else
-				$parent_cond = " AND vals.up=1 ";  # By default for Root's children
+			Prepare_parent_filter($filter_cond, $parent_cond, $blocks["&main"]["CUR_VARS"]["parent_obj"]);
 
 			foreach($_REQUEST as $key => $value)
 				if(($value != "") && (preg_match("/(F\_|FR\_|TO\_)/", $key))){
