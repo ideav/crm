@@ -66,9 +66,16 @@
     <p><a style="border-bottom: 1px dotted;" onclick="document.getElementById('backup').style.display='block';"><t9n>[RU]Архивирование базы[EN]Backup this database</t9n></a></p>
     <div id="backup" class="alert alert-info mb-0" role="alert" style="display:none;">
         <t9n>[RU]Вы можете архивировать вашу базу данных в компактный архив, чтобы потом восстановить его при необходимости. Для получения архива <a href="/{_global_.z}/backup">нажмите здесь</a>.
-                [EN]You can archive your database into a compact archive so that you can restore it later if necessary. To get the archive <a href="/{_global_.z}/backup">click here</a>.</t9n> 
+                [EN]You can archive your database into a compact archive so that you can restore it later if necessary. To get the archive <a href="/{_global_.z}/backup">click here</a>.</t9n>
             <t9n>[RU]Файл будет также доступен в папке backups внутри <a href="/{_global_.z}/dir_admin/?templates=1">templates</a>.
                 [EN]The file will also be available in the backups folder inside templates <a href="/{_global_.z}/dir_admin/?templates=1">templates</a>.</t9n>
+    </div>
+    <p><a style="border-bottom: 1px dotted;" onclick="document.getElementById('code-backup').style.display='block';"><t9n>[RU]Архивирование файлов[EN]Backup these files</t9n></a></p>
+    <div id="code-backup" class="alert alert-info mb-0" role="alert" style="display:none;">
+        <t9n>[RU]Архив файлов базы: шаблоны в корне templates (подпапки, backups и logs не входят), фронт в корне download (js, css, conf, json, html) и подпапки download с загруженными файлами. Для получения архива <a href="/{_global_.z}/code_backup">нажмите здесь</a>.
+                [EN]The files archive: templates in the templates root (subfolders, backups and logs are not included), front-end in the download root (js, css, conf, json, html) and download subfolders with uploaded files. To get the archive <a href="/{_global_.z}/code_backup">click here</a>.</t9n>
+        <t9n>[RU]Файл будет также доступен в папке backups внутри templates; восстановить — значком «Восстановить файлы» у файла .code.zip.
+                [EN]The file will also be available in the backups folder inside templates; to restore, use the "Restore files" icon next to a .code.zip file.</t9n>
     </div>
     <table class="table table-striped table-condensed table-bordered">
       <tr>
@@ -104,6 +111,9 @@
                 </svg></a><span class="file-name">&nbsp;&nbsp;</span>
             <a class="menu-name" name="{NAME}" href="/ace/gjs.html?src=/{_global_.z}/dir_admin/&{_parent_.FOLDER}=1&add_path={_parent_.ADD_PATH}&gf={NAME}" target="_blank" title="<t9n>[RU]Редактировать (в новом окне)[EN]Edit (in a new tab)</t9n>"><img src="/ace/gjs.png" style="vertical-align: baseline;"></a>
             <a class="restore" name="{NAME}" href="/{_global_.z}/restore/?backup_file={NAME}" title="<t9n>[RU]Восстановить из архива[EN]Restore from archive</t9n>" style="display:none"><svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M6 14V22C6 22.5304 6.21071 23.0391 6.58579 23.4142C6.96086 23.7893 7.46957 24 8 24H20C20.5304 24 21.0391 23.7893 21.4142 23.4142C21.7893 23.0391 22 22.5304 22 22V14M18 8L14 4M14 4L10 8M14 4V17" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg></a>&nbsp;
+            <a class="code-restore" name="{NAME}" href="/{_global_.z}/code_restore/?backup_file={NAME}" title="<t9n>[RU]Восстановить файлы из архива[EN]Restore files from archive</t9n>" style="display:none"><svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <path d="M6 14V22C6 22.5304 6.21071 23.0391 6.58579 23.4142C6.96086 23.7893 7.46957 24 8 24H20C20.5304 24 21.0391 23.7893 21.4142 23.4142C21.7893 23.0391 22 22.5304 22 22V14M18 8L14 4M14 4L10 8M14 4V17" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg></a>&nbsp;
         </td>
@@ -225,12 +235,21 @@
             RestoreBackup.init({ db: db, xsrf: document.view_dir._xsrf ? document.view_dir._xsrf.value : '' });
     });
 </script>
+<!-- Восстановление файлов из архива .code.zip (#5168): окно с составом архива и подтверждением, затем запись файлов -->
+<script src="/js/code-restore.js?5168" defer></script>
+<script>
+    window.addEventListener('load', function() {
+        if (window.CodeRestore && document.view_dir)
+            CodeRestore.init({ db: db, xsrf: document.view_dir._xsrf ? document.view_dir._xsrf.value : '' });
+    });
+</script>
 <script>
     if(search.download)
         $('.menu-name').remove();
     else{
         $('.file-name,.menu-name:not([name$=".html"])').remove();
         $('.restore[name$=".dmp.zip"]').show();
+        $('.code-restore[name$=".code.zip"]').show();
     }
     localize();
 </script>
