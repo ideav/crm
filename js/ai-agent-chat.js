@@ -88,6 +88,8 @@
                         self.send();
                     }
                 });
+                this.restoreDraft();
+                this.input.addEventListener('input', function () { self.saveDraft(); });
             }
 
             if (this.attachBtn && this.fileInput) {
@@ -161,13 +163,38 @@
         },
 
         // localStorage недоступен в приватном режиме/при запрете — ширина просто не запомнится.
-        storage: function (method, value) {
+        // key — ключ записи, по умолчанию ширина панели.
+        storage: function (method, value, key) {
+            key = key || this.widthKey;
             try {
                 var ls = window.localStorage;
-                return method === 'setItem' ? ls.setItem(this.widthKey, value) : ls[method](this.widthKey);
+                return method === 'setItem' ? ls.setItem(key, value) : ls[method](key);
             } catch (e) {
                 return null;
             }
+        },
+
+        // --- crm#5171: черновик неотправленного сообщения ---
+        //
+        // Набранный, но не отправленный текст переживает переход на другую страницу и
+        // перезагрузку: пишется в localStorage на каждый ввод, подставляется при загрузке
+        // и стирается при отправке. Ключ — по базе и пользователю, чтобы черновик не
+        // перетекал в чужую базу или к другому пользователю того же браузера.
+
+        draftKey: function () {
+            return 'integram.aiAgent.draft.' + this.getCurrentDbName() + '.' + this.getCurrentUserName();
+        },
+
+        saveDraft: function () {
+            if (!this.input) return;
+            if (this.input.value) this.storage('setItem', this.input.value, this.draftKey());
+            else this.storage('removeItem', null, this.draftKey());
+        },
+
+        restoreDraft: function () {
+            if (!this.input || this.input.value) return;
+            var draft = this.storage('getItem', null, this.draftKey());
+            if (draft) this.input.value = draft;
         },
 
         initResizer: function () {
@@ -666,6 +693,7 @@
                     form.append('files[]', file, file.name);
                 });
                 if (this.input) this.input.value = '';
+                this.saveDraft();
                 this.attachments = [];
                 this.renderAttachments();
             }
