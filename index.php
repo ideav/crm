@@ -5911,7 +5911,10 @@ function maskCsvDelimiters($v){
 # Выделено из case "&uni_obj_all" без изменения поведения: явный F_U применяется
 # только когда у типа определён parent_obj (реквизит, связывающий тип с родителем).
 function Prepare_parent_filter(&$filter_cond, &$parent_cond, $parent_obj){
-	if(isset($_REQUEST["F_U"]) && $parent_obj){
+	# F_U>1 задан явно — фильтруем по родителю даже без parent_obj (реквизит-массив
+	# типа потерян, issue #5170): иначе листинг детей молча подменяется «детьми корня»
+	# и конструктор запросов пустеет при живых данных отчёта.
+	if(isset($_REQUEST["F_U"]) && (((int)$_REQUEST["F_U"] > 1) || $parent_obj)) {
 	    if((int)$_REQUEST["F_U"] > 0)
 	    	$filter_cond .= " AND vals.up=".(int)$_REQUEST["F_U"]." ";
 	    else
