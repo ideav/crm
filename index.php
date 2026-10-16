@@ -10357,6 +10357,143 @@ function Restore_apply($rows, $source){
 	return array("result" => "ok", "rows" => count($rows), "backup" => $safety, "user" => $z, "role" => (int)$role);
 }
 # </restore-5166>
+# <code-backup-5168>
+# Архивация файлов базы и восстановление из архива — аналог бэкапа базы (#5166) для кода базы (#5168).
+# В архив .code.zip в templates/custom/<база>/backups берём:
+#   — шаблоны в корне templates/custom/<база> (подпапки — включая backups и logs — не входят);
+#   — фронт в корне download/<база>: только js, css, conf, json, html — загруженные в корень архивы
+#     и документы не берём;
+#   — подпапки download/<база> целиком: в них загруженные пользователями файлы, их переносят
+#     в новую базу.
+# Восстановить (записать файлы архива ВМЕСТО текущих) может владелец базы — пользователь с её
+# именем — или супер-админ сервера (как и у восстановления базы, Restore_allowed).
+
+# Архив файлов базы в templates/custom/<база>/backups, возвращает имя архива .code.zip
+function Code_backup(){
+	global $z;
+	if(!is_dir($path="templates/custom/$z/backups"))
+		@mkdir($path, 0777, TRUE);
+	$name = $z."_".date("Ymd_His").".code";
+	$zip = new ZipArchive();
+	if($zip->open("$path/$name.zip", ZipArchive::CREATE) !== TRUE)
+		return "";  # каталог не создать или не записать — архива нет
+	if(is_dir("templates/custom/$z"))
+		foreach(scandir("templates/custom/$z") as $f)
+			if(!is_dir("templates/custom/$z/$f"))  # корень templates: файлы, подпапки не берём
+				$zip->addFile("templates/custom/$z/$f", "templates/$f");
+	if(is_dir("download/$z"))
+		foreach(scandir("download/$z") as $f){
+			if($f === "." || $f === "..")
+				continue;
+			$p = "download/$z/$f";
+			if(is_file($p)){
+				if(in_array(strtolower(pathinfo($f, PATHINFO_EXTENSION)), array("js", "css", "conf", "json", "html")))
+					$zip->addFile($p, "download/$f");
+			}elseif(is_dir($p))
+				Code_backup_dir($zip, $p, "download/$f");  # подпапки download — целиком
+		}
+	$zip->close();
+	return "$name.zip";
+}
+# Файлы подпапки download — рекурсивно, с путями внутри архива от download/
+function Code_backup_dir($zip, $dir, $zip_dir){
+	foreach(scandir($dir) as $f){
+		if($f === "." || $f === "..")
+			continue;
+		if(is_file("$dir/$f"))
+			$zip->addFile("$dir/$f", "$zip_dir/$f");
+		elseif(is_dir("$dir/$f"))
+			Code_backup_dir($zip, "$dir/$f", "$zip_dir/$f");
+	}
+}
+# Состав архива .code.zip: первая строка — маркер для окна восстановления, дальше пути с размерами
+function Code_backup_listing($source){
+	global $z;
+	$zip = new ZipArchive();
+	if(basename($source) !== $source || !is_file("templates/custom/$z/backups/$source")
+		|| $zip->open("templates/custom/$z/backups/$source") !== TRUE)
+		return t9n("[RU]Архив не читается[EN]The archive cannot be read");
+	$out = array("CODE BACKUP $source");
+	for($i = 0; $i < $zip->numFiles; $i++){
+		$n = $zip->getNameIndex($i);
+		if($n === FALSE || $n === "" || substr($n, -1) === "/")  # каталоги без файлов не переносим
+			continue;
+		$st = $zip->statIndex($i);
+		$out[] = "$n ".($st !== FALSE ? $st["size"] : 0);
+	}
+	$zip->close();
+	$out[] = "TOTAL ".(count($out) - 1);
+	return implode("\n", $out);
+}
+# Рекурсивно удаляет каталог — временная распаковка архива
+function Code_rm_dir($dir){
+	if(!is_dir($dir))
+		return;
+	foreach(scandir($dir) as $f){
+		if($f === "." || $f === "..")
+			continue;
+		if(is_dir("$dir/$f"))
+			Code_rm_dir("$dir/$f");
+		else
+			unlink("$dir/$f");
+	}
+	@rmdir($dir);
+}
+# Записывает файлы архива .code.zip в templates/custom/<база> и download/<база>. Перед записью
+# снимает страховочный архив текущих файлов; не записался — отказ, файлы не тронуты.
+function Code_restore_apply($source){
+	global $z;
+	if(!Restore_allowed()){
+		header("HTTP/1.0 403 Forbidden");
+		return array("error" => t9n("[RU]Восстановить файлы может только владелец базы ($z) или администратор сервера"
+			."[EN]Only the DB owner ($z) or the server administrator can restore the files"));
+	}
+	if(basename($source) !== $source || !is_file($zip_path = "templates/custom/$z/backups/$source"))
+		return array("error" => t9n("[RU]Задайте файл архива для восстановления[EN]Please provide the backup file"));
+	$zip = new ZipArchive();
+	if($zip->open($zip_path) !== TRUE)
+		return array("error" => t9n("[RU]Архив не читается[EN]The archive cannot be read"));
+	$names = array();
+	for($i = 0; $i < $zip->numFiles; $i++){
+		$n = $zip->getNameIndex($i);
+		if($n === FALSE || $n === "" || substr($n, -1) === "/")  # каталоги без файлов не переносим
+			continue;
+		if(strpos($n, "\\") !== FALSE || strpos($n, "..") !== FALSE || substr($n, 0, 1) === "/"
+			|| (strpos($n, "templates/") !== 0 && strpos($n, "download/") !== 0)){
+			$zip->close();
+			return array("error" => t9n("[RU]В архиве чужой путь $n — восстановление не начато, файлы не тронуты"
+				."[EN]Foreign path $n in the archive — the restore has not started, the files are intact"));
+		}
+		$names[] = $n;
+	}
+	$zip->close();
+	if(!count($names))
+		return array("error" => t9n("[RU]Архив пуст[EN]The archive is empty"));
+	if(!($safety = Code_backup()) || !is_file("templates/custom/$z/backups/$safety"))
+		return array("error" => t9n("[RU]Не удалось сохранить текущие файлы в backups — восстановление не начато, файлы не тронуты"
+			."[EN]Could not save the current files to backups — the restore has not started, the files are intact"));
+	wlog("Code restore $source into $z by ".$GLOBALS["GLOBAL_VARS"]["user"].": ".count($names)." files, safety backup $safety", "log");
+	$zip = new ZipArchive();
+	$zip->open($zip_path);
+	$tmp = "templates/custom/$z/backups/.restore_".getmypid();
+	Code_rm_dir($tmp);
+	@mkdir($tmp, 0777, TRUE);
+	$zip->extractTo($tmp);
+	$zip->close();
+	$wrote = 0;
+	foreach($names as $n){
+		if(strpos($n, "templates/") === 0)
+			$to = "templates/custom/$z/".substr($n, 10);
+		else
+			$to = "download/$z/".substr($n, 9);
+		@mkdir(dirname($to), 0777, TRUE);
+		if(copy("$tmp/$n", $to))
+			$wrote++;
+	}
+	Code_rm_dir($tmp);
+	return array("result" => "ok", "files" => $wrote, "backup" => $safety);
+}
+# </code-backup-5168>
 function check()
 {
     if(isset($_POST["_xsrf"]))

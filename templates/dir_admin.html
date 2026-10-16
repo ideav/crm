@@ -97,6 +97,11 @@
         Вы можете архивировать вашу базу данных в компактный архив, чтобы потом восстановить его при необходимости. Для получения архива <a href="/{_global_.z}/backup">нажмите здесь</a>.
         Файл будет также доступен в папке backups внутри <a href="/{_global_.z}/dir_admin/?templates=1">templates</a>.
     </div>
+    <p><a style="border-bottom: 1px dotted;" onclick="document.getElementById('code-backup').style.display='block';">Архивирование файлов</a></p>
+    <div id="code-backup" class="alert alert-info mb-0" role="alert" style="display:none;">
+        Архив файлов базы: шаблоны в корне templates (подпапки, backups и logs не входят), фронт в корне download (js, css, conf, json, html) и подпапки download с загруженными файлами. Для получения архива <a href="/{_global_.z}/code_backup">нажмите здесь</a>.
+        Файл будет также доступен в папке backups внутри <a href="/{_global_.z}/dir_admin/?templates=1">templates</a>; восстановить — значком «Восстановить файлы» у файла .code.zip.
+    </div>
     <p><a style="border-bottom: 1px dotted;" onclick="document.getElementById('repo-update').style.display='block'; RepoUpdate.open();">Обновление из репозитория</a></p>
     <div id="repo-update" class="alert alert-info mb-0" role="alert" style="display:none;">
         Читаем репозиторий…
@@ -138,6 +143,9 @@
                 </svg></a><span class="file-name">&nbsp;&nbsp;</span>
             <a class="menu-name" name="{NAME}" href="/ace/gjs.html?src=/{_global_.z}/dir_admin/&{_parent_.FOLDER}=1&add_path={_parent_.ADD_PATH}&gf={NAME}" target="_blank" title="Редактировать (в новом окне)"><img src="/ace/gjs.png" style="vertical-align: baseline;"></a>
             <a class="restore" name="{NAME}" href="/{_global_.z}/restore/?backup_file={NAME}" title="Восстановить из архива" style="display:none"><svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M6 14V22C6 22.5304 6.21071 23.0391 6.58579 23.4142C6.96086 23.7893 7.46957 24 8 24H20C20.5304 24 21.0391 23.7893 21.4142 23.4142C21.7893 23.0391 22 22.5304 22 22V14M18 8L14 4M14 4L10 8M14 4V17" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg></a>&nbsp;
+            <a class="code-restore" name="{NAME}" href="/{_global_.z}/code_restore/?backup_file={NAME}" title="Восстановить файлы из архива" style="display:none"><svg width="28" height="28" viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <path d="M6 14V22C6 22.5304 6.21071 23.0391 6.58579 23.4142C6.96086 23.7893 7.46957 24 8 24H20C20.5304 24 21.0391 23.7893 21.4142 23.4142C21.7893 23.0391 22 22.5304 22 22V14M18 8L14 4M14 4L10 8M14 4V17" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/>
                 </svg></a>&nbsp;
         </td>
@@ -269,6 +277,14 @@
             RestoreBackup.init({ db: db, xsrf: document.view_dir._xsrf ? document.view_dir._xsrf.value : '' });
     });
 </script>
+<!-- Восстановление файлов из архива .code.zip (#5168): окно с составом архива и подтверждением, затем запись файлов -->
+<script src="/js/code-restore.js?5168" defer></script>
+<script>
+    window.addEventListener('load', function() {
+        if (window.CodeRestore && document.view_dir)
+            CodeRestore.init({ db: db, xsrf: document.view_dir._xsrf ? document.view_dir._xsrf.value : '' });
+    });
+</script>
 <script>
     window.addEventListener('load', function() {
         if (!window.RepoUpdate || !document.view_dir) return;
@@ -292,6 +308,7 @@
     else{
         $('.file-name,.menu-name:not([name$=".html"])').remove();
         $('.restore[name$=".dmp.zip"]').show();
+        $('.code-restore[name$=".code.zip"]').show();
     }
 	function pusk(link){
          window.open('/{_global_.z}/'+link, '_blank');
