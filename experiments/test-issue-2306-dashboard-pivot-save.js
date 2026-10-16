@@ -185,6 +185,14 @@ function dashSetStatus(msg) { dashSetStatus.last = msg; }
 function dashApplyNewVizSettings(panelEl, panelKey, settings) {
     dashModelData[panelKey].settings = settings;
 }
+const DASH_VALUE_LABEL_FIELD_ID = '155556';
+let dashMetadata = null;
+function dashLoadMetadata(cb) { cb(); }
+${extractFunctionIfPresent('dashSchemaDef')}
+${extractFunctionIfPresent('dashMetadataList')}
+${extractFunctionIfPresent('dashReqAlias')}
+${extractFunctionIfPresent('dashFindReqByName')}
+${extractFunctionIfPresent('dashSchema')}
 ${extractFunctionIfPresent('dashGetPivotUiElement')}
 ${extractFunctionIfPresent('dashEnsurePivotShell')}
 ${extractFunctionIfPresent('dashNormalizePivotConfig')}
