@@ -5907,6 +5907,18 @@ function maskCsvDelimiters($v){
         return "\"".$v."\"";
     return $v;
 }
+# Меню роли (блок MyRoleMenu) отбирается по записи текущего пользователя, а у суперпользователя
+# (вход по ADMINHASH) записи нет, user_id=0 — показываем ему меню роли admin (issue #5173).
+# Явно выбранную роль (FR_RoleID из настройки меню) не перекрываем.
+function Superuser_role_menu_request($block_name)
+{
+    $gv = isset($GLOBALS["GLOBAL_VARS"]) ? $GLOBALS["GLOBAL_VARS"] : array();
+    if(($block_name !== "MyRoleMenu") || isset($_REQUEST["FR_RoleID"]))
+        return;
+    if(!isset($gv["user"]) || ($gv["user"] !== "admin") || !isset($gv["user_id"]) || ((string)$gv["user_id"] !== "0"))
+        return;
+    $_REQUEST["FR_RoleID"] = !empty($gv["role_id"]) ? $gv["role_id"] : ADMINROLE;
+}
 function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 {
     $tmp = explode(".", $block);
@@ -9181,6 +9193,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 
 			if($rep_id)	# If we got a Report
 			{
+				Superuser_role_menu_request($block_name);
 				Compile_Report($rep_id, $block, $exe, FALSE, $noFilters);
 				if(!$exe)
 					return $rep_id;
