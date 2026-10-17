@@ -32,6 +32,14 @@ SET @src := 'xcom';
 
 -- ---------------------------------------------------------------------------
 
+-- Схема Интеграма — NOT NULL без DEFAULT, и в строгом режиме сервера INSERT
+-- во временную таблицу без полного списка колонок падает
+-- (ERROR 1364 «Field 't' doesn't have a default value», прогон на ideav
+-- 17.10.2026). На время скрипта строгий режим выключается, в конце
+-- восстанавливается.
+SET @saved_sql_mode := @@SESSION.sql_mode;
+SET SESSION sql_mode = '';
+
 -- 1. Копия рабочей базы в таблицу шаблона.
 DROP TABLE IF EXISTS cm;
 SET @stmt := CONCAT('CREATE TABLE cm LIKE `', @src, '`');
@@ -53,6 +61,7 @@ INSERT INTO cm_data_tables (val) VALUES
     ('RFP'),
     ('Токен'),
     ('Бренд'),
+    ('Код'),
     ('Решение по паре'),
     ('Журнал развёртывания'),
     ('Профиль загрузки');
@@ -101,3 +110,5 @@ SELECT COALESCE(typ.val, CONCAT('тип ', rec.t)) AS `Таблица`,
 --    Token (125), Secret (130).
 SELECT COUNT(*) AS `Осталось строк с секретами`
   FROM cm WHERE t IN (20, 40, 125, 130);
+
+SET SESSION sql_mode = @saved_sql_mode;
