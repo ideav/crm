@@ -74,6 +74,12 @@ function dashCellDateTo(td) {
 
 ${extractFunction('dashCellItemRef')}
 ${extractFunction('dashCellRgHead')}
+let dashMetadata = null;
+${extractFunction('dashSchemaDef')}
+${extractFunction('dashMetadataList')}
+${extractFunction('dashReqAlias')}
+${extractFunction('dashFindReqByName')}
+${extractFunction('dashSchema')}
 ${extractFunction('dashValueSearchUrl')}
 
 // Case 1: id known — must use FR_1042=@{id}

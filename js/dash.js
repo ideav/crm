@@ -393,6 +393,63 @@ function dashFindTypeMetadata(typeId) {
     return null;
 }
 
+// Issue #5176: таблицы и реквизиты, куда пишет дэшборд, ищутся по именам в metadata —
+// в базе, развёрнутой из шаблона, id свои (в finmo «Значение» — 496, а не 1010).
+// Реквизит ищется по alias (исходное имя: в finmo val = «Дата_т», alias = «Дата»), затем по val.
+// Таблица разрешается целиком: нет таблицы или хоть одного реквизита — берутся запасные id
+// исходной схемы, чтобы не смешивать id разных баз.
+function dashSchemaDef(key) {
+    return {
+        value: { table: 'Значение', id: '1010', fields: {
+            date: ['Дата', '1039'], item: ['Строка бюджета', '1042'],
+            group: ['Колонка группы', '1104'], label: ['Метка', DASH_VALUE_LABEL_FIELD_ID] } },
+        panel: { table: 'Панель', id: '', fields: { settings: ['Настройки', '1165'] } }
+    }[key];
+}
+
+function dashMetadataList() {
+    if (!dashMetadata) return [];
+    if (Array.isArray(dashMetadata)) return dashMetadata;
+    return typeof dashMetadata === 'object' ? Object.keys(dashMetadata).map(function(k) { return dashMetadata[k]; }) : [];
+}
+
+function dashReqAlias(req) {
+    var attrs = req && req.attrs;
+    if (typeof attrs === 'string') {
+        try { attrs = JSON.parse(attrs); } catch (e) { attrs = null; }
+    }
+    return attrs && attrs.alias ? String(attrs.alias) : '';
+}
+
+function dashFindReqByName(meta, name) {
+    var reqs = (meta && Array.isArray(meta.reqs)) ? meta.reqs : [], i;
+    for (i = 0; i < reqs.length; i++)
+        if (reqs[i] && dashReqAlias(reqs[i]) === name) return reqs[i];
+    for (i = 0; i < reqs.length; i++)
+        if (reqs[i] && String(reqs[i].val) === name) return reqs[i];
+    return null;
+}
+
+// { id, fields: {key: id} } для dashSchemaDef(key); без metadata — запасные id.
+// Одноимённых таблиц может быть несколько (в базе есть системная «Панель» форм) —
+// берётся первая, где нашлись все реквизиты.
+function dashSchema(key) {
+    var def = dashSchemaDef(key), fallback = { id: def.id, fields: {} }, f;
+    for (f in def.fields) fallback.fields[f] = def.fields[f][1];
+    var list = dashMetadataList();
+    for (var i = 0; i < list.length; i++) {
+        if (!list[i] || String(list[i].val) !== def.table) continue;
+        var resolved = { id: String(list[i].id), fields: {} }, complete = true;
+        for (f in def.fields) {
+            var req = dashFindReqByName(list[i], def.fields[f][0]);
+            if (!req) { complete = false; break; }
+            resolved.fields[f] = String(req.id);
+        }
+        if (complete) return resolved;
+    }
+    return fallback;
+}
+
 // Returns the index in a JSON_OBJ record's `r` array where the given req
 // field lives, or -1 if not resolvable. Layout: r[0] = main value,
 // r[1..N] = reqs in metadata.reqs order (issue #857).
@@ -409,7 +466,7 @@ function dashRecordReqIndex(typeId, fieldId) {
 // JSON_OBJ payloads expose values only via the positional `r` array — there
 // is no `rec['Метка']` key — so we resolve the index via cached metadata
 // and fall back to the last req when metadata is unavailable (the dashboard
-// schemas keep the label field as the trailing req on both 1010 and 155551).
+// schemas keep the label field as the trailing req on both «Значение» and 155551).
 function dashRecordLabel(rec, typeId, labelFieldId) {
     if (!rec) return '';
     if (Object.prototype.hasOwnProperty.call(rec, 'Метка')) return rec['Метка'] || '';
@@ -4949,9 +5006,11 @@ function dashSaveCurrentPivotSettings(panelEl, pivotWrap) {
     settings = dashMergePivotConfigIntoSettings(modelData.settings, pivotConfig);
     jsonStr = JSON.stringify(settings);
     if (panelID) {
-        newApi('POST', '_m_set/' + panelID + '?JSON', 'dashPivotSettingsSaved',
-            't1165=' + encodeURIComponent(jsonStr),
-            { panelEl: panelEl, panelKey: panelKey, settings: settings, pivotWrap: pivotWrap, pivotConfig: pivotConfig });
+        dashLoadMetadata(function() {
+            newApi('POST', '_m_set/' + panelID + '?JSON', 'dashPivotSettingsSaved',
+                't' + dashSchema('panel').fields.settings + '=' + encodeURIComponent(jsonStr),
+                { panelEl: panelEl, panelKey: panelKey, settings: settings, pivotWrap: pivotWrap, pivotConfig: pivotConfig });
+        });
     } else {
         dashApplyNewVizSettings(panelEl, panelKey, settings);
         dashSetPivotSavedConfig(pivotWrap, dashPivotConfigString(pivotConfig));
@@ -5714,9 +5773,11 @@ document.getElementById('dash-viz-save').addEventListener('click', function() {
     dashVizModalCtx = null;
 
     if (panelID) {
-        newApi('POST', '_m_set/' + panelID + '?JSON', 'dashVizSettingsSaved',
-            't1165=' + encodeURIComponent(jsonStr),
-            { panelEl: panelEl, panelKey: panelKey, settings: settings });
+        dashLoadMetadata(function() {
+            newApi('POST', '_m_set/' + panelID + '?JSON', 'dashVizSettingsSaved',
+                't' + dashSchema('panel').fields.settings + '=' + encodeURIComponent(jsonStr),
+                { panelEl: panelEl, panelKey: panelKey, settings: settings });
+        });
     } else {
         dashApplyNewVizSettings(panelEl, panelKey, settings);
     }
@@ -6535,14 +6596,15 @@ function dashValueSearchUrl(td) {
     var to = dashCellDateTo(td);
     var rgHead = dashCellRgHead(td);
     var dashLabel = (td.dataset && td.dataset.dashLabel) || '';
-    var url = 'object/1010?JSON_OBJ';
-    if (fr) url += '&FR_1039=' + fr;
-    if (to) url += '&TO_1039=' + to;
+    var s = dashSchema('value'), f = s.fields;
+    var url = 'object/' + s.id + '?JSON_OBJ';
+    if (fr) url += '&FR_' + f.date + '=' + fr;
+    if (to) url += '&TO_' + f.date + '=' + to;
     // valueItemId is a record id (filter by id with @), itemRef is a name (filter by value)
-    if (valueItemId) url += '&FR_1042=@' + encodeURIComponent(valueItemId);
-    else url += '&FR_1042=' + encodeURIComponent(itemRef);
-    if (rgHead) url += '&F_1104=' + encodeURIComponent(rgHead);
-    url += '&F_' + DASH_VALUE_LABEL_FIELD_ID + '=' + (dashLabel ? '%' : '!%');
+    if (valueItemId) url += '&FR_' + f.item + '=@' + encodeURIComponent(valueItemId);
+    else url += '&FR_' + f.item + '=' + encodeURIComponent(itemRef);
+    if (rgHead) url += '&F_' + f.group + '=' + encodeURIComponent(rgHead);
+    url += '&F_' + f.label + '=' + (dashLabel ? '%' : '!%');
     return url;
 }
 
@@ -6571,12 +6633,13 @@ window.dashValueSearchDone = function(json, ctx) {
     var td = ctx.td, newVal = ctx.newVal, itemRef = ctx.itemRef;
     var fr = ctx.fr, to = ctx.to, rgHead = ctx.rgHead;
     var dashLabel = ctx.dashLabel || '';
+    var s = dashSchema('value'), f = s.fields;
 
     // Filter results by label matching rules (а/б/в) using the row's dashboard label.
-    // The server-side filter is the literal F_155556=% / =!% per the issue spec, which
+    // The server-side filter is the literal F_{Метка}=% / =!% per the issue spec, which
     // narrows to "any label" / "no label" — we still need the substring rules client-side.
     json = (json || []).filter(function(rec) {
-        return dashMatrixLabelMatches(dashLabel, dashRecordLabel(rec, '1010', DASH_VALUE_LABEL_FIELD_ID));
+        return dashMatrixLabelMatches(dashLabel, dashRecordLabel(rec, s.id, f.label));
     });
 
     if (json.length === 0) {
@@ -6584,12 +6647,12 @@ window.dashValueSearchDone = function(json, ctx) {
         if (newVal === '') { dashSetStatus(''); return; }
         // Create new record
         var valueItemId = ctx.td.dataset.valueItemId;
-        var params = 't1010=' + encodeURIComponent(newVal)
-            + (valueItemId ? '&t1042=' + encodeURIComponent(valueItemId) : '&NEW_1042=' + encodeURIComponent(itemRef)) // Create the ref in case it does not exist
-            + '&t1039=' + encodeURIComponent(fr || dashTodayYMD());
-        if (rgHead) params += '&t1104=' + encodeURIComponent(rgHead);
-        if (dashLabel) params += '&t' + DASH_VALUE_LABEL_FIELD_ID + '=' + encodeURIComponent(dashLabel);
-        newApi('POST', '_m_new/1010?JSON&up=1', 'dashValueSaveDone', params, { td: td, newVal: newVal });
+        var params = 't' + s.id + '=' + encodeURIComponent(newVal)
+            + (valueItemId ? '&t' + f.item + '=' + encodeURIComponent(valueItemId) : '&NEW_' + f.item + '=' + encodeURIComponent(itemRef)) // Create the ref in case it does not exist
+            + '&t' + f.date + '=' + encodeURIComponent(fr || dashTodayYMD());
+        if (rgHead) params += '&t' + f.group + '=' + encodeURIComponent(rgHead);
+        if (dashLabel) params += '&t' + f.label + '=' + encodeURIComponent(dashLabel);
+        newApi('POST', '_m_new/' + s.id + '?JSON&up=1', 'dashValueSaveDone', params, { td: td, newVal: newVal });
     } else if (json.length === 1) {
         var recId = json[0].i;
         if (newVal === '') {
@@ -6597,7 +6660,7 @@ window.dashValueSearchDone = function(json, ctx) {
             newApi('POST', '_m_del/' + recId + '?JSON', 'dashValueSaveDone', '', { td: td, newVal: newVal });
         } else {
             // Update existing record
-            var params2 = 't1010=' + encodeURIComponent(newVal);
+            var params2 = 't' + s.id + '=' + encodeURIComponent(newVal);
             newApi('POST', '_m_save/' + recId + '?JSON', 'dashValueSaveDone', params2, { td: td, newVal: newVal });
         }
     } else {
@@ -6804,7 +6867,7 @@ window.dashMultivalDelDone = function(json, ctx) {
         var td = dashMultivalCtx.td;
         var options = dashMultivalCtx.options || {};
         var saveCallback = options.saveCallback || 'dashValueSaveDone';
-        var saveParam = options.saveParam || 't1010';
+        var saveParam = options.saveParam || ('t' + dashSchema('value').id);
         var saveCtx = { td: td, newVal: newVal };
         if (saveCallback === 'dashMatrixValueSaveDone')
             saveCtx.recId = recId;

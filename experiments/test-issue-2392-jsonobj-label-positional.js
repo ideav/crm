@@ -89,6 +89,11 @@ ${extractFunction('dashMatrixLabelMatches')}
 ${extractFunction('dashFindTypeMetadata')}
 ${extractFunction('dashRecordReqIndex')}
 ${extractFunction('dashRecordLabel')}
+${extractFunction('dashSchemaDef')}
+${extractFunction('dashMetadataList')}
+${extractFunction('dashReqAlias')}
+${extractFunction('dashFindReqByName')}
+${extractFunction('dashSchema')}
 ${extractFunction('dashMatrixDashLabel')}
 ${extractFunction('dashMatrixSearchUrl')}
 ${extractFunction('dashMatrixValueSearchDone')}
