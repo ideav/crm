@@ -9,11 +9,11 @@
     { "name": "Клиент",         "description": "Просмотр своих заказов (портал — следующая фаза)" }
   ],
   "users": [
-    { "login": "admin",      "role": "Администратор", "name": "Администратор", "password": "admin_atex_2026" },
-    { "login": "director",   "role": "Руководитель",  "name": "Руководитель",  "password": "director_atex_2026" },
-    { "login": "manager",    "role": "Менеджер",      "name": "Менеджер",      "password": "manager_atex_2026" },
-    { "login": "dispatcher", "role": "Диспетчер",     "name": "Диспетчер",     "password": "dispatcher_atex_2026" },
-    { "login": "operator",   "role": "Оператор",      "name": "Оператор",      "password": "operator_atex_2026" },
-    { "login": "client",     "role": "Клиент",        "name": "Клиент",        "password": "client_atex_2026" }
+    { "login": "admin",      "role": "Администратор", "name": "Администратор", "password": "demo-admin-change-me" },
+    { "login": "director",   "role": "Руководитель",  "name": "Руководитель",  "password": "demo-director-change-me" },
+    { "login": "manager",    "role": "Менеджер",      "name": "Менеджер",      "password": "demo-manager-change-me" },
+    { "login": "dispatcher", "role": "Диспетчер",     "name": "Диспетчер",     "password": "demo-dispatcher-change-me" },
+    { "login": "operator",   "role": "Оператор",      "name": "Оператор",      "password": "demo-operator-change-me" },
+    { "login": "client",     "role": "Клиент",        "name": "Клиент",        "password": "demo-client-change-me" }
   ]
 }

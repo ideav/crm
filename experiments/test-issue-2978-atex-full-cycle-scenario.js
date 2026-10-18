@@ -33,11 +33,11 @@ function includes(text, message) {
 });
 
 [
-    'manager / manager_atex_2026',
-    'dispatcher / dispatcher_atex_2026',
-    'operator / operator_atex_2026',
-    'director / director_atex_2026',
-    'client / client_atex_2026'
+    'manager / demo-manager-change-me',
+    'dispatcher / demo-dispatcher-change-me',
+    'operator / demo-operator-change-me',
+    'director / demo-director-change-me',
+    'client / demo-client-change-me'
 ].forEach(function(login) {
     includes(login, `tester account is documented: ${login}`);
 });
