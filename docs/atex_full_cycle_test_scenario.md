@@ -19,13 +19,13 @@
 
 | Роль | Логин / пароль | Рабочие места |
 |---|---|---|
-| Администратор | `admin / admin_atex_2026` | штатные таблицы для подготовки справочников |
-| Менеджер | `manager / manager_atex_2026` | `templates/atex/orders.html` |
-| Диспетчер | `dispatcher / dispatcher_atex_2026` | `templates/atex/cut-calc.html`, `templates/atex/production-planning.html` |
-| Оператор | `operator / operator_atex_2026` | `templates/atex/slitter.html`, `templates/atex/sleeve-cutter.html`, `templates/atex/cut-map.html` |
-| Кладовщик | `operator / operator_atex_2026` | `templates/atex/intake.html`, `templates/atex/warehouse.html` |
-| Руководитель | `director / director_atex_2026` | `templates/atex/dashboards.html` |
-| Клиент | `client / client_atex_2026` | `templates/atex/portal.html` |
+| Администратор | `admin / demo-admin-change-me` | штатные таблицы для подготовки справочников |
+| Менеджер | `manager / demo-manager-change-me` | `templates/atex/orders.html` |
+| Диспетчер | `dispatcher / demo-dispatcher-change-me` | `templates/atex/cut-calc.html`, `templates/atex/production-planning.html` |
+| Оператор | `operator / demo-operator-change-me` | `templates/atex/slitter.html`, `templates/atex/sleeve-cutter.html`, `templates/atex/cut-map.html` |
+| Кладовщик | `operator / demo-operator-change-me` | `templates/atex/intake.html`, `templates/atex/warehouse.html` |
+| Руководитель | `director / demo-director-change-me` | `templates/atex/dashboards.html` |
+| Клиент | `client / demo-client-change-me` | `templates/atex/portal.html` |
 
 ## Копипаст-набор
 
@@ -38,7 +38,7 @@
 ```text
 Клиент: ООО "Ромашка-Термолента"
 Логин: client
-Пароль: client_atex_2026
+Пароль: demo-client-change-me
 Email: qa-romashka@example.test
 Телефон: +7 495 010-29-78
 ```
@@ -186,7 +186,7 @@ Email: qa-romashka@example.test
 
 ### 3. Создать тип резки
 
-1. Войти как `dispatcher / dispatcher_atex_2026`.
+1. Войти как `dispatcher / demo-dispatcher-change-me`.
 2. Открыть `templates/atex/cut-calc.html`.
 3. Создать тип резки `ТТ-58 ECO 57x40`.
 4. Добавить две полосы из раздела [Тип резки](#тип-резки).
@@ -194,7 +194,7 @@ Email: qa-romashka@example.test
 
 ### 4. Создать заказ
 
-1. Войти как `manager / manager_atex_2026`.
+1. Войти как `manager / demo-manager-change-me`.
 2. Открыть `templates/atex/orders.html`.
 3. Нажать `Создать заказ` и заполнить заказ с меткой `АТХ-2026-0001` в
    примечании. Номер заказа в списке присваивается сервером; запишите его для
@@ -205,7 +205,7 @@ Email: qa-romashka@example.test
 
 ### 5. Запланировать производство
 
-1. Войти как `dispatcher / dispatcher_atex_2026`.
+1. Войти как `dispatcher / demo-dispatcher-change-me`.
 2. Открыть `templates/atex/production-planning.html`.
 3. Создать производственную резку: `SL-01`, `ТТ-58 ECO 57x40`,
    `RM-2026-05-31-01`, `Дата план: 2026-06-01`.
@@ -218,7 +218,7 @@ Email: qa-romashka@example.test
 
 ### 6. Проверить карту раскроя
 
-1. Войти как `operator / operator_atex_2026`.
+1. Войти как `operator / demo-operator-change-me`.
 2. Открыть `templates/atex/cut-map.html`.
 3. Выбрать производственную резку, созданную для сценария `АТХ-2026-0001`.
 4. Проверить, что карта показывает 18 ножей, занято `890 мм`, остаток `20 мм`,
@@ -260,14 +260,14 @@ Email: qa-romashka@example.test
 
 ### 10. Проверить руководительский дашборд
 
-1. Войти как `director / director_atex_2026`.
+1. Войти как `director / demo-director-change-me`.
 2. Открыть `templates/atex/dashboards.html`.
 3. Проверить, что в сводках есть заказ в статусе `Выполнен`, резка по `SL-01`,
    выпуск ГП и уменьшенный остаток сырья.
 
 ### 11. Проверить клиентский портал
 
-1. Войти как `client / client_atex_2026`.
+1. Войти как `client / demo-client-change-me`.
 2. Открыть `templates/atex/portal.html`.
 3. Проверить, что виден только заказ клиента `ООО "Ромашка-Термолента"`.
 4. Раскрыть заказ с меткой `АТХ-2026-0001` и проверить позицию:
