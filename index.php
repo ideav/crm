@@ -239,7 +239,7 @@ elseif(!preg_match(DB_MASK, $z)){
     # удалённые *.html — у них точка в имени, DB_MASK её не пропускает).
     # Ответ 200 плодил в Яндексе «малоценные» дубли на каждый битый адрес.
     http_response_code(404);
-    die("Invalid database");
+    Die_bad_path($z);
 }
 
 # Callback асинхронного ИИ-агента (server-to-server, без сессии). Принимаем результат
@@ -904,6 +904,38 @@ function isApi(){
     global $dumpAPI;
     return (isset($dumpAPI) || !empty(array_filter(array_merge($_POST, $_GET), function($value, $key) { return strpos($key, 'JSON') === 0;}, ARRAY_FILTER_USE_BOTH)));
 }
+# <bad-path-5186>
+# #5186: адрес с вебрута не похож на имя базы (DB_MASK). Браузеру — HTML-страница вместо
+# голого текста: адрес с точкой (удалённый или опечатанный *.html, *.php, картинка) —
+# «Страница не найдена» со ссылкой на главную, прочее — «Invalid database» со ссылкой на вход.
+# Не-браузерным клиентам (fetch, curl, JSON API) — прежний текст «Invalid database»:
+# js/app.js читает не-JSON ответ как «базы нет». Сам адрес на страницу не выводим.
+function Die_bad_path($z){
+	$accept = isset($_SERVER["HTTP_ACCEPT"]) ? $_SERVER["HTTP_ACCEPT"] : "";
+	if(isApi() || stripos($accept, "text/html") === FALSE)
+		die("Invalid database");
+	$en = isset($_COOKIE["my_locale"]) && $_COOKIE["my_locale"] === "EN";
+	if(strpos($z, ".") !== FALSE){
+		$title = $en ? "Page not found" : "Страница не найдена";
+		$text = $en ? "There is no such page: it may have been removed, or the address has a typo."
+			: "Такой страницы нет: возможно, её удалили или в адресе опечатка.";
+		$links = '<a href="/">'.($en ? "Home" : "На главную").'</a> · <a href="/my">'.($en ? "Sign in" : "Вход").'</a>';
+	}
+	else{
+		$title = "Invalid database";
+		$text = $en ? "There is no database with this name. Check the address or sign in to your database."
+			: "Базы с таким именем нет. Проверьте адрес или войдите в свою базу.";
+		$links = '<a href="/my">'.($en ? "Sign in" : "Вход").'</a> · <a href="/">'.($en ? "Home" : "На главную").'</a>';
+	}
+	header("Content-Type: text/html; charset=UTF-8");
+	die("<!DOCTYPE html>\n<html lang=\"".($en ? "en" : "ru")."\"><head><meta charset=\"UTF-8\">"
+		."<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+		."<meta name=\"robots\" content=\"noindex\"><title>404 — $title</title>"
+		."<style>body{font-family:sans-serif;max-width:560px;margin:15vh auto;padding:0 16px;color:#222}"
+		."h1{font-size:28px}a{color:#1a5fb4}</style></head>"
+		."<body><h1>$title</h1><p>$text</p><p>$links</p></body></html>");
+}
+# </bad-path-5186>
 # <not-found-5067>
 # #5067: несуществующая таблица или отчёт — 404, а не 200 с текстом (и не 403 «нет прав»)
 function Find_table_or_404($id){
