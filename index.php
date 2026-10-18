@@ -5942,10 +5942,11 @@ function maskCsvDelimiters($v){
 # Меню роли (блок MyRoleMenu) отбирается по записи текущего пользователя, а у суперпользователя
 # (вход по ADMINHASH) записи нет, user_id=0 — показываем ему меню роли admin (issue #5173).
 # Явно выбранную роль (FR_RoleID из настройки меню) не перекрываем.
+# Имя блока сравниваем без учёта регистра: из шаблона оно приходит как «myrolemenu».
 function Superuser_role_menu_request($block_name)
 {
     $gv = isset($GLOBALS["GLOBAL_VARS"]) ? $GLOBALS["GLOBAL_VARS"] : array();
-    if(($block_name !== "MyRoleMenu") || isset($_REQUEST["FR_RoleID"]))
+    if((strtolower($block_name) !== "myrolemenu") || isset($_REQUEST["FR_RoleID"]))
         return;
     if(!isset($gv["user"]) || ($gv["user"] !== "admin") || !isset($gv["user_id"]) || ((string)$gv["user_id"] !== "0"))
         return;
