@@ -4230,6 +4230,21 @@ function maskCsvDelimiters($v){
         return "\"".$v."\"";
     return $v;
 }
+# Подготовка фильтра по родителю для листинга объекта (issue #5170, #5184).
+# Выделено из case "&uni_obj_all" без изменения поведения: явный F_U применяется
+# только когда у типа определён parent_obj (реквизит, связывающий тип с родителем).
+function Prepare_parent_filter(&$filter_cond, &$parent_cond, $parent_obj){
+	if(isset($_REQUEST["F_U"]) && $parent_obj) {
+	    if((int)$_REQUEST["F_U"] > 0)
+	    	$filter_cond .= " AND vals.up=".(int)$_REQUEST["F_U"]." ";
+	    else
+	    	$filter_cond .= " AND vals.up!=0 ";
+	}
+	elseif(isset($_REQUEST["F_I"]) && ((int)$_REQUEST["F_I"] > 0))
+		$parent_cond = " ";  # skip the parent cond in case the exact filter is set
+	else
+		$parent_cond = " AND vals.up=1 ";  # By default for Root's children
+}
 function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 {
     $tmp = explode(".", $block);
@@ -6227,16 +6242,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 			$cur_base_typ = $blocks["&main"]["CUR_VARS"]["typ"];
 			$filter_by_id_off = FALSE;
 			$GLOBALS["where"] = $GLOBALS["join"] = $GLOBALS["join_cond"] = "";
-			if(isset($_REQUEST["F_U"]) && $blocks["&main"]["CUR_VARS"]["parent_obj"]){
-			    if((int)$_REQUEST["F_U"] > 0)
-			    	$filter_cond .= " AND vals.up=".(int)$_REQUEST["F_U"]." ";
-			    else
-			    	$filter_cond .= " AND vals.up!=0 ";
-			}
-			elseif(isset($_REQUEST["F_I"]) && ((int)$_REQUEST["F_I"] > 0))
-				$parent_cond = " ";  # skip the parent cond in case the exact filter is set
-			else
-				$parent_cond = " AND vals.up=1 ";  # By default for Root's children
+			Prepare_parent_filter($filter_cond, $parent_cond, $blocks["&main"]["CUR_VARS"]["parent_obj"]);
 
 			trace(print_r($GLOBALS["attrs"], TRUE));
 

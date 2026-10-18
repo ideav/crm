@@ -55,13 +55,9 @@ function core_function($src, $name){
     return "";
 }
 
-$src = file_get_contents(__DIR__ . "/../index.php");
-$fn = core_function($src, "Prepare_parent_filter");
-if($fn === ""){
-    echo "  FAIL Prepare_parent_filter не найдена в index.php\n";
-    exit(1);
-}
-eval($fn);
+# Оба ядра: index.php (ideav.ru) и снапшот живого ядра integram.io (issue #5184 —
+# тот же потерянный реквизит в r7ohr, а фикс #5170 был только в index.php).
+$cores = array("index.php", "experiments/index_integram.io.php");
 
 # ── Таблица «входы × ожидания» ─────────────────────────────────────────────────────────────
 # [имя, $_REQUEST, parent_obj, ожидаемый $filter_cond, ожидаемый $parent_cond]
@@ -89,16 +85,26 @@ $cases = array(
           array("F_U" => ""), NULL, "", " AND vals.up=1 "),
 );
 
-foreach($cases as $c){
-    list($name, $req, $parent_obj, $want_filter, $want_parent) = $c;
-    $_REQUEST = $req;
-    $filter_cond = "";
-    $parent_cond = ""; # вызывающий (case "&uni_obj_all") инициализирует его пустым
-    Prepare_parent_filter($filter_cond, $parent_cond, $parent_obj);
-    ok($filter_cond === $want_filter, "$name: filter_cond",
-       var_export($filter_cond, true) . " != " . var_export($want_filter, true));
-    ok($parent_cond === $want_parent, "$name: parent_cond",
-       var_export($parent_cond, true) . " != " . var_export($want_parent, true));
+foreach($cores as $k => $core){
+    echo "$core\n";
+    $fn = core_function(file_get_contents(__DIR__ . "/../$core"), "Prepare_parent_filter");
+    if($fn === ""){
+        ok(false, "Prepare_parent_filter найдена в $core");
+        continue;
+    }
+    # Одноимённые функции двух ядер не уживутся в одном процессе — даём каждой своё имя
+    eval(str_replace("function Prepare_parent_filter", "function Prepare_parent_filter_$k", $fn));
+    foreach($cases as $c){
+        list($name, $req, $parent_obj, $want_filter, $want_parent) = $c;
+        $_REQUEST = $req;
+        $filter_cond = "";
+        $parent_cond = ""; # вызывающий (case "&uni_obj_all") инициализирует его пустым
+        call_user_func_array("Prepare_parent_filter_$k", array(&$filter_cond, &$parent_cond, $parent_obj));
+        ok($filter_cond === $want_filter, "$name: filter_cond",
+           var_export($filter_cond, true) . " != " . var_export($want_filter, true));
+        ok($parent_cond === $want_parent, "$name: parent_cond",
+           var_export($parent_cond, true) . " != " . var_export($want_parent, true));
+    }
 }
 
 echo $failed === 0 ? "\nALL TESTS PASSED\n" : "\nFAILED: $failed\n";
