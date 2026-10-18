@@ -148,7 +148,7 @@ mb_internal_encoding("UTF-8");
 if(function_exists('mysqli_report'))
     mysqli_report(MYSQLI_REPORT_OFF);
 
-define("DB_MASK", "/^[a-z0-9_]{1,15}$/i");
+define("DB_MASK", "/^[a-z][a-z0-9_]{0,14}$/i");  # Имя базы: первая — буква (#5186)
 define("USER_DB_MASK", "/^[a-z]\w{2,14}$/i");  # Mask for the DB name validation
 define("DIR_MASK", "/^[a-z0-9_-]+$/i");  # Mask for the dir name validation
 define("FILE_MASK", "/^[a-z0-9_.-]+$/i");
