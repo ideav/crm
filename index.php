@@ -10758,6 +10758,20 @@ function aiAgentSubmitRequest($com){
     check(); # XSRF
     aiAgentRequireUser();
 
+    # crm#5203: у пользователя несколько диалогов с агентом. Диалог — id, который присылает
+    # клиент; у каждого своя лента и своя сессия агента (conversation_id). Без id запрос
+    # идёт по-старому: в общую сессию пользователя и без записи в историю.
+    $conversation = isset($_POST["conversation"]) ? strtolower(trim((string)$_POST["conversation"])) : "";
+    if($conversation !== "" && !aiAgentChatIdValid($conversation))
+        aiAgentError(t9n("[RU]Некорректный id диалога[EN]Invalid conversation id"), 400);
+    if(isset($_POST["action"]) && (string)$_POST["action"] === "delete_conversation"){
+        if($conversation === "")
+            aiAgentError(t9n("[RU]Не указан диалог[EN]No conversation specified"), 400);
+        $deleted = aiAgentChatDelete($z, aiAgentCurrentUser(), $conversation);
+        api_dump(json_encode(array("ok" => true, "deleted" => $deleted), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "ai-agent.json");
+        return;
+    }
+
     # python2node#846: кнопки плана агента — «Применить» (apply), «Отменить» план (cancel) и
     # «Отменить» выполненное (undo). Это не вопрос агенту, а действие над его планом: агент
     # исполняет его сам токеном этого же пользователя.
@@ -10788,7 +10802,7 @@ function aiAgentSubmitRequest($com){
     $attachmentNames = array();
     foreach($attachments as $a)
         $attachmentNames[] = isset($a["name"]) ? (string)$a["name"] : "";
-    $job = aiAgentJobCreate($z, $message, $attachmentNames, aiAgentCurrentUser());
+    $job = aiAgentJobCreate($z, $message, $attachmentNames, aiAgentCurrentUser(), $conversation);
     $jobId = $job["id"];
 
     # Для асинхронного агента готовим callback (см. docs/ai-agent-endpoint.md):
@@ -10804,6 +10818,8 @@ function aiAgentSubmitRequest($com){
         # Асинхронный (вариант B1) отвечает 202 {status:queued} -> задача остаётся
         # processing, результат придёт в callback; клиентский опрос это поддерживает.
         $extra = $action !== "" ? array("action" => $action, "plan_id" => $planId) : array();
+        if($conversation !== "")
+            $extra["conversation_id"] = $conversation;
         # crm#5118: галка «Применить автоматически» — агент исполняет план без подтверждения
         # (python2node#869). Только для вопроса; галку CRM не хранит.
         if($action === "" && isset($_POST["auto_apply"]) && $_POST["auto_apply"] === "1")
@@ -10857,7 +10873,29 @@ function aiAgentStatusRequest($com){
         return;
     }
 
-    $job = aiAgentJobLatest($z, $user);
+    # crm#5203: список диалогов пользователя и лента одного диалога (conversation=latest —
+    # последний по времени). Диалоги лежат в файле пользователя — чужие недоступны по построению.
+    if(isset($_GET["conversations"])){
+        $list = aiAgentChatsList(aiAgentChatsLoad($z, $user));
+        api_dump(json_encode(array("conversations" => $list), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "ai-agent.json");
+        return;
+    }
+    $conversation = isset($_GET["conversation"]) ? strtolower(trim((string)$_GET["conversation"])) : "";
+    if($conversation !== "" && !isset($_GET["latest"])){
+        $chats = aiAgentChatsLoad($z, $user);
+        if($conversation === "latest"){
+            $list = aiAgentChatsList($chats);
+            $conversation = count($list) ? $list[0]["id"] : "";
+        }
+        $chat = aiAgentChatIdValid($conversation) ? aiAgentChatsFind($chats, $conversation) : null;
+        if(!$chat)
+            aiAgentError(t9n("[RU]Диалог не найден[EN]Conversation not found"), 404);
+        api_dump(json_encode(array("conversation" => $chat), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "ai-agent.json");
+        return;
+    }
+
+    # Последняя задача; с conversation — последняя задача этого диалога.
+    $job = aiAgentJobLatest($z, $user, aiAgentChatIdValid($conversation) ? $conversation : "");
     api_dump(json_encode(array("job" => $job ? aiAgentJobPublic($job) : null), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "ai-agent.json");
 }
 # POST /{db}/ai/agent/callback — приём результата от асинхронного ИИ-агента
@@ -11436,9 +11474,9 @@ function aiAgentJobId(){
     }
     return md5(uniqid((string)mt_rand(), true));
 }
-function aiAgentJobNew($message, $attachmentNames, $now, $user=""){
+function aiAgentJobNew($message, $attachmentNames, $now, $user="", $conversation=""){
     $names = is_array($attachmentNames) ? array_values(array_map("strval", $attachmentNames)) : array();
-    return array(
+    $job = array(
         "id" => aiAgentJobId(),
         "user" => strtolower((string)$user),
         "createdAt" => (int)$now,
@@ -11449,6 +11487,9 @@ function aiAgentJobNew($message, $attachmentNames, $now, $user=""){
         "result" => null,
         "error" => null
     );
+    if((string)$conversation !== "")
+        $job["conversation"] = (string)$conversation;   # crm#5203: диалог, в ленту которого идёт задача
+    return $job;
 }
 # --- Чистые операции над списком задач (тестируются без файловой системы) ---
 function aiAgentJobsAppend($jobs, $job, $max){
@@ -11581,9 +11622,9 @@ function aiAgentJobsMutate($db, $mutator){
     @fclose($fp);
     return $ret;
 }
-function aiAgentJobCreate($db, $message, $attachmentNames, $user=""){
+function aiAgentJobCreate($db, $message, $attachmentNames, $user="", $conversation=""){
     $now = time();
-    $job = aiAgentJobNew($message, $attachmentNames, $now, $user);
+    $job = aiAgentJobNew($message, $attachmentNames, $now, $user, $conversation);
     aiAgentJobsMutate($db, function($jobs) use ($job, $now){
         $jobs = aiAgentJobsPrune($jobs, $now, AI_AGENT_JOBS_TTL);
         $jobs = aiAgentJobsAppend($jobs, $job, AI_AGENT_JOBS_MAX);
@@ -11593,7 +11634,7 @@ function aiAgentJobCreate($db, $message, $attachmentNames, $user=""){
 }
 function aiAgentJobUpdate($db, $id, $changes){
     $now = time();
-    return aiAgentJobsMutate($db, function($jobs) use ($id, $changes, $now){
+    $job = aiAgentJobsMutate($db, function($jobs) use ($id, $changes, $now){
         $job = aiAgentJobsFind($jobs, $id);
         if(!$job)
             return array($jobs, null);
@@ -11601,13 +11642,173 @@ function aiAgentJobUpdate($db, $id, $changes){
         $jobs = aiAgentJobsReplace($jobs, $id, $job);
         return array($jobs, $job);
     });
+    # crm#5203: состояние задачи диалога копируется в его ленту — история живёт дольше задач
+    # (AI_AGENT_JOBS_TTL). Ход работы (progress) в историю не пишется.
+    if(is_array($job) && !empty($job["conversation"]) && is_array($changes)
+        && (array_key_exists("status", $changes) || array_key_exists("result", $changes) || array_key_exists("error", $changes)))
+        aiAgentChatSaveTurn($db, $job);
+    return $job;
 }
 function aiAgentJobGet($db, $id){
     return aiAgentJobsFind(aiAgentJobsLoadRaw($db), $id);
 }
-function aiAgentJobLatest($db, $user=null){
+function aiAgentJobLatest($db, $user=null, $conversation=""){
     $jobs = aiAgentJobsPrune(aiAgentJobsLoadRaw($db), time(), AI_AGENT_JOBS_TTL);
+    if((string)$conversation !== "")
+        $jobs = array_values(array_filter($jobs, function($job) use ($conversation){
+            return is_array($job) && isset($job["conversation"]) && $job["conversation"] === $conversation;
+        }));
     return aiAgentJobsLatest($jobs, $user);
+}
+# ============================================================
+# crm#5203: история диалогов ИИ-чата.
+#
+# У пользователя базы несколько диалогов с агентом, у каждого — своя лента. Лента — ходы
+# (вопрос + ответ), каждый ход — публичный снимок задачи (aiAgentJobPublic), поэтому клиент
+# рисует историю тем же кодом, что и ответ на опрос. Хранилище — JSON-файл на пару (база,
+# пользователь) в LOGS_DIR/ai_chats/<база>/sha1(user).json: каталог logs закрыт от веба
+# (logs/.htaccess), а время жизни истории не зависит от временного каталога и TTL задач.
+# Держим AI_AGENT_CHATS_MAX последних диалогов и AI_AGENT_CHAT_TURNS_MAX ходов в каждом.
+# ============================================================
+if(!defined("AI_AGENT_CHATS_MAX")) define("AI_AGENT_CHATS_MAX", 50);
+if(!defined("AI_AGENT_CHAT_TURNS_MAX")) define("AI_AGENT_CHAT_TURNS_MAX", 100);
+if(!defined("AI_AGENT_CHAT_TITLE_LEN")) define("AI_AGENT_CHAT_TITLE_LEN", 60);
+
+function aiAgentChatIdValid($id){
+    return is_string($id) && preg_match('/^[a-f0-9]{8,64}$/', $id) === 1;
+}
+function aiAgentChatsFile($db, $user){
+    $safeDb = preg_replace('/[^a-z0-9_]/i', '', (string)$db);
+    $user = strtolower((string)$user);
+    if($safeDb === "" || $user === "")
+        return "";
+    $dir = (defined("LOGS_DIR") ? LOGS_DIR : sys_get_temp_dir()."/")."ai_chats/".$safeDb;
+    if(!is_dir($dir))
+        @mkdir($dir, 0700, true);
+    return $dir."/".sha1($user).".json";
+}
+# Название диалога — начало первого вопроса.
+function aiAgentChatTitle($message){
+    $title = trim(preg_replace('/\s+/u', ' ', (string)$message));
+    if($title === "")
+        return t9n("[RU]Новый чат[EN]New chat");
+    if(mb_strlen($title, "UTF-8") > AI_AGENT_CHAT_TITLE_LEN)
+        $title = rtrim(mb_substr($title, 0, AI_AGENT_CHAT_TITLE_LEN - 1, "UTF-8"))."…";
+    return $title;
+}
+# --- Чистые операции над списком диалогов ---
+function aiAgentChatsFind($chats, $id){
+    if(!is_array($chats))
+        return null;
+    foreach($chats as $chat)
+        if(is_array($chat) && isset($chat["id"]) && $chat["id"] === $id)
+            return $chat;
+    return null;
+}
+# Ход $turn (снимок задачи) записывается в диалог $id: тот же ход заменяется, новый
+# дописывается в конец. Диалога нет — создаётся с названием по первому вопросу.
+function aiAgentChatsPutTurn($chats, $id, $turn, $now){
+    $chat = aiAgentChatsFind($chats, $id);
+    if(!$chat)
+        $chat = array("id" => $id, "title" => aiAgentChatTitle(isset($turn["message"]) ? $turn["message"] : ""),
+                      "createdAt" => (int)$now, "updatedAt" => (int)$now, "turns" => array());
+    $turns = (isset($chat["turns"]) && is_array($chat["turns"])) ? $chat["turns"] : array();
+    $found = false;
+    foreach($turns as $i => $t)
+        if(is_array($t) && isset($t["id"]) && $t["id"] === $turn["id"]){
+            $turns[$i] = $turn;
+            $found = true;
+        }
+    if(!$found){
+        $turns[] = $turn;
+        $chat["updatedAt"] = (int)$now;
+    }
+    if(count($turns) > AI_AGENT_CHAT_TURNS_MAX)
+        $turns = array_slice($turns, count($turns) - AI_AGENT_CHAT_TURNS_MAX);
+    $chat["turns"] = array_values($turns);
+    $out = aiAgentChatsRemove($chats, $id);
+    $out[] = $chat;
+    # Лишние — самые давние по последнему вопросу.
+    if(count($out) > AI_AGENT_CHATS_MAX){
+        usort($out, function($a, $b){ return (int)$b["updatedAt"] - (int)$a["updatedAt"]; });
+        $out = array_slice($out, 0, AI_AGENT_CHATS_MAX);
+    }
+    return array_values($out);
+}
+function aiAgentChatsRemove($chats, $id){
+    $out = array();
+    foreach(is_array($chats) ? $chats : array() as $c)
+        if(!(is_array($c) && isset($c["id"]) && $c["id"] === $id))
+            $out[] = $c;
+    return $out;
+}
+# Список для клиента: без ходов, свежие сверху.
+function aiAgentChatsList($chats){
+    $list = array();
+    foreach(is_array($chats) ? $chats : array() as $c){
+        if(!is_array($c) || !isset($c["id"]))
+            continue;
+        $list[] = array(
+            "id" => (string)$c["id"],
+            "title" => isset($c["title"]) ? (string)$c["title"] : "",
+            "createdAt" => isset($c["createdAt"]) ? (int)$c["createdAt"] : 0,
+            "updatedAt" => isset($c["updatedAt"]) ? (int)$c["updatedAt"] : 0,
+            "turns" => (isset($c["turns"]) && is_array($c["turns"])) ? count($c["turns"]) : 0
+        );
+    }
+    usort($list, function($a, $b){
+        return $b["updatedAt"] === $a["updatedAt"] ? $b["createdAt"] - $a["createdAt"] : $b["updatedAt"] - $a["updatedAt"];
+    });
+    return $list;
+}
+function aiAgentChatsDecode($raw){
+    $data = (is_string($raw) && trim($raw) !== "") ? json_decode($raw, true) : null;
+    return (is_array($data) && isset($data["chats"]) && is_array($data["chats"])) ? array_values($data["chats"]) : array();
+}
+# --- Файловые обёртки (эксклюзивная блокировка на чтение-модификацию-запись) ---
+function aiAgentChatsLoad($db, $user){
+    $path = aiAgentChatsFile($db, $user);
+    if($path === "" || !is_readable($path))
+        return array();
+    $raw = @file_get_contents($path);
+    return aiAgentChatsDecode($raw === false ? "" : $raw);
+}
+# $mutator(array $chats): array — должен вернуть array($newChats, $return).
+function aiAgentChatsMutate($db, $user, $mutator){
+    $path = aiAgentChatsFile($db, $user);
+    if($path === "")
+        return null;
+    $fp = @fopen($path, "c+");
+    if(!$fp)
+        return null;
+    @chmod($path, 0600);   # переписка пользователя — только владельцу процесса
+    @flock($fp, LOCK_EX);
+    $raw = stream_get_contents($fp);
+    list($chats, $ret) = $mutator(aiAgentChatsDecode($raw === false ? "" : $raw));
+    @ftruncate($fp, 0);
+    @rewind($fp);
+    @fwrite($fp, json_encode(array("chats" => array_values($chats)), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+    @fflush($fp);
+    @flock($fp, LOCK_UN);
+    @fclose($fp);
+    return $ret;
+}
+# Снимок задачи — в ленту её диалога. Задачи кнопок и триггеров ("trg:") в чат не идут.
+function aiAgentChatSaveTurn($db, $job){
+    if(strncmp((string)$db, "trg:", 4) === 0 || empty($job["user"])
+        || !aiAgentChatIdValid(isset($job["conversation"]) ? $job["conversation"] : ""))
+        return;
+    $turn = aiAgentJobPublic($job);
+    $turn["progress"] = null;
+    $now = time();
+    aiAgentChatsMutate($db, $job["user"], function($chats) use ($job, $turn, $now){
+        return array(aiAgentChatsPutTurn($chats, $job["conversation"], $turn, $now), null);
+    });
+}
+function aiAgentChatDelete($db, $user, $id){
+    return (bool)aiAgentChatsMutate($db, $user, function($chats) use ($id){
+        return array(aiAgentChatsRemove($chats, $id), aiAgentChatsFind($chats, $id) !== null);
+    });
 }
 function getAiChatSettings($settings=array()){
     if(is_string($settings)){
