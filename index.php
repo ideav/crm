@@ -388,7 +388,7 @@ if(($z === "my") && ((isset($com[2]) ? $com[2] : "") === "register")){ # Registe
         $id = newUser($email, $email, "115", "", "");
 		# Save password into token so that the user cannot log in until the confirmation
         Insert($id, 1, TOKEN, hash("sha512", Salt($id, $_POST["regpwd"])), "Insert password");
-        $confirm = hash("sha512", "xz$email");
+        $confirm = Reg_confirm_code();
         Insert($id, 1, PASSWORD, $confirm, "Insert confirmation code"); # Save confirmation code into password
         if(isset($_COOKIE["_aff"]))
             Insert($id, 1, 1012, (int)$_COOKIE["_aff"], "Insert the affiliate ref");
@@ -954,8 +954,37 @@ function Report_exists_or_404($id){
 		my_die(t9n("[RU]Запрос #$id не найден[EN]Report #$id not found"), "404 Not Found");
 }
 # </not-found-5067>
+# xsrf сессии: производный от её токена ($a), без токена не вычисляется
 function xsrf($a, $b){
-	return substr(hash("sha512", Salt($a, $b)), 0, 22);
+	global $z;
+	return substr(hash("sha512", SALT."$z:$a:$b"), 0, 22);
+}
+# xsrf прежней формулы sha512(SALT.<база>.$b): токен в неё не входил, значение было общим на базу
+function Xsrf_is_legacy($xsrf, $user){
+	global $z;
+	foreach(array($z, $user) as $b)
+		if($xsrf === substr(hash("sha512", SALT.$z.$b), 0, 22))
+			return TRUE;
+	return FALSE;
+}
+# Вход по Authorization: Basic (base64 «логин:пароль» или открытым текстом) — токен пользователя или FALSE
+function Basic_auth_token($value){
+	global $z;
+	if(strpos($value, ":") === FALSE)
+		$value = base64_decode($value);
+	$tmp = explode(":", $value, 2);
+	$u = addslashes($tmp[0]);
+	$pwd = hash("sha512", Salt($u, isset($tmp[1]) ? $tmp[1] : ""));
+	$data_set = Exec_sql("SELECT tok.val tok, u.id FROM $z pwd, $z u"
+							." LEFT JOIN $z tok ON tok.up=u.id AND tok.t=".TOKEN
+						." WHERE u.t=".USER." AND u.val='$u' AND pwd.up=u.id AND pwd.val='$pwd'"
+				, "Basic authentication");
+	if(!($row = mysqli_fetch_array($data_set)))
+		return FALSE;
+	if(isset($row["tok"]))
+		return $row["tok"];
+	Insert($row["id"], 1, TOKEN, $pwd, "Save basic token");
+	return $pwd;
 }
 // Cryptographically secure session/auth token. random_bytes() throws if no
 // CSPRNG is available; we fall back to openssl_random_pseudo_bytes (which
@@ -2606,29 +2635,14 @@ function Validate_Token(){ # Validates the cookie token and gathers the user per
     		}
     		elseif(strtolower($key) === "authorization"){
     		    if(strtolower(substr($value, 0, 5)) === "basic"){  // Basic HTML authorization
-        		    $value = trim(substr($value, 5));
-        		    if(strpos($value, ":") === FALSE)
-                        $value = base64_decode($value);
-        		    $tmp = explode(":", $value);
-                    $u = $tmp[0];
-                    $pwd = hash("sha512", Salt($u, $tmp[1]));
-            		$data_set = Exec_sql("SELECT tok.val tok, u.id FROM $z pwd, $z u"
-            									." LEFT JOIN $z tok ON tok.up=u.id AND tok.t=".TOKEN
-            								." WHERE u.t=".USER." AND u.val='$u' AND pwd.up=u.id AND pwd.val='$pwd'"
-            						, "Basic authentication");
-            		if($row = mysqli_fetch_array($data_set)){
-            		    if(isset($row["tok"]))
-                    		$tok = $row["tok"];
-                    	else
-                    	    insert($row["id"], 1, TOKEN, $tok = $pwd, "Save basic token");
-            		}
-                	else{
+        		    $tok = Basic_auth_token(trim(substr($value, 5)));
+            		if($tok === FALSE){
             	        header("HTTP/1.0 401 Unauthorized");
-            		    die("[{\"error\":\"Basic auth: Invalid login/password (login:$u)\"}]");
+            		    die("[{\"error\":\"Basic auth: Invalid login/password\"}]");
                 	}
     		    }
     		    elseif(strtolower(substr($value, 0, 6)) === "bearer")  // Bearer-token
-        		    $tok = trim(substr($value, 6));
+        		    $tok = addslashes(trim(substr($value, 6)));
     		    else // Auth token
             		$tok = htmlentities($value);
         		break;
@@ -2656,14 +2670,17 @@ function Validate_Token(){ # Validates the cookie token and gathers the user per
 			if(!$row["r"])
 				my_die(t9n("[RU]Пользователю ".$GLOBALS["GLOBAL_VARS"]["user"]." не задана роль"
 				        ."[EN]No role assigned to user ".$GLOBALS["GLOBAL_VARS"]["user"]));
+			# xsrf без записи или прежней формулы (общий на базу) заменяется на производный от токена
+			if(!$row["xsrf_id"])
+				Insert($row["id"], 1, XSRF, $xsrf = xsrf($tok, $z), "Save xsrf");
+			elseif(Xsrf_is_legacy((string)$xsrf, $GLOBALS["GLOBAL_VARS"]["user"]))
+				Update_Val($row["xsrf_id"], $xsrf = xsrf($tok, $z));
 			if($row["act_id"])
                 Exec_sql("UPDATE $z SET val=".microtime(TRUE)." WHERE id=".$row["act_id"], "Update activity time", FALSE);
             else
                 Exec_sql("INSERT INTO $z (up, ord, t, val) VALUES (".$row["id"].",0,".ACTIVITY.",".microtime(TRUE).")", "Set activity time", FALSE);
             if($typ === SECRET){
         		setcookie("idb_$z", "", time() - 3600, "/");  # Remove the password cookie
-            	if(!$row["xsrf"])
-            		Insert($row["id"], 1, XSRF, $xsrf=xsrf($tok, $GLOBALS["GLOBAL_VARS"]["user"]), "Save xsrf for secret");
         		$data_tok = Exec_sql("SELECT tok.id FROM $z tok WHERE tok.t=".TOKEN." AND tok.up=".$row["id"], "Check if token exists");
         		if(!mysqli_fetch_array($data_tok))
             		Insert($row["id"], 1, TOKEN, $tok, "Save token for secret");
@@ -8865,9 +8882,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 				$path = "templates/custom/$z";
 			if(!file_exists($path))
 				mkdir($path);
-			$add_path = isset($_REQUEST["add_path"]) ? $_REQUEST["add_path"] : "";
-			if(strpos($add_path, "..") !== false)
-            	$add_path = "";
+			$add_path = Dir_admin_add_path(isset($_REQUEST["add_path"]) ? $_REQUEST["add_path"] : "");
 			if(isset($_REQUEST["gf"]))
 				if((strpos($_REQUEST["gf"], "..") === false) && file_exists($path.$add_path."/".$_REQUEST["gf"]))
 				{
@@ -10336,6 +10351,46 @@ function Restore_allowed(){
 	return isset($GLOBALS["GLOBAL_VARS"]["user_id"]) && (((string)$GLOBALS["GLOBAL_VARS"]["user_id"] === "0")
 		|| ($GLOBALS["GLOBAL_VARS"]["user"] === $z));
 }
+# restore_admin (до входа в базу): токен владельца базы (пользователь с именем базы) из куки idb_<база>,
+# POST token или X-Authorization; токен кабинета my того, за кем база записана; мастер-токен сервера
+function Restore_admin_allowed(){
+	global $z;
+	$tokens = array();
+	if(isset($_COOKIE["idb_$z"]))
+		$tokens[] = $_COOKIE["idb_$z"];
+	if(isset($_POST["token"]))
+		$tokens[] = $_POST["token"];
+	foreach(getallheaders() as $key => $value)
+		if(strtolower($key) === "x-authorization")
+			$tokens[] = trim($value);
+	foreach($tokens as $tok){
+		if(!is_string($tok) || ($tok === ""))
+			continue;
+		if(hash_equals(hash("sha512", ADMINHASH.$z), $tok))
+			return TRUE;
+		if(mysqli_fetch_array(Exec_sql("SELECT u.id FROM $z u, $z tok WHERE u.t=".USER." AND u.val='$z' AND tok.up=u.id"
+				." AND tok.t=".TOKEN." AND tok.val='".addslashes($tok)."' LIMIT 1", "Restore admin: owner token")))
+			return TRUE;
+	}
+	if(($z !== "my") && isset($_COOKIE["idb_my"]) && is_string($_COOKIE["idb_my"]) && ($_COOKIE["idb_my"] !== ""))
+		if(mysqli_fetch_array(Exec_sql("SELECT u.id FROM my tok, my u, my db WHERE u.t=".USER." AND tok.up=u.id"
+				." AND tok.val='".addslashes($_COOKIE["idb_my"])."' AND tok.t=".TOKEN
+				." AND db.val='$z' AND db.up=u.id AND db.t=".DATABASE." LIMIT 1", "Restore admin: cabinet token")))
+			return TRUE;
+	return FALSE;
+}
+# Код подтверждения регистрации — случайный, по адресу почты не вычисляется
+function Reg_confirm_code(){
+	return secureToken();
+}
+# Подкаталог dir_admin внутри папки базы: «» или «/a/b». Ведущий «/» обязателен — иначе
+# «download/abc» + «d» = папка чужой базы abcd; «..» отбрасывает путь целиком
+function Dir_admin_add_path($p){
+	$p = trim(str_replace("\\", "/", (string)$p), "/");
+	if(($p === "") || (strpos($p, "..") !== false) || (strpos($p, "\0") !== false))
+		return "";
+	return "/$p";
+}
 function Restore_id($sql, $msg){
 	$row = mysqli_fetch_array(Exec_sql($sql, $msg));
 	return $row ? $row[0] : 0;
@@ -10552,8 +10607,9 @@ function Code_restore_apply($source){
 # </code-backup-5168>
 function check()
 {
-    if(isset($_POST["_xsrf"]))
-    	if($GLOBALS["GLOBAL_VARS"]["xsrf"] == $_POST["_xsrf"]) # Check the xsrf token
+    $xsrf = isset($GLOBALS["GLOBAL_VARS"]["xsrf"]) ? (string)$GLOBALS["GLOBAL_VARS"]["xsrf"] : "";
+    if(isset($_POST["_xsrf"]) && is_string($_POST["_xsrf"]) && ($xsrf !== ""))
+    	if(hash_equals($xsrf, $_POST["_xsrf"])) # Check the xsrf token
 	    	return true;
 	if($GLOBALS["GLOBAL_VARS"]["xsrf"] == ADMINHASH)
     	return true;
@@ -14149,6 +14205,10 @@ switch($a)  # Check actions, which don't require authentication
 		break;
 
 	case "restore_admin":
+		if(!Restore_admin_allowed()){
+			header("HTTP/1.0 403 Forbidden");
+			die('{"result":"error, the DB owner token required"}');
+		}
 		if($_SERVER["REQUEST_METHOD"] === "POST"){
     		$data_set = Exec_sql("SELECT u.id, r.id rid, r.t rol FROM $z u LEFT JOIN $z r ON r.up=u.id AND r.val='115' WHERE u.t=".USER." AND u.val='$z'"
 								, "Check the admin");
@@ -14479,7 +14539,6 @@ if(Validate_Token())
 			break;
 # Type editor commands
 		case "_d_req":
-		case "_attributes":
 			if(($id == 0) || ($t == 0))
 				my_die(t9n("[RU]Неверный реквизит ($t) или ID ($id)[EN] Invalid requisite($t) or ID ($id)"));
 			if($t === 1){ // Add a free link Req
@@ -14528,7 +14587,6 @@ if(Validate_Token())
 			break;
 			
 		case "_d_save":
-		case "_patchterm":
 			if($val == "")
 				my_die(t9n("[RU]Неверный тип[EN]Invalid type"));
 			if($row = mysqli_fetch_array(Exec_sql("SELECT obj.t, obj.val, obj.ord, dup.id dup FROM $z obj
@@ -14547,7 +14605,6 @@ if(Validate_Token())
 			break;
 
 		case "_d_alias":
-		case "_setalias":
 			if(strpos($val, ":") !== false)
 				my_die(t9n("[RU]Недопустимый символ &laquo;:&raquo; в псевдониме $val [EN] Invalid character &laquo;:&raquo; in the alias $val"));
 			if($row = mysqli_fetch_array(Exec_sql("SELECT term.val, term.t, par.up, term.up myup FROM $z term, $z par WHERE term.id=$id AND par.id=term.t", "Get Ref alias"))){
@@ -14585,7 +14642,6 @@ if(Validate_Token())
 			break;
 
 		case "_d_new":
-		case "_terms":
 			if($val == "")
 				my_die(t9n("[RU]Пустой тип[EN]Empty type"));
 			if(!isset($_REQUEST["t"]))
@@ -14602,7 +14658,6 @@ if(Validate_Token())
 			break;
 
 		case "_d_ref":
-		case "_references":
 			if($id == 0)
 				my_die(t9n("[RU]Неверная ссылка ($id) [EN]Invalid link ($id)"));
 			if($row = mysqli_fetch_array(Exec_sql("SELECT obj.up, obj.t, ref.id FROM $z obj LEFT JOIN $z ref ON ref.up=0 AND ref.t=$id AND ref.val='' WHERE obj.id=$id"
@@ -14621,7 +14676,6 @@ if(Validate_Token())
 			break;
 
 		case "_d_null":
-		case "_setnull":
 			$result = Exec_sql("SELECT obj.id, req.val FROM $z req LEFT JOIN $z obj ON obj.id=req.up WHERE req.id=$id and obj.up=0"
 							, "Check the req and obj");
 			if($row = mysqli_fetch_array($result))
@@ -14632,7 +14686,6 @@ if(Validate_Token())
 			break;
 
 		case "_d_multi":
-		case "_setmulti":
 			$result = Exec_sql("SELECT obj.id, req.val FROM $z req LEFT JOIN $z obj ON obj.id=req.up WHERE req.id=$id and obj.up=0"
 							, "Check the req and obj");
 			if($row = mysqli_fetch_array($result))
@@ -14643,7 +14696,6 @@ if(Validate_Token())
 			break;
 
 		case "_d_key":
-		case "_setkey":
 			$result = Exec_sql("SELECT obj.id, req.val FROM $z req LEFT JOIN $z obj ON obj.id=req.up WHERE req.id=$id and obj.up=0"
 							, "Check the req and obj");
 			if($row = mysqli_fetch_array($result))
@@ -14654,7 +14706,6 @@ if(Validate_Token())
 			break;
 
 		case "_d_attrs":
-		case "_modifiers":
 			$prevAttrs = "";
 			if($row = mysqli_fetch_array(Exec_sql("SELECT val FROM $z WHERE id=$id", "Get req attrs")))
 				$prevAttrs = $row["val"];
@@ -14694,7 +14745,6 @@ if(Validate_Token())
 			break;
 
 		case "_d_up":
-		case "_moveup":
 			$result = Exec_sql("SELECT obj.up, obj.ord, max(peers.ord) new_ord
 								FROM $z obj LEFT JOIN $z peers ON peers.up=obj.up AND peers.ord<obj.ord WHERE obj.id=$id"
 							, "Get new Order");
@@ -14712,7 +14762,6 @@ if(Validate_Token())
 			break;
 
 		case "_d_ord":
-		case "_setorder":
 	        if(!is_numeric($_REQUEST["order"]) || ((int)$_REQUEST["order"] < 1))
         		die("Invalid order");
         	$newOrd = (int)$_REQUEST["order"];
@@ -14734,7 +14783,6 @@ if(Validate_Token())
 			break;
 
 		case "_d_del":
-		case "_deleteterm":
 			$data_set = Exec_sql("SELECT COUNT(id) FROM $z WHERE t=$id AND t!=up", "Check, if the Typ is being used");
 			if($row = mysqli_fetch_array($data_set))
 				if($row[0] > 0)
@@ -14753,7 +14801,6 @@ if(Validate_Token())
 			break;
 
 		case "_d_del_req":
-		case "_deletereq":
 			$data_set = Exec_sql("SELECT def.up, def.t typ, def.ord, r.t, r.val FROM $z def, $z r WHERE def.id=$id AND r.id=def.t", "Get Req's typ");
 			if($row = mysqli_fetch_array($data_set))
 			{

@@ -25,3 +25,7 @@ experiments/*
 
 # Снапшоты живой базы из миграционных скриптов docs/scripts (создаются при --apply)
 docs/scripts/out/
+
+# Журналы приложения пишутся в logs/ (LOGS_DIR); в репозитории только запрет выдачи
+/logs/*
+!/logs/.htaccess
