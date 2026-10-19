@@ -81,9 +81,9 @@ var DAY_SETTINGS = { DAY_START_HOUR: '8:00', DAY_END_HOUR: '16:30', LUNCH_START:
     LUNCH_DURATION: '40', TOTAL_INTERVALS: '20', MAX_OVERWORK_CUTS_MN: '5', MAX_OVERWORK_TUNE_MN: '10',
     SLOT_PLACEMENT: '1' };
 var TIMES = { KNIFE: 30, MATERIAL_WINDING: 15, KNIFE_MOVE: 0, BETWEEN_CUTS: 2, CLEANUP_SHIFT: 30 };
-// Две точки намотки — иначе метраж выше последней точки не экстраполируется (клампится), и
-// «проход длиннее смены» из фикстуры ниже не получится.
-var OP_TIMES = { WIND_300: 1.8, WIND_600: 3.6 };
+// Норма для прохода 120 км — выше последней точки метраж не экстраполируется (берётся последняя
+// норма, #5198), и без неё «проход длиннее смены» из фикстуры ниже не получится.
+var OP_TIMES = { WIND_300: 1.8, WIND_600: 3.6, WIND_120000: 720 };
 var SID = '1279';
 var BASE = new Date(2026, 6, 28, 0, 0, 0, 0).getTime();
 

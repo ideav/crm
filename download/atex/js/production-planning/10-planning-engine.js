@@ -1397,8 +1397,8 @@
     }
 
     // Точки «намотка N метров → минуты» из кодов WIND_<метры> таблицы времён операций
-    // (WIND_300=1.2 … WIND_1100=5.6). Спец-коды (WIND_FOIL_305, WIND_05_110) не парсятся
-    // как серия — это отдельные режимы (учтём позже). → [{m, min}] по возрастанию метров.
+    // (WIND_300=1.2 … WIND_1100=5.6). Спец-серии (WIND_FOIL_*, WIND_05_*, WIND_W30_*) идут
+    // отдельными наборами, прикреплёнными к результату. → [{m, min}] по возрастанию метров.
     function windingPointsFromTimes(opTimes){
         var pts = [];
         Object.keys(opTimes || {}).forEach(function(code){
@@ -1412,7 +1412,29 @@
         pts.foil = foilWindingPointsFromTimes(opTimes);
         // #4501: ярусы УЗКИХ полос (WIND_W30_<метры>) — тем же приёмом.
         pts.narrow = narrowWindingTiersFromTimes(opTimes);
+        // #5198: втулка 0.5″ наматывается медленно — своя серия WIND_05_<метры>.
+        pts.halfInch = halfInchWindingPointsFromTimes(opTimes);
         return pts;
+    }
+
+    // #5198: точки намотки на ВТУЛКУ 0.5″ из кодов WIND_05_<метры> («Намотка 0,5 до 110 метров»,
+    // WIND_05_110=4). Читаются порогом, как базовая серия: при одной строке любой проход стоит её
+    // норму. Помечаем halfInch:true — для подписи нормы (windNormCode). Нет кодов → [].
+    function halfInchWindingPointsFromTimes(opTimes){
+        var pts = [];
+        Object.keys(opTimes || {}).forEach(function(code){
+            var m = /^WIND_05_(\d+)$/.exec(code);
+            if (m) pts.push({ m: Number(m[1]), min: Number(opTimes[code]) || 0, halfInch: true });
+        });
+        pts.sort(function(a, b){ return a.m - b.m; });
+        return pts;
+    }
+
+    // #5198: задание на втулке 0.5″ — по «Дюймам» втулки (sleeveInches резки/плана/раскладки;
+    // из отчёта приходит строкой «0.50»). Не знаем дюймов → не 0.5″.
+    function isHalfInchSleeve(cut){
+        return !!cut && typeof cut === 'object' && cut.sleeveInches != null && cut.sleeveInches !== ''
+            && Math.abs(Number(cut.sleeveInches) - 0.5) < 1e-9;
     }
 
     // #4501: ЯРУСЫ УЗКОЙ НАМОТКИ. Полоса ≤ 30 мм наматывается дольше — на вал насаживается
@@ -1481,10 +1503,15 @@
     //   #4501: если у резки есть полоса не шире порога яруса — ярус узкой намотки (самый узкий
     //     подходящий, он специфичнее). У фольги свой ярус (WIND_FOIL_W…): без него узкая фольга
     //     остаётся на блочной фольговой норме — линейная узкая серия её бы УСКОРИЛА.
+    //   #5198: втулка 0.5″ (sleeveInches) — серия WIND_05_ при любой длине и старше всех
+    //     остальных: на тонкую втулку мотается медленно, какими бы ни были полосы и сырьё.
     // Первый аргумент — резка/дескриптор/план целиком (из него берём isFoil и самую узкую полосу)
     // либо, как раньше, булев isFoil (тогда ширины полос неизвестны и ярус не выбирается).
     function windPointsForCut(cutOrIsFoil, windPoints){
         var isFoil, minWidth;
+        if (isHalfInchSleeve(cutOrIsFoil) && windPoints && windPoints.halfInch && windPoints.halfInch.length) {
+            return windPoints.halfInch;
+        }
         if (cutOrIsFoil && typeof cutOrIsFoil === 'object') {
             isFoil = !!cutOrIsFoil.isFoil;
             minWidth = minStripWidthOfCut(cutOrIsFoil);
@@ -1515,31 +1542,26 @@
         return round3(Math.ceil(x / Number(ref.m)) * (Number(ref.min) || 0));
     }
 
-    // Время намотки runMeters (мин) по точкам — кусочно-линейно: ниже первой точки —
-    // пропорционально от 0; между точками — линейно; выше последней — экстраполяция по
-    // последнему отрезку (при одной точке — клампим). #3742: точки фольги (флаг foil) —
-    // блочная модель foilWindingMinutes, а не интерполяция. Нет точек / runMeters≤0 → 0.
+    // Время намотки runMeters (мин) по точкам — ПОРОГОМ (#5198): берётся норма ближайшей точки
+    // не короче прохода («до 300 м — WIND_300, до 450 м — WIND_450»): 250 м при WIND_300=1.5 стоит
+    // 1.5 мин. Без пропорции и интерполяции. Выше последней точки — последняя норма, без
+    // экстраполяции (нужен длиннее — заводится строка справочника). #3742: точки фольги (флаг
+    // foil) — блочная модель foilWindingMinutes. Нет точек / runMeters≤0 → 0.
     function windingMinutes(runMeters, points){
         var x = Number(runMeters) || 0;
+        if (x <= 0) return 0;
         var p = (points || []).slice().sort(function(a, b){ return a.m - b.m; });
-        if (!p.length || x <= 0) return 0;
         if (p.some(function(q){ return q.foil; })) return foilWindingMinutes(x, p);   // #3742: фольга — блоками
-        if (x <= p[0].m) return round3(p[0].min * (x / p[0].m));
-        for (var i = 1; i < p.length; i++){
-            if (x <= p[i].m){
-                var t = (x - p[i-1].m) / (p[i].m - p[i-1].m);
-                return round3(p[i-1].min + t * (p[i].min - p[i-1].min));
-            }
-        }
-        // #4501: узкая серия ВЫШЕ последней своей точки не экстраполируется — клампим. Диапазон
-        // задан справочником («×2 до 600 м включительно»): доплата за узкие втулки на длинном
-        // рулоне не исчезает (падать на базовую норму нельзя), но и выдумывать за справочник
-        // наклон не следует. Нужен 900 м — заводится строка WIND_W30_900.
-        if (p[p.length-1].narrow) return round3(p[p.length-1].min);
-        if (p.length < 2) return round3(p[p.length-1].min);
-        var a = p[p.length-2], b = p[p.length-1];
-        var slope = (b.min - a.min) / (b.m - a.m);
-        return round3(b.min + slope * (x - b.m));
+        var norm = windingThresholdPoint(x, p);
+        return norm ? round3(norm.min) : 0;
+    }
+
+    // #5198: точка серии, чья норма применяется к проходу x м: первая с m ≥ x, выше последней —
+    // последняя. points отсортированы по m. Нет точек → null.
+    function windingThresholdPoint(x, points){
+        if (!points.length) return null;
+        for (var i = 0; i < points.length; i++){ if (x <= points[i].m) return points[i]; }
+        return points[points.length-1];
     }
 
     // cutRef — резка/дескриптор/план целиком (#4501: из него берётся и фольга, и самая узкая
@@ -1551,19 +1573,15 @@
         return round3(windingMinutes(runMeters, pts) * runs);
     }
 
-    // Норма(ы) намотки, реально применённые для метража runMeters (зеркало windingMinutes,
-    // #3240 «привести только ту, которая здесь подходит»):
-    //   точное совпадение точки → [та точка]; ниже первой → [первая] (пропорция от 0);
-    //   между точками → [нижняя, верхняя] (интерполяция); выше последней → [предпоследняя,
-    //   последняя] (экстраполяция). Нет точек / runMeters≤0 → []. → подмножество points.
+    // Норма намотки, реально применённая для метража runMeters (зеркало windingMinutes,
+    // #3240 «привести только ту, которая здесь подходит»; #5198 — порог): [ближайшая точка не
+    // короче прохода], выше последней — [последняя]. Нет точек / runMeters≤0 → [].
     function relevantWindingNorms(runMeters, points){
         var x = Number(runMeters) || 0;
         var p = (points || []).slice().sort(function(a, b){ return a.m - b.m; });
-        if (!p.length || x <= 0) return [];
-        for (var k = 0; k < p.length; k++){ if (p[k].m === x) return [p[k]]; }
-        if (x <= p[0].m) return [p[0]];
-        for (var i = 1; i < p.length; i++){ if (x <= p[i].m) return [p[i-1], p[i]]; }
-        return p.length >= 2 ? [p[p.length-2], p[p.length-1]] : [p[p.length-1]];
+        if (x <= 0) return [];
+        var norm = windingThresholdPoint(x, p);
+        return norm ? [norm] : [];
     }
 
     // norms → строка «Норма намотки: WIND_600=4 мин» (одна) либо «Нормы намотки:
@@ -1583,7 +1601,7 @@
     // Код нормы намотки для подписи оператору: WIND_600 / WIND_FOIL_305 / WIND_W30_600 (#4501 —
     // по коду видно, что применена узкая серия, и какой у неё порог).
     function windNormCode(norm){
-        return 'WIND_' + (norm && norm.foil ? 'FOIL_' : '')
+        return 'WIND_' + (norm && norm.foil ? 'FOIL_' : '') + (norm && norm.halfInch ? '05_' : '')
             + (norm && norm.narrow ? 'W' + formatTimingNumber(norm.maxWidth) + '_' : '')
             + formatTimingNumber(norm && norm.m);
     }
@@ -7676,6 +7694,7 @@
                     id: String(m.id), slitterId: slitterById[String(m.id)],
                     materialId: m.materialId, winding: m.winding, batchId: m.batchId,
                     knifeWidths: m.knifeWidths, knifeCount: m.knifeCount, isFoil: m.isFoil,
+                    sleeveInches: m.sleeveInches,   // #5198
                     width: m.width, planDate: m.planDate, plannedRuns: m.plannedRuns,
                     runLength: m.runLength, duration: m.duration
                 };

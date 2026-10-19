@@ -756,35 +756,37 @@
     // #3744: точки «намотка N метров → минуты» из кодов WIND_<метры> таблицы «Время
     // операции, мин» (WIND_300=1.2 … WIND_1100=5.6). Та же модель метража, что в
     // production-planning.js (windingPointsFromTimes). Спец-коды (WIND_FOIL_*) не парсим.
-    function windingPointsFromTimes(opTimes) {
+    // #5198: втулка 0.5″ (sleeveInches) наматывается медленно — серия WIND_05_<метры>
+    // («Намотка 0,5 до 110 метров») при любой длине, если она заведена; как в планировании.
+    function windingPointsFromTimes(opTimes, sleeveInches) {
+        if (isHalfInch(sleeveInches)) {
+            var half = windingSeries(opTimes, /^WIND_05_(\d+)$/);
+            if (half.length) return half;
+        }
+        return windingSeries(opTimes, /^WIND_(\d+)$/);
+    }
+
+    function windingSeries(opTimes, re) {
         var pts = [];
         Object.keys(opTimes || {}).forEach(function(code) {
-            var m = /^WIND_(\d+)$/.exec(code);
+            var m = re.exec(code);
             if (m) pts.push({ m: Number(m[1]), min: toNumber(opTimes[code]) });
         });
         pts.sort(function(a, b) { return a.m - b.m; });
         return pts;
     }
 
-    // #3744: минуты намотки runMeters по точкам — кусочно-линейно (зеркало
-    // production-planning.js windingMinutes): ниже первой точки — пропорция от 0; между
-    // точками — линейно; выше последней — экстраполяция последним отрезком (при одной
-    // точке клампим). Нет точек / runMeters ≤ 0 → 0.
+    // #3744/#5198: минуты намотки runMeters по точкам — ПОРОГОМ (зеркало production-planning.js
+    // windingMinutes): норма ближайшей точки не короче прохода («до 300 м — WIND_300»), без
+    // пропорции и интерполяции; выше последней — последняя норма. Нет точек / runMeters ≤ 0 → 0.
     function windingMinutes(runMeters, points) {
         var x = toNumber(runMeters);
         var p = (points || []).slice().sort(function(a, b) { return a.m - b.m; });
         if (!p.length || x <= 0) return 0;
-        if (x <= p[0].m) return round3(p[0].min * (x / p[0].m));
-        for (var i = 1; i < p.length; i++) {
-            if (x <= p[i].m) {
-                var t = (x - p[i - 1].m) / (p[i].m - p[i - 1].m);
-                return round3(p[i - 1].min + t * (p[i].min - p[i - 1].min));
-            }
+        for (var i = 0; i < p.length; i++) {
+            if (x <= p[i].m) return round3(p[i].min);
         }
-        if (p.length < 2) return round3(p[p.length - 1].min);
-        var a = p[p.length - 2], b = p[p.length - 1];
-        var slope = (b.min - a.min) / (b.m - a.m);
-        return round3(b.min + slope * (x - b.m));
+        return round3(p[p.length - 1].min);
     }
 
     // Лидер на проход (#4006) — код BETWEEN_CUTS таблицы «Время операции, мин»; нет
@@ -2022,7 +2024,7 @@
         // до целых минут один раз — во всплывающей подсказке формула целиком.
         var times = this.opTimes || {};
         var leaderUnit = leaderMinutesFromTimes(times);
-        var planMins = planningMinutes(p.totalPasses, p.rollLength, windingPointsFromTimes(times), leaderUnit);
+        var planMins = planningMinutes(p.totalPasses, p.rollLength, windingPointsFromTimes(times, this.sleeveChoice().inches), leaderUnit);   // #5198: 0.5″
         var units = planningTimeUnits(planMins);
         var timeVal = el('span', { class: 'atex-co-time', title: 'Наладка ' + SETUP_ONCE_MIN
             + ' мин + «Всего резок» × (намотка по норме WIND_* + лидер ' + ruNum(leaderUnit)

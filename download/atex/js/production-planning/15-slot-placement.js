@@ -27,7 +27,7 @@
         return { kind: 'cut', id: id, slitterId: sid,
                  materialId: cut.materialId, winding: cut.winding, batchId: cut.batchId,
                  knifeWidths: cut.knifeWidths, knifeCount: cut.knifeCount, rollerWidth: cut.rollerWidth,
-                 isFoil: !!cut.isFoil, leader: cut.leader, sleeveId: cut.sleeveId,
+                 isFoil: !!cut.isFoil, leader: cut.leader, sleeveId: cut.sleeveId, sleeveInches: cut.sleeveInches,
                  plannedRuns: Number(cut.plannedRuns) || 0, dueKey: dk, fixed: !!cut.fixed, firstPartId: fp,
                  // #4497: ХРАНИМОЕ место задания — время старта («Дата план», сек) и станок, где оно
                  // лежит. По ним видно, чьё место в дне защищать (у 🔒) и кто стоял перед ней раньше.

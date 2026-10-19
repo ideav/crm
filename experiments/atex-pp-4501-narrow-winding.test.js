@@ -74,8 +74,8 @@ assertEqual(planning.windPointsForCut(cut({ kw: [] }), pts), pts, 'полос н
 assertEqual(planning.windingMinutes(600, narrowPts), 8, 'узкая: 600 м → 8 мин (было 4)');
 assertEqual(planning.windingMinutes(450, narrowPts), 3.6, 'узкая: 450 м → 3.6 мин (было 1.8)');
 assertEqual(planning.windingMinutes(300, narrowPts), 2.4, 'узкая: 300 м → 2.4 мин (было 1.2)');
-assertEqual(planning.windingMinutes(150, narrowPts), 1.2, 'узкая: 150 м → пропорция от нуля (1.2)');
-assertEqual(planning.windingMinutes(525, narrowPts), 5.8, 'узкая: 525 м → интерполяция 3.6…8');
+assertEqual(planning.windingMinutes(150, narrowPts), 2.4, 'узкая: 150 м → полная норма 300 м (2.4, #5198)');
+assertEqual(planning.windingMinutes(525, narrowPts), 8, 'узкая: 525 м → норма 600 м (8, #5198: порог)');
 assertEqual(planning.windingMinutes(900, narrowPts), 8,
     'узкая: 900 м → клампим на последней точке серии (не экстраполируем и не падаем на базовую 5)');
 assertEqual(planning.windingMinutes(600, pts), 4, 'базовая серия не тронута: 600 м → 4');

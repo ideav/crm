@@ -1382,6 +1382,8 @@
                     // единодиаметровая (layoutPositionGroups разбивает позиции по втулке) —
                     // обычно одна; несколько (легаси-смешение) выделяем предупреждением.
                     sleeves: []
+                    // #5198: sleeveInches — «Дюймы» втулки задания (0.5″ — своя норма намотки
+                    // WIND_05_*); ставится ниже, только когда отчёт их отдал (нет поля — не знаем).
                 };
                 order.push(cutId);
             }
@@ -1392,6 +1394,13 @@
                 // в справочнике встречается ведущий таб у некоторых названий.
                 var sleeveVal = str(row.cut_sleeve).trim();
                 if (sleeveVal && cutsById[cutId].sleeves.indexOf(sleeveVal) < 0) cutsById[cutId].sleeves.push(sleeveVal);
+                // #5198: дюймы втулки. Среди нескольких втулок задания берём меньшую — на тонкую
+                // мотается медленнее, и время задания определяет она.
+                var inchRaw = str(row['Дюймы']).trim();
+                var inch = inchRaw === '' ? NaN : Number(inchRaw.replace(',', '.'));
+                if (isFinite(inch) && inch > 0 && (cutsById[cutId].sleeveInches == null || inch < cutsById[cutId].sleeveInches)) {
+                    cutsById[cutId].sleeveInches = inch;
+                }
             }
             var supplyId = str(row.supply_id);
             if (supplyId) {
@@ -2321,6 +2330,8 @@
                     windDir: normWinding(p && p.windDir),
                     windLength: windLengthValue(p && p.windLength),
                     isFoil: !!(p && p.isFoil),   // #3599: фольга (тип сырья) — в конец смены
+                    // #5198: дюймы втулки (группа одной втулки — sleeveId в ключе) → норма WIND_05_*
+                    sleeveInches: p && p.sleeveInches != null ? p.sleeveInches : null,
                     positions: []
                 };
                 order.push(groupKey);
@@ -2379,7 +2390,8 @@
             }
             // #4501: норма намотки зависит от полос раскладки (узкие ≤ порога — своя серия),
             // поэтому диагностика считает длительность тем же контекстом, что и генерация.
-            var layoutCut = { isFoil: !!(layout && layout.isFoil), strips: (layout && layout.strips) || [] };
+            var layoutCut = { isFoil: !!(layout && layout.isFoil), strips: (layout && layout.strips) || [],
+                sleeveInches: layout ? layout.sleeveInches : null };   // #5198
             if (!(plannedCutDurationMinutes(runLength, plannedRuns, opTimes, layoutCut) > 0)) {
                 out.push({
                     key: 'duration',

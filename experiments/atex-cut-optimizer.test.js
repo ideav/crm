@@ -178,8 +178,8 @@ var wp = core.windingPointsFromTimes(ot);
 assertEqual(wp, [{ m: 300, min: 1.2 }, { m: 600, min: 3 }, { m: 900, min: 5 }],
     'windingPointsFromTimes parses WIND_<m> codes (special codes ignored), sorted');
 assertEqual(core.windingMinutes(600, wp), 3, 'windingMinutes hits an exact norm point');
-assertEqual(core.windingMinutes(450, wp), 2.1, 'windingMinutes interpolates between 300 and 600');
-assertEqual(core.windingMinutes(150, wp), 0.6, 'windingMinutes scales proportionally below the first point');
+assertEqual(core.windingMinutes(450, wp), 3, 'windingMinutes between 300 and 600 → norm of 600 (#5198: threshold)');
+assertEqual(core.windingMinutes(150, wp), 1.2, 'windingMinutes below the first point → full first norm (#5198)');
 assertEqual(core.windingMinutes(450, []), 0, 'windingMinutes with no norms → 0');
 // #4832: лидер на проход — BETWEEN_CUTS, без кода → 2 мин (как в планировщике), явный 0 выключает.
 assertEqual(core.leaderMinutesFromTimes({ BETWEEN_CUTS: 3 }), 3, 'leaderMinutesFromTimes reads BETWEEN_CUTS');
@@ -187,8 +187,8 @@ assertEqual(core.leaderMinutesFromTimes({}), 2, 'leaderMinutesFromTimes defaults
 assertEqual(core.leaderMinutesFromTimes({ BETWEEN_CUTS: 0 }), 0, 'leaderMinutesFromTimes: explicit 0 disables');
 // #4832 (решение заказчика): наладку ОСТАВИЛИ, добавили лидер —
 // 45 (единожды) + «Всего резок» × (намотка + лидер), без промежуточных округлений.
-assertEqual(core.planningMinutes(10, 450, wp, 2), 86, '#4832 planningMinutes = 45 + 10 × (2.1 + 2)');
-assertEqual(core.planningMinutes(1, 450, wp, 2), 49.1, '#4832 одна резка 450 м → 45 + 2.1 + 2');
+assertEqual(core.planningMinutes(10, 450, wp, 2), 95, '#4832 planningMinutes = 45 + 10 × (3 + 2)');
+assertEqual(core.planningMinutes(1, 450, wp, 2), 50, '#4832 одна резка 450 м → 45 + 3 + 2');
 assertEqual(core.planningMinutes(0, 450, wp, 2), 0, 'planningMinutes is 0 when there are no cuts');
 assertEqual(core.planningMinutes(5, 450, [], 2), 55, '#4832 без норм намотки → 45 + 5 × лидер 2');
 // формулы заказчика: round((1.8 намотка + 2 лидер) × 25 проходов + 45) = 140 —

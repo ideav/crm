@@ -12,7 +12,7 @@
 // (ctx.continuesFromPrevDay) — тег «↩ Продолжение резки предыдущего рабочего дня».
 //
 // Сценарий = скриншот issue #3889: метраж прохода 500 м, нормы намотки WIND_450=1.8,
-// WIND_600=4 → намотка 1 прохода = 2.533 мин; голова — 0 проходов, продолжение — 23 прохода.
+// WIND_600=4 → намотка 1 прохода = 4 мин (порог WIND_600, #5198); голова — 0 проходов, продолжение — 23 прохода.
 //
 // Run with: node experiments/atex-production-planning-3889.test.js
 
@@ -27,7 +27,7 @@ function ok(cond, name) {
 function texts(lines) { return lines.map(function (l) { return l.text; }); }
 function has(arr, sub) { return arr.some(function (t) { return t.indexOf(sub) !== -1; }); }
 
-// Нормы намотки как на скриншоте: WIND_450=1.8, WIND_600=4 → для 500 м интерполяция = 2.533 мин.
+// Нормы намотки как на скриншоте: WIND_450=1.8, WIND_600=4 → для 500 м порог WIND_600 = 4 мин (#5198).
 var POINTS = [{ m: 450, min: 1.8 }, { m: 600, min: 4 }];
 var base = Date.UTC(2026, 5, 29);          // полночь дня, мс
 var ts = base / 1000 + 8 * 3600;           // 08:00, сек (авто-номер резки)
@@ -61,16 +61,16 @@ var tailCut = {
     knifeWidths: [30, 30, 30], knifeCount: 3,
     planDate: String(ts + 86400), number: String(ts + 86400), winding: 'OUT'
 };
-var scTail = { cutId: 'tail', startMin: 8 * 60 + 15, finishMin: 8 * 60 + 15 + 58.259, setupMin: 15, durationMin: 58.259, leaderMin: 47 };
+var scTail = { cutId: 'tail', startMin: 8 * 60 + 15, finishMin: 8 * 60 + 15 + 92, setupMin: 15, durationMin: 92, leaderMin: 47 };
 var ctxTail = planning.buildCutTimingCtx(tailCut, null, scTail, 500, POINTS, {}, { firstCutSetup: true });
 
 ok(ctxTail.setupOnly === false, 'продолжение: ctx.setupOnly = false (есть проходы)');
 var linesTail = texts(planning.cutTimingTimelineLines(ctxTail));
 // #4421: намотка и лидер — РАЗНЫМИ строками; итог = их сумма (и она сходится с окном).
-ok(has(linesTail, 'Намотка: 2.533 * 23 = 58.259'), 'продолжение: «Намотка: 2.533 * 23 = 58.259 мин» (#4421)');
+ok(has(linesTail, 'Намотка: 4 * 23 = 92'), 'продолжение: «Намотка: 4 * 23 = 92 мин» (#4421)');
 ok(has(linesTail, 'Лидер: 47 мин'), 'продолжение: «Лидер: 47 мин» своей строкой (норму не печатаем — 2*23=46 ≠ 47)');
 ok(!has(linesTail, 'Намотка и лидер'), 'продолжение: слитой строки «Намотка и лидер» больше нет (#4421)');
-ok(has(linesTail, 'Итого резка: 58.259 + 47 = 105.259'), 'продолжение: «Итого резка: 58.259 + 47 = 105.259» (#4006: лидер включён в итог)');
+ok(has(linesTail, 'Итого резка: 92 + 47 = 139'), 'продолжение: «Итого резка: 92 + 47 = 139» (#4006: лидер включён в итог)');
 ok(!has(linesTail, 'Только настройка станка'), 'продолжение: НЕТ строки настройки');
 ok(!has(linesTail, 'Продолжение резки предыдущего'), 'продолжение: без флага — тега «вчера» нет');
 
@@ -78,7 +78,7 @@ ok(!has(linesTail, 'Продолжение резки предыдущего'), 
 ctxTail.continuesFromPrevDay = true;
 var linesCont = texts(planning.cutTimingTimelineLines(ctxTail));
 ok(has(linesCont, '↩ Продолжение резки предыдущего рабочего дня (ножи на станке).'), 'продолжение+флаг: тег «↩ предыдущего рабочего дня»');
-ok(has(linesCont, 'Итого резка: 58.259 + 47 = 105.259'), 'продолжение+флаг: намотка по-прежнему считается (#4006: с лидером)');
+ok(has(linesCont, 'Итого резка: 92 + 47 = 139'), 'продолжение+флаг: намотка по-прежнему считается (#4006: с лидером)');
 
 // ── Обычная резка с проходами, остаток которых уходит на след. день (дробление по проходам) ──
 ctxTail.continuesFromPrevDay = false;
@@ -86,7 +86,7 @@ ctxTail.continuesNextDay = true;
 var linesNext = texts(planning.cutTimingTimelineLines(ctxTail));
 ok(has(linesNext, '↪ Остаток проходов — продолжение в следующем рабочем дне.'),
     'продолжение вперёд: тег «↪ остаток проходов в следующем дне»');
-ok(has(linesNext, 'Итого резка: 58.259 + 47 = 105.259'), 'продолжение вперёд: намотка считается (#4006: с лидером)');
+ok(has(linesNext, 'Итого резка: 92 + 47 = 139'), 'продолжение вперёд: намотка считается (#4006: с лидером)');
 
 // ── Прямой ctx без buildCutTimingCtx: setupOnly выводится и из runs=0 ──
 var bare = planning.cutTimingTimelineLines({

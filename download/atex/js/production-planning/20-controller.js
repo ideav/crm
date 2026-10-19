@@ -2750,7 +2750,13 @@
             var p = posById[String(pid)];
             return p ? p.width : 0;
         }) };
-        var duration = plannedCutDurationMinutes(runLength, d.plannedRuns, this.opTimes, draftCut); // #3606/#4501
+        // #5198: дюймы втулки — меньшие среди выбранных позиций (0.5″ — своя норма намотки).
+        selectedPositions.forEach(function(pid) {
+            var p = posById[String(pid)];
+            var inch = p && p.sleeveInches != null ? Number(p.sleeveInches) : NaN;
+            if (isFinite(inch) && inch > 0 && (draftCut.sleeveInches == null || inch < draftCut.sleeveInches)) draftCut.sleeveInches = inch;
+        });
+        var duration = plannedCutDurationMinutes(runLength, d.plannedRuns, this.opTimes, draftCut); // #3606/#4501/#5198
         var timing = cutTimingDetails(runLength, d.plannedRuns, this.opTimes, draftCut);
         var cutMainState = { last: this.lastCutMainValue };
         var cutMainValue = nextCutMainValue(this.cuts, controllerNowMs(this), cutMainState);
@@ -2878,7 +2884,7 @@
                 var w = Number(s.width) || 0, q = Math.round(Number(s.qty) || 0);
                 for (var i = 0; i < q; i++) knifeWidths.push(w);
             });
-            var prospectCut = { isFoil: position.isFoil, knifeWidths: knifeWidths };
+            var prospectCut = { isFoil: position.isFoil, knifeWidths: knifeWidths, sleeveInches: position.sleeveInches };   // #5198
             return {
                 forKey: String(positionId) + '|' + qty,
                 positionId: String(position.id), position: position, qty: qty,
@@ -4595,6 +4601,7 @@
                 slitterId: (c.slitter && c.slitter.id != null) ? String(c.slitter.id) : '',
                 materialId: c.materialId, winding: c.winding, batchId: c.batchId,
                 knifeWidths: c.knifeWidths, knifeCount: c.knifeCount, isFoil: !!c.isFoil,
+                sleeveInches: c.sleeveInches,   // #5198
                 width: c.width, planDate: c.planDate, plannedRuns: runs, runLength: runLength,
                 duration: plannedCutDurationMinutes(runLength, runs, self.opTimes, c)   // #3606/#4501
             };
@@ -7866,6 +7873,7 @@
                         lay.windLength = group.windLength;
                         lay.leader = group.leader;   // #3569: лидер профиля — копируется в задание
                         lay.isFoil = !!group.isFoil; // #3599: фольга — раскладку в конец смены
+                        lay.sleeveInches = group.sleeveInches;   // #5198: втулка 0.5″ — своя норма намотки
                         if (coreReserve > 0) {
                             // #3872: привязать втулочные полосы к уже заказанным 110-мм позициям
                             // того же заказа (что покрывает раскладка). Найденные позиции — реальные
@@ -8104,6 +8112,7 @@
                 knifeCount: stripsTotalKnives(lay && lay.strips),
                 knifeWidths: knifeWidthsForStrips(lay && lay.strips),
                 isFoil: !!(lay && lay.isFoil),
+                sleeveInches: lay ? lay.sleeveInches : null,   // #5198
                 width: stripsUsedWidth(lay && lay.strips),
                 rollerWidth: 0,
                 planDate: cutMainValue,
@@ -8132,6 +8141,7 @@
                 knifeCount: descriptor.knifeCount,
                 knifeWidths: descriptor.knifeWidths,
                 isFoil: descriptor.isFoil,
+                sleeveInches: descriptor.sleeveInches,   // #5198
                 width: descriptor.width,
                 rollerWidth: descriptor.rollerWidth,
                 planDate: descriptor.planDate,
@@ -8266,6 +8276,7 @@
                     knifeCount: plan.knifeCount,
                     knifeWidths: plan.knifeWidths,
                     isFoil: plan.isFoil,
+                    sleeveInches: plan.sleeveInches,   // #5198
                     width: plan.width,
                     rollerWidth: plan.rollerWidth
                 });
