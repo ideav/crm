@@ -1095,7 +1095,7 @@ const TOOLS = [
   // These tools provide full parity with the legacy Integram PHP API
   {
     name: 'integram_modify_requisite_attributes',
-    description: 'Modify requisite attributes in one operation (_d_attrs / _modifiers). Sets alias, null flag, and multi flag for a requisite in a single API call.',
+    description: 'Modify requisite attributes in one operation (_d_attrs). Sets alias, null flag, and multi flag for a requisite in a single API call.',
     inputSchema: {
       type: 'object',
       properties: {
