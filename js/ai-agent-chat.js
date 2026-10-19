@@ -35,12 +35,15 @@
         tickTimer: null,        // setInterval обновления текста ожидания
         currentBubble: null,    // «пузырь» агента с индикатором «думает»
         rendered: {},           // id задач, уже показанных в ленте
+        answered: {},           // crm#5193: id задач, чей ответ/ошибка уже в ленте
+        pollInFlight: null,     // crm#5193: id задачи, чей опрос ещё не вернулся
         localActivity: false,   // были ли отправки в этой сессии вкладки
         resumeChecked: false,   // восстановление выполняем один раз за загрузку
         progressText: '',       // python2node#849: последняя строка хода работы агента
 
         init: function () {
             this.rendered = {};
+            this.answered = {};
             this.planButtons = {};
             this.toggle = document.getElementById('ai-chat-toggle');
             this.panel = document.getElementById('ai-agent-panel');
@@ -807,7 +810,9 @@
                 return response.json().catch(function () { return null; });
             }).then(function (data) {
                 var job = data && data.job ? data.job : null;
-                if (job) {
+                // crm#5193: последняя задача на сервере — уже показанная прошлая, значит
+                // новое сообщение до сервера не дошло. Прошлый ответ за новый не выдаём.
+                if (job && !(job.id && self.answered[job.id])) {
                     self.routeJob(job, false);
                 } else {
                     self.replaceThinking('Не удалось связаться с ИИ-агентом. Повторите попытку позже.');
@@ -829,6 +834,10 @@
                 }
                 return;
             }
+            // crm#5193: ответ этой задачи уже в ленте (опросы вернулись пачкой) или опрос
+            // запоздал и относится к прошлой задаче — второй раз не рисуем.
+            if (job.id && this.answered[job.id]) return;
+            if (fromPoll && job.id !== this.pollJobId) return;
             this.activeJobId = job.id;
 
             if (job.status === 'done') {
@@ -837,6 +846,7 @@
                 return;
             }
             if (job.status === 'error') {
+                if (job.id) this.answered[job.id] = true;
                 this.replaceThinking(this.getErrorText(job.result) || job.error || 'ИИ-агент завершил работу с ошибкой.');
                 this.endWaiting();
                 return;
@@ -852,7 +862,7 @@
             var content = this.getAssistantContent(job.result) || 'ИИ-агент не вернул ответ.';
             var wrap = this.replaceThinking(content, null, this.getAssistantBlocks(job.result));
             if (job.result && job.result.plan) this.renderPlan(wrap, job.result.plan);
-            if (job.id) this.rendered[job.id] = true;
+            if (job.id) this.rendered[job.id] = this.answered[job.id] = true;
         },
 
         // python2node#849: последняя строка хода работы агента вместо общего «думаю».
@@ -928,17 +938,24 @@
         pollOnce: function () {
             var jobId = this.pollJobId;
             if (!jobId) return;
+            // crm#5193: при медленной сети тики не копят запросы — следующий опрос
+            // уходит только после ответа на предыдущий.
+            if (this.pollInFlight === jobId) return;
+            this.pollInFlight = jobId;
             var self = this;
+            var release = function () { if (self.pollInFlight === jobId) self.pollInFlight = null; };
             fetch(this.getStatusUrl(jobId), {
                 credentials: 'same-origin',
                 headers: { 'X-Requested-With': 'XMLHttpRequest' }
             }).then(function (response) {
                 return response.json().catch(function () { return null; });
             }).then(function (data) {
+                release();
                 // Нет данных — временный сбой/таймаут опроса, продолжаем ждать.
                 if (!data || !data.job) return;
                 self.routeJob(data.job, true);
             }).catch(function () {
+                release();
                 // Сетевой сбой опроса не фатален: задача жива на сервере.
             });
         },
@@ -969,12 +986,14 @@
             this.rendered[job.id] = true;
 
             if (job.status === 'done') {
+                this.answered[job.id] = true;
                 var wrap = this.addMessage('assistant', this.getAssistantContent(job.result) || 'ИИ-агент не вернул ответ.',
                     null, this.getAssistantBlocks(job.result));
                 if (job.result && job.result.plan) this.renderPlan(wrap, job.result.plan);
                 return;
             }
             if (job.status === 'error') {
+                this.answered[job.id] = true;
                 this.addMessage('assistant', this.getErrorText(job.result) || job.error || 'ИИ-агент завершил работу с ошибкой.');
                 return;
             }
