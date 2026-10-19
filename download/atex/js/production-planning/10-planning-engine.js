@@ -1397,8 +1397,8 @@
     }
 
     // Точки «намотка N метров → минуты» из кодов WIND_<метры> таблицы времён операций
-    // (WIND_300=1.2 … WIND_1100=5.6). Спец-коды (WIND_FOIL_305, WIND_05_110) не парсятся
-    // как серия — это отдельные режимы (учтём позже). → [{m, min}] по возрастанию метров.
+    // (WIND_300=1.2 … WIND_1100=5.6). Спец-серии (WIND_FOIL_*, WIND_05_*, WIND_W30_*) идут
+    // отдельными наборами, прикреплёнными к результату. → [{m, min}] по возрастанию метров.
     function windingPointsFromTimes(opTimes){
         var pts = [];
         Object.keys(opTimes || {}).forEach(function(code){
@@ -1412,7 +1412,29 @@
         pts.foil = foilWindingPointsFromTimes(opTimes);
         // #4501: ярусы УЗКИХ полос (WIND_W30_<метры>) — тем же приёмом.
         pts.narrow = narrowWindingTiersFromTimes(opTimes);
+        // #5198: втулка 0.5″ наматывается медленно — своя серия WIND_05_<метры>.
+        pts.halfInch = halfInchWindingPointsFromTimes(opTimes);
         return pts;
+    }
+
+    // #5198: точки намотки на ВТУЛКУ 0.5″ из кодов WIND_05_<метры> («Намотка 0,5 до 110 метров»,
+    // WIND_05_110=4). Читаются порогом, как базовая серия: при одной строке любой проход стоит её
+    // норму. Помечаем halfInch:true — для подписи нормы (windNormCode). Нет кодов → [].
+    function halfInchWindingPointsFromTimes(opTimes){
+        var pts = [];
+        Object.keys(opTimes || {}).forEach(function(code){
+            var m = /^WIND_05_(\d+)$/.exec(code);
+            if (m) pts.push({ m: Number(m[1]), min: Number(opTimes[code]) || 0, halfInch: true });
+        });
+        pts.sort(function(a, b){ return a.m - b.m; });
+        return pts;
+    }
+
+    // #5198: задание на втулке 0.5″ — по «Дюймам» втулки (sleeveInches резки/плана/раскладки;
+    // из отчёта приходит строкой «0.50»). Не знаем дюймов → не 0.5″.
+    function isHalfInchSleeve(cut){
+        return !!cut && typeof cut === 'object' && cut.sleeveInches != null && cut.sleeveInches !== ''
+            && Math.abs(Number(cut.sleeveInches) - 0.5) < 1e-9;
     }
 
     // #4501: ЯРУСЫ УЗКОЙ НАМОТКИ. Полоса ≤ 30 мм наматывается дольше — на вал насаживается
@@ -1481,10 +1503,15 @@
     //   #4501: если у резки есть полоса не шире порога яруса — ярус узкой намотки (самый узкий
     //     подходящий, он специфичнее). У фольги свой ярус (WIND_FOIL_W…): без него узкая фольга
     //     остаётся на блочной фольговой норме — линейная узкая серия её бы УСКОРИЛА.
+    //   #5198: втулка 0.5″ (sleeveInches) — серия WIND_05_ при любой длине и старше всех
+    //     остальных: на тонкую втулку мотается медленно, какими бы ни были полосы и сырьё.
     // Первый аргумент — резка/дескриптор/план целиком (из него берём isFoil и самую узкую полосу)
     // либо, как раньше, булев isFoil (тогда ширины полос неизвестны и ярус не выбирается).
     function windPointsForCut(cutOrIsFoil, windPoints){
         var isFoil, minWidth;
+        if (isHalfInchSleeve(cutOrIsFoil) && windPoints && windPoints.halfInch && windPoints.halfInch.length) {
+            return windPoints.halfInch;
+        }
         if (cutOrIsFoil && typeof cutOrIsFoil === 'object') {
             isFoil = !!cutOrIsFoil.isFoil;
             minWidth = minStripWidthOfCut(cutOrIsFoil);
@@ -1574,7 +1601,7 @@
     // Код нормы намотки для подписи оператору: WIND_600 / WIND_FOIL_305 / WIND_W30_600 (#4501 —
     // по коду видно, что применена узкая серия, и какой у неё порог).
     function windNormCode(norm){
-        return 'WIND_' + (norm && norm.foil ? 'FOIL_' : '')
+        return 'WIND_' + (norm && norm.foil ? 'FOIL_' : '') + (norm && norm.halfInch ? '05_' : '')
             + (norm && norm.narrow ? 'W' + formatTimingNumber(norm.maxWidth) + '_' : '')
             + formatTimingNumber(norm && norm.m);
     }
@@ -7667,6 +7694,7 @@
                     id: String(m.id), slitterId: slitterById[String(m.id)],
                     materialId: m.materialId, winding: m.winding, batchId: m.batchId,
                     knifeWidths: m.knifeWidths, knifeCount: m.knifeCount, isFoil: m.isFoil,
+                    sleeveInches: m.sleeveInches,   // #5198
                     width: m.width, planDate: m.planDate, plannedRuns: m.plannedRuns,
                     runLength: m.runLength, duration: m.duration
                 };

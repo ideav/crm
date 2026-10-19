@@ -756,10 +756,20 @@
     // #3744: точки «намотка N метров → минуты» из кодов WIND_<метры> таблицы «Время
     // операции, мин» (WIND_300=1.2 … WIND_1100=5.6). Та же модель метража, что в
     // production-planning.js (windingPointsFromTimes). Спец-коды (WIND_FOIL_*) не парсим.
-    function windingPointsFromTimes(opTimes) {
+    // #5198: втулка 0.5″ (sleeveInches) наматывается медленно — серия WIND_05_<метры>
+    // («Намотка 0,5 до 110 метров») при любой длине, если она заведена; как в планировании.
+    function windingPointsFromTimes(opTimes, sleeveInches) {
+        if (isHalfInch(sleeveInches)) {
+            var half = windingSeries(opTimes, /^WIND_05_(\d+)$/);
+            if (half.length) return half;
+        }
+        return windingSeries(opTimes, /^WIND_(\d+)$/);
+    }
+
+    function windingSeries(opTimes, re) {
         var pts = [];
         Object.keys(opTimes || {}).forEach(function(code) {
-            var m = /^WIND_(\d+)$/.exec(code);
+            var m = re.exec(code);
             if (m) pts.push({ m: Number(m[1]), min: toNumber(opTimes[code]) });
         });
         pts.sort(function(a, b) { return a.m - b.m; });
@@ -2014,7 +2024,7 @@
         // до целых минут один раз — во всплывающей подсказке формула целиком.
         var times = this.opTimes || {};
         var leaderUnit = leaderMinutesFromTimes(times);
-        var planMins = planningMinutes(p.totalPasses, p.rollLength, windingPointsFromTimes(times), leaderUnit);
+        var planMins = planningMinutes(p.totalPasses, p.rollLength, windingPointsFromTimes(times, this.sleeveChoice().inches), leaderUnit);   // #5198: 0.5″
         var units = planningTimeUnits(planMins);
         var timeVal = el('span', { class: 'atex-co-time', title: 'Наладка ' + SETUP_ONCE_MIN
             + ' мин + «Всего резок» × (намотка по норме WIND_* + лидер ' + ruNum(leaderUnit)
