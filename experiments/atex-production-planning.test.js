@@ -1123,16 +1123,16 @@ assertEqual(planning.cutMissingBatch({ materialId: '' }, gb), false, 'cutMissing
 // вход не мутируется (порядок исходного массива сохранён).
 assertEqual(fifoBatches[0].id, '10', 'reserveFifo: вход не мутируется (сортировка на копии)');
 
-// Длительность намотки: точки из WIND_*, интерполяция метры→минуты (старт/финиш резок).
+// Длительность намотки: точки из WIND_*, норма ближайшей точки не короче прохода (#5198).
 var opT = { WIND_300: 1.2, WIND_600: 4.0, WIND_900: 5.0, WIND_1100: 5.6, MATERIAL_WINDING: 15, KNIFE_220_59: 30 };
 var pts = planning.windingPointsFromTimes(opT);
 assertEqual(pts, [{m:300,min:1.2},{m:600,min:4.0},{m:900,min:5.0},{m:1100,min:5.6}], 'windingPointsFromTimes: только WIND_<метры>, по возрастанию');
 assertEqual(planning.windingMinutes(0, pts), 0, 'windingMinutes: 0 м → 0');
 assertEqual(planning.windingMinutes(300, pts), 1.2, 'windingMinutes: 300 м → 1.2 (точка)');
 assertEqual(planning.windingMinutes(1100, pts), 5.6, 'windingMinutes: 1100 м → 5.6 (точка)');
-assertEqual(planning.windingMinutes(150, pts), 0.6, 'windingMinutes: 150 м → 0.6 (пропорц. от 0 до первой)');
-assertEqual(planning.windingMinutes(750, pts), 4.5, 'windingMinutes: 750 м → 4.5 (между 600 и 900)');
-assertEqual(planning.windingMinutes(1200, pts), 5.9, 'windingMinutes: 1200 м → 5.9 (экстраполяция)');
+assertEqual(planning.windingMinutes(150, pts), 1.2, 'windingMinutes: 150 м → 1.2 (порог WIND_300, #5198)');
+assertEqual(planning.windingMinutes(750, pts), 5, 'windingMinutes: 750 м → 5 (порог WIND_900, #5198)');
+assertEqual(planning.windingMinutes(1200, pts), 5.6, 'windingMinutes: 1200 м → 5.6 (последняя норма, без экстраполяции, #5198)');
 assertEqual(planning.windingMinutes(500, []), 0, 'windingMinutes: нет точек → 0');
 // #3606/#3742: фольга наматывается медленнее — серия WIND_FOIL_<метры>. #3742: норма
 // «4 мин за каждые 305 м» считается БЛОКАМИ (ceil(метраж/305)×4), не пропорцией.
@@ -1156,7 +1156,7 @@ assertEqual(planning.windingMinutes(610, ptsF.foil), 8, 'фольга 610 м →
 assertEqual(planning.windPointsForCut(true, ptsF), ptsF.foil, 'windPointsForCut: фольга → фолье-точки');
 assertEqual(planning.windPointsForCut(false, ptsF) === ptsF, true, 'windPointsForCut: не фольга → обычные');
 assertEqual(planning.plannedCutDurationMinutes(122, 20, opTF, true), 80, 'plannedCutDuration: фольга 122 м × 20 = 80 (#3742: 4×20)');
-assertEqual(planning.plannedCutDurationMinutes(122, 1, opTF, false), 0.488, 'plannedCutDuration: НЕ фольга 122 м = 0.488 (обычная WIND_300)');
+assertEqual(planning.plannedCutDurationMinutes(122, 1, opTF, false), 1.2, 'plannedCutDuration: НЕ фольга 122 м = 1.2 (обычная WIND_300, #5198)');
 assertEqual(planning.foilWindingPointsFromTimes({ WIND_300: 1.2 }), [], 'foilWindingPointsFromTimes: нет WIND_FOIL_ → []');
 assertEqual(planning.windPointsForCut(true, planning.windingPointsFromTimes({ WIND_300: 1.2 })),
     planning.windingPointsFromTimes({ WIND_300: 1.2 }), 'windPointsForCut: фольга без WIND_FOIL_ → обычные (фолбэк)');
@@ -1173,14 +1173,14 @@ assertEqual(planning.cutTimingDetails(600, 3, opT),
     'Метраж прохода: 600 м\nПлановых проходов: 3\nНорма намотки: WIND_600=4 мин\nНамотка: 4 * 3 = 12 мин\nЛидер: 2 * 3 = 6 мин\nИтого резка: 12 + 6 = 18 мин',
     'cutTimingDetails #3240: расшифровка длительности с релевантной нормой (точное совпадение метража)');
 assertEqual(planning.cutTimingDetails(750, 1, opT),
-    'Метраж прохода: 750 м\nПлановых проходов: 1\nНормы намотки: WIND_600=4 мин; WIND_900=5 мин (интерполяция)\nНамотка: 4.5 * 1 = 4.5 мин\nЛидер: 2 * 1 = 2 мин\nИтого резка: 4.5 + 2 = 6.5 мин',
-    'cutTimingDetails #3240: интерполяция показывает обе окружающие нормы');
+    'Метраж прохода: 750 м\nПлановых проходов: 1\nНорма намотки: WIND_900=5 мин\nНамотка: 5 * 1 = 5 мин\nЛидер: 2 * 1 = 2 мин\nИтого резка: 5 + 2 = 7 мин',
+    'cutTimingDetails #3240/#5198: между точками — одна норма-порог сверху');
 
 // #3240: relevantWindingNorms — какие WIND_* реально применяются для метража.
 assertEqual(planning.relevantWindingNorms(600, pts), [{m:600,min:4}], 'relevantWindingNorms: точное совпадение → одна точка');
-assertEqual(planning.relevantWindingNorms(750, pts), [{m:600,min:4},{m:900,min:5}], 'relevantWindingNorms: между точками → нижняя+верхняя');
-assertEqual(planning.relevantWindingNorms(150, pts), [{m:300,min:1.2}], 'relevantWindingNorms: ниже первой → первая (пропорция от 0)');
-assertEqual(planning.relevantWindingNorms(1200, pts), [{m:900,min:5},{m:1100,min:5.6}], 'relevantWindingNorms: выше последней → последний отрезок (экстраполяция)');
+assertEqual(planning.relevantWindingNorms(750, pts), [{m:900,min:5}], 'relevantWindingNorms: между точками → верхняя (порог, #5198)');
+assertEqual(planning.relevantWindingNorms(150, pts), [{m:300,min:1.2}], 'relevantWindingNorms: ниже первой → первая');
+assertEqual(planning.relevantWindingNorms(1200, pts), [{m:1100,min:5.6}], 'relevantWindingNorms: выше последней → последняя (#5198)');
 assertEqual(planning.relevantWindingNorms(0, pts), [], 'relevantWindingNorms: 0 м → []');
 assertEqual(planning.formatWindingNorms([{m:600,min:4}]), 'Норма намотки: WIND_600=4 мин', 'formatWindingNorms: одна норма');
 assertEqual(planning.formatWindingNorms([{m:600,min:4},{m:900,min:5}]), 'Нормы намотки: WIND_600=4 мин; WIND_900=5 мин (интерполяция)', 'formatWindingNorms: две нормы — пометка интерполяции');

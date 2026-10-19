@@ -6917,31 +6917,26 @@
         return round3(Math.ceil(x / Number(ref.m)) * (Number(ref.min) || 0));
     }
 
-    // Время намотки runMeters (мин) по точкам — кусочно-линейно: ниже первой точки —
-    // пропорционально от 0; между точками — линейно; выше последней — экстраполяция по
-    // последнему отрезку (при одной точке — клампим). #3742: точки фольги (флаг foil) —
-    // блочная модель foilWindingMinutes, а не интерполяция. Нет точек / runMeters≤0 → 0.
+    // Время намотки runMeters (мин) по точкам — ПОРОГОМ (#5198): берётся норма ближайшей точки
+    // не короче прохода («до 300 м — WIND_300, до 450 м — WIND_450»): 250 м при WIND_300=1.5 стоит
+    // 1.5 мин. Без пропорции и интерполяции. Выше последней точки — последняя норма, без
+    // экстраполяции (нужен длиннее — заводится строка справочника). #3742: точки фольги (флаг
+    // foil) — блочная модель foilWindingMinutes. Нет точек / runMeters≤0 → 0.
     function windingMinutes(runMeters, points){
         var x = Number(runMeters) || 0;
+        if (x <= 0) return 0;
         var p = (points || []).slice().sort(function(a, b){ return a.m - b.m; });
-        if (!p.length || x <= 0) return 0;
         if (p.some(function(q){ return q.foil; })) return foilWindingMinutes(x, p);   // #3742: фольга — блоками
-        if (x <= p[0].m) return round3(p[0].min * (x / p[0].m));
-        for (var i = 1; i < p.length; i++){
-            if (x <= p[i].m){
-                var t = (x - p[i-1].m) / (p[i].m - p[i-1].m);
-                return round3(p[i-1].min + t * (p[i].min - p[i-1].min));
-            }
-        }
-        // #4501: узкая серия ВЫШЕ последней своей точки не экстраполируется — клампим. Диапазон
-        // задан справочником («×2 до 600 м включительно»): доплата за узкие втулки на длинном
-        // рулоне не исчезает (падать на базовую норму нельзя), но и выдумывать за справочник
-        // наклон не следует. Нужен 900 м — заводится строка WIND_W30_900.
-        if (p[p.length-1].narrow) return round3(p[p.length-1].min);
-        if (p.length < 2) return round3(p[p.length-1].min);
-        var a = p[p.length-2], b = p[p.length-1];
-        var slope = (b.min - a.min) / (b.m - a.m);
-        return round3(b.min + slope * (x - b.m));
+        var norm = windingThresholdPoint(x, p);
+        return norm ? round3(norm.min) : 0;
+    }
+
+    // #5198: точка серии, чья норма применяется к проходу x м: первая с m ≥ x, выше последней —
+    // последняя. points отсортированы по m. Нет точек → null.
+    function windingThresholdPoint(x, points){
+        if (!points.length) return null;
+        for (var i = 0; i < points.length; i++){ if (x <= points[i].m) return points[i]; }
+        return points[points.length-1];
     }
 
     // cutRef — резка/дескриптор/план целиком (#4501: из него берётся и фольга, и самая узкая
@@ -6953,19 +6948,15 @@
         return round3(windingMinutes(runMeters, pts) * runs);
     }
 
-    // Норма(ы) намотки, реально применённые для метража runMeters (зеркало windingMinutes,
-    // #3240 «привести только ту, которая здесь подходит»):
-    //   точное совпадение точки → [та точка]; ниже первой → [первая] (пропорция от 0);
-    //   между точками → [нижняя, верхняя] (интерполяция); выше последней → [предпоследняя,
-    //   последняя] (экстраполяция). Нет точек / runMeters≤0 → []. → подмножество points.
+    // Норма намотки, реально применённая для метража runMeters (зеркало windingMinutes,
+    // #3240 «привести только ту, которая здесь подходит»; #5198 — порог): [ближайшая точка не
+    // короче прохода], выше последней — [последняя]. Нет точек / runMeters≤0 → [].
     function relevantWindingNorms(runMeters, points){
         var x = Number(runMeters) || 0;
         var p = (points || []).slice().sort(function(a, b){ return a.m - b.m; });
-        if (!p.length || x <= 0) return [];
-        for (var k = 0; k < p.length; k++){ if (p[k].m === x) return [p[k]]; }
-        if (x <= p[0].m) return [p[0]];
-        for (var i = 1; i < p.length; i++){ if (x <= p[i].m) return [p[i-1], p[i]]; }
-        return p.length >= 2 ? [p[p.length-2], p[p.length-1]] : [p[p.length-1]];
+        if (x <= 0) return [];
+        var norm = windingThresholdPoint(x, p);
+        return norm ? [norm] : [];
     }
 
     // norms → строка «Норма намотки: WIND_600=4 мин» (одна) либо «Нормы намотки:
