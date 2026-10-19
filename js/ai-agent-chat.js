@@ -16,6 +16,11 @@
  *     результат не теряется, если пользователь закрыл вкладку и вернулся — даже
  *     из другого браузера (состояние хранится на сервере, не в localStorage).
  *
+ * crm#5203: у пользователя несколько диалогов. У каждого своя лента (хранится на
+ * сервере, GET ?conversation=ID) и своя сессия агента (conversation_id). Кнопки в шапке:
+ * «Новый чат» и список чатов (GET ?conversations=1) с удалением. Открытый диалог
+ * запоминается в localStorage; без него открывается последний (conversation=latest).
+ *
  * Старый расширенный ИИ-чат (js/ai-chat.js) скрыт из интерфейса, но оставлен в
  * репозитории как backend-история.
  */
@@ -40,6 +45,8 @@
         localActivity: false,   // были ли отправки в этой сессии вкладки
         resumeChecked: false,   // восстановление выполняем один раз за загрузку
         progressText: '',       // python2node#849: последняя строка хода работы агента
+        conversationId: '',     // crm#5203: открытый диалог
+        greeting: [],           // приветствие из разметки — первая строка ленты любого диалога
 
         init: function () {
             this.rendered = {};
@@ -81,6 +88,7 @@
             });
 
             this.initResizer();
+            this.initConversations();
 
             if (this.sendBtn) this.sendBtn.addEventListener('click', function () { self.send(); });
 
@@ -691,6 +699,8 @@
             var context = this.renderContext();
             if (context) form.append('context', JSON.stringify(context));
             if (this.autoApply && this.autoApply.checked) form.append('auto_apply', '1');
+            if (!this.conversationId) this.setConversation(this.newChatId());
+            form.append('conversation', this.conversationId);
             if (!fromAction) {
                 this.attachments.forEach(function (file) {
                     form.append('files[]', file, file.name);
@@ -755,6 +765,7 @@
             form.append('_xsrf', this.getXsrfToken());
             form.append('action', action);
             form.append('plan', planId);
+            if (this.conversationId) form.append('conversation', this.conversationId);
             this.submit(form);
         },
 
@@ -763,6 +774,9 @@
             this.beginWaiting(null);
 
             var self = this;
+            // crm#5203: пока шёл запрос, пользователь открыл другой диалог — ответ туда не рисуем
+            // (он сохранится в ленте своего диалога на сервере).
+            var cid = this.conversationId;
             fetch(this.getAgentUrl(), {
                 method: 'POST',
                 body: form,
@@ -773,11 +787,11 @@
                     return { status: response.status, ok: response.ok, data: data };
                 });
             }).then(function (result) {
-                self.handleSubmitResponse(result);
+                if (self.conversationId === cid) self.handleSubmitResponse(result);
             }).catch(function () {
                 // Соединение оборвалось (например, таймаут сервера). Задача уже
                 // создана на сервере — пробуем подхватить её опросом.
-                self.recoverAfterSubmitFailure();
+                if (self.conversationId === cid) self.recoverAfterSubmitFailure();
             });
         },
 
@@ -803,7 +817,8 @@
         // Подхват задачи, если submit-запрос не дождался ответа (обрыв/таймаут).
         recoverAfterSubmitFailure: function () {
             var self = this;
-            fetch(this.getStatusUrl(null), {
+            var url = this.getStatusUrl(null) + (this.conversationId ? '&conversation=' + encodeURIComponent(this.conversationId) : '');
+            fetch(url, {
                 credentials: 'same-origin',
                 headers: { 'X-Requested-With': 'XMLHttpRequest' }
             }).then(function (response) {
@@ -948,9 +963,19 @@
                 credentials: 'same-origin',
                 headers: { 'X-Requested-With': 'XMLHttpRequest' }
             }).then(function (response) {
-                return response.json().catch(function () { return null; });
+                return response.json().catch(function () { return null; }).then(function (data) {
+                    return response.status === 404 ? { gone: true } : data;
+                });
             }).then(function (data) {
                 release();
+                // crm#5203: задачи больше нет (истёк срок хранения задач, а в истории диалога
+                // ход остался «в работе») — ждать нечего.
+                if (data && data.gone && jobId === self.pollJobId) {
+                    self.answered[jobId] = true;
+                    self.replaceThinking('Ответ на этот вопрос не сохранился. Повторите вопрос.');
+                    self.endWaiting();
+                    return;
+                }
                 // Нет данных — временный сбой/таймаут опроса, продолжаем ждать.
                 if (!data || !data.job) return;
                 self.routeJob(data.job, true);
@@ -962,21 +987,238 @@
 
         // --- восстановление при открытии (в т.ч. из другого браузера) ---
 
+        // crm#5203: открывается запомненный диалог, а без него — последний по времени.
         resume: function () {
             if (this.resumeChecked) return;
             this.resumeChecked = true;
             if (this.localActivity) return;
             if (typeof fetch === 'undefined') return;
+            var stored = this.storage('getItem', null, this.conversationKey());
+            if (this.isChatId(stored)) this.conversationId = stored;
+            this.loadConversation(this.conversationId || 'latest');
+        },
+
+        // --- crm#5203: диалоги ---
+
+        conversationKey: function () {
+            return 'integram.aiAgent.conversation.' + this.getCurrentDbName() + '.' + this.getCurrentUserName();
+        },
+
+        isChatId: function (id) {
+            return typeof id === 'string' && /^[a-f0-9]{8,64}$/.test(id);
+        },
+
+        newChatId: function () {
+            var hex = '';
+            var c = typeof crypto !== 'undefined' && crypto.getRandomValues ? crypto : null;
+            var bytes = c ? c.getRandomValues(new Uint8Array(16)) : null;
+            for (var i = 0; i < 16; i++) {
+                var b = bytes ? bytes[i] : Math.floor(Math.random() * 256);
+                hex += (b < 16 ? '0' : '') + b.toString(16);
+            }
+            return hex;
+        },
+
+        setConversation: function (id) {
+            this.conversationId = id;
+            this.storage('setItem', id, this.conversationKey());
+        },
+
+        getConversationUrl: function (id) {
+            return this.getAgentUrl() + '&conversation=' + encodeURIComponent(id);
+        },
+
+        getConversationsUrl: function () {
+            return this.getAgentUrl() + '&conversations=1';
+        },
+
+        // Лента диалога с сервера. Диалога ещё нет (новый чат без вопросов или удалён) —
+        // пустая лента с этим id; для 'latest' — новый диалог.
+        loadConversation: function (id) {
             var self = this;
-            fetch(this.getStatusUrl(null), {
+            fetch(this.getConversationUrl(id), {
                 credentials: 'same-origin',
                 headers: { 'X-Requested-With': 'XMLHttpRequest' }
             }).then(function (response) {
                 return response.json().catch(function () { return null; });
             }).then(function (data) {
-                var job = data && data.job ? data.job : null;
-                if (!job || self.localActivity) return;
-                self.restoreJob(job);
+                // Ответ опоздал: пользователь уже пишет, начал новый чат или открыл другой.
+                if (self.localActivity || (id === 'latest' ? !!self.conversationId : id !== self.conversationId)) return;
+                var chat = data && data.conversation;
+                if (chat && self.isChatId(chat.id)) {
+                    self.setConversation(chat.id);
+                    self.renderConversation(chat);
+                    return;
+                }
+                if (!self.conversationId) self.setConversation(self.newChatId());
+                // Сервер без диалогов отдаёт последнюю задачу, как раньше.
+                if (data && data.job) self.restoreJob(data.job);
+            }).catch(function () {
+                if (!self.conversationId) self.setConversation(self.newChatId());
+            });
+        },
+
+        // Лента с нуля: приветствие и ходы диалога. Незавершённый ход — «думает» и опрос.
+        clearFeed: function () {
+            this.stopPolling();
+            this.endWaiting();
+            this.rendered = {};
+            this.answered = {};
+            this.planButtons = {};
+            if (!this.messages) return;
+            this.messages.innerHTML = '';
+            for (var i = 0; i < this.greeting.length; i++) this.messages.appendChild(this.greeting[i]);
+        },
+
+        renderConversation: function (chat) {
+            this.clearFeed();
+            var turns = chat && Array.isArray(chat.turns) ? chat.turns : [];
+            for (var i = 0; i < turns.length; i++) this.restoreJob(turns[i]);
+            this.scrollToBottom();
+        },
+
+        newConversation: function () {
+            this.localActivity = false;
+            this.clearFeed();
+            this.setConversation(this.newChatId());
+            this.closeChats();
+            if (this.input) this.input.focus();
+        },
+
+        openConversation: function (id) {
+            if (!this.isChatId(id)) return;
+            this.closeChats();
+            if (id === this.conversationId) return;
+            this.localActivity = false;
+            this.clearFeed();
+            this.setConversation(id);
+            this.loadConversation(id);
+        },
+
+        // Кнопки «Новый чат» и «Чаты» — в шапке перед «Закрыть», список чатов — под шапкой.
+        // Создаются здесь, а не в разметке: панель чата есть и в собственных шаблонах баз.
+        initConversations: function () {
+            this.greeting = this.messages && this.messages.children ? Array.prototype.slice.call(this.messages.children) : [];
+            var header = this.closeBtn ? this.closeBtn.parentNode : null;
+            if (!header || !header.insertBefore || !header.parentNode) return;
+            var self = this;
+            var bar = this.el('div', 'ai-agent-header-actions');
+            var btn = function (icon, title, handler) {
+                var b = self.el('button', 'ai-chat-icon-btn');
+                b.type = 'button';
+                b.title = title;
+                b.setAttribute('aria-label', title);
+                b.innerHTML = '<i class="pi ' + icon + '"></i>';
+                b.addEventListener('click', handler);
+                bar.appendChild(b);
+                return b;
+            };
+            this.newChatBtn = btn('pi-plus', 'Новый чат', function () { self.newConversation(); });
+            this.chatsBtn = btn('pi-history', 'Чаты', function () { self.toggleChats(); });
+            this.chatsBtn.setAttribute('aria-expanded', 'false');
+            header.insertBefore(bar, this.closeBtn);
+            bar.appendChild(this.closeBtn);
+
+            this.chatsEl = this.el('div', 'ai-agent-chats');
+            this.chatsEl.hidden = true;
+            this.chatsEl.setAttribute('role', 'list');
+            this.chatsEl.setAttribute('aria-label', 'Чаты');
+            header.parentNode.insertBefore(this.chatsEl, header.nextSibling);
+        },
+
+        closeChats: function () {
+            if (!this.chatsEl) return;
+            this.chatsEl.hidden = true;
+            if (this.chatsBtn) this.chatsBtn.setAttribute('aria-expanded', 'false');
+        },
+
+        toggleChats: function () {
+            if (!this.chatsEl) return;
+            if (!this.chatsEl.hidden) { this.closeChats(); return; }
+            this.chatsEl.hidden = false;
+            if (this.chatsBtn) this.chatsBtn.setAttribute('aria-expanded', 'true');
+            this.chatsEl.innerHTML = '';
+            this.chatsEl.appendChild(this.el('div', 'ai-agent-chats-note', 'Загрузка…'));
+            var self = this;
+            fetch(this.getConversationsUrl(), {
+                credentials: 'same-origin',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            }).then(function (response) {
+                return response.json().catch(function () { return null; });
+            }).then(function (data) {
+                self.renderChats(data && Array.isArray(data.conversations) ? data.conversations : []);
+            }).catch(function () {
+                self.renderChats(null);
+            });
+        },
+
+        // Дата в списке: сегодня — время, иначе день и месяц (год — если не текущий).
+        chatDate: function (sec, nowMs) {
+            if (!(sec > 0)) return '';
+            var d = new Date(sec * 1000), now = new Date(nowMs || this.now());
+            var pad = function (n) { return (n < 10 ? '0' : '') + n; };
+            if (d.toDateString() === now.toDateString()) return pad(d.getHours()) + ':' + pad(d.getMinutes());
+            var s = pad(d.getDate()) + '.' + pad(d.getMonth() + 1);
+            return d.getFullYear() === now.getFullYear() ? s : s + '.' + d.getFullYear();
+        },
+
+        renderChats: function (list) {
+            if (!this.chatsEl) return;
+            var self = this;
+            this.chatsEl.innerHTML = '';
+            if (!list) {
+                this.chatsEl.appendChild(this.el('div', 'ai-agent-chats-note', 'Не удалось загрузить список чатов.'));
+                return;
+            }
+            if (!list.length) {
+                this.chatsEl.appendChild(this.el('div', 'ai-agent-chats-note', 'Пока нет сохранённых чатов.'));
+                return;
+            }
+            list.forEach(function (chat) {
+                if (!chat || !self.isChatId(chat.id)) return;
+                var row = self.el('div', 'ai-agent-chat-item' + (chat.id === self.conversationId ? ' is-active' : ''));
+                row.setAttribute('role', 'listitem');
+                var open = self.el('button', 'ai-agent-chat-open');
+                open.type = 'button';
+                open.appendChild(self.el('span', 'ai-agent-chat-title', self.blockText(chat.title, 200) || 'Новый чат'));
+                open.appendChild(self.el('span', 'ai-agent-chat-date', self.chatDate(chat.updatedAt)));
+                open.addEventListener('click', function () { self.openConversation(chat.id); });
+                row.appendChild(open);
+                // Удаление в два нажатия: первое спрашивает, второе удаляет.
+                var del = self.el('button', 'ai-agent-chat-delete');
+                del.type = 'button';
+                del.title = 'Удалить чат';
+                del.setAttribute('aria-label', 'Удалить чат');
+                del.innerHTML = '<i class="pi pi-trash"></i>';
+                del.addEventListener('click', function () {
+                    if (!del.classList.contains('is-confirm')) {
+                        del.classList.add('is-confirm');
+                        del.title = 'Нажмите ещё раз, чтобы удалить';
+                        del.setAttribute('aria-label', del.title);
+                        return;
+                    }
+                    self.deleteConversation(chat.id, row);
+                });
+                row.appendChild(del);
+                self.chatsEl.appendChild(row);
+            });
+        },
+
+        deleteConversation: function (id, row) {
+            var self = this;
+            var form = new FormData();
+            form.append('_xsrf', this.getXsrfToken());
+            form.append('action', 'delete_conversation');
+            form.append('conversation', id);
+            fetch(this.getAgentUrl(), {
+                method: 'POST',
+                body: form,
+                credentials: 'same-origin',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            }).then(function (response) {
+                if (!response.ok) return;
+                if (row && row.parentNode && row.parentNode.removeChild) row.parentNode.removeChild(row);
+                if (id === self.conversationId) self.newConversation();
             }).catch(function () {});
         },
 

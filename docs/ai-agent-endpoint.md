@@ -32,6 +32,7 @@ Authorization: Bearer <INTEGRAM_AGENT_TOKEN>      # только если ток
   "token": "<токен petrov в acme>", // агент работает ЭТИМ токеном и с правами petrov
   "core_token": "<JWT petrov в ядре>", // необязательно: токен ядра для задачника (issue #5131)
   "message": "текст запроса пользователя",
+  "conversation_id": "9f2c…",   // необязательно: диалог чата (crm#5203)
   "attachments": [
     { "name": "f.csv", "type": "text/csv", "size": 1234, "content": "<base64>" }
   ],
@@ -49,6 +50,18 @@ Authorization: Bearer <INTEGRAM_AGENT_TOKEN>      # только если ток
 
 `attachments` — массив (может быть пустым); `content` — содержимое файла в base64
 (лимит 10 МБ на файл, накладывается CRM).
+
+### Диалог (`conversation_id`)
+
+У пользователя в чате несколько диалогов (crm#5203). `conversation_id` — id диалога, в
+котором задан вопрос (8–64 символа `[a-f0-9]`): у каждого диалога своя память агента, вопрос из
+одного диалога не видит переписку другого. Действия над планом (`action`) приходят с id того
+диалога, где план предложен. Поля нет — запрос от клиента без диалогов, память общая на
+пользователя.
+
+Ленту диалогов хранит CRM: `logs/ai_chats/<база>/sha1(user).json`, до 50 диалогов по 100
+ходов. Клиент читает её запросами `GET /{db}/ai/agent?conversations=1` (список) и
+`?conversation=<id>|latest` (лента), удаляет — `POST action=delete_conversation`.
 
 ### Контекст экрана (`context`)
 
