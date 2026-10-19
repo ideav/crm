@@ -323,6 +323,25 @@
         return v === '' ? '' : v;
     }
 
+    // #5196: остаток ДЖАМБО по номеру — «Счётчик кон.» его последней записи (наибольший id,
+    // любое задание), у записи без отметок — её «Счётчик нач.». Остаток партии и «Счётчик кон.»
+    // задания для этого не годятся: в партии несколько джамбо, у задания — несколько рулонов
+    // (боевое 16.10: 15199 у записи против 11299 у задания, −3900 м). Номер не встречался — ''.
+    function jumboLastCounter(records, number) {
+        var no = String(number == null ? '' : number).trim();
+        if (no === '') return '';
+        var last = null;
+        (records || []).forEach(function(r) {
+            if (!r || String(r.jumboNo == null ? '' : r.jumboNo).trim() !== no) return;
+            if (!(toNumber(r.id) > 0)) return;
+            if (!last || toNumber(r.id) > toNumber(last.id)) last = r;
+        });
+        if (!last) return '';
+        var end = String(last.counterEnd == null ? '' : last.counterEnd).trim();
+        if (end !== '') return end;
+        return String(last.counterStart == null ? '' : last.counterStart).trim();
+    }
+
     // #5010: погонаж записи джамбо — те же счётчики, что у резки (#4321):
     // «нач.» − «кон.»; счётчик мотает назад, погонаж записи всегда неотрицательный.
     function jumboMeterage(record) {
@@ -1625,6 +1644,7 @@
         jumboAccumulate: jumboAccumulate,           // #4914: отметка прибавляет к накопленному записи
         jumboDeltaFrom: jumboDeltaFrom,             // #4914: дельта отметки из черновиков ввода
         jumboNextCounterStart: jumboNextCounterStart, // #4914: кон. предыдущего → нач. следующего
+        jumboLastCounter: jumboLastCounter,         // #5196: остаток джамбо по его записям
         jumboSignature: jumboSignature,             // #4914: подпись редактируемых полей записи
         jumboRecordFields: jumboRecordFields,       // #4860: вся запись «Номера джамбо» по метаданным
         jumboInputFields: jumboInputFields,         // #4914: автосохранение — редактируемые поля записи
@@ -3309,7 +3329,10 @@
             cut.batch = first.label || cut.batch;
             cut.materialId = first.materialId || cut.materialId;
         }
-        if (!cut.counterStart && first.remainderM > 0) cut.counterStart = String(core.round3(first.remainderM));
+        if (!cut.counterStart && first.remainderM > 0) {
+            cut.counterStart = String(core.round3(first.remainderM));
+            cut.counterStartFromBatch = true;   // #5196: подстановка — уступит остатку джамбо
+        }
     };
 
     // #4783 п.9: партия сырья — одной строкой и БЕЗ выбора. Партию подбирает
@@ -3442,6 +3465,7 @@
                 storedRec.counterEnd = shifted.counterEnd;
             } else {
                 cut.counterStart = cStart.value;
+                cut.counterStartFromBatch = false;   // #5196: вписано оператором
             }
             refreshMeterage();
         });
@@ -4312,6 +4336,25 @@
         });
     };
 
+    // #5196: остаток джамбо по номеру — его прошлые записи из всех заданий (фильтр по главному
+    // значению 82374) плюс записи текущего задания. Чтение упало — '' (прежний порядок
+    // подстановки), но не молча: заводку записи сбой чтения не останавливает.
+    AtexSlitter.prototype.lastJumboCounter = function(cut, number) {
+        var table = (this.meta && this.meta.jumboTable) || null;
+        var no = String(number == null ? '' : number).trim();
+        if (!table || no === '') return Promise.resolve('');
+        var own = (cut && cut.jumbos) || [];
+        return this.getJson('object/' + encodeURIComponent(table.id) + '/?JSON_OBJ&LIMIT=0,500&F_'
+            + encodeURIComponent(table.id) + '=' + encodeURIComponent(no)).then(function(rows) {
+            var list = Array.isArray(rows) ? rows : ((rows && rows.object) || []);
+            return core.jumboLastCounter(core.jumbosFromObjects(table, list).concat(own), no);
+        }).catch(function(err) {
+            console.error('[slitter] #5196: прошлые записи джамбо ' + no + ' не прочитаны — '
+                + '«Счётчик нач.» подставлен по-старому: ' + (err && err.message ? err.message : err));
+            return core.jumboLastCounter(own, no);
+        });
+    };
+
     // #4914: активная запись джамбо — выбранная закладка; записей ещё нет, но оператор
     // начал ввод — черновик pendingJumbo (станет записью при первом сохранении).
     AtexSlitter.prototype.activeJumbo = function() {
@@ -4333,19 +4376,33 @@
         if (!cut || number === '') return Promise.resolve(null);
         var table = (this.meta && this.meta.jumboTable) || null;
         if (!table) return Promise.resolve(null);
-        var counterStart = rec && rec.counterStart ? rec.counterStart
-            : String(cut.counterStart == null ? '' : cut.counterStart).trim();
-        var fields = {};
-        fields['t' + table.id] = number;
-        var csRid = reqIdByName(table, JUMBO_REQ.counterStart);
-        if (csRid && counterStart !== '') fields['t' + csRid] = core.toNumber(counterStart);
         // #5075: одна заводка на задание за раз — фокус на «Проходов» и автосохранение номера
         // не должны завести две записи одному черновику.
         if (cut.jumboEnsuring) return cut.jumboEnsuring;
         var done = function(v) { cut.jumboEnsuring = null; return v; };
         var fail = function(err) { cut.jumboEnsuring = null; throw err; };
-        cut.jumboEnsuring = this.postRetry('_m_new/' + table.id + '?JSON&up=' + encodeURIComponent(cut.id), fields,
-            { beforeRetry: function() { return self.findCreatedJumbo(cut, number); } })
+        var counterStart = '';
+        // #5196: начало, вписанное оператором (в запись или в задание), не перебиваем; пустое
+        // или подставленное из партии — уступает остатку этого джамбо по его прошлым записям.
+        var typedStart = rec && rec.counterStart ? String(rec.counterStart).trim() : '';
+        var cutStart = String(cut.counterStart == null ? '' : cut.counterStart).trim();
+        var startTyped = typedStart !== '' || (cutStart !== '' && !cut.counterStartFromBatch);
+        cut.jumboEnsuring = (startTyped ? Promise.resolve('') : this.lastJumboCounter(cut, number))
+            .then(function(jumboStart) {
+                counterStart = typedStart || jumboStart || cutStart;
+                if (jumboStart && jumboStart !== cutStart) {
+                    // первая запись задания: её начало и есть начало задания (#5082)
+                    cut.counterStart = jumboStart;
+                    cut.counterStartFromBatch = false;
+                    self.notify('«Счётчик нач.» — остаток джамбо ' + number + ' по прошлой записи: ' + jumboStart + ' м');
+                }
+                var fields = {};
+                fields['t' + table.id] = number;
+                var csRid = reqIdByName(table, JUMBO_REQ.counterStart);
+                if (csRid && counterStart !== '') fields['t' + csRid] = core.toNumber(counterStart);
+                return self.postRetry('_m_new/' + table.id + '?JSON&up=' + encodeURIComponent(cut.id), fields,
+                    { beforeRetry: function() { return self.findCreatedJumbo(cut, number); } });
+            })
             .then(function(res) {
                 // ID новой записи приходит в res.obj (см. orders.js), fallback — id/i.
                 var newId = res && ((res.obj != null && String(res.obj))
@@ -4526,8 +4583,10 @@
         return this.ensureJumboRecord(cut).then(function() {
             var table = (self.meta && self.meta.jumboTable) || null;
             if (!table) return null;
+            return self.lastJumboCounter(cut, number).then(function(jumboStart) {
             var prev = (cut.jumbos || [])[(cut.jumbos || []).length - 1] || null;
-            var counterStart = core.jumboNextCounterStart(prev)
+            // #5196: номер уже резали — остаток этого джамбо; новый — «кон.» предыдущей записи (#4914)
+            var counterStart = jumboStart || core.jumboNextCounterStart(prev)
                 || String(cut.counterStart == null ? '' : cut.counterStart).trim();
             var fields = {};
             fields['t' + table.id] = number;
@@ -4553,6 +4612,7 @@
                     self.render();
                     return stored;
                 });
+            });
         }).catch(function(err) {
             self.notify('Джамбо не добавлен: ' + (err && err.message ? err.message : err), 'error');
             return null;
