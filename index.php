@@ -340,7 +340,7 @@ if(($z === "my") && ((isset($com[2]) ? $com[2] : "") === "register")){ # Registe
         		if($row["uid"]){ # User found
         			# Update the user in the CRM
         			Exec_sql("UPDATE $z SET val='".$row["token"]."' WHERE id=".$row["pid"], "Update user's password");
-        			updateTokens($row);
+        			updateTokens($row, array((string)$row["token"]));  # до подтверждения в токене лежал хеш пароля
                 	createDb($row["uid"], "", $row["email"], $row["pwd"]);
             		header("Location: /$z");
             		die();
@@ -779,10 +779,15 @@ function createDb($id, $name, $email, $pwd=""){
         $z = $db;
     }
 }
-function updateTokens($row){
+# $pwdHashes — хеши пароля пользователя: токен, совпадающий с одним из них, заменяется случайным
+function updateTokens($row, $pwdHashes = array()){
 	global $z;
 	# Token must be assigned before deriving xsrf (issue #2122).
-	if($row["tok"])
+	if($row["tok"] && in_array((string)$row["token"], $pwdHashes, TRUE)){
+    	$token = $GLOBALS["GLOBAL_VARS"]["token"] = secureToken();
+		Update_Val($row["tok"], $token);
+	}
+	elseif($row["tok"])
     	$token = $GLOBALS["GLOBAL_VARS"]["token"] = $row["token"];
 	else{
     	$token = $GLOBALS["GLOBAL_VARS"]["token"] = secureToken();
@@ -975,16 +980,20 @@ function Basic_auth_token($value){
 	$tmp = explode(":", $value, 2);
 	$u = addslashes($tmp[0]);
 	$pwd = hash("sha512", Salt($u, isset($tmp[1]) ? $tmp[1] : ""));
-	$data_set = Exec_sql("SELECT tok.val tok, u.id FROM $z pwd, $z u"
+	$data_set = Exec_sql("SELECT tok.val tok, tok.id tok_id, u.id FROM $z pwd, $z u"
 							." LEFT JOIN $z tok ON tok.up=u.id AND tok.t=".TOKEN
 						." WHERE u.t=".USER." AND u.val='$u' AND pwd.up=u.id AND pwd.val='$pwd'"
 				, "Basic authentication");
 	if(!($row = mysqli_fetch_array($data_set)))
 		return FALSE;
-	if(isset($row["tok"]))
+	if(isset($row["tok"]) && ($row["tok"] !== $pwd))
 		return $row["tok"];
-	Insert($row["id"], 1, TOKEN, $pwd, "Save basic token");
-	return $pwd;
+	$tok = secureToken();  # токен не равен хешу пароля: прежде Basic-вход клал хеш в токен
+	if(isset($row["tok"]))
+		Update_Val($row["tok_id"], $tok);
+	else
+		Insert($row["id"], 1, TOKEN, $tok, "Save basic token");
+	return $tok;
 }
 // Cryptographically secure session/auth token. random_bytes() throws if no
 // CSPRNG is available; we fall back to openssl_random_pseudo_bytes (which
@@ -14022,7 +14031,8 @@ switch($a)  # Check actions, which don't require authentication
 					$msg = t9n("[RU]Пароль успешно изменен[EN]The password has been changed");
 				}
 			}
-			updateTokens($row);
+			# Токен, равный хешу пароля этой базы или кабинета my (копируется в базу при регистрации), заменяется
+			updateTokens($row, array(hash("sha512", Salt($u, $p)), hash("sha512", SALT."my".$p)));
 #			if(isset($_POST["save"]))
 #				setcookie("idb_$z", $GLOBALS["GLOBAL_VARS"]["token"], 0, "/");  # The cookie to be deleted upon the session close
 #			else
