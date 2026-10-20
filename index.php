@@ -1731,6 +1731,18 @@ function logJournalFilter(){
             return array("error" => t9n("[RU]id: ожидается число[EN]id: a number expected"));
         $f["id"] = (int)$_REQUEST["id"];
     }
+    if(isset($_REQUEST["where"]) && is_string($_REQUEST["where"]) && strlen($_REQUEST["where"])){
+        $w = json_decode($_REQUEST["where"], TRUE);
+        if(!is_array($w) || (count($w) > 10))
+            return array("error" => t9n("[RU]where: ожидается JSON-массив до 10 условий[EN]where: a JSON array of up to 10 conditions expected"));
+        foreach($w as $c)
+            if(!is_array($c) || !isset($c["f"], $c["op"], $c["v"]) || !is_string($c["f"]) || !is_scalar($c["v"])
+                    || !preg_match('/^(\*|[A-Za-z0-9_]+)$/', $c["f"])
+                    || !in_array($c["op"], array("eq", "ne", "starts", "ends", "contains", "notcontains"), TRUE))
+                return array("error" => t9n("[RU]where: условие {f: поле или *, op: eq|ne|starts|ends|contains|notcontains, v: значение}[EN]where: a condition is {f: field or *, op: eq|ne|starts|ends|contains|notcontains, v: value}"));
+        if(count($w))
+            $f["where"] = $w;
+    }
     foreach(array("since", "until") as $k)
         if(isset($_REQUEST[$k]) && is_string($_REQUEST[$k]) && strlen($_REQUEST[$k])){
             $ts = strtotime($_REQUEST[$k]);
@@ -1765,7 +1777,39 @@ function logJournalMatch($rec, $f, &$stop){
             return FALSE;
     if(isset($f["id"]) && (!isset($rec["id"]) || ((int)$rec["id"] !== $f["id"])))
         return FALSE;
+    if(isset($f["where"]))
+        foreach($f["where"] as $c)
+            if(!logJournalCond($rec, $c))
+                return FALSE;
     return TRUE;
+}
+# Условие where (issue #5000): поле f (или «*» — любое поле строки) сравнивается со значением v
+# без учёта регистра. Не-строковые значения — как текст: числа и логические по записи JSON,
+# вложенное — JSON без кодов \uXXXX. Отсутствующее поле — пустая строка. «Не равно» и «не содержит»
+# для «*» значат «ни одно поле не подошло».
+function logJournalCond($rec, $c){
+    $op = $c["op"];
+    $neg = ($op === "ne") || ($op === "notcontains");
+    $pos = $neg ? ($op === "ne" ? "eq" : "contains") : $op;
+    # Значение условия приводится к тексту так же, как поле строки: true — «true», а не «1»
+    $v = is_string($c["v"]) ? $c["v"] : json_encode($c["v"], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    $v = mb_strtolower($v, "UTF-8");
+    $n = strlen($v);
+    $vals = ($c["f"] === "*") ? array_values($rec) : array(isset($rec[$c["f"]]) ? $rec[$c["f"]] : "");
+    $found = FALSE;
+    foreach($vals as $x){
+        $x = is_string($x) ? $x : json_encode($x, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $x = mb_strtolower((string)$x, "UTF-8");
+        $ok = ($pos === "eq") ? ($x === $v)
+            : (($pos === "starts") ? (substr($x, 0, $n) === $v)
+            : (($pos === "ends") ? (($n === 0) || (substr($x, -$n) === $v))
+            : (strpos($x, $v) !== FALSE)));
+        if($ok){
+            $found = TRUE;
+            break;
+        }
+    }
+    return $neg ? !$found : $found;
 }
 # Читает журнал с конца блоками по LOG_READ_BLOCK, начиная с курсора «файл:смещение» (пустой —
 # с конца текущего файла). Собирает до $limit+1 подходящих строк: limit+1-я значит, что есть

@@ -1,0 +1,105 @@
+/* Рабочее место dir_admin (issue #5000): собственные стили вместо bootstrap 3.3.7.
+   Разметка шаблона сохранила имена классов (table, btn, form-control, input-group, alert),
+   здесь они определены заново; цвета — из переменных styles.css, поэтому тёмная тема работает сама. */
+*, *::before, *::after { box-sizing: border-box; }
+body.dir-admin {
+    margin: 0;
+    padding: 8px 12px;
+    font-family: Verdana, Tahoma, sans-serif;
+    font-size: 14px;
+    line-height: 1.4;
+    background: var(--bg-primary, #fff);
+    color: var(--text-primary, #212529);
+}
+body.dir-admin a { cursor: pointer; color: var(--link-color, #3b82f6); }
+/* Значки файлов нарисованы контуром stroke="#1A1A1A" — это цвет фона тёмной темы */
+[data-theme="dark"] svg path[stroke="#1A1A1A"],
+[data-theme="dark"] svg path[stroke="#1a1a1a"] {
+    stroke: var(--text-primary);
+}
+body.dir-admin p { margin: 0 0 10px; }
+body.dir-admin h4 { margin: 14px 0 8px; font-size: 18px; }
+body.dir-admin .container { max-width: 1200px; margin: 1px; }
+
+body.dir-admin .alert {
+    padding: 10px 14px;
+    margin: 0 0 12px;
+    border: 1px solid var(--border-color, #dee2e6);
+    border-radius: var(--radius-sm, 4px);
+    background: var(--bg-secondary, #f8f9fa);
+    color: var(--text-primary, #212529);
+}
+
+body.dir-admin .table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 14px;
+}
+body.dir-admin .table td, body.dir-admin .table th {
+    padding: 4px 8px;
+    border: 1px solid var(--border-color, #dee2e6);
+    vertical-align: top;
+    text-align: left;
+}
+body.dir-admin .table-striped tr:nth-child(even) { background: var(--bg-secondary, #f8f9fa); }
+
+body.dir-admin .btn {
+    display: inline-block;
+    padding: 5px 12px;
+    font: inherit;
+    cursor: pointer;
+    color: var(--text-primary, #212529);
+    background: var(--bg-secondary, #f8f9fa);
+    border: 1px solid var(--input-border, #ced4da);
+    border-radius: var(--radius-sm, 4px);
+}
+body.dir-admin .btn:hover:not(:disabled) { background: var(--bg-primary, #fff); border-color: var(--text-secondary, #6c757d); }
+body.dir-admin .btn:disabled { opacity: .5; cursor: default; }
+body.dir-admin .btn-xs { padding: 1px 6px; font-size: 12px; }
+
+body.dir-admin .form-control, body.dir-admin .da-input {
+    padding: 5px 8px;
+    font: inherit;
+    color: var(--text-primary, #212529);
+    background: var(--input-bg, #fff);
+    border: 1px solid var(--input-border, #ced4da);
+    border-radius: var(--radius-sm, 4px);
+}
+body.dir-admin .form-control { width: 100%; }
+body.dir-admin .input-group { display: flex; }
+body.dir-admin .input-group .form-control { flex: 1; border-top-right-radius: 0; border-bottom-right-radius: 0; }
+body.dir-admin .input-group-btn .btn { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -1px; }
+
+/* Вкладки */
+.da-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border-color, #dee2e6); margin: 0 0 14px; }
+.da-tab {
+    padding: 7px 16px;
+    margin-bottom: -1px;
+    font: inherit;
+    cursor: pointer;
+    color: var(--text-secondary, #6c757d);
+    background: none;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm, 4px) var(--radius-sm, 4px) 0 0;
+}
+.da-tab.active {
+    color: var(--text-primary, #212529);
+    background: var(--bg-primary, #fff);
+    border-color: var(--border-color, #dee2e6) var(--border-color, #dee2e6) var(--bg-primary, #fff);
+}
+.da-pane[hidden] { display: none; }
+
+/* Журнал */
+.jv-bar, .jv-nav { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; margin-bottom: 10px; }
+.jv-conds { display: flex; flex-direction: column; gap: 4px; }
+.jv-cond { display: flex; gap: 4px; }
+.jv-cond .da-input[type="text"] { min-width: 220px; }
+.jv-info { color: var(--text-secondary, #6c757d); align-self: center; }
+.jv-status { min-height: 1.4em; margin-bottom: 6px; color: var(--text-secondary, #6c757d); }
+.jv-status.jv-error { color: var(--color-error, #dc2626); }
+.jv-table-wrap { overflow-x: auto; }
+.jv-table { font-size: 12px; font-family: Consolas, monospace; }
+.jv-table td { white-space: nowrap; max-width: 420px; overflow: hidden; text-overflow: ellipsis; }
+.jv-row { cursor: pointer; }
+.jv-detail td { white-space: normal; max-width: none; }
+.jv-detail pre { margin: 0; white-space: pre-wrap; word-break: break-all; }
