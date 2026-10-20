@@ -89,6 +89,7 @@ function mysqli_fetch_array($res){
     return isset($res->rows[$res->i]) ? $res->rows[$res->i++] : FALSE;
 }
 function Check_Grant($id, $t = 0, $grant = "WRITE", $fatal = TRUE){ return TRUE; }
+function Check_Rec_masks($id, $fields = NULL, $typ = 0){}   # маски строк (python2node#1008) — своя мерка
 function BuiltIn($v){ return $v; }
 function Format_Val($t, $v){ return $v; }
 function Update_Val($id, $val){ $GLOBALS["CHANGES"][] = array("update_val", $id, $val); }

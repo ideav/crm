@@ -2483,6 +2483,102 @@ function Check_Val_granted($t, $val, $id=0){
     	return $ok;
 	}
 }
+# Маски строк роли (GRANTS["mask"]) действуют на запись так же, как на чтение (python2node#1008):
+# каждое непустое значение колонки с маской — сохранённое в записи, в её родителях и присланное
+# на запись — обязано проходить маску. Сравнение то же, что у списка object/ (Construct_WHERE):
+# ссылка сравнивается по id записи-цели; маски одной колонки складываются по ИЛИ, разных — по И.
+# Пустое значение не проверяется, как в карточке: запись, созданная без значения колонки с маской,
+# иначе стала бы недоступна своему же автору. Возвращает текст отказа или "" (проверка пройдена).
+function Rec_masks_denial($id, $fields = NULL, $typ = 0)
+{
+	global $z;
+	if(($GLOBALS["GLOBAL_VARS"]["user"] == "admin") || empty($GLOBALS["GRANTS"]["mask"]))
+		return "";
+	$id = (int)$id;
+	$typ = (int)$typ;
+	$val = NULL;
+	$up = 0;
+	if($id){
+		if(!($row = mysqli_fetch_array(Exec_sql("SELECT t, up, val FROM $z WHERE id=$id", "Get record for masks"))))
+			return "";
+		if((int)$row["up"] === 0)	# Метаданные масками не закрываются
+			return "";
+		$typ = (int)$row["t"];
+		$up = (int)$row["up"];
+		$val = $row["val"];
+	}
+	$masked = array();	# Колонка с маской => "ref" | "val"
+	$reqs = array();	# Все колонки типа: по ним отличаем значение от ссылки
+	$data_set = Exec_sql("SELECT req.id, def.t FROM $z req JOIN $z def ON def.id=req.t WHERE req.up=$typ AND $typ!=0", "Get masked reqs");
+	while($row = mysqli_fetch_array($data_set)){
+		$reqs[(int)$row["id"]] = TRUE;
+		if(isset($GLOBALS["GRANTS"]["mask"][$row["id"]]))
+			$masked[(int)$row["id"]] = isset($GLOBALS["basics"][$row["t"]]) ? "val" : "ref";
+	}
+	if(isset($GLOBALS["GRANTS"]["mask"][$typ]))
+		$masked[$typ] = "val";	# Маска на таблицу — по главному значению записи
+	$vals = array();
+	if(count($masked) && $id){
+		if(isset($masked[$typ]))
+			$vals[$typ][] = $val;
+		$data_set = Exec_sql("SELECT t, val FROM $z WHERE up=$id", "Get record values for masks");
+		while($row = mysqli_fetch_array($data_set))
+			if(isset($masked[(int)$row["t"]]) && ($masked[(int)$row["t"]] === "val"))
+				$vals[(int)$row["t"]][] = $row["val"];
+			elseif(!isset($reqs[(int)$row["t"]]) && is_numeric($row["val"])
+					&& isset($masked[(int)$row["val"]]) && ($masked[(int)$row["val"]] === "ref"))
+				$vals[(int)$row["val"]][] = $row["t"];	# Ссылка: up=запись, t=цель, val=колонка
+	}
+	$new = array();
+	if(is_array($fields))
+		foreach($fields as $key => $v){
+			$req = (int)substr($key, 1);
+			if(("t$req" !== $key) || !isset($masked[$req]))
+				continue;
+			if($masked[$req] === "ref")
+				$new[$req] = is_array($v) ? $v : explode(",", (string)$v);
+			else
+				$new[$req] = array(is_array($v) ? "" : BuiltIn((string)$v));
+		}
+	foreach(array($vals, $new) as $set)
+		foreach($set as $req => $list)
+			if(($msg = Mask_denial($req, $list, $masked[$req])) !== "")
+				return $msg;
+	if($up > 1)	# Подчинённая запись наследует маски родителя
+		return Rec_masks_denial($up);
+	return "";
+}
+function Mask_denial($req, $list, $kind)
+{
+	foreach($list as $v){
+		$v = trim((string)$v);
+		if($v === "")
+			continue;
+		if(($kind === "ref") && !is_numeric($v))
+			continue;	# Нечисловую ссылку отобьёт RequireRefId/checkNewRef
+		$ok = FALSE;
+		foreach($GLOBALS["GRANTS"]["mask"][$req] as $mask => $level){
+			$cond = Fetch_WHERE_for_mask($req, $v, $mask);
+			if($cond === ""){
+				$ok = TRUE;
+				break;
+			}
+			$row = mysqli_fetch_array(Exec_sql("SELECT $cond", "Check value by mask"));
+			if($row && ($row[0] === "1")){
+				$ok = TRUE;
+				break;
+			}
+		}
+		if(!$ok)
+			return t9n("[RU]У вас нет доступа к этому объекту ($v) по маске![EN]You do not have this object granted ($v) by mask")." ($req)";
+	}
+	return "";
+}
+function Check_Rec_masks($id, $fields = NULL, $typ = 0)
+{
+	if(($msg = Rec_masks_denial($id, $fields, $typ)) !== "")
+		my_die($msg, "403 Forbidden");
+}
 function Check_Types_Grant($fatal=TRUE)	# $fatal stops the script on no access
 {
 	if($GLOBALS["GLOBAL_VARS"]["user"] == "admin")
@@ -6723,7 +6819,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 				if(isset($GLOBALS["ARR_typs"][$key]))
 					$GLOBALS["REV_BT"][$key] = "ARRAY";
 			    trace("Check GRANTS for $key");
-				if(Val_barred_by_mask($key, isset($row["val"]) ? (isset($GLOBALS["REF_typs"][$key]) ? $row["ref_val"] : $v) : NULL))
+				if(Val_barred_by_mask($key, isset($row["val"]) ? (isset($GLOBALS["REF_typs"][$key]) ? $row["val"] : $v) : NULL))	# Ссылка — по id цели, как в списке (python2node#1008)
 						$blocks[$block]["disabled"][] = "DISABLED";
 				elseif(isset($GLOBALS["GRANTS"][$key]))
 				{
@@ -6747,7 +6843,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 
 				if(isset($GLOBALS["REF_typs"][$key])){
 					if(strlen($v))
-						Check_Val_granted($key, $row["ref_val"], $v); # Check if we got this Req val granted
+						Check_Val_granted($key, $row["val"], $v); # Check if we got this Req val granted (ссылка — по id цели, python2node#1008)
 					$GLOBALS["REV_BT"][$key] = "REFERENCE";
 					$blocks[$block]["ref"][] = $GLOBALS["REF_typs"][$key];
 					$blocks[$block]["base_typ"][] = $base_typ;
@@ -12876,6 +12972,7 @@ function ApplyMSet($id, $req, $files)
 		    $t = 0;
 		    $obj = $id;
 		    $id = "";
+			Check_Rec_masks($obj, $req);	# python2node#1008: маски строк — и на запись
 			foreach($req as $key => $val) # Check if we have an attribute set
 				if((substr($key, 0, 1) == "t") && ((int)substr($key, 1)!=0)){
 				    $t = (int)substr($key, 1);
@@ -13034,6 +13131,7 @@ function ApplyMDel($id)
 			if($id == 0)
 				my_die(t9n("[RU]Неверный id: $id[EN]Wrong id: $id"));
 			Check_Grant($id);
+			Check_Rec_masks($id);
 			if($id == $GLOBALS["GLOBAL_VARS"]["user_id"])
 			    my_die(t9n("[RU]Нельзя удалить себя как пользователя[EN]The user is not able to delete himself, sorry"));
 			$refs = exec_sql("SELECT count(r.id), obj.up, obj.ord, obj.t, obj.val, par.up pup, type.up tup FROM $z obj"
@@ -13085,6 +13183,9 @@ function ApplyMNew($id, $up, $files)
 				my_die(t9n("[RU]Недопустимый id=0.[EN]Invalid id=0."));
 			if($id === "")
 				my_die(t9n("[RU]Недопустимый пустой id[EN]Invalid empty id"));
+			Check_Rec_masks(0, $_REQUEST, $id);	# python2node#1008: новая запись — в пределах масок роли
+			if($up > 1)
+				Check_Rec_masks($up);
 		    # Check if the Type exists and has reqs
 			$data_set = Exec_sql("SELECT obj.t, obj.ord, req.id, req.t reqt, req.val, def.t base"
 			                        ." FROM $z obj LEFT JOIN $z req ON req.up=$id AND req.t!=req.up LEFT JOIN $z def ON def.id=req.t"
@@ -13348,6 +13449,7 @@ function ApplyMSave($id, $req, $files)
 			$typ = $row["typ"];
 			$base_typ = $GLOBALS["basics"][$row["t"]];
 			$unique = (int)$row["uniq"];
+			Check_Rec_masks($id, $req);	# python2node#1008: маски строк — и на запись
 			$up = $row["up"];
 			if($up > 1)
 				$arg = "F_U=$up";  # Retain this for Array elements only
@@ -14542,6 +14644,7 @@ if(Validate_Token())
 
 		case "_m_up":
 			Check_Grant($id);
+			Check_Rec_masks($id);
 			$result = Exec_sql("SELECT obj.t, obj.up, obj.ord, max(peers.ord) new_ord
 								FROM $z obj LEFT JOIN $z peers ON peers.up=obj.up AND peers.t=obj.t AND peers.ord<obj.ord
 								WHERE obj.id=$id", "Get new Order and other Reqs");
@@ -14565,6 +14668,7 @@ if(Validate_Token())
 	        if(!is_numeric($_REQUEST["order"]) || ((int)$_REQUEST["order"] < 1))
         		die("Invalid order");
 			Check_Grant($id);
+			Check_Rec_masks($id);
         	$newOrd = (int)$_REQUEST["order"];
 			$result = Exec_sql("SELECT obj.ord, obj.up FROM $z obj, $z par WHERE obj.id=$id AND par.id=obj.up AND par.up!=0", "Check the obj");
 			if($row = mysqli_fetch_array($result)){
@@ -14587,6 +14691,7 @@ if(Validate_Token())
 	        if(!is_numeric($_REQUEST["new_id"]) || ((int)$_REQUEST["new_id"] < 1))
         		die("Invalid ID");
 			Check_Grant($id);
+			Check_Rec_masks($id);
         	$newId = (int)$_REQUEST["new_id"];
 			$result = Exec_sql("SELECT up FROM $z WHERE id=$newId OR (id=$id AND up=0)", "Check the new id");
 			if($row = mysqli_fetch_array($result))
@@ -14644,6 +14749,9 @@ if(Validate_Token())
 			if($id==0)
 				die(t9n("[RU]Неверный id: $id[EN]Wrong id: $id"));
 			Check_Grant($id);
+			Check_Rec_masks($id);
+			if($up > 1)
+				Check_Rec_masks($up);
 			# Get the Object
 			$result = Exec_sql("SELECT a.up, a.t, up.t ut, a.ord, target.t tt, COALESCE(MAX(reqs.ord)+1,1) new_ord
 									FROM $z a, $z up, $z target, $z reqs
@@ -14753,6 +14861,10 @@ if(Validate_Token())
 				}
 				if($rid === $userIdNum){
 					$errors[(string)$rid] = t9n("[RU]Нельзя удалить себя как пользователя[EN]Can't delete yourself");
+					continue;
+				}
+				if(($maskDenial = Rec_masks_denial($rid)) !== ""){	# python2node#1008
+					$errors[(string)$rid] = $maskDenial;
 					continue;
 				}
 				$refCnt = (int)$row["ref_cnt"];

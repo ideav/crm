@@ -275,6 +275,7 @@ if($part === "new"){
         return $id;
     }
     function Check_Grant($id, $t = 0, $grant = "WRITE", $fatal = TRUE){ return TRUE; }
+    function Check_Rec_masks($id, $fields = NULL, $typ = 0){}   # маски строк (python2node#1008) — своя мерка
     function Grant_1level($id){ return "WRITE"; }
     function Calc_Order($up, $t){ return 1; }
     function BuiltIn($v){ return $v; }
