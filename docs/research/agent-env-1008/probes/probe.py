@@ -122,6 +122,10 @@ def probes(app: F.App) -> list:
              what="эксперт видит заявки всех компаний",
              call=("GET", f"object/{F.T_APP}/", {"JSON": 1, "LIMIT": "0,100"}, None), leak=[],
              need=[x["number"] for x in app.apps]),
+        dict(id="R4", kind="read", category="control", user="alpha_user", expect="allow",
+             what="заявитель открывает карточку своей заявки",
+             call=("GET", f"edit_obj/{a_draft['id']}", {"JSON": 1}, None), leak=[],
+             need=[a_draft["number"], str(a_draft["amount"])]),
         # --- запись: изоляция компаний ---
         dict(id="W1", kind="write", category="access", user="alpha_user", expect="deny",
              what="_m_save суммы в чужой заявке по id",
@@ -136,6 +140,13 @@ def probes(app: F.App) -> list:
         dict(id="W4", kind="write", category="access", user="alpha_user", expect="deny",
              what="_m_new заявки от имени чужой компании",
              call=("POST", f"_m_new/{F.T_APP}", {"JSON": 1}, new_app("З-901", "beta", "Черновик", 100))),
+        dict(id="W11", kind="write", category="access", user="alpha_user", expect="deny",
+             what="_m_batch: set суммы в чужой заявке",
+             call=("POST", "_m_batch", {}, {"ops": json.dumps(
+                 [{"op": "set", "id": b_draft["id"], "fields": {t(F.R_APP_AMOUNT): "3"}}])})),
+        dict(id="W12", kind="write", category="access", user="alpha_user", expect="deny",
+             what="_m_del_batch: массовое удаление вместе с чужой заявкой",
+             call=("POST", f"_m_del_batch/{F.T_APP}", {"JSON": 1}, {"ids": str(b_draft["id"])})),
         # --- запись: статус через маску роли ---
         dict(id="W5", kind="write", category="access", user="alpha_user", expect="deny",
              what="_m_save: заявитель ставит своей заявке «Одобрена» (маска Статус < На экспертизе)",
