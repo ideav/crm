@@ -1791,7 +1791,9 @@ function logJournalCond($rec, $c){
     $op = $c["op"];
     $neg = ($op === "ne") || ($op === "notcontains");
     $pos = $neg ? ($op === "ne" ? "eq" : "contains") : $op;
-    $v = mb_strtolower((string)$c["v"], "UTF-8");
+    # Значение условия приводится к тексту так же, как поле строки: true — «true», а не «1»
+    $v = is_string($c["v"]) ? $c["v"] : json_encode($c["v"], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    $v = mb_strtolower($v, "UTF-8");
     $n = strlen($v);
     $vals = ($c["f"] === "*") ? array_values($rec) : array(isset($rec[$c["f"]]) ? $rec[$c["f"]] : "");
     $found = FALSE;

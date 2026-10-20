@@ -78,6 +78,19 @@ check(hit($req, array(array("f" => "path", "op" => "starts", "v" => "/acme"), ar
 check(hit($req, array(array("f" => "path", "op" => "starts", "v" => "/acme"), array("f" => "st", "op" => "eq", "v" => "200"))) === TRUE, "условия по И: оба прошли");
 check(hit($req, "[]") === TRUE, "пустой список условий — всё подходит");
 
+# Значение условия не строкой (JSON-литерал в where) — текстом по записи JSON, как и поле строки:
+# true ↔ "true", а не "1"; false ↔ "false", а не "" (ревью PR #5208). Числа — как были.
+$sq = json_decode('{"ok":true,"err":false,"ms":12.0,"n":3,"t":"true"}', TRUE);
+check(hit($sq, '[{"f":"ok","op":"eq","v":true}]') === TRUE, "v: true = поле true");
+check(hit($sq, '[{"f":"ok","op":"ne","v":true}]') === FALSE, "v: true — «не равно» полю true мимо");
+check(hit($sq, '[{"f":"err","op":"eq","v":false}]') === TRUE, "v: false = поле false");
+check(hit($sq, '[{"f":"ok","op":"eq","v":false}]') === FALSE, "v: false ≠ поле true");
+check(hit($sq, '[{"f":"ms","op":"eq","v":12.0}]') === TRUE, "v: 12.0 = поле 12.0");
+check(hit($sq, '[{"f":"n","op":"eq","v":3}]') === TRUE, "v: 3 = поле 3 (целые как были)");
+check(hit($sq, '[{"f":"ok","op":"eq","v":"TRUE"}]') === TRUE, "v строкой «TRUE» = поле true (строки как были)");
+check(hit($sq, '[{"f":"t","op":"eq","v":"true"}]') === TRUE, "v строкой = строковое поле");
+check(hit($sq, '[{"f":"*","op":"eq","v":true}]') === TRUE, "«*»: v true нашлось в ok");
+
 # старые фильтры живут рядом
 $_REQUEST = array("user" => "Petrov", "where" => json_encode(array(array("f" => "st", "op" => "eq", "v" => "200"))));
 $f = logJournalFilter(); $stop = FALSE;
