@@ -213,7 +213,7 @@ elseif(($z == "auth.asp") && !empty($_GET['code'])){
         	        if($row["tok"])
             	        $token = $row["tok"];
             	    else{
-            			$token = md5(microtime(TRUE));
+            			$token = secureToken();
                         Insert($row["id"], 1, TOKEN, $token, "Reset token for G admin");
             	    }
         	        if(!$row["xsrf"])
@@ -227,7 +227,7 @@ elseif(($z == "auth.asp") && !empty($_GET['code'])){
         	setcookie($z, $token, time() + 2592000*12, "/"); # 30*12 days
     	}
         else{
-			$GLOBALS["GLOBAL_VARS"]["token"] = md5(microtime(TRUE));
+			$GLOBALS["GLOBAL_VARS"]["token"] = secureToken();
 			$GLOBALS["GLOBAL_VARS"]["xsrf"] = xsrf($GLOBALS["GLOBAL_VARS"]["token"], $z);
             $id = newUser($info["id"], $info["email"], "115", $info["name"], $info["picture"]);
             Insert($id, 1, 274, "Google", "Set social for new G user");
@@ -379,14 +379,15 @@ function createDb($id, $name, $email, $pwd=""){
 }
 function updateTokens($row){
 	global $z;
-	$xsrf = $GLOBALS["GLOBAL_VARS"]["xsrf"] = xsrf($token, $z);
-	setcookie($z, $token, time() + 2592000*12, "/"); # 30*12 days
+	# Токен присваивается до вывода xsrf и cookie (issue #5207, как в index.php #2122).
 	if($row["tok"])
     	$token = $GLOBALS["GLOBAL_VARS"]["token"] = $row["token"];
 	else{
-    	$token = $GLOBALS["GLOBAL_VARS"]["token"] = md5(microtime(TRUE));
+    	$token = $GLOBALS["GLOBAL_VARS"]["token"] = secureToken();
 		Insert($row["uid"], 1, TOKEN, $token, "Save token");
 	}
+	$xsrf = $GLOBALS["GLOBAL_VARS"]["xsrf"] = xsrf($token, $z);
+	setcookie($z, $token, time() + 2592000*12, "/"); # 30*12 days
 	if($row["xsrf"])
 		Update_Val($row["xsrf"], $xsrf);
 	else
@@ -487,6 +488,17 @@ function isApi(){
 }
 function xsrf($a, $b){
 	return substr(sha1(Salt($a, $b)), 0, 22);
+}
+// Криптостойкий токен сессии: 64 hex-символа из random_bytes (issue #5207, как в index.php #2122).
+// Если CSPRNG недоступен, random_bytes бросает исключение — берём openssl_random_pseudo_bytes.
+function secureToken(){
+	try {
+		return bin2hex(random_bytes(32));
+	} catch (Exception $e) {
+		$bytes = openssl_random_pseudo_bytes(32, $strong);
+		if ($bytes !== false && $strong) return bin2hex($bytes);
+		throw $e;
+	}
 }
 function login($z="", $u="", $message="", $details=""){
 	wlog(" @".$_SERVER["REMOTE_ADDR"], "log");
@@ -8160,7 +8172,7 @@ switch($a)  # Check actions, which don't require authentication
     						, "Check the user token");
     		if($row = mysqli_fetch_array($data_set))
     		{
-    			$token = md5(microtime(TRUE));
+    			$token = secureToken();
     			$xsrf = xsrf($token, $u);
 				Update_Val($row["tok"], $token);
 
