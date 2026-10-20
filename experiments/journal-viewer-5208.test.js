@@ -135,17 +135,17 @@ test('«Старее →» с ошибкой: «← Новее» ведёт на
     assert.strictEqual(ui.param(3, 'cursor'), null, 'показана была страница c1, новее неё — начало журнала');
 });
 
-test('строки, отобранные сервером по where, клиент не выкидывает (12.0 и {} в записи PHP)', async () => {
+test('строки, отобранные сервером по where, клиент не выкидывает (пустой объект: PHP «[]», JS «{}»)', async () => {
     const ui = mount();
     ui.host.start();
     await reply(ui, 0, 200, page([]));
     ui.addBtn.click();
     const [f, op, v] = ui.condBox.children[0].children;
-    f.value = 'ms'; op.value = 'contains'; v.value = '12.0';
+    f.value = 'params'; op.value = 'eq'; v.value = '[]';
     ui.applyBtn.click();
-    assert.deepStrictEqual(JSON.parse(ui.param(1, 'where')), [{ f: 'ms', op: 'contains', v: '12.0' }], 'условие ушло на сервер');
-    // сервер (json_encode PHP) увидел в ms «12.0» и в params «[]» — строки подходят
-    await reply(ui, 1, 200, '{"rows":[{"ms":12.0,"params":{}},{"ms":12.05,"params":{}}],"more":false,"next":null}');
+    assert.deepStrictEqual(JSON.parse(ui.param(1, 'where')), [{ f: 'params', op: 'eq', v: '[]' }], 'условие ушло на сервер');
+    // сервер разбирает строку json_decode(…, TRUE): {} становится array(), json_encode даёт «[]» — строки подходят
+    await reply(ui, 1, 200, '{"rows":[{"path":"/a","params":{}},{"path":"/b","params":{}}],"more":false,"next":null}');
     assert.strictEqual(ui.rows().length, 2, 'все строки ответа сервера на экране');
 });
 
