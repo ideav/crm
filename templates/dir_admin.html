@@ -5,47 +5,13 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>File manager</title>
-    <link rel="stylesheet" href="/css/bootstrap.3.3.7.min.css">
-	<link rel="stylesheet" href="/assets/vendor/primeicons/primeicons.css">
+    <link rel="stylesheet" href="/assets/vendor/primeicons/primeicons.css">
     <link rel="stylesheet" href="/css/styles.css">
-    <style>
-        a{ cursor: pointer; }
-        [data-theme="dark"] body {
-            background-color: var(--bg-primary);
-            color: var(--text-primary);
-        }
-        [data-theme="dark"] .alert-info {
-            background-color: var(--bg-secondary);
-            border-color: var(--border-color);
-            color: var(--text-primary);
-        }
-        [data-theme="dark"] .btn-default {
-            background-color: var(--bg-secondary);
-            border-color: var(--border-color);
-            color: var(--text-primary);
-        }
-        [data-theme="dark"] .btn-default:hover,
-        [data-theme="dark"] .btn-default:focus {
-            background-color: var(--bg-primary);
-            border-color: var(--text-secondary);
-            color: var(--text-primary);
-        }
-        [data-theme="dark"] .table-striped > tbody > tr:nth-of-type(odd) {
-            background-color: var(--bg-secondary);
-        }
-        [data-theme="dark"] .input-group-btn .btn-default {
-            background-color: var(--bg-secondary);
-            border-color: var(--border-color);
-            color: var(--text-primary);
-        }
-        [data-theme="dark"] svg path[stroke="#1A1A1A"],
-        [data-theme="dark"] svg path[stroke="#1a1a1a"] {
-            stroke: var(--text-primary);
-        }
-    </style>
+    <!-- Собственные стили рабочего места вместо bootstrap 3.3.7 (#5000); версия — числом в адресе -->
+    <link rel="stylesheet" href="/css/dir-admin.css?5000">
     <script src="/js/jquery-3.5.1.slim.min.js"></script>
 </head>
-<body style="font-family:Verdana,Tahoma,sans-serif;line-height:normal;padding:2px">
+<body class="dir-admin">
 <div>
     <a href="/{_global_.z}"><i class="pi pi-home" style="font-size: 2rem; color: var(--text-primary, #333);"></i></a>
     &nbsp; 
@@ -57,6 +23,12 @@
     Это техническая страница. Здесь вы можете восстановить поврежденные файлы шаблона, если ваши страницы перестали из-за них работать.<br />
     Оригинальные файлы можно скачать <a target="git" href="https://github.com/ideav/crm/tree/main/templates">здесь</a> и загрузить в папку <a href="/{_global_.z}/dir_admin/?templates=1">templates</a>.
 </p>
+<!-- Вкладки (#5000): «Файлы» — прежнее содержимое страницы, «Журнал» — просмотр журнала базы. -->
+<div class="da-tabs">
+    <button type="button" class="da-tab active" data-pane="da-files">Файлы</button>
+    <button type="button" class="da-tab" data-pane="da-journal">Журнал</button>
+</div>
+<div id="da-files" class="da-pane">
 <div class="container" style="margin:1px;">
 <div class="row">
 <script language="javascript">
@@ -260,6 +232,32 @@
 <!-- End:&Dir_Admin -->
 </div>
 </div>
+</div>
+<div id="da-journal" class="da-pane" hidden>
+    <p>Журнал базы: запросы к ней и изменения данных, от самых новых. Страницами по 100 строк; дальше вглубь истории — кнопкой «Старее».
+       Условия поиска сочетаются по «И», регистр не важен. Клик по строке раскрывает её целиком. Журнал доступен администратору базы.</p>
+    <div id="journal-viewer"></div>
+</div>
+<!-- Просмотр журнала (#5000): запускается при первом открытии вкладки «Журнал» -->
+<script src="/js/journal-viewer.js?5000" defer></script>
+<script>
+    window.addEventListener('load', function() {
+        var box = document.getElementById('journal-viewer');
+        if (window.JournalViewer && box) JournalViewer.init({ db: db, container: 'journal-viewer' });
+        function show(name) {
+            Array.prototype.forEach.call(document.querySelectorAll('.da-tab'), function(t) {
+                t.classList.toggle('active', t.getAttribute('data-pane') === name);
+            });
+            Array.prototype.forEach.call(document.querySelectorAll('.da-pane'), function(p) { p.hidden = p.id !== name; });
+            if (name === 'da-journal' && box && box.start) box.start();
+            try { history.replaceState(null, '', name === 'da-journal' ? '#journal' : location.pathname + location.search); } catch (e) {}
+        }
+        Array.prototype.forEach.call(document.querySelectorAll('.da-tab'), function(t) {
+            t.addEventListener('click', function() { show(t.getAttribute('data-pane')); });
+        });
+        if (location.hash === '#journal') show('da-journal');
+    });
+</script>
 <script src="/js/app.js"></script>
 <script src="/js/form-submit.js" defer></script>
 <script src="/js/js.js"></script>
