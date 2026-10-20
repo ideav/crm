@@ -12,6 +12,11 @@ body.dir-admin {
     color: var(--text-primary, #212529);
 }
 body.dir-admin a { cursor: pointer; color: var(--link-color, #3b82f6); }
+/* Значки файлов нарисованы контуром stroke="#1A1A1A" — это цвет фона тёмной темы */
+[data-theme="dark"] svg path[stroke="#1A1A1A"],
+[data-theme="dark"] svg path[stroke="#1a1a1a"] {
+    stroke: var(--text-primary);
+}
 body.dir-admin p { margin: 0 0 10px; }
 body.dir-admin h4 { margin: 14px 0 8px; font-size: 18px; }
 body.dir-admin .container { max-width: 1200px; margin: 1px; }
