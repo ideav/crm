@@ -266,6 +266,7 @@ if($part === "firstcol"){
     }
 
     function Check_Grant($id, $t = 0, $grant = "WRITE", $fatal = TRUE){ $GLOBALS["GRANTED"][] = "$id/$t"; return TRUE; }
+    function Check_Rec_masks($id, $fields = NULL, $typ = 0){}   # маски строк (python2node#1008) — своя мерка
     function BuiltIn($v){ return $v; }
     function Format_Val($t, $v){ return $v; }
     function Update_Val($id, $val){ $GLOBALS["UPDATED"][] = array($id, $val); }
