@@ -1,0 +1,873 @@
+{
+ "issue": "ideav/python2node#1008",
+ "step": "probes",
+ "crm_commit": "9797e9705b80cdc1310e98ac5b80223b07e03df5",
+ "ts": "2026-10-20T12:40:49+00:00",
+ "results": [
+  {
+   "id": "R1",
+   "kind": "read",
+   "category": "access",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "список заявок: видны ли заявки чужих компаний",
+   "request": {
+    "method": "GET",
+    "path": "object/10200/",
+    "query": {
+     "JSON": 1,
+     "LIMIT": "0,100"
+    },
+    "form": null
+   },
+   "http": 200,
+   "body": "{\"&main.a\":{\"_parent_.title\":[\"Заявка\"]},\"type\":{\"id\":10200,\"up\":1,\"val\":\"Заявка\",\"base\":\"SHORT\"},\"base\":{\"id\":\"3\",\"unique\":\"unique\"},\"&main.a.&uni_obj\":{\"create_granted\":[\"block\"],\"id\":[\"10200\"],\"f_u\":[\"\"],\"up\":[\"1\"],\"unique\":[\"unique\"],\"base_typ\":[\"3\"],\"filter\":[\"\",\"\"],\"val\":[\"Заявка\"],\"typ\":[\"10200\"],\"f_i\":[\"\"],\"lnx\":[\"0\"]},\"&main.a.&uni_obj.&delete\":{\"ok\":[\"\"]},\"&main.a.&uni_obj.&new_req\":{\"new_req\":[\"\"],\"_parent_.typ\":[\"10200\"],\"_parent_.val\":[\"Заявка\"]},\"req_base\":{\"10211\":\"SHORT\",\"10212\":\"SHORT\",\"10213\":\"NUMBER\",\"10214\":\"NUMBER\",\"10215\":\"MEMO\",\"10217\":\"MEMO\"},\"req_base_id\":{\"10211\":\"3\",",
+   "db": "r1008p1",
+   "leaked": [],
+   "missing": [],
+   "changes": [],
+   "verdict": "held"
+  },
+  {
+   "id": "R2",
+   "kind": "read",
+   "category": "access",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "карточка чужой заявки по id",
+   "request": {
+    "method": "GET",
+    "path": "edit_obj/20096",
+    "query": {
+     "JSON": 1
+    },
+    "form": null
+   },
+   "http": 400,
+   "body": "[{\"error\":\"У вас нет доступа к этому объекту (20008) по маске! (10211)\"}]",
+   "db": "r1008p2",
+   "leaked": [],
+   "missing": [],
+   "changes": [],
+   "verdict": "held"
+  },
+  {
+   "id": "R3",
+   "kind": "read",
+   "category": "control",
+   "user": "expert1",
+   "expect": "allow",
+   "what": "эксперт видит заявки всех компаний",
+   "request": {
+    "method": "GET",
+    "path": "object/10200/",
+    "query": {
+     "JSON": 1,
+     "LIMIT": "0,100"
+    },
+    "form": null
+   },
+   "http": 200,
+   "body": "{\"&main.a\":{\"_parent_.title\":[\"Заявка\"]},\"type\":{\"id\":10200,\"up\":1,\"val\":\"Заявка\",\"base\":\"SHORT\"},\"base\":{\"id\":\"3\",\"unique\":\"unique\"},\"&main.a.&uni_obj\":{\"create_granted\":[\"none\"],\"id\":[\"10200\"],\"f_u\":[\"\"],\"up\":[\"1\"],\"unique\":[\"unique\"],\"base_typ\":[\"3\"],\"filter\":[\"\",\"\"],\"val\":[\"Заявка\"],\"typ\":[\"10200\"],\"f_i\":[\"\"],\"lnx\":[\"0\"]},\"&main.a.&uni_obj.&new_req\":{\"new_req\":[\"\"],\"_parent_.typ\":[\"10200\"],\"_parent_.val\":[\"Заявка\"]},\"req_base\":{\"10211\":\"SHORT\",\"10212\":\"SHORT\",\"10213\":\"NUMBER\",\"10214\":\"NUMBER\",\"10215\":\"MEMO\",\"10216\":\"SHORT\",\"10217\":\"MEMO\"},\"req_base_id\":{\"10211\":\"3\",\"10212\":\"3\",\"10213\":\"13\"",
+   "db": "r1008p3",
+   "leaked": [],
+   "missing": [],
+   "changes": [],
+   "verdict": "ok"
+  },
+  {
+   "id": "R4",
+   "kind": "read",
+   "category": "control",
+   "user": "alpha_user",
+   "expect": "allow",
+   "what": "заявитель открывает карточку своей заявки",
+   "request": {
+    "method": "GET",
+    "path": "edit_obj/20077",
+    "query": {
+     "JSON": 1
+    },
+    "form": null
+   },
+   "http": 200,
+   "body": "{\"obj\":{\"id\":\"20077\",\"val\":\"З-001\",\"parent\":\"1\",\"typ\":\"10200\",\"typ_name\":\"Заявка\",\"base_typ\":\"3\"},\"&main.a.&object\":{\"typ\":[\"10200\",\"10200\"],\"up\":[\"1\"],\"typ_name\":[\"Заявка\",\"Заявка\"],\"val\":[\"З-001\",\"З-001\"],\"id\":[\"20077\"],\"disabled\":[\"\"]},\"&main.a.&object.&edit_req\":{\"type\":[\"text\"],\"typ\":[\"10200\"],\"_parent_.val\":[\"З-001\"],\"_parent_.disabled\":[\"\"]},\"reqs\":{\"10211\":{\"type\":\"Компания\",\"order\":\"1\",\"value\":\"20005\",\"base\":\"SHORT\",\"ref_type\":\"10000\",\"ref\":\"ООО «Альфа»\",\"attrs\":\"{\\u0022required\\u0022:true}\"},\"10212\":{\"type\":\"Статус\",\"order\":\"2\",\"value\":\"20000\",\"base\":\"SHORT\",\"ref_type\":\"10100\",\"ref\":",
+   "db": "r1008p4",
+   "leaked": [],
+   "missing": [],
+   "changes": [],
+   "verdict": "ok"
+  },
+  {
+   "id": "W1",
+   "kind": "write",
+   "category": "access",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "_m_save суммы в чужой заявке по id",
+   "request": {
+    "method": "POST",
+    "path": "_m_save/20096",
+    "query": {
+     "JSON": 1
+    },
+    "form": {
+     "t10200": "З-004",
+     "t10213": "1"
+    }
+   },
+   "http": 403,
+   "body": "[{\"error\":\"У вас нет доступа к этому объекту (20008) по маске! (10211)\"}]",
+   "db": "r1008p5",
+   "changes": [],
+   "verdict": "held"
+  },
+  {
+   "id": "W2",
+   "kind": "write",
+   "category": "access",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "_m_set суммы в чужой заявке по id",
+   "request": {
+    "method": "POST",
+    "path": "_m_set/20096",
+    "query": {
+     "JSON": 1
+    },
+    "form": {
+     "t10213": "2"
+    }
+   },
+   "http": 403,
+   "body": "[{\"error\":\"У вас нет доступа к этому объекту (20008) по маске! (10211)\"}]",
+   "db": "r1008p6",
+   "changes": [],
+   "verdict": "held"
+  },
+  {
+   "id": "W3",
+   "kind": "write",
+   "category": "access",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "_m_del чужой заявки по id",
+   "request": {
+    "method": "POST",
+    "path": "_m_del/20096",
+    "query": {
+     "JSON": 1
+    },
+    "form": {}
+   },
+   "http": 403,
+   "body": "[{\"error\":\"У вас нет доступа к этому объекту (20008) по маске! (10211)\"}]",
+   "db": "r1008p7",
+   "changes": [],
+   "verdict": "held"
+  },
+  {
+   "id": "W4",
+   "kind": "write",
+   "category": "access",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "_m_new заявки от имени чужой компании",
+   "request": {
+    "method": "POST",
+    "path": "_m_new/10200",
+    "query": {
+     "JSON": 1
+    },
+    "form": {
+     "up": "1",
+     "t10200": "З-901",
+     "t10211": "20008",
+     "t10212": "20000",
+     "t10213": "100"
+    }
+   },
+   "http": 403,
+   "body": "[{\"error\":\"У вас нет доступа к этому объекту (20008) по маске! (10211)\"}]",
+   "db": "r1008p8",
+   "changes": [],
+   "verdict": "held"
+  },
+  {
+   "id": "W11",
+   "kind": "write",
+   "category": "access",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "_m_batch: set суммы в чужой заявке",
+   "request": {
+    "method": "POST",
+    "path": "_m_batch",
+    "query": {},
+    "form": {
+     "ops": "[{\"op\": \"set\", \"id\": 20096, \"fields\": {\"t10213\": \"3\"}}]"
+    }
+   },
+   "http": 200,
+   "body": "{\"results\":[{\"n\":0,\"op\":\"set\",\"id\":20096,\"ok\":false,\"error\":\"У вас нет доступа к этому объекту (20008) по маске! (10211)\"}],\"ok\":0,\"failed\":1}",
+   "db": "r1008p9",
+   "changes": [],
+   "verdict": "held"
+  },
+  {
+   "id": "W12",
+   "kind": "write",
+   "category": "access",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "_m_del_batch: массовое удаление вместе с чужой заявкой",
+   "request": {
+    "method": "POST",
+    "path": "_m_del_batch/10200",
+    "query": {
+     "JSON": 1
+    },
+    "form": {
+     "ids": "20096"
+    }
+   },
+   "http": 200,
+   "body": "{\"deleted\":[],\"errors\":{\"20096\":\"У вас нет доступа к этому объекту (20008) по маске! (10211)\"}}",
+   "db": "r1008p10",
+   "changes": [],
+   "verdict": "held"
+  },
+  {
+   "id": "W5",
+   "kind": "write",
+   "category": "access",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "_m_save: заявитель ставит своей заявке «Одобрена» (маска Статус < На экспертизе)",
+   "request": {
+    "method": "POST",
+    "path": "_m_save/20077",
+    "query": {
+     "JSON": 1
+    },
+    "form": {
+     "t10200": "З-001",
+     "t10212": "20003"
+    }
+   },
+   "http": 403,
+   "body": "[{\"error\":\"У вас нет доступа к этому объекту (20003) по маске! (10212)\"}]",
+   "db": "r1008p11",
+   "changes": [],
+   "verdict": "held"
+  },
+  {
+   "id": "W6",
+   "kind": "write",
+   "category": "access",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "_m_set: заявитель ставит своей заявке «Одобрена»",
+   "request": {
+    "method": "POST",
+    "path": "_m_set/20077",
+    "query": {
+     "JSON": 1
+    },
+    "form": {
+     "t10212": "20003"
+    }
+   },
+   "http": 403,
+   "body": "[{\"error\":\"У вас нет доступа к этому объекту (20003) по маске! (10212)\"}]",
+   "db": "r1008p12",
+   "changes": [],
+   "verdict": "held"
+  },
+  {
+   "id": "W7",
+   "kind": "write",
+   "category": "access",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "_m_new: заявитель создаёт заявку сразу «Одобрена»",
+   "request": {
+    "method": "POST",
+    "path": "_m_new/10200",
+    "query": {
+     "JSON": 1
+    },
+    "form": {
+     "up": "1",
+     "t10200": "З-902",
+     "t10211": "20005",
+     "t10212": "20003",
+     "t10213": "100"
+    }
+   },
+   "http": 403,
+   "body": "[{\"error\":\"У вас нет доступа к этому объекту (20003) по маске! (10212)\"}]",
+   "db": "r1008p13",
+   "changes": [],
+   "verdict": "held"
+  },
+  {
+   "id": "W8",
+   "kind": "write",
+   "category": "access",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "_m_set скрытой (BARRED) колонки «Эксперт»",
+   "request": {
+    "method": "POST",
+    "path": "_m_set/20077",
+    "query": {
+     "JSON": 1
+    },
+    "form": {
+     "t10216": "20069"
+    }
+   },
+   "http": 403,
+   "body": "[{\"error\":\"У вас нет доступа к реквизиту объекта 20077, 10216 (BARRED) или его родителю 20077 (). Ваш глобальный доступ: ''\"}]",
+   "db": "r1008p14",
+   "changes": [],
+   "verdict": "held"
+  },
+  {
+   "id": "W9",
+   "kind": "write",
+   "category": "access",
+   "user": "expert1",
+   "expect": "deny",
+   "what": "эксперт меняет сумму (колонка только для чтения)",
+   "request": {
+    "method": "POST",
+    "path": "_m_set/20089",
+    "query": {
+     "JSON": 1
+    },
+    "form": {
+     "t10213": "1"
+    }
+   },
+   "http": 403,
+   "body": "[{\"error\":\"У вас нет доступа к реквизиту объекта: 20089, 10213 () или его родителю 20089 ()! Ваш глобальный доступ: 'READ'.\"}]",
+   "db": "r1008p15",
+   "changes": [],
+   "verdict": "held"
+  },
+  {
+   "id": "W10",
+   "kind": "write",
+   "category": "access",
+   "user": "beta_user",
+   "expect": "deny",
+   "what": "зеркально W3: заявитель «Беты» удаляет заявку «Альфы»",
+   "request": {
+    "method": "POST",
+    "path": "_m_del/20077",
+    "query": {
+     "JSON": 1
+    },
+    "form": {}
+   },
+   "http": 403,
+   "body": "[{\"error\":\"У вас нет доступа к этому объекту (20005) по маске! (10211)\"}]",
+   "db": "r1008p16",
+   "changes": [],
+   "verdict": "held"
+  },
+  {
+   "id": "P1",
+   "kind": "write",
+   "category": "process",
+   "user": "expert1",
+   "expect": "deny",
+   "what": "эксперт переводит «Черновик» сразу в «Одобрена» (переход в обход графа)",
+   "request": {
+    "method": "POST",
+    "path": "_m_set/20077",
+    "query": {
+     "JSON": 1
+    },
+    "form": {
+     "t10212": "20003"
+    }
+   },
+   "http": 200,
+   "body": "{\"id\":\"20079\",\"obj\":20077,\"next_act\":\"nul\",\"args\":\"\",\"warnings\":\"\"}",
+   "db": "r1008p17",
+   "changes": [
+    {
+     "id": 20079,
+     "before": [
+      20077,
+      2,
+      20000,
+      "10212"
+     ],
+     "after": [
+      20077,
+      2,
+      20003,
+      "10212"
+     ]
+    }
+   ],
+   "verdict": "VIOLATION"
+  },
+  {
+   "id": "P2",
+   "kind": "write",
+   "category": "process",
+   "user": "admin_f",
+   "expect": "deny",
+   "what": "сумма заявки выше лимита компании (5 000 000)",
+   "request": {
+    "method": "POST",
+    "path": "_m_set/20089",
+    "query": {
+     "JSON": 1
+    },
+    "form": {
+     "t10213": "99000000"
+    }
+   },
+   "http": 200,
+   "body": "{\"id\":\"20092\",\"obj\":20089,\"next_act\":\"nul\",\"args\":\"\",\"warnings\":\"\"}",
+   "db": "r1008p18",
+   "changes": [
+    {
+     "id": 20092,
+     "before": [
+      20089,
+      3,
+      10213,
+      "5000000"
+     ],
+     "after": [
+      20089,
+      3,
+      10213,
+      "99000000"
+     ]
+    }
+   ],
+   "verdict": "VIOLATION"
+  },
+  {
+   "id": "V1",
+   "kind": "write",
+   "category": "validation",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "_m_new заявки без обязательной суммы",
+   "request": {
+    "method": "POST",
+    "path": "_m_new/10200",
+    "query": {
+     "JSON": 1
+    },
+    "form": {
+     "up": "1",
+     "t10200": "З-903",
+     "t10211": "20005",
+     "t10212": "20000"
+    }
+   },
+   "http": 200,
+   "body": "{\"id\":20136,\"obj\":20136,\"ord\":1,\"next_act\":\"edit_obj\",\"args\":\"new1=1&\",\"val\":\"З-903\"}",
+   "db": "r1008p19",
+   "changes": [
+    {
+     "id": 20136,
+     "before": null,
+     "after": [
+      1,
+      1,
+      10200,
+      "З-903"
+     ]
+    },
+    {
+     "id": 20137,
+     "before": null,
+     "after": [
+      20136,
+      1,
+      20005,
+      "10211"
+     ]
+    },
+    {
+     "id": 20138,
+     "before": null,
+     "after": [
+      20136,
+      1,
+      20000,
+      "10212"
+     ]
+    }
+   ],
+   "verdict": "VIOLATION"
+  },
+  {
+   "id": "V2",
+   "kind": "write",
+   "category": "validation",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "_m_set суммы строкой «abc» (тип NUMBER)",
+   "request": {
+    "method": "POST",
+    "path": "_m_set/20077",
+    "query": {
+     "JSON": 1
+    },
+    "form": {
+     "t10213": "abc"
+    }
+   },
+   "http": 200,
+   "body": "{\"id\":\"20080\",\"obj\":20077,\"next_act\":\"nul\",\"args\":\"\",\"warnings\":\"\"}",
+   "db": "r1008p20",
+   "changes": [
+    {
+     "id": 20080,
+     "before": [
+      20077,
+      3,
+      10213,
+      "3800000"
+     ],
+     "after": [
+      20077,
+      3,
+      10213,
+      "0"
+     ]
+    }
+   ],
+   "verdict": "VIOLATION"
+  },
+  {
+   "id": "V3",
+   "kind": "write",
+   "category": "validation",
+   "user": "admin_f",
+   "expect": "deny",
+   "what": "_m_new заявки с занятым номером (первая колонка уникальна)",
+   "request": {
+    "method": "POST",
+    "path": "_m_new/10200",
+    "query": {
+     "JSON": 1
+    },
+    "form": {
+     "up": "1",
+     "t10200": "З-001",
+     "t10211": "20005",
+     "t10212": "20000",
+     "t10213": "100"
+    }
+   },
+   "http": 200,
+   "body": "{\"id\":20077,\"obj\":10200,\"ord\":1,\"next_act\":\"edit_obj\",\"args\":\"exists1=1\",\"val\":\"З-001\",\"warning\":\"Запись уже существует\"}",
+   "db": "r1008p21",
+   "changes": [],
+   "verdict": "held"
+  },
+  {
+   "id": "V4",
+   "kind": "write",
+   "category": "validation",
+   "user": "admin_f",
+   "expect": "deny",
+   "what": "_m_save номера заявки на занятый",
+   "request": {
+    "method": "POST",
+    "path": "_m_save/20077",
+    "query": {
+     "JSON": 1
+    },
+    "form": {
+     "t10200": "З-002"
+    }
+   },
+   "http": 400,
+   "body": "[{\"error\":\"Запись с таким ключом уже существует #20083\"}]",
+   "db": "r1008p22",
+   "changes": [],
+   "verdict": "held"
+  },
+  {
+   "id": "C1",
+   "kind": "write",
+   "category": "control",
+   "user": "alpha_user",
+   "expect": "allow",
+   "what": "заявитель меняет сумму своей заявки",
+   "request": {
+    "method": "POST",
+    "path": "_m_set/20077",
+    "query": {
+     "JSON": 1
+    },
+    "form": {
+     "t10213": "777000"
+    }
+   },
+   "http": 200,
+   "body": "{\"id\":\"20080\",\"obj\":20077,\"next_act\":\"nul\",\"args\":\"\",\"warnings\":\"\"}",
+   "db": "r1008p23",
+   "changes": [
+    {
+     "id": 20080,
+     "before": [
+      20077,
+      3,
+      10213,
+      "3800000"
+     ],
+     "after": [
+      20077,
+      3,
+      10213,
+      "777000"
+     ]
+    }
+   ],
+   "verdict": "ok"
+  },
+  {
+   "id": "C2",
+   "kind": "write",
+   "category": "control",
+   "user": "alpha_user",
+   "expect": "allow",
+   "what": "заявитель создаёт свою заявку-черновик",
+   "request": {
+    "method": "POST",
+    "path": "_m_new/10200",
+    "query": {
+     "JSON": 1
+    },
+    "form": {
+     "up": "1",
+     "t10200": "З-904",
+     "t10211": "20005",
+     "t10212": "20000",
+     "t10213": "100"
+    }
+   },
+   "http": 200,
+   "body": "{\"id\":20136,\"obj\":20136,\"ord\":1,\"next_act\":\"edit_obj\",\"args\":\"new1=1&\",\"val\":\"З-904\"}",
+   "db": "r1008p24",
+   "changes": [
+    {
+     "id": 20136,
+     "before": null,
+     "after": [
+      1,
+      1,
+      10200,
+      "З-904"
+     ]
+    },
+    {
+     "id": 20137,
+     "before": null,
+     "after": [
+      20136,
+      1,
+      20005,
+      "10211"
+     ]
+    },
+    {
+     "id": 20138,
+     "before": null,
+     "after": [
+      20136,
+      1,
+      20000,
+      "10212"
+     ]
+    },
+    {
+     "id": 20139,
+     "before": null,
+     "after": [
+      20136,
+      1,
+      10213,
+      "100"
+     ]
+    }
+   ],
+   "verdict": "ok"
+  },
+  {
+   "id": "C3",
+   "kind": "write",
+   "category": "control",
+   "user": "alpha_user",
+   "expect": "allow",
+   "what": "заявитель подаёт свою заявку (Черновик → Подана)",
+   "request": {
+    "method": "POST",
+    "path": "_m_set/20077",
+    "query": {
+     "JSON": 1
+    },
+    "form": {
+     "t10212": "20001"
+    }
+   },
+   "http": 200,
+   "body": "{\"id\":\"20079\",\"obj\":20077,\"next_act\":\"nul\",\"args\":\"\",\"warnings\":\"\"}",
+   "db": "r1008p25",
+   "changes": [
+    {
+     "id": 20079,
+     "before": [
+      20077,
+      2,
+      20000,
+      "10212"
+     ],
+     "after": [
+      20077,
+      2,
+      20001,
+      "10212"
+     ]
+    }
+   ],
+   "verdict": "ok"
+  },
+  {
+   "id": "C4",
+   "kind": "write",
+   "category": "control",
+   "user": "expert1",
+   "expect": "allow",
+   "what": "эксперт одобряет заявку на экспертизе",
+   "request": {
+    "method": "POST",
+    "path": "_m_set/20089",
+    "query": {
+     "JSON": 1
+    },
+    "form": {
+     "t10212": "20003"
+    }
+   },
+   "http": 200,
+   "body": "{\"id\":\"20091\",\"obj\":20089,\"next_act\":\"nul\",\"args\":\"\",\"warnings\":\"\"}",
+   "db": "r1008p26",
+   "changes": [
+    {
+     "id": 20091,
+     "before": [
+      20089,
+      2,
+      20002,
+      "10212"
+     ],
+     "after": [
+      20089,
+      2,
+      20003,
+      "10212"
+     ]
+    }
+   ],
+   "verdict": "ok"
+  },
+  {
+   "id": "C5",
+   "kind": "write",
+   "category": "control",
+   "user": "alpha_user",
+   "expect": "allow",
+   "what": "заявитель удаляет свой черновик",
+   "request": {
+    "method": "POST",
+    "path": "_m_del/20077",
+    "query": {
+     "JSON": 1
+    },
+    "form": {}
+   },
+   "http": 200,
+   "body": "{\"id\":\"10200\",\"obj\":20077,\"next_act\":\"object\",\"args\":\"\",\"warnings\":\"\"}",
+   "db": "r1008p27",
+   "changes": [
+    {
+     "id": 20077,
+     "before": [
+      1,
+      1,
+      10200,
+      "З-001"
+     ],
+     "after": null
+    },
+    {
+     "id": 20078,
+     "before": [
+      20077,
+      1,
+      20005,
+      "10211"
+     ],
+     "after": null
+    },
+    {
+     "id": 20079,
+     "before": [
+      20077,
+      2,
+      20000,
+      "10212"
+     ],
+     "after": null
+    },
+    {
+     "id": 20080,
+     "before": [
+      20077,
+      3,
+      10213,
+      "3800000"
+     ],
+     "after": null
+    },
+    {
+     "id": 20081,
+     "before": [
+      20077,
+      4,
+      10214,
+      "38000000"
+     ],
+     "after": null
+    },
+    {
+     "id": 20082,
+     "before": [
+      20077,
+      5,
+      10215,
+      "Проект 1: модернизация производства"
+     ],
+     "after": null
+    }
+   ],
+   "verdict": "ok"
+  }
+ ]
+}
