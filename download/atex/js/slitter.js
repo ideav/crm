@@ -82,6 +82,7 @@
     var CUT_REQ = {
         slitter: 'Слиттер',
         batch: 'Партия сырья',
+        material: 'Вид сырья',   // #5209: сырьё задания (95358, ссылка) — по нему подбирается партия
         planDate: 'Дата план',
         status: 'Статус',
         counterStart: 'Счётчик нач.',
@@ -2324,6 +2325,14 @@
             function valAny(names) { var i = colIndexAny(meta, names); return i >= 0 ? (row[i] || '') : ''; }
             var slitterRef = parseRef(val(CUT_REQ.slitter));
             var batchRef = parseRef(val(CUT_REQ.batch));
+            // #5209: «Вид сырья» ЗАДАНИЯ — из записи, иначе из уже загруженной строки очереди
+            // (slitter_cuts: cut_material_id/cut_material). Без него сырьё открытого задания
+            // пустое, batchMatchesCut пропускает любую партию, и автоподбор брал партию ЧУЖОГО
+            // сырья (боевое: задание 972638 R300V получило партию 753078 MR190 — и шапку MR190).
+            var matRef = parseRef(val(CUT_REQ.material));
+            var queued = (self.cuts || []).filter(function(c) { return String(c.id) === String(rec.i); })[0] || {};
+            var materialId = matRef.id || queued.materialId || '';
+            var material = matRef.label || queued.material || '';
             self.currentCut = {
                 id: String(rec.i),
                 number: row[0] || '',
@@ -2332,6 +2341,9 @@
                 slitter: slitterRef.label,
                 batch: batchRef.label,
                 batchId: batchRef.id,
+                materialId: materialId ? String(materialId) : '',   // #5209
+                material: material,                                  // #5209: шапка renderCutSpec
+                materialLabel: material,                             // #5209: сверка по имени в batchMatchesCut
                 savedMeterage: core.toNumber(val(CUT_REQ.meterage)),
                 // #3352 / #4353: «Дата план» — ГЛАВНОЕ значение записи (row[0]), отдельного
                 // реквизита с таким именем в таблице нет. Без фолбэка на row[0] дата открытой
@@ -2443,8 +2455,9 @@
         });
     };
 
-    // #3460: вид сырья резки для шапки. У резки нет прямого поля «Вид сырья» —
-    // выводим из плановой партии: сперва из загруженного пула партий (findBatch),
+    // #3460: вид сырья резки для шапки. #5209: собственный «Вид сырья» задания loadCut уже
+    // взял; партия подбирается только того же сырья (batchMatchesCut). Здесь уточняем по
+    // плановой партии: сперва из загруженного пула партий (findBatch),
     // иначе тихо дочитываем объект партии и берём ссылку «Вид сырья».
     AtexSlitter.prototype.loadCutMaterial = function() {
         var self = this;
