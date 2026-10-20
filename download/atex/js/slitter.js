@@ -1052,16 +1052,33 @@
     // #3460: партии из отчёта могут не иметь id вида сырья — тогда сверяем по
     // названию вида сырья (batch_material). Если у резки известен id — он в
     // приоритете; иначе сравниваем по названию. Нет ориентира → пропускаем.
+    // #4996: альтернативное название сырья задания (cut.altMaterial) — имя того же «Вида
+    // сырья»; партия, подписанная этим именем, своя.
     function batchMatchesCut(batch, cut) {
         var cutMat = String((cut && cut.materialId) || '').trim();
         var cutLabel = normMaterial(cut && cut.materialLabel);
+        var cutAlt = normMaterial(cut && cut.altMaterial);
+        function labelMatches() {
+            var bl = normMaterial(batch && batch.materialLabel);
+            return bl === cutLabel || (cutAlt !== '' && bl === cutAlt);
+        }
         if (cutMat) {
             var bid = String((batch && batch.materialId) || '').trim();
             if (bid) return bid === cutMat;
-            return cutLabel ? normMaterial(batch && batch.materialLabel) === cutLabel : true;
+            return cutLabel ? labelMatches() : true;
         }
-        if (cutLabel) return normMaterial(batch && batch.materialLabel) === cutLabel;
+        if (cutLabel) return labelMatches();
         return true;
+    }
+
+    // #5209 (решение владельца «нельзя выбрать такую партию»): партия другого вида сырья к
+    // заданию не привязывается никаким путём. Пусто — партия годится (или её нет, или у
+    // задания нет сырья); иначе — текст отказа оператору.
+    function foreignBatchMessage(batch, cut) {
+        if (!batch || batchMatchesCut(batch, cut)) return '';
+        var batchMat = String(batch.materialLabel || batch.materialId || '?').trim();
+        var cutMat = String((cut && (cut.materialLabel || cut.material || cut.materialId)) || '?').trim();
+        return 'Партия ' + batch.id + ' — сырьё ' + batchMat + ', задание на ' + cutMat + '. Выбрать нельзя.';
     }
 
     function batchPasses(batch, cut) {
@@ -1685,6 +1702,7 @@
         isSetupTask: isSetupTask,   // #3635 п.5
         batchPasses: batchPasses,
         batchMatchesCut: batchMatchesCut,
+        foreignBatchMessage: foreignBatchMessage,   // #5209
         availableBatchesForCut: availableBatchesForCut,
         batchCoverage: batchCoverage,
         // #3460: формат времени резки и разбор партий из отчёта
@@ -2201,7 +2219,8 @@
         var cut = this.currentCut;
         if (!cut) return;
         var batch = cut.batchId ? this.findBatch(cut.batchId) : null;
-        var matId = batch ? batch.materialId : null;
+        // #5209: сырьё (и ширину) задания партия другого сырья не подменяет.
+        var matId = batch && core.batchMatchesCut(batch, cut) ? batch.materialId : null;
         cut.materialId = matId || cut.materialId || '';
         cut.materialWidthMm = cut.materialId ? (this.materialWidths[String(cut.materialId)] || 0) : 0;
     };
@@ -2261,6 +2280,8 @@
     AtexSlitter.prototype.cutSpecText = function(cut) {
         if (!cut) return '';
         var batch = this.findBatch(cut.batchId);
+        // #5209: партия другого сырья подпись задания не задаёт — у него своё сырьё.
+        if (batch && !core.batchMatchesCut(batch, { materialId: cut.materialId, materialLabel: cut.material })) batch = null;
         // #3674: cut.material приходит из отчёта slitter_cuts; #4996: альт-имя сырья
         // из cut_planning старше и него, и имени партии.
         var material = (this.cutAlts || {})[String(cut.id)] || (batch && batch.materialLabel) || cut.material || cut.batch || '';
@@ -2344,6 +2365,7 @@
                 materialId: materialId ? String(materialId) : '',   // #5209
                 material: material,                                  // #5209: шапка renderCutSpec
                 materialLabel: material,                             // #5209: сверка по имени в batchMatchesCut
+                altMaterial: (self.cutAlts || {})[String(rec.i)] || '',  // #4996: альт-имя того же сырья
                 savedMeterage: core.toNumber(val(CUT_REQ.meterage)),
                 // #3352 / #4353: «Дата план» — ГЛАВНОЕ значение записи (row[0]), отдельного
                 // реквизита с таким именем в таблице нет. Без фолбэка на row[0] дата открытой
@@ -2463,8 +2485,12 @@
         var self = this;
         var cut = this.currentCut;
         if (!cut) return Promise.resolve();
+        // #5209: у задания есть свой «Вид сырья» — он и остаётся в шапке; сырьё партии его не
+        // перезаписывает. Партия другого сырья с задания снимается (dropForeignBatch).
+        var ownMaterial = !!(String(cut.materialId || '').trim() || String(cut.materialLabel || '').trim());
         var batch = cut.batchId ? this.findBatch(cut.batchId) : null;
         if (batch) {
+            if (ownMaterial) { this.dropForeignBatch(cut, batch); return Promise.resolve(); }
             cut.materialId = batch.materialId || cut.materialId || '';
             cut.material = batch.materialLabel || cut.material || cut.batch || '';
             return Promise.resolve();
@@ -2472,12 +2498,20 @@
         if (!cut.material) cut.material = cut.batch || '';
         var batchMeta = this.meta.batch;
         if (!cut.batchId || !batchMeta) return Promise.resolve();
-        return this.getJson('object/' + batchMeta.id + '/?JSON_OBJ&F_I=' + encodeURIComponent(cut.batchId) + '&LIMIT=0,1').then(function(rows) {
+        var batchId = String(cut.batchId);
+        return this.getJson('object/' + batchMeta.id + '/?JSON_OBJ&F_I=' + encodeURIComponent(batchId) + '&LIMIT=0,1').then(function(rows) {
             var rec = (rows || [])[0];
             if (!rec) return;
             var kindIdx = colIndex(batchMeta, BATCH_REQ.kind);
             if (kindIdx < 0) return;
             var matRef = parseRef((rec.r || [])[kindIdx]);
+            if (ownMaterial) {
+                // #5209: партии нет в пуле (не «в работе») — сырьё сверяем по её объекту.
+                if (self.dropForeignBatch(cut, { id: batchId, materialId: matRef.id || '', materialLabel: matRef.label || '' })) {
+                    self.syncInitialBatchSelection();   // взамен — партия своего сырья, если есть
+                }
+                return;
+            }
             if (matRef.id) cut.materialId = matRef.id;
             if (matRef.label) cut.material = matRef.label;
         }).catch(function() {});
@@ -3325,9 +3359,38 @@
     };
 
 
+    // #5209 (решение владельца «нельзя выбрать такую партию»): партия ДРУГОГО вида сырья
+    // с задания снимается — из cut.batchId и из выбранных — с отказом оператору. true — снята.
+    AtexSlitter.prototype.dropForeignBatch = function(cut, batch) {
+        var msg = core.foreignBatchMessage(batch, cut);
+        if (!msg) return false;
+        var id = String(batch.id);
+        if (cut && String(cut.batchId) === id) { cut.batchId = null; cut.batch = ''; }
+        this.selectedBatchIds = (this.selectedBatchIds || []).filter(function(x) { return String(x) !== id; });
+        if (typeof this.notify === 'function') this.notify(msg, 'error');
+        return true;
+    };
+
+    // #5209: проверка на границе записи — партия задания (cut.batchId) того же сырья. Устаревшее
+    // состояние пульта с чужой партией не пишет ни отметку, ни остаток партии. true — можно.
+    AtexSlitter.prototype.batchAllowedForCut = function(cut) {
+        var batch = cut && cut.batchId ? this.findBatch(cut.batchId) : null;
+        var msg = core.foreignBatchMessage(batch, cut);
+        if (!msg) return true;
+        if (typeof this.notify === 'function') this.notify(msg, 'error');
+        return false;
+    };
+
     AtexSlitter.prototype.syncInitialBatchSelection = function() {
+        var self = this;
         var cut = this.currentCut;
         if (!cut) return;
+        // #5209: плановая «Партия сырья» задания чужого сырья — снимается; выбранные чужие — тоже.
+        var planned = cut.batchId ? this.findBatch(cut.batchId) : null;
+        if (planned) this.dropForeignBatch(cut, planned);
+        this.selectedBatchIds = (this.selectedBatchIds || []).filter(function(id) {
+            return !core.foreignBatchMessage(self.findBatch(id), cut);
+        });
         // #3460: партии со склада «Атех» (foreign) — на другом складе, выбрать
         // их нельзя, поэтому из автоподбора по умолчанию исключаем.
         var available = core.availableBatchesForCut(this.batches, cut).filter(function(b) { return !b.foreign; });
@@ -3813,6 +3876,8 @@
             }
             return Promise.resolve(null);
         }
+        // #5209: остаток партии ДРУГОГО сырья со счётчиком этого задания не сводим.
+        if (!this.batchAllowedForCut(cut)) return Promise.resolve(null);
         var remMReq = reqIdByName(batchMeta, BATCH_REQ.remainderM);
         var remAreaReq = reqIdByName(batchMeta, BATCH_REQ.remainder);
         var width = core.toNumber(batch.widthMm) || core.toNumber((this.materialWidths || {})[String(batch.materialId)]);
@@ -4018,6 +4083,8 @@
                     + '«Счётчик нач.», с ней сводится остаток', 'error');
                 return;
             }
+            // #5209: партия другого вида сырья — не пишем ничего (ни отметку, ни остаток партии).
+            if (!self.batchAllowedForCut(cut)) return;
             // #4902 п.1: «Счётчик нач.» = «Остаток, м» партии — обновляется ТОЛЬКО 1 раз,
             // если пустое. Заполненное не трогаем никогда (оператор мог поправить показание).
             // Из взять нечего (партии нет в пуле / остаток пуст) — просим заполнить руками:
