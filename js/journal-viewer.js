@@ -21,33 +21,13 @@
     };
     var CELL_CHARS = 140;
 
-    // Значение поля как текст — так же, как его сравнивает сервер (logJournalCond в index.php)
+    // Значение поля как текст для ячейки и выгрузки. Строки отбирает только сервер (logJournalCond
+    // в index.php): текст JSON у PHP и JS расходится (12.0 / 12, [] / {}), второй отбор на клиенте
+    // выкидывал бы строки, которые сервер признал подходящими.
     function valueText(v) {
         if (v === undefined || v === null) return '';
         if (typeof v === 'string') return v;
         return JSON.stringify(v);
-    }
-
-    // То же сравнение, что на сервере: без учёта регистра; «*» — любое поле строки
-    function matches(row, cond) {
-        var v = String(cond.v).toLowerCase();
-        var neg = cond.op === 'ne' || cond.op === 'notcontains';
-        var pos = cond.op === 'ne' ? 'eq' : cond.op === 'notcontains' ? 'contains' : cond.op;
-        var vals = cond.f === '*' ? Object.keys(row).map(function (k) { return row[k]; }) : [row[cond.f]];
-        var found = vals.some(function (x) {
-            var s = valueText(x).toLowerCase();
-            if (pos === 'eq') return s === v;
-            if (pos === 'starts') return s.slice(0, v.length) === v;
-            if (pos === 'ends') return v.length === 0 || s.slice(-v.length) === v;
-            return s.indexOf(v) !== -1;
-        });
-        return neg ? !found : found;
-    }
-
-    function applyFilters(rows, conds) {
-        return rows.filter(function (r) {
-            return conds.every(function (c) { return matches(r, c); });
-        });
     }
 
     // Условия формы без пустых значений («равно пустому» задаётся явно — op eq и пустое v не отбрасываем)
@@ -76,14 +56,21 @@
         return s.length > CELL_CHARS ? s.slice(0, CELL_CHARS) + '…' : s;
     }
 
+    // Строка, начинающаяся с = + - @ (или \t, \r), в Excel станет формулой: в журнале лежат
+    // значения, которые вводили пользователи, поэтому такой текст уходит с апострофом впереди.
+    // Числа формулой не бывают — отрицательное число остаётся числом.
     function csvCell(v) {
         var s = valueText(v);
+        if (typeof v === 'string' && /^[=+\-@\t\r]/.test(s)) s = "'" + s;
         return /[",;\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
     }
 
+    // Разделитель «;»: файл с BOM открывают двойным щелчком в Excel, а русский Excel делит столбцы по «;»
+    var CSV_SEP = ';';
+
     function toCsv(rows, cols) {
-        var out = [cols.map(csvCell).join(',')];
-        rows.forEach(function (r) { out.push(cols.map(function (c) { return csvCell(r[c]); }).join(',')); });
+        var out = [cols.map(csvCell).join(CSV_SEP)];
+        rows.forEach(function (r) { out.push(cols.map(function (c) { return csvCell(r[c]); }).join(CSV_SEP)); });
         return out.join('\r\n');
     }
 
@@ -247,13 +234,21 @@
                 : '';
         }
 
-        function load(cursor) {
+        // Номер последнего запроса: ответ более раннего (смена режима, «Найти», «Сбросить» во время
+        // чтения) приходит позже и молча отбрасывается — иначе на экране оказались бы строки и курсор
+        // другого режима или старых условий. onOk — сдвиг стека курсоров, только при успехе: при
+        // ошибке стек и показанная страница (state.cursor) остаются как были.
+        var seq = 0;
+
+        function load(cursor, onOk) {
+            var my = ++seq;
             state.busy = true;
             setStatus('Читаем журнал…');
             render();
             return fetch(buildQuery(db, state.mode, cursor, state.conds), { credentials: 'same-origin' })
                 .then(function (r) { return r.text().then(function (body) { return { status: r.status, body: body }; }); })
                 .then(function (res) {
+                    if (my !== seq) return;
                     state.busy = false;
                     if (res.status !== 200) {
                         state.rows = []; state.more = false;
@@ -261,18 +256,21 @@
                         return render();
                     }
                     var page = JSON.parse(res.body);
-                    // Сервер без поддержки where вернул бы всё подряд — досеиваем теми же условиями
-                    state.rows = applyFilters(page.rows || [], cleanConds(state.conds));
+                    // Строки уже отобраны сервером по where — источник истины он
+                    state.rows = page.rows || [];
                     state.more = !!page.more;
                     state.next = page.next;
                     state.cursor = cursor;
+                    if (onOk) onOk();
                     setStatus('');
                     render();
                     if (!state.rows.length && state.more) setStatus('На этой странице совпадений нет — нажмите «Старее →»');
                 })
                 .catch(function (e) {
+                    if (my !== seq) return;
                     state.busy = false;
                     state.rows = [];
+                    state.more = false;
                     setStatus('Не удалось прочитать журнал: ' + (e && e.message ? e.message : e), true);
                     render();
                 });
@@ -281,14 +279,18 @@
         function search() {
             state.conds = formConds();
             state.stack = [];
+            state.cursor = '';
             load('');
         }
 
-        newer.addEventListener('click', function () { if (state.stack.length) load(state.stack.pop()); });
+        newer.addEventListener('click', function () {
+            if (!state.stack.length) return;
+            load(state.stack[state.stack.length - 1], function () { state.stack.pop(); });
+        });
         older.addEventListener('click', function () {
             if (!state.more || !state.next) return;
-            state.stack.push(state.cursor);
-            load(state.next);
+            var shown = state.cursor;
+            load(state.next, function () { state.stack.push(shown); });
         });
         applyBtn.addEventListener('click', search);
         resetBtn.addEventListener('click', function () { condBox.textContent = ''; search(); });
@@ -313,7 +315,7 @@
         render();
     }
 
-    var api = { init: init, PAGE: PAGE, matches: matches, applyFilters: applyFilters, cleanConds: cleanConds,
+    var api = { init: init, PAGE: PAGE, cleanConds: cleanConds,
                 buildQuery: buildQuery, columnsFor: columnsFor, cellText: cellText, toCsv: toCsv,
                 valueText: valueText, errorText: errorText };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
