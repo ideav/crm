@@ -11,7 +11,7 @@
                 уровень t=170 WRITE | 171 READ | 172 BARRED, маска t=49 (MASK), удаление t=56 (DELETE).
 
 Правила доступа заданы штатными грантами (index.php getGrants):
-  Админ фонда      — WRITE на всё, DELETE;
+  Админ фонда      — WRITE на всё, DELETE, WRITE на метаданные (правка схемы);
   Эксперт          — READ на всё, WRITE на «Статус» и «Заключение эксперта»;
   Заявитель <комп> — WRITE и DELETE на «Заявку», маска «Компания = своя», маска «Статус < На экспертизе»,
                      «Эксперт» скрыт (BARRED), «Заключение» только чтение.
@@ -24,6 +24,7 @@ USER, ROLE, ROLE_OBJECT, USER_ROLE_REQ, TOKEN_REQ, NAME_REQ = 18, 42, 116, 115, 
 WRITE, READ, BARRED = 170, 171, 172
 MASK, DELETE = 49, 56
 ALL_OBJECTS = 1
+METADATA = 0  # грант на объект 0 — правка схемы (index.php Check_Types_Grant)
 
 # --- схема ---------------------------------------------------------------------------------
 T_COMPANY, T_STATUS, T_APP = 10000, 10100, 10200
@@ -92,7 +93,7 @@ class App:
 
         review = self.status["На экспертизе"]
         grants = {
-            "Админ фонда": [(ALL_OBJECTS, WRITE, None, True)],
+            "Админ фонда": [(ALL_OBJECTS, WRITE, None, True), (METADATA, WRITE, None, False)],
             "Эксперт": [(ALL_OBJECTS, READ, None, False), (R_APP_STATUS, WRITE, None, False),
                         (R_APP_VERDICT, WRITE, None, False)],
         }
