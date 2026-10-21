@@ -34,7 +34,7 @@
 ```bash
 bash stand/stand.sh up [<коммит ideav/crm>]   # на хосте с Docker
 python3 probes/probe.py [--only W1,C1]          # на том же хосте
-python probes/prod_check.py --db <тестовая база>  # с машины с ssh-доступом к серверу ideav.ru
+R1008_SSH=root@<хост> python probes/prod_check.py --db <тестовая база>  # с машины с ssh-доступом к серверу ideav.ru
 ```
 
 После замены `index.php` внутри работающего контейнера контейнер нужно перезапустить (`docker restart crm1008-app`). Иначе opcache продолжит отдавать прежнее ядро.

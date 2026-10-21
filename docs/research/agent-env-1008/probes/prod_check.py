@@ -5,8 +5,8 @@
 пробы и в конце строки удаляются. Уровни доступа берутся из базы (у шаблона ideav.ru они другие,
 чем у docker-шаблона crm). База — только служебная тестовая, не клиентская.
 
-  python probes/prod_check.py --db bt866test [--only W1,C1] [--out results/prod-<дата>.json]
-Доступ к MySQL — через ssh root@<хост> mysql (переменная R1008_SSH).
+  R1008_SSH=root@<хост> python probes/prod_check.py --db <тестовая база> [--only W1,C1] [--out results/prod-<дата>.json]
+Доступ к MySQL — через ssh <R1008_SSH> mysql; переменная обязательна.
 """
 import argparse
 import datetime
@@ -19,7 +19,7 @@ from pathlib import Path
 import probe as P
 import funding as F
 
-SSH = os.getenv("R1008_SSH", "root@92.242.60.37")
+SSH = os.getenv("R1008_SSH", "")
 ID_FLOOR = 10000
 
 
@@ -38,6 +38,8 @@ def main():
     ap.add_argument("--only", default="")
     ap.add_argument("--out", default="")
     args = ap.parse_args()
+    if not SSH:
+        ap.error("задайте R1008_SSH=<user>@<хост> сервера с базой ideav")
     db = args.db
     P.mysql, P.BASE = remote_mysql, args.base
 
