@@ -733,7 +733,7 @@
             if (!wrap || !plan || !plan.id) return;
             this.disablePlan(plan.id);
             var actions = plan.status === 'pending' ? ['apply', 'cancel']
-                : (plan.status === 'applied' && plan.undo) ? ['undo'] : [];
+                : plan.undo ? ['undo'] : [];   // applied или partial (python2node#1027)
             if (!actions.length) return;
             var self = this;
             var bar = document.createElement('div');
