@@ -11,7 +11,7 @@
                 уровень t=170 WRITE | 171 READ | 172 BARRED, маска t=49 (MASK), удаление t=56 (DELETE).
 
 Правила доступа заданы штатными грантами (index.php getGrants):
-  Админ фонда      — WRITE на всё, DELETE, WRITE на метаданные (правка схемы);
+  Админ фонда      — WRITE на всё, DELETE, EXPORT (выгрузка и резервная копия), WRITE на метаданные (правка схемы);
   Эксперт          — READ на всё, WRITE на «Статус» и «Заключение эксперта»;
   Заявитель <комп> — WRITE и DELETE на «Заявку», маска «Компания = своя», маска «Статус < На экспертизе»,
                      «Эксперт» скрыт (BARRED), «Заключение» только чтение.
@@ -22,7 +22,7 @@ import random
 SHORT, MEMO, NUMBER = 3, 12, 13
 USER, ROLE, ROLE_OBJECT, USER_ROLE_REQ, TOKEN_REQ, NAME_REQ = 18, 42, 116, 115, 125, 33
 WRITE, READ, BARRED = 170, 171, 172
-MASK, DELETE = 49, 56
+MASK, DELETE, EXPORT = 49, 56, 55
 ALL_OBJECTS = 1
 METADATA = 0  # грант на объект 0 — правка схемы (index.php Check_Types_Grant)
 
@@ -93,7 +93,7 @@ class App:
 
         review = self.status["На экспертизе"]
         grants = {
-            "Админ фонда": [(ALL_OBJECTS, WRITE, None, True), (METADATA, WRITE, None, False)],
+            "Админ фонда": [(ALL_OBJECTS, WRITE, None, True, True), (METADATA, WRITE, None, False)],
             "Эксперт": [(ALL_OBJECTS, READ, None, False), (R_APP_STATUS, WRITE, None, False),
                         (R_APP_VERDICT, WRITE, None, False)],
         }
@@ -108,13 +108,15 @@ class App:
         for i, (name, items) in enumerate(grants.items(), 1):
             rid = self.role[name] = nid()
             rows.append((rid, 1, 10 + i, ROLE, name))
-            for j, (obj, level, mask, delete) in enumerate(items, 1):
+            for j, (obj, level, mask, delete, *export) in enumerate(items, 1):
                 gid = nid()
                 rows += [(gid, rid, j, ROLE_OBJECT, str(obj)), (nid(), gid, 1, level, "")]
                 if mask is not None:
                     rows.append((nid(), gid, 2, MASK, mask))
                 if delete:
                     rows.append((nid(), gid, 3, DELETE, "1"))
+                if export and export[0]:
+                    rows.append((nid(), gid, 4, EXPORT, "1"))
 
         for i, (login, fio, role) in enumerate(USERS, 1):
             uid = self.user[login] = nid()

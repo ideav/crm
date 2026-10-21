@@ -1,6 +1,6 @@
 # Контракт адаптеров пилота
 
-Раннер (`pilot/run.py`) работает с вариантами только через модуль `pilot/variant_<x>.py`. Всё выполняется на песочнице (`root@104.128.137.21`), рядом со стендом `crm1008-app` / `crm1008-db`.
+Раннер (`pilot/run.py`) работает с вариантами только через модуль `pilot/variant_<x>.py`. Всё выполняется на песочнице, рядом со стендом `crm1008-app` / `crm1008-db`.
 
 ```python
 def provision(run_id: str, overrides: dict | None = None) -> dict

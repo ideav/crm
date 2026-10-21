@@ -35,7 +35,7 @@ def variant(name):
 def one(job, args, out: Path):
     vname, sc, rep = job
     run_id = f"{vname}_{sc['id']}_{rep}".lower().replace("-", "_")
-    log_dir = out / "runs" / run_id
+    log_dir = (out / "runs" / run_id).resolve()  # хост agent-chat пишет plan_apply.json по этому пути
     log_dir.mkdir(parents=True, exist_ok=True)
     v, ctx, rec = variant(vname), None, {"variant": vname, "scenario": sc["id"], "kind": sc["kind"],
                                           "rep": rep, "model": args.model, "run_id": run_id}

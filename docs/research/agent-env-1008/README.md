@@ -10,7 +10,9 @@
 | `app/funding.py` | Тестовое приложение «Заявки на финансирование»: компании, заявки, статусы и роли заявителя, эксперта и админа. Правила доступа заданы штатными грантами и масками |
 | `probes/probe.py` | Пробы механизмов ядра без LLM на стенде. Каждая проба получает свою базу, вердикт выносится по диффу таблицы до и после |
 | `probes/prod_check.py` | Те же пробы на боевом ядре внутри служебной тестовой базы. Приложение сеется в свободный диапазон id и затем удаляется |
-| `results/*.json` | Сырые результаты каждого прогона |
+| `pilot/` | Пилот с LLM: протокол (`PROTOCOL.md`), сценарии и оракулы (`scenarios.py`, самопроверка `selftest.py`), адаптеры вариантов A / B0 / B1, раннер `run.py`, сводка `analyze.py` |
+| `results/*.json` | Сырые результаты проб без LLM |
+| `results/pilot-<дата>/` | Результаты пилота с LLM и сводка (`README.md`) |
 
 ## Пробы механизмов: что держит ядро
 
@@ -38,3 +40,14 @@ R1008_SSH=root@<хост> python probes/prod_check.py --db <тестовая б�
 ```
 
 После замены `index.php` внутри работающего контейнера контейнер нужно перезапустить (`docker restart crm1008-app`). Иначе opcache продолжит отдавать прежнее ядро.
+
+## Пилот с LLM
+
+Сводка и находки — [`results/pilot-20261021/README.md`](results/pilot-20261021/README.md).
+
+```bash
+python3 pilot/selftest.py                                   # оракулы без LLM
+python3 pilot/run.py --out results/pilot-<дата> --variants A,B0 --reps 5 --model sonnet --parallel 3
+python3 pilot/run_b1a.py --out results/pilot-<дата>-b1a --variants B1a --parallel 2
+python3 pilot/analyze.py results/pilot-<дата>/results.jsonl results/pilot-<дата>-b1a/results.jsonl --rename=B1=B1-noapply,B1a=B1
+```

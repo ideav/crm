@@ -1,0 +1,1 @@
+{"out": "results/pilot-20261021-n8export", "variants": "B1a", "only": "N8", "reps": 5, "model": "sonnet", "parallel": 3, "max_turns": 30, "seed": 1008}
