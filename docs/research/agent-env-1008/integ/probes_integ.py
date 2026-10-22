@@ -260,7 +260,9 @@ def answer_ok(answer: str, expected: list):
 
 def apply_pre(env, pre):
     if pre[0] == "contracts":
-        env.force_contracts(S.CONTRACTS)
+        # дата у всех договоров: агент вправе сделать «Дату» обязательной (a1-t1-1, NOT NULL signed_on)
+        env.force_contracts([(num, app, amount, status, date or "2026-10-15")
+                             for num, app, amount, status, date in S.CONTRACTS])
     elif pre[0] == "company":
         env.force_company(*pre[1:])
     else:
