@@ -6573,6 +6573,23 @@ function Menu_layout_setting()
     $v = strtolower(trim(str_replace(pack("CCC", 0xef, 0xbb, 0xbf), "", (string)file_get_contents($file, FALSE, NULL, 0, 64))));
     return in_array($v, array("top", "left", "auto"), TRUE) ? $v : "";
 }
+# Колонка фильтра листинга таблицы по ключу F_/FR_/TO_ (issue #5238): id реквизита по имени или
+# id, id таблицы по её имени или id, U (родитель) и I (id записи). В запросе рабочего места есть и
+# параметры для его отчётов и скриптов — колонку, которой в таблице нет, не фильтруем (FALSE),
+# иначе имя уходит в SQL как есть: «aRoleID.t=RoleID» → Unknown column 'RoleID'.
+function Listing_filter_column($col, $id)
+{
+    if(($col === "U") || ($col === "I") || ((string)$col === (string)$id))
+        return $col;
+    $names = isset($GLOBALS["REQNAMES"]) && is_array($GLOBALS["REQNAMES"]) ? $GLOBALS["REQNAMES"] : array();
+    if(strlen($col) && (($tmp = array_search($col, $names)) !== FALSE))
+        return (string)$tmp;
+    if(isset($GLOBALS["GLOBAL_VARS"]["api"]["type"]["val"]) && ($col === $GLOBALS["GLOBAL_VARS"]["api"]["type"]["val"]))
+        return $id;
+    if(ctype_digit((string)$col) && isset($names[$col]))
+        return $col;
+    return FALSE;
+}
 # Подготовка фильтра по родителю для листинга объекта (issue #5170).
 # Выделено из case "&uni_obj_all" без изменения поведения: явный F_U применяется
 # только когда у типа определён parent_obj (реквизит, связывающий тип с родителем).
@@ -8731,14 +8748,12 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 				if(($value != "") && (preg_match("/(F\_|FR\_|TO\_)/", $key))){
 					$pre = substr($key, 0, strpos($key, "_"));
 					$col = substr($key, strpos($key, "_")+1);
+					$req = Listing_filter_column($col, $id);
+					if($req === FALSE) # Not a column of this table - the parameter is for other blocks or scripts
+						continue;
 					# Replace field name with its ID and remove the named filter
-					if(is_array($GLOBALS["REQNAMES"]) && ($tmp = array_search($col, $GLOBALS["REQNAMES"]))){ // Reqs names
-						$col = $tmp;
-						$_REQUEST[$pre."_$col"] = $value;
-						unset($_REQUEST[$key]);
-					}
-					elseif($col === $GLOBALS["GLOBAL_VARS"]["api"]["type"]["val"]){ // Object name
-						$col = $id;
+					if((string)$req !== $col){
+						$col = $req;
 						$_REQUEST[$pre."_$col"] = $value;
 						unset($_REQUEST[$key]);
 					}
