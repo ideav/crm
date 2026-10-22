@@ -88,7 +88,7 @@ function fakeRoot(attrs) {
     };
 }
 let root = fakeRoot();
-let res = AV.apply(root, { db: 'shop', user: 'guest', role: 'guest' }, flat(3));
+let res = AV.apply(root, { db: 'shop', user: 'guest', role: 'guest' }, flat(3), 'auto');
 check(res.view === 'guest' && res.layout === 'top', 'apply: гость → guest/top');
 check(root.classes.has('app-view-guest') && root.classes.has('menu-layout-top'), 'apply: классы app-view-guest и menu-layout-top');
 
@@ -98,8 +98,8 @@ check(res.layout === 'left' && root.classes.has('menu-layout-left') && !root.cla
     'apply: data-menu-layout корня шаблона задаёт раскладку');
 
 root = fakeRoot();
-AV.apply(root, { db: 'shop', user: 'ivan', role: 'manager' }, flat(3));
-AV.apply(root, { db: 'shop', user: 'ivan', role: 'manager' }, flat(max + 2));
+AV.apply(root, { db: 'shop', user: 'ivan', role: 'manager' }, flat(3), 'auto');
+AV.apply(root, { db: 'shop', user: 'ivan', role: 'manager' }, flat(max + 2), 'auto');
 check(root.classes.has('menu-layout-left') && !root.classes.has('menu-layout-top'), 'apply повторно: прежняя раскладка снимается');
 
 if (failures) {

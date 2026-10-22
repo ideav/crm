@@ -3,13 +3,17 @@
 // Вид (класс app-view-* на <html>):
 //   guest — посетитель без входа (пользователь guest): без меню пользователя и ИИ-агента,
 //           в шапке кнопка «Войти»;
-//   admin — роль admin (или id ADMINROLE), владелец базы, доступ к структуре базы;
+//   admin — роль admin (или id ADMINROLE), владелец базы, доступ к структуре базы,
+//           право писать в таблицу меню (грант 151): правка меню живёт в левом меню;
 //   user  — остальные.
 // Раскладка меню (класс menu-layout-* на <html>):
-//   left — левое меню: у админа всегда, у прочих — когда разделов больше TOP_MENU_MAX
-//          или в меню есть третий уровень;
-//   top  — верхнее меню в шапке, подпункты второго уровня — выпадающими списками.
-// Шаблон может задать раскладку явно: <html data-menu-layout="top|left|auto">.
+//   left — левое меню (по умолчанию);
+//   top  — верхнее меню в шапке, подпункты второго уровня — выпадающими списками;
+//   auto — выбор по меню роли: у админа левое, у прочих верхнее, пока разделов не больше
+//          TOP_MENU_MAX и нет третьего уровня, иначе левое.
+// Источник выбора, по старшинству: <html data-menu-layout="top|left|auto"> своего main.html →
+// файл базы templates/custom/{db}/_menu_layout.html (одно слово; читается из
+// <template id="app-menu-layout">) → left.
 //
 // Подключается в <head> main.html до отрисовки страницы, чтобы раскладка не «прыгала».
 (function (w) {
@@ -28,7 +32,21 @@
         if (ctx.db && user === lower(ctx.db)) return 'admin';
         var grants = ctx.grants;
         if (grants && !Array.isArray(grants) && (grants['0'] === 'READ' || grants['0'] === 'WRITE')) return 'admin';
+        if (grants && !Array.isArray(grants) && grants['151'] === 'WRITE') return 'admin';
         return 'user';
+    }
+
+    var MODES = { top: true, left: true, auto: true };
+
+    function mode(v) {
+        v = lower(v).trim();
+        return MODES[v] ? v : '';
+    }
+
+    // Файл базы подставляется шаблонизатором внутрь <template>; без файла там info.html —
+    // такое содержимое (и всё, кроме одного из слов top/left/auto) выбором не считается.
+    function readLayoutConfig(el) {
+        return el ? mode(el.innerHTML) : '';
     }
 
     // Глубина и число разделов меню — по тем же правилам, что buildMenu в main-app.js:
@@ -57,9 +75,10 @@
         return (shape.top <= TOP_MENU_MAX && shape.depth <= 2) ? 'top' : 'left';
     }
 
-    function apply(root, ctx, items) {
+    function apply(root, ctx, items, configured) {
         var view = getView(ctx);
-        var layout = getMenuLayout(view, items, root.getAttribute('data-menu-layout'));
+        var chosen = mode(root.getAttribute('data-menu-layout')) || mode(configured) || 'left';
+        var layout = getMenuLayout(view, items, chosen);
         ['guest', 'user', 'admin'].forEach(function (v) { root.classList.remove('app-view-' + v); });
         ['top', 'left'].forEach(function (l) { root.classList.remove('menu-layout-' + l); });
         root.classList.add('app-view-' + view);
@@ -71,6 +90,7 @@
         TOP_MENU_MAX: TOP_MENU_MAX,
         getView: getView,
         getMenuLayout: getMenuLayout,
+        readLayoutConfig: readLayoutConfig,
         apply: apply
     };
 })(window);

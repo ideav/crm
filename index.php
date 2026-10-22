@@ -6185,6 +6185,20 @@ function Superuser_role_menu_request($block_name)
         return;
     $_REQUEST["FR_RoleID"] = !empty($gv["role_id"]) ? $gv["role_id"] : ADMINROLE;
 }
+# Раскладка меню базы для main.html (issue #5221): одно слово top|left|auto в файле
+# templates/custom/{db}/_menu_layout.html. Нет файла или иное содержимое — пусто, main.html
+# показывает левое меню. Значение уходит в шаблон как {_global_.menu_layout}.
+function Menu_layout_setting()
+{
+    global $z;
+    if(!preg_match("/^[A-Za-z0-9_]+$/", (string)$z))
+        return "";
+    $file = $_SERVER["DOCUMENT_ROOT"]."/templates/custom/$z/_menu_layout.html";
+    if(!is_file($file))
+        return "";
+    $v = strtolower(trim(str_replace(pack("CCC", 0xef, 0xbb, 0xbf), "", (string)file_get_contents($file, FALSE, NULL, 0, 64))));
+    return in_array($v, array("top", "left", "auto"), TRUE) ? $v : "";
+}
 # Подготовка фильтра по родителю для листинга объекта (issue #5170).
 # Выделено из case "&uni_obj_all" без изменения поведения: явный F_U применяется
 # только когда у типа определён parent_obj (реквизит, связывающий тип с родителем).
@@ -15892,6 +15906,7 @@ if(Validate_Token())
 
 			if(isset($GLOBALS["GRANTS"]))
 				$GLOBALS["GLOBAL_VARS"]["grants"] = base64_encode(json_encode($GLOBALS["GRANTS"], JSON_UNESCAPED_UNICODE));
+			$GLOBALS["GLOBAL_VARS"]["menu_layout"] = Menu_layout_setting();
         	Make_tree($text, "&main");
         	$html = Parse_block("&main");
 
