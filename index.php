@@ -2827,7 +2827,8 @@ function Validate_Token(){ # Validates the cookie token and gathers the user per
 						." LEFT JOIN $z xsrf ON xsrf.up=u.id AND xsrf.t=".XSRF
 						." LEFT JOIN $z act ON act.up=u.id AND act.t=".ACTIVITY
 						." WHERE u.t=".USER." AND tok.up=u.id AND tok.val='$tok' AND tok.t=$typ", "Validate token");
-		if($row = mysqli_fetch_array($data_set)){
+		# Пользователь guest входит только с ролью guest (#5231), иначе — как посетитель без токена
+		if(($row = mysqli_fetch_array($data_set)) && (strtolower($row["val"]) !== "guest" || ($row["r"] && strtolower((string)$row["role"]) === "guest"))){
 			$GLOBALS["GLOBAL_VARS"]["user"] = strtolower($row["val"]);
 			$GLOBALS["GLOBAL_VARS"]["role"] = strtolower($row["role"]);
 			$GLOBALS["GLOBAL_VARS"]["role_id"] = $row["r"];
@@ -2870,7 +2871,7 @@ function Validate_Token(){ # Validates the cookie token and gathers the user per
         						." LEFT JOIN ($z r CROSS JOIN $z role_def) ON r.up=u.id AND role_def.id=r.t AND role_def.t=".ROLE
     		                    ." WHERE u.t=".USER." AND u.val='guest'"
 		                    , "Get Guest credentials");
-		if(($row = mysqli_fetch_array($data_set)) && $row["r"]){
+		if(($row = mysqli_fetch_array($data_set)) && strtolower((string)$row["role"]) === "guest"){
 		    $tok = "gtuoeksetn";
 		    $xsrf = Guest_session($row, $tok);
 		}
@@ -2924,8 +2925,8 @@ function Validate_Token(){ # Validates the cookie token and gathers the user per
     $GLOBALS["GLOBAL_VARS"]["token"] = $tok;
 	return isset($GLOBALS["GLOBAL_VARS"]["user"]);  # Return TRUE in case the token is OK
 }
-# Вход гостем (#5221): посетитель без токена работает пользователем guest, если тот заведён
-# и ему задана роль. Токен гостя общий для всех посетителей, поэтому вход — в этом же запросе:
+# Вход гостем (#5221, #5231): посетитель без токена работает пользователем guest, если тот
+# заведён и его роль — guest. Токен гостя общий для всех посетителей, поэтому вход — в этом же запросе:
 # и страница, и JSON API отвечают гостю сразу, без перенаправления на себя. Запись токена
 # приводится к общему значению, xsrf — к производному от него. Возвращает xsrf сессии.
 function Guest_session($row, $tok){
