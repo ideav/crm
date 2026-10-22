@@ -62,6 +62,7 @@ def change_text(x: str) -> str:
 
 
 def run_agent(kind: str, db: str, prompt: str, log: Path, model: str, max_turns: int, timeout: int) -> dict:
+    log = log.resolve()  # MCP-сервер работает в своём временном каталоге
     log.mkdir(parents=True, exist_ok=True)
     calls = log / "calls.jsonl"
     work = Path(tempfile.mkdtemp(prefix="r1055-agent-"))
@@ -102,6 +103,8 @@ def run_agent(kind: str, db: str, prompt: str, log: Path, model: str, max_turns:
     answer = (result or {}).get("result") or ""
     if QUOTA.search(answer) or QUOTA.search(err[-2000:]):
         raise Quota(answer[:200] or err[-200:])
+    if '"content":"Connection closed"' in out:
+        raise RuntimeError("MCP-сервер среды упал во время прогона — сбой стенда, см. agent.jsonl")
     u = (result or {}).get("usage") or {}
     tool_calls = [json.loads(x) for x in calls.read_text("utf-8").splitlines()] if calls.exists() else []
     return {"answer": answer, "done": "ГОТОВО" in answer, "is_error": bool((result or {}).get("is_error", True)),

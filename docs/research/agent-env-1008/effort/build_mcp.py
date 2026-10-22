@@ -23,7 +23,7 @@ sys.path.insert(0, str(HERE))
 import envs as E  # noqa: E402
 
 KIND = os.environ["R1055_ENV"]
-CALLS = Path(os.environ["R1055_CALLS"])
+CALLS = Path(os.environ["R1055_CALLS"]).resolve()
 KB = Path(os.getenv("R1055_KB", "/nonexistent"))
 ENV = E.CoreEnv(os.environ["R1055_DB"]) if KIND == "b" else E.PgrstEnv()
 LIMIT = 20000  # символов ответа: длиннее — обрезается с пометкой
