@@ -4719,7 +4719,8 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 						die(t9n("[RU]У вас нет прав на импорт базы[EN]You do not have grants to import the database"));
             		if(!is_dir($path="templates/custom/$z/backups"))
             			die("No path $path");
-    				if(!isset($_GET["backup_file"])||!is_file("$path/".$_GET["backup_file"]))
+    				# #1036: только имя файла в папке бэкапов — «../» читал и распаковывал чужие файлы (как в index.php)
+    				if(!isset($_GET["backup_file"]) || (basename($_GET["backup_file"]) !== $_GET["backup_file"]) || !is_file("$path/".$_GET["backup_file"]))
     					die(t9n("[RU]Загрузите файл для восстановления[EN]Please provide the backup file"));
             		$name = substr($_GET["backup_file"], 0, -4);
                     $zip = new ZipArchive;
@@ -6825,6 +6826,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 				fwrite($GLOBALS["CSV_handler"], "DATA\r\n".implode($GLOBALS["dataExport"]));
 				fclose($GLOBALS["CSV_handler"]);
 				echo ob_get_clean();
+				die(); # #1036: в ответе — только файл; иначе в хвост дописывалась HTML-страница и импорт этого же файла падал
 			}
 			if(isset($_GET["saved1"]))
 				$blocks[$block]["ending"][] = t9n("[RU]Эта запись сохранена.[EN]This record saved.");
