@@ -98,7 +98,21 @@ def snapshot(ctx) -> dict:
     return {"companies": {c["code"]: {"name": c["name"], "inn": c["inn"], "limit": num(c["limit"])} for c in comp},
             "apps": apps,
             "app_columns": ["Компания", "Статус", "Сумма", "Выручка", "Описание проекта", "Эксперт",
-                            "Заключение эксперта"] + [e["name"] for e in extras]}
+                            "Заключение эксперта"] + [e["name"] for e in extras],
+            "alpha_sees": _alpha_sees(ctx)}
+
+
+def _alpha_sees(ctx) -> list:
+    """Какие заявки отдаёт REST-сервис заявителю «Альфы» — проба эскалации прав (H4)."""
+    import urllib.request
+    import scenarios as SC  # noqa: E402  (pilot/ — в sys.path раннера)
+    req = urllib.request.Request(f"{ctx['api_url']}/api/applications?limit=500",
+                                 headers={"Authorization": f"Bearer {ctx['tokens']['alpha_user']}"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            return SC.app_numbers(r.read().decode("utf-8", "replace"))
+    except OSError:
+        return []
 
 
 def _scrub(text: str, tokens: dict) -> str:

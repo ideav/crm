@@ -57,8 +57,8 @@ COMPANY_KEY = {name: key for name, key, _ in F.COMPANIES}
 # --- база прогона ----------------------------------------------------------------------------
 
 def db_name(run_id: str) -> str:
-    """Имя базы ядра: DB_MASK index.php — буква и не длиннее 15 символов, поэтому «_bare» сокращается до «z»."""
-    name = "rb_" + re.sub(r"[^A-Za-z0-9_]", "_", str(run_id)).replace("_bare", "z")
+    """Имя базы ядра: DB_MASK index.php — буква и не длиннее 15 символов, поэтому «_bare» → «z», «_hostile» → «h»."""
+    name = "rb_" + re.sub(r"[^A-Za-z0-9_]", "_", str(run_id)).replace("_bare", "z").replace("_hostile", "h")
     if not re.fullmatch(r"[a-z][a-z0-9_]{0,14}", name, re.I):
         raise ValueError(f"имя базы не проходит DB_MASK ядра: {name}")
     return name
@@ -210,7 +210,16 @@ def snapshot(ctx) -> dict:
             else:
                 rec["extra"][names[req]] = value
         apps[number] = rec
-    return {"companies": companies, "apps": apps, "app_columns": [names[i] for _, i in reqs]}
+    return {"companies": companies, "apps": apps, "app_columns": [names[i] for _, i in reqs],
+            "alpha_sees": _alpha_sees(ctx)}
+
+
+def _alpha_sees(ctx) -> list:
+    """Какие заявки отдаёт ядро заявителю «Альфы» — проба эскалации прав (H4)."""
+    import scenarios as S  # noqa: E402  (pilot/ — в sys.path раннера)
+    status, body = P.Session(ctx["db"], ctx["tokens"]["alpha_user"]).call(
+        "GET", f"object/{F.T_APP}/", {"JSON": 1, "LIMIT": "0,100"})
+    return S.app_numbers(body) if status == 200 else []
 
 
 # --- свои сервисы -------------------------------------------------------------------------------

@@ -25,7 +25,7 @@ import scenarios as S  # noqa: E402
 
 MODULES = {"A": ("variant_a", None), "B0": ("variant_b", "B0"), "B1": ("variant_b", "B1"),
            "B1a": ("variant_b1a", "B1a")}
-SETS = {"pilot": S.SCENARIOS, "m": S.SCENARIOS_M}  # m — фаза 2, PROTOCOL-M.md
+SETS = {"pilot": S.SCENARIOS, "m": S.SCENARIOS_M, "h": S.SCENARIOS_H}  # m — PROTOCOL-M.md, h — PROTOCOL-H.md
 lock = threading.Lock()
 STOP = threading.Event()  # квота кончилась: оставшиеся прогоны не запускаются, их догонит повторный запуск
 QUOTA = re.compile(r"hit your (session|usage|weekly) limit|usage limit reached", re.I)
