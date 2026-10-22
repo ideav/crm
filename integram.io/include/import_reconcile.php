@@ -173,3 +173,61 @@ function Import_subst_literals($str, $subst, $exists, $count, &$warning)
             return $m[1].$out.$m[3];
         }, $str);
 }
+
+# --------------------------------------------------------------------------------------------
+# Ссылки существующей записи (issue #5226)
+#
+# Фаза данных BKI сверяет ссылки записи по реквизиту с набором из файла:
+#   - ссылка, которая уже есть, не вставляется повторно; повтор внутри поля - одна ссылка;
+#   - переданный набор заменяет прежний: лишние строки-ссылки удаляются, общие остаются
+#     той же строкой;
+#   - пустое поле не доходит до разбора ссылок - набор записи не меняется;
+#   - пробел " " - пустой набор: все ссылки записи по реквизиту удаляются.
+# --------------------------------------------------------------------------------------------
+
+# План сверки. $have - ссылки записи в базе: id строки-ссылки => id цели. $incoming - id
+# целей из файла (уже после подстановок obj_subst). Возвращает строки к удалению и цели к
+# вставке в порядке файла. Из повторов одной цели в базе остаётся первая строка.
+function Import_ref_set_plan($have, $incoming)
+{
+    $want = array();
+    foreach($incoming as $target)
+        if((int)$target > 0)
+            $want[(int)$target] = TRUE;
+    $delete = $kept = array();
+    foreach($have as $rowId => $target)
+        if(isset($want[(int)$target]) && !isset($kept[(int)$target]))
+            $kept[(int)$target] = TRUE;
+        else
+            $delete[] = $rowId;
+    $insert = array();
+    foreach(array_keys($want) as $target)
+        if(!isset($kept[$target]))
+            $insert[] = $target;
+    return array("delete" => $delete, "insert" => $insert);
+}
+
+# Применить набор целей $incoming к ссылкам реквизита $key записи $up типа $t. Ссылки
+# записи, которой до этой строки файла в базе не было ($existing = FALSE), не читаются.
+function Import_ref_set($up, $t, $key, $incoming, $existing, $message)
+{
+    global $z;
+    $have = array();
+    if($existing)
+    {
+        # Ссылки записи могут ждать в батче (та же запись раньше в файле) - сначала в базу
+        Insert_batch("", "", "", "", "$message: flush before refs check");
+        # Строка-ссылка: t = id цели, val = id колонки. У обычного реквизита t - колонка
+        # типа записи (up = $t), поэтому значение, совпавшее с id колонки, сюда не попадает
+        $data = Exec_sql("SELECT r.id, r.t FROM $z r JOIN $z o ON o.id=r.t AND o.up NOT IN (0, $t)"
+                        ." WHERE r.up=$up AND r.val='$key' ORDER BY r.id", "$message: load refs");
+        while($row = mysqli_fetch_array($data))
+            $have[$row["id"]] = $row["t"];
+    }
+    $plan = Import_ref_set_plan($have, $incoming);
+    foreach($plan["delete"] as $rowId)
+        Delete($rowId);
+    $ord = 1;
+    foreach($plan["insert"] as $target)
+        Insert_batch($up, $ord++, $target, $key, $message);
+}

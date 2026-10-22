@@ -15,7 +15,7 @@
  *
  * Решение «что удалить, что вставить» принимает Import_ref_set_plan() из
  * include/import_reconcile.php — её же зовёт ядро (index.php и
- * experiments/index_integram.io.php) через Import_ref_set().
+ * integram.io/index.php) через Import_ref_set().
  *
  * Запуск (база не нужна):
  *   php experiments/issue-5226-bki-ref-set.test.php
