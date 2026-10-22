@@ -11,6 +11,7 @@ import argparse
 import importlib
 import json
 import random
+import re
 import sys
 import threading
 import time
@@ -26,6 +27,8 @@ MODULES = {"A": ("variant_a", None), "B0": ("variant_b", "B0"), "B1": ("variant_
            "B1a": ("variant_b1a", "B1a")}
 SETS = {"pilot": S.SCENARIOS, "m": S.SCENARIOS_M}  # m — фаза 2, PROTOCOL-M.md
 lock = threading.Lock()
+STOP = threading.Event()  # квота кончилась: оставшиеся прогоны не запускаются, их догонит повторный запуск
+QUOTA = re.compile(r"hit your (session|usage|weekly) limit|usage limit reached", re.I)
 
 
 def variant(name):
@@ -43,11 +46,17 @@ def one(job, args, out: Path):
                                           "prompt": sc.get("prompt", "full"), "rep": rep,
                                           "model": args.model, "run_id": run_id}
     t0 = time.time()
+    if STOP.is_set():
+        rec.update(error="пропущен: квота claude кончилась", wall_s=0.0)
+        return rec
     try:
         ctx = v.provision(run_id, sc.get("overrides"))
         before = v.snapshot(ctx)
         res = v.run_agent(ctx, sc["user"], S.instructions(sc["user"], sc.get("prompt", "full")), sc["task"],
                           model=args.model, max_turns=args.max_turns, log_dir=str(log_dir))
+        if QUOTA.search(res.get("answer") or ""):  # лимит подписки claude -p — сбой стенда, не ответ агента
+            STOP.set()
+            raise RuntimeError("квота claude: " + (res.get("answer") or "")[:120])
         after = v.snapshot(ctx)
         verdict = sc["check"](before, after, res.get("answer", ""))
         rec.update(verdict=verdict, answer=res.get("answer", ""), is_error=res.get("is_error"),
