@@ -14,7 +14,9 @@
 #   3) у гостя чужое значение токена — оно восстанавливается, сайт не падает с «Неверный токен»;
 #   4) повторный визит с кукой гостя — обычная проверка токена, роль гостя;
 #   5) гостя нет: JSON API без токена — 401 «No authorization token provided», страница — вход;
-#   6) гостю не задана роль — посетителя отправляют на вход, а не «не задана роль».
+#   6) гостю не задана роль — посетителя отправляют на вход, а не «не задана роль»;
+#   7) (#5231) у пользователя guest роль не guest — гостевого входа нет: страница — вход,
+#      JSON API — 401, кука гостя с прошлого визита не впускает.
 
 const GUEST_TOK = "gtuoeksetn";
 
@@ -67,6 +69,16 @@ $r = child("guest_no_role");
 expect(empty($r["ok"]) && strpos($r["out"], "LOGIN:InvalidToken") !== false, "гость без роли: на вход");
 expect(strpos($r["out"], "не задана роль") === false, "гость без роли: не падает «не задана роль»");
 
+# #5231: гость работает, только когда заведены и пользователь guest, и роль guest
+$r = child("guest_other_role_page");
+expect(empty($r["ok"]) && strpos($r["out"], "LOGIN:InvalidToken") !== false, "#5231 guest с ролью не guest, страница: на вход");
+$r = child("guest_other_role_api");
+expect(empty($r["ok"]) && strpos($r["out"], "No authorization token provided") !== false, "#5231 guest с ролью не guest, JSON API: 401");
+$r = child("guest_other_role_cookie");
+expect(empty($r["ok"]) && strpos($r["out"], "LOGIN:InvalidToken") !== false, "#5231 guest с ролью не guest, кука гостя: на вход");
+$r = child("guest_no_role_cookie");
+expect(empty($r["ok"]) && strpos($r["out"], "LOGIN:InvalidToken") !== false, "#5231 guest без роли, кука гостя: на вход");
+
 if($failures){ echo "\n$failures FAIL\n"; exit(1); }
 echo "\nOK\n";
 exit(0);
@@ -110,6 +122,10 @@ function run_case($case){
         case "no_guest_api":  $GLOBALS["DB"]["guest"] = null; $GLOBALS["DB"]["api"] = TRUE; $_GET["JSON"] = ""; break;
         case "no_guest_page": $GLOBALS["DB"]["guest"] = null; break;
         case "guest_no_role": $g["role"] = null; break;
+        case "guest_other_role_page": $g["role_name"] = "Reader"; $g["tokens"] = array(GUEST_TOK); break;
+        case "guest_other_role_api": $g["role_name"] = "Reader"; $GLOBALS["DB"]["api"] = TRUE; $_GET["JSON"] = ""; break;
+        case "guest_other_role_cookie": $g["role_name"] = "Reader"; $g["tokens"] = array(GUEST_TOK); $_COOKIE["idb_demo"] = GUEST_TOK; break;
+        case "guest_no_role_cookie": $g["role"] = null; $g["tokens"] = array(GUEST_TOK); $_COOKIE["idb_demo"] = GUEST_TOK; break;
     }
     unset($g);
     $ok = \G5221\Validate_Token();
