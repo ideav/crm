@@ -8034,6 +8034,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 #print_r($GLOBALS);my_die();
 					array_pop($object);	# Cut off the empty item after the last semi-colon
 					$new_id = $order = 0;
+					$rec_existing = FALSE;	# issue #5226: запись уже есть в базе - её ссылки сверяются с файлом
 					foreach($object as $value)
 					{
 					    trace(" Parse $value, t:$t, orig:$orig");
@@ -8056,12 +8057,14 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 												, $count, $GLOBALS["warning"]);
 										Insert_batch($new_id, 1, $key, $value, "Import req");
 									}
+								elseif($value === " ") # issue #5226: пробел - очистить ссылки записи по реквизиту
+									Import_ref_set($new_id, $t, $key, array(), $rec_existing, "Import refs clear");
 								elseif(isset($GLOBALS["MULTI"][$key])){ // Reference might be set by multi ID
-						            $multies = explode(",", $value);	# Get multiselect items set
-    					            $ord = 1;
-                					foreach($multies as $ref)
-								        if((int)$ref != 0)
-									        Insert_batch($new_id, $ord++, CheckObjSubst((int)$ref), $key, "Import multi ref");
+									$multies = array();
+									foreach(explode(",", $value) as $ref)	# Get multiselect items set
+										if((int)$ref != 0)
+											$multies[] = CheckObjSubst((int)$ref);
+									Import_ref_set($new_id, $t, $key, $multies, $rec_existing, "Import multi ref");
         						}
 								elseif((strpos($value, ":") !== FALSE) // Referenced object set by Value like "ID:Value" or ":Value"
 								        || ((int)$value == 0))  // or just "Value"
@@ -8116,10 +8119,10 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
         								else
         								    $refObjID = Insert(1, 1, $refType, $refObjVal, "Import direct ref Object");
 								    }
-									Insert_batch($new_id, 1, $refObjID, $key, "Import direct ref");
+									Import_ref_set($new_id, $t, $key, array($refObjID), $rec_existing, "Import direct ref");
 								}
 								elseif((int)$value != 0) // Reference set by ID
-									Insert_batch($new_id, 1, CheckObjSubst((int)$value), $key, "Import ref");
+									Import_ref_set($new_id, $t, $key, array(CheckObjSubst((int)$value)), $rec_existing, "Import ref");
 						}
 						else
 						{
@@ -8143,6 +8146,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 								$new_id = $typ[1];
 								if($row = mysqli_fetch_array(Exec_sql("SELECT id FROM $z WHERE t=$t AND val='".addslashes($typ[2])."'", "Check Obj presence"))){
 									$new_id = $GLOBALS["obj_subst"][$new_id] = $row["id"];
+									$rec_existing = TRUE;
 								}
 								elseif($row = mysqli_fetch_array(Exec_sql("SELECT t, val FROM $z WHERE id=$new_id", "Check ID presence")))
 								{

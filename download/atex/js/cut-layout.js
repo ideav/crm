@@ -430,6 +430,22 @@
             // независимы: набор ножей судится по ширинам, разборка упаковщиком — по заказам.
             if (maxWidths > 0 && Object.keys(merged.demandByWidth).length > maxWidths) continue;
             if (maxOrders > 0 && ordersInCombo(merged.positionsCovered) > maxOrders) continue;
+            // #5223 (решение заказчика): совмещать заказы можно только с СОХРАНЕНИЕМ
+            // КОЛИЧЕСТВА — слитая резка обязана производить для каждой заказанной ширины
+            // обеих групп ровно столько, сколько та производила бы сама. Число проходов у
+            // резки общее для всех ширин, поэтому «выгодное» по прогонам слияние раздувает
+            // производство гостя (боевой случай #5223: 80мм было 11 полос × 10 проходов =
+            // 110 шт., стало 1 полоса × 115 = 115 шт. при заказе 110). Меняет количество —
+            // не слияние: заказы режутся раздельно.
+            var qtyKept = true;
+            [gi, gj].forEach(function(g){
+              Object.keys(g.demandByWidth).forEach(function(k){
+                var own = round3(orderStripQty(g.result.strips, Number(k)) * g.runs);
+                var now = round3(orderStripQty(merged.result.strips, Number(k)) * merged.runs);
+                if (own !== now) qtyKept = false;
+              });
+            });
+            if (!qtyKept) continue;
             var dr = merged.runs - (gi.runs + gj.runs);
             var ds = round3(merged.scrap - (gi.scrap + gj.scrap));
             var dw = round3(merged.waste - (gi.waste + gj.waste));   // #3706: отход (трим)
