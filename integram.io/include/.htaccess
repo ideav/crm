@@ -1,0 +1,4 @@
+AuthType Basic
+AuthName "include"
+AuthUserFile "<webroot_parent>/.htpasswds/public_html/include/passwd"
+require valid-user

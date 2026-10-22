@@ -8,18 +8,22 @@ PHP-движок integram.io работает на своём хосте (не �
 | В репо | На хосте (webroot integram.io) | Примечание |
 |---|---|---|
 | `integram.io/index.php` | `index.php` | ядро integram.io; **не** то же, что корневой `index.php` (ideav.ru) |
-| `include/funcs.php` | `include/funcs.php` | общий с ideav.ru |
-| `include/import_reconcile.php` | `include/import_reconcile.php` | общий с ideav.ru |
-| — | `include/connection.php` | свой у хоста: база, SMTP, секреты; в репо не хранится |
-| — | `include/.htaccess` | свой у хоста (Basic-auth), в репо не хранится |
+| `integram.io/include/funcs.php` | `include/funcs.php` | копия общего `include/funcs.php` |
+| `integram.io/include/import_reconcile.php` | `include/import_reconcile.php` | копия общего `include/import_reconcile.php` |
+| `integram.io/include/connection.php` | `include/connection.php` | **шаблон**: база, SMTP, соль, ключи SMS/Google/Yandex — заменить `<…>` реальными значениями |
+| `integram.io/include/.htaccess` | `include/.htaccess` | **шаблон**: Basic-auth на `include/`, `<webroot_parent>` — каталог над webroot |
 
 На 22.10.2026 живые `index.php`, `include/funcs.php` и `include/import_reconcile.php` совпадают
-с репо байт в байт (md5).
+с репо байт в байт (md5); шаблоны сняты с живых файлов, секреты заменены заглушками. Реальные
+`connection.php` и `.htaccess` на хосте не перезаписывать шаблоном.
 
 ## Правка ядра
 
 Корневой `index.php` (ideav.ru) и `integram.io/index.php` — разные файлы: правку, которая нужна
-обоим хостам, вносят в оба (пример — issue #5170 и #5184). Мерки, которые гоняют оба ядра:
+обоим хостам, вносят в оба (пример — issue #5170 и #5184).
+
+`funcs.php` и `import_reconcile.php` правят в `include/` и копируют в `integram.io/include/`;
+расхождение роняет `experiments/integram-io-include-sync-5228.test.js`. Мерки, которые гоняют оба ядра:
 `experiments/fu-filter-without-parent-obj-5170.test.php`,
 `experiments/integram-io-secure-token-5207.test.js`, `experiments/integramio-php8-1036.test.js`,
 `experiments/security-integramio-1036.test.js`.
