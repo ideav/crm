@@ -6550,24 +6550,14 @@ function maskCsvDelimiters($v){
 # (вход по ADMINHASH) записи нет, user_id=0 — показываем ему меню роли admin (issue #5173).
 # Явно выбранную роль (FR_RoleID из настройки меню) не перекрываем.
 # Имя блока сравниваем без учёта регистра: из шаблона оно приходит как «myrolemenu».
-# Возвращает TRUE, если FR_RoleID подставлен: после блока его снимает Superuser_role_menu_release.
 function Superuser_role_menu_request($block_name)
 {
     $gv = isset($GLOBALS["GLOBAL_VARS"]) ? $GLOBALS["GLOBAL_VARS"] : array();
     if((strtolower($block_name) !== "myrolemenu") || isset($_REQUEST["FR_RoleID"]))
-        return FALSE;
+        return;
     if(!isset($gv["user"]) || ($gv["user"] !== "admin") || !isset($gv["user_id"]) || ((string)$gv["user_id"] !== "0"))
-        return FALSE;
+        return;
     $_REQUEST["FR_RoleID"] = !empty($gv["role_id"]) ? $gv["role_id"] : ADMINROLE;
-    return TRUE;
-}
-# FR_RoleID, подставленный для меню роли, нужен только этому блоку: оставшись в $_REQUEST,
-# он становится фильтром листинга таблицы на той же странице, и в базе без колонки RoleID
-# запрос падает «Unknown column 'RoleID'» (issue #5238).
-function Superuser_role_menu_release($was_set)
-{
-    if($was_set)
-        unset($_REQUEST["FR_RoleID"]);
 }
 # Раскладка меню базы для main.html (issue #5221): одно слово top|left|auto в файле
 # templates/custom/{db}/_menu_layout.html. Нет файла или иное содержимое — пусто, main.html
@@ -9870,12 +9860,10 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 
 			if($rep_id)	# If we got a Report
 			{
-				$role_menu_fr = Superuser_role_menu_request($block_name);
+				Superuser_role_menu_request($block_name);
 				Compile_Report($rep_id, $block, $exe, FALSE, $noFilters);
-				if(!$exe){
-					Superuser_role_menu_release($role_menu_fr);
+				if(!$exe)
 					return $rep_id;
-				}
 				$bak_id = $id;
 				$id = $rep_id;
 				if(isset($_REQUEST["obj"]) && ($_REQUEST["obj"] != 0))
@@ -9896,7 +9884,6 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 
 #print_r($GLOBALS);die($block."!");
 				$id = $bak_id;
-				Superuser_role_menu_release($role_menu_fr);
 			}
 			break;
 	}
