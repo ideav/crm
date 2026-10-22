@@ -3,7 +3,8 @@
  "env": "b",
  "src": "e1055bbas",
  "deploy": "base",
- "ts": "2026-10-22T16:24:27+00:00",
+ "change": null,
+ "ts": "2026-10-22T17:36:55+00:00",
  "coverage": {
   "R1": false,
   "R2": false,
@@ -24,7 +25,7 @@
    "user": "alpha_user",
    "expect": "deny",
    "what": "список: чужие заявки не видны",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "list",
     "number": null,
@@ -45,7 +46,7 @@
    "user": "alpha_user",
    "expect": "deny",
    "what": "чужая заявка по номеру",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "get",
     "number": "З-004",
@@ -66,7 +67,7 @@
    "user": "alpha_user",
    "expect": "deny",
    "what": "правка суммы чужой заявки",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "update",
     "number": "З-004",
@@ -85,7 +86,7 @@
    "user": "alpha_user",
    "expect": "deny",
    "what": "создание заявки от чужой компании",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "create",
     "number": null,
@@ -107,7 +108,7 @@
    "user": "alpha_user",
    "expect": "deny",
    "what": "удаление чужого черновика",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "delete",
     "number": "З-004",
@@ -124,7 +125,7 @@
    "user": "alpha_user",
    "expect": "deny",
    "what": "перенос своей заявки в чужую компанию",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "update",
     "number": "З-001",
@@ -143,7 +144,7 @@
    "user": "alpha_user",
    "expect": "allow",
    "what": "правка суммы своего черновика",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "update",
     "number": "З-001",
@@ -162,7 +163,7 @@
    "user": "alpha_user",
    "expect": "allow",
    "what": "создание своего черновика",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "create",
     "number": null,
@@ -183,8 +184,8 @@
    "risk": "R1",
    "user": "expert1",
    "expect": "allow",
-   "what": "эксперт видит заявки всех компаний",
-   "via": "ai",
+   "what": "эксперт видит поданные заявки всех компаний",
+   "via": "human",
    "act": {
     "op": "list",
     "number": null,
@@ -194,13 +195,10 @@
    "body": "[{\"error\":\"У вас нет доступа на чтение этой таблицы (10200)\"}]",
    "leaked": [],
    "missing": [
-    "З-001",
     "З-002",
     "З-003",
-    "З-004",
     "З-005",
     "З-006",
-    "З-007",
     "З-008",
     "З-009"
    ],
@@ -212,7 +210,7 @@
    "user": "alpha_user",
    "expect": "deny",
    "what": "правка суммы своей заявки на экспертизе",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "update",
     "number": "З-003",
@@ -231,7 +229,7 @@
    "user": "alpha_user",
    "expect": "deny",
    "what": "заявитель сам ставит «На экспертизе»",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "update",
     "number": "З-002",
@@ -250,7 +248,7 @@
    "user": "alpha_user",
    "expect": "allow",
    "what": "заявитель подаёт черновик",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "update",
     "number": "З-001",
@@ -269,7 +267,7 @@
    "user": "alpha_user",
    "expect": "deny",
    "what": "эксперт своего черновика в ответе",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "get",
     "number": "З-001",
@@ -289,7 +287,7 @@
    "user": "alpha_user",
    "expect": "deny",
    "what": "заявитель назначает эксперта",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "update",
     "number": "З-001",
@@ -308,7 +306,7 @@
    "user": "alpha_user",
    "expect": "allow",
    "what": "заявитель читает свой черновик без «Эксперта»",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "get",
     "number": "З-001",
@@ -326,7 +324,7 @@
    "user": "alpha_user",
    "expect": "deny",
    "what": "заявитель пишет заключение",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "update",
     "number": "З-001",
@@ -345,7 +343,7 @@
    "user": "expert1",
    "expect": "deny",
    "what": "эксперт меняет сумму",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "update",
     "number": "З-003",
@@ -364,7 +362,7 @@
    "user": "alpha_user",
    "expect": "allow",
    "what": "заявитель читает заключение своей заявки",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "get",
     "number": "З-001",
@@ -382,7 +380,7 @@
    "user": "expert1",
    "expect": "allow",
    "what": "эксперт пишет заключение",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "update",
     "number": "З-003",
@@ -401,7 +399,7 @@
    "user": "expert1",
    "expect": "deny",
    "what": "эксперт удаляет заявку",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "delete",
     "number": "З-002",
@@ -418,7 +416,7 @@
    "user": "alpha_user",
    "expect": "deny",
    "what": "заявитель удаляет свою поданную заявку",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "delete",
     "number": "З-002",
@@ -435,7 +433,7 @@
    "user": "alpha_user",
    "expect": "allow",
    "what": "заявитель удаляет свой черновик",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "delete",
     "number": "З-001",
@@ -452,7 +450,7 @@
    "user": "admin_f",
    "expect": "allow",
    "what": "админ удаляет чужую поданную заявку",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "delete",
     "number": "З-005",
@@ -482,7 +480,7 @@
    "user": "alpha_user",
    "expect": "deny",
    "what": "создание заявки без суммы",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "create",
     "number": null,
@@ -503,7 +501,7 @@
    "user": "alpha_user",
    "expect": "deny",
    "what": "стирание суммы своего черновика",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "update",
     "number": "З-001",
@@ -522,7 +520,7 @@
    "user": "alpha_user",
    "expect": "allow",
    "what": "создание своего черновика с суммой",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "create",
     "number": null,
@@ -544,7 +542,7 @@
    "user": "alpha_user",
    "expect": "deny",
    "what": "сумма «abc» в своём черновике",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "update",
     "number": "З-001",
@@ -563,7 +561,7 @@
    "user": "alpha_user",
    "expect": "deny",
    "what": "создание заявки с суммой «abc»",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "create",
     "number": null,
@@ -585,7 +583,7 @@
    "user": "alpha_user",
    "expect": "allow",
    "what": "числовая сумма в своём черновике",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "update",
     "number": "З-001",
@@ -604,7 +602,7 @@
    "user": "admin_f",
    "expect": "deny",
    "what": "«Черновик» → «Одобрена» в обход графа",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "update",
     "number": "З-001",
@@ -644,7 +642,7 @@
    "user": "admin_f",
    "expect": "deny",
    "what": "«На экспертизе» → «Подана» (назад)",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "update",
     "number": "З-003",
@@ -684,7 +682,7 @@
    "user": "admin_f",
    "expect": "deny",
    "what": "создание заявки сразу «Одобрена»",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "create",
     "number": null,
@@ -720,7 +718,7 @@
    "user": "admin_f",
    "expect": "allow",
    "what": "«Подана» → «На экспертизе»",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "update",
     "number": "З-002",
@@ -760,7 +758,7 @@
    "user": "expert1",
    "expect": "deny",
    "what": "одобрение суммы 6 000 000 сверх лимита",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "update",
     "number": "З-003",
@@ -779,7 +777,7 @@
    "user": "expert1",
    "expect": "allow",
    "what": "одобрение в пределах лимита с заключением",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "update",
     "number": "З-003",
@@ -798,7 +796,7 @@
    "user": "expert1",
    "expect": "deny",
    "what": "одобрение без заключения",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "update",
     "number": "З-003",
@@ -817,7 +815,7 @@
    "user": "expert1",
    "expect": "deny",
    "what": "отклонение без заключения",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "update",
     "number": "З-003",
@@ -836,7 +834,7 @@
    "user": "expert1",
    "expect": "allow",
    "what": "отклонение с заключением одним действием",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "update",
     "number": "З-003",

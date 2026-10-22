@@ -96,7 +96,8 @@ def reference_b(env: E.CoreEnv, change: str):
         grants = []
         for role, level in [("Заявитель alpha", F.BARRED), ("Заявитель beta", F.BARRED), ("Эксперт", F.WRITE)]:
             rid = env._id(F.ROLE, role)
-            grants += [(f"{role}g", rid, 30, F.ROLE_OBJECT, ids["rq"]), (f"{role}l", f"{role}g", 1, level, "")]
+            grants += [(f"{role}g", rid, 30, F.ROLE_OBJECT, ids["rq"]),
+                       (f"{role}l", f"{role}g", 1, E.LEVEL_IDEAV[level], str(E.LEVEL_REQ))]
         _core_insert(env, grants)
     # X2 в ядре выразить нечем: правило лимита — «нет механизма»
 

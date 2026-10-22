@@ -105,6 +105,20 @@ def domain(core: dict) -> dict:
     return {"apps": apps, "companies": {c[1]: norm_num(c[3]) for c in core["companies"]}}
 
 
+# Шаблон баз ideav.ru (таблица ru с ideav.ru 22.10.2026 без пользователей шаблона, на стенде — ru_ideav).
+# В нём «Объекты» (116) — таблица грантов, уровень — ссылка-реквизит 136 на значения 52/53/54 (docs/kb/roles.md).
+# app/funding.py пишет гранты в формате docker-шаблона crm (уровни 170/171/172): ideav_rows переводит.
+TEMPLATE_B = os.getenv("R1055_TEMPLATE", "ru_ideav")
+LEVEL_REQ = 136
+LEVEL_IDEAV = {F.WRITE: 54, F.READ: 53, F.BARRED: 52}
+
+
+def ideav_rows(rows) -> list:
+    grants = {r[0] for r in rows if r[3] == F.ROLE_OBJECT}
+    return [(i, u, o, LEVEL_IDEAV[t], str(LEVEL_REQ)) if u in grants and t in LEVEL_IDEAV else (i, u, o, t, v)
+            for i, u, o, t, v in rows]
+
+
 def seed_app(tokens: dict) -> F.App:
     return F.App(tokens)
 
@@ -145,7 +159,8 @@ class CoreEnv:
         app = seed_app(self.tokens)
         if config == "base":
             app.rows = base_rows(app)
-        P.mysql(F.build_sql(self.db, app))
+        app.rows = ideav_rows(app.rows)
+        P.mysql(F.build_sql(self.db, app, TEMPLATE_B))
         self._tokens_file(self.db).write_text(json.dumps(self.tokens))
 
     def clone(self, src: str):

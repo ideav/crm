@@ -4,7 +4,7 @@
  "src": "e1055bx",
  "deploy": "reference",
  "change": "X1",
- "ts": "2026-10-22T17:01:20+00:00",
+ "ts": "2026-10-22T17:36:59+00:00",
  "coverage": {
   "X1": true
  },
@@ -15,7 +15,7 @@
    "user": "delta_user",
    "expect": "allow",
    "what": "заявитель «Дельты» создаёт свой черновик",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "create",
     "number": null,
@@ -50,7 +50,7 @@
    "user": "delta_user",
    "expect": "deny",
    "what": "заявитель «Дельты» видит чужие заявки",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "list",
     "number": null,
@@ -68,7 +68,7 @@
    "user": "delta_user",
    "expect": "deny",
    "what": "заявитель «Дельты» правит заявку «Альфы»",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "update",
     "number": "З-001",
@@ -87,7 +87,7 @@
    "user": "alpha_user",
    "expect": "deny",
    "what": "заявитель «Альфы» создаёт заявку «Дельты»",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "create",
     "number": null,

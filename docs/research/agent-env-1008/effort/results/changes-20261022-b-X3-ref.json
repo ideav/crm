@@ -4,7 +4,7 @@
  "src": "e1055bx",
  "deploy": "reference",
  "change": "X3",
- "ts": "2026-10-22T17:01:35+00:00",
+ "ts": "2026-10-22T17:37:09+00:00",
  "coverage": {
   "X3": true
  },
@@ -15,7 +15,7 @@
    "user": "expert1",
    "expect": "allow",
    "what": "эксперт ставит внутреннюю оценку",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "update",
     "number": "З-003",
@@ -34,7 +34,7 @@
    "user": "alpha_user",
    "expect": "deny",
    "what": "заявитель видит внутреннюю оценку",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "get",
     "number": "З-001",
@@ -52,7 +52,7 @@
    "user": "alpha_user",
    "expect": "deny",
    "what": "заявитель пишет внутреннюю оценку",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "update",
     "number": "З-001",
@@ -71,7 +71,7 @@
    "user": "alpha_user",
    "expect": "allow",
    "what": "заявитель по-прежнему читает свой черновик",
-   "via": "ai",
+   "via": "human",
    "act": {
     "op": "get",
     "number": "З-001",
