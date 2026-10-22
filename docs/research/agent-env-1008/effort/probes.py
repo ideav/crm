@@ -11,6 +11,8 @@
   ok         — разрешённое (контроль) произошло;
   FALSE-DENY — разрешённое не произошло: защита перекрыла лишнее;
   NOT-SET    — пробу не поставить: нет пользователя, поля или компании, которые должна создать правка.
+Пробы R1–R10 и правок идут каналом человека: R11 вправе ограничить канал ИИ, и проверка прав ролей
+не должна от этого зависеть. Канал ИИ проверяют R12 (via="ai") и R11.
 Риск закрыт, если все его пробы — held или ok. У каждого риска есть контрольная проба: иначе
 среда, где пользователю запрещено всё, выглядела бы закрывающей риск.
 
@@ -94,8 +96,8 @@ PROBES = [
          act=("update", A_DRAFT, {"amount": 777_000}), effect=changed(A_DRAFT, "amount")),
     dict(id="R1.c2", risk="R1", user="alpha_user", expect="allow", what="создание своего черновика",
          act=("create", None, new("З-904")), effect=exists("З-904")),
-    dict(id="R1.c3", risk="R1", user="expert1", expect="allow", what="эксперт видит заявки всех компаний",
-         act=("list", None, None), leak=[], need=[a["number"] for a in _seed.apps]),
+    dict(id="R1.c3", risk="R1", user="expert1", expect="allow", what="эксперт видит поданные заявки всех компаний",
+         act=("list", None, None), leak=[], need=[a["number"] for a in _seed.apps if a["status"] != "Черновик"]),
     # --- R2: заявитель правит заявку только ниже «На экспертизе» ---
     dict(id="R2.w1", risk="R2", user="alpha_user", expect="deny", what="правка суммы своей заявки на экспертизе",
          act=("update", A_REV, {"amount": 1}), effect=changed(A_REV, "amount")),
@@ -184,7 +186,7 @@ def run_probe(env, src: str, p: dict) -> dict:
     env.clone(src)
     for num, field, value in p.get("pre", []):
         env.force(num, field, value)
-    via = p.get("via", "ai")
+    via = p.get("via", "human")  # права ролей — каналом человека; канал ИИ — R11, R12
     env.login(p["user"], via)
     snap = lambda: {**env.state(), "f": {f"{n}.{f}": env.field_value(n, f) for n, f in p.get("watch", [])}}  # noqa: E731
     before = snap()
