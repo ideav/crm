@@ -449,7 +449,7 @@ elseif(($z == "my") && !empty($_GET['code'])){
         curl_setopt($ch, CURLOPT_POST, 1);
         curl_setopt($ch, CURLOPT_POSTFIELDS, http_build_query($params));
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true); # #1036: без проверки сертификата MITM подменяет ответ OAuth
         curl_setopt($ch, CURLOPT_HEADER, false);
         $oauthTokenRequestTime = microtime(true);
         $data = curl_exec($ch);
@@ -489,7 +489,7 @@ elseif(($z == "my") && !empty($_GET['code'])){
             $ch = curl_init('https://login.yandex.ru/info?format=json');
             curl_setopt($ch, CURLOPT_HTTPHEADER, array('Authorization: OAuth '.$data['access_token']));
             curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true); # #1036
             $info = curl_exec($ch);
             $infoHttpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
             $infoCurlErrno = curl_errno($ch);
@@ -529,7 +529,7 @@ elseif(($z == "my") && !empty($_GET['code'])){
         curl_setopt($ch, CURLOPT_POST, 1);
         curl_setopt($ch, CURLOPT_POSTFIELDS, $params);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true); # #1036
         curl_setopt($ch, CURLOPT_HEADER, false);
         $data = curl_exec($ch);
         curl_close($ch);
@@ -804,6 +804,14 @@ function updateTokens($row, $pwdHashes = array()){
 	else
 		Insert($row["uid"], 1, ACTIVITY, microtime(TRUE), "Save activity time");
 }
+# Значения токена, которые updateTokens при входе заменяет новым: хеши пароля этой базы и
+# кабинета my, а после смены пароля — и сам текущий токен (#1036).
+function Rotate_token_hashes($row, $u, $p, $pwdChanged){
+	$hashes = array(hash("sha512", Salt($u, $p)), hash("sha512", SALT."my".$p));
+	if($pwdChanged && isset($row["token"]) && (string)$row["token"] !== "")
+		$hashes[] = (string)$row["token"];
+	return $hashes;
+}
 function incrementRetries($uid, $retries_id, $retries, $message="Increment retries count"){
 	$newRetries = 1 + (int)$retries;
 	if($retries_id)
@@ -904,6 +912,15 @@ function checkDbNameReserved($db)
 }
 function checkDbName($mask, $db){
     return preg_match($mask, $db);
+}
+# #1036: переход после выхода. next_act экранирован только addslashes — «</script><script>…»
+# закрывал тег и исполнялся на origin всех баз; адрес уходит в JS строкой JSON с \u-экранами.
+function Exit_redirect_script($z, $next_act){
+    return "<script>document.location.href=".json_encode("/$z/$next_act", JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)."</script>";
+}
+# #1036: имя базы из ?login= входа в кабинет — подставляется в SQL как имя таблицы
+function Cabinet_login_ok($db){
+    return is_string($db) && checkDbName(USER_DB_MASK, $db);
 }
 function isApi(){
     global $dumpAPI;
@@ -1455,7 +1472,9 @@ function logRequest(){
 # маске maskSensitiveLogValue, xsrf, а также tN реквизитов-секретов (t20 — пароль в _m_set).
 function logParams(){
     # `c`/`s` — код и секрет входа по QR: секрет отпирает выдачу ПОСТОЯННОГО токена (#4677)
+    # npw1/npw2 — новый пароль при смене, p/o — новый и старый хеш в ссылке confirm, jwt (#1036)
     $sensitivePostKeys = ['pwd', 'password', 'token', 'secret', 'reset', 'regpwd', 'regpwd1', 'c', 's', 'code', '_xsrf', 'xsrf'
+                        , 'npw1', 'npw2', 'p', 'o', 'jwt'
                         , 't'.PASSWORD, 't'.XSRF, 't'.TOKEN, 't'.SECRET];
     $out = array();
     foreach(array_merge(is_array($_GET) ? $_GET : array(), is_array($_POST) ? $_POST : array()) as $key => $value){
@@ -2884,6 +2903,9 @@ function Validate_Token(){ # Validates the cookie token and gathers the user per
             my_die(t9n("[RU]Ошибка авторизации $z"."[EN]Authentication failed in $z"));
         }
 		elseif($z === "my" && isset($_GET["login"]) && (substr(mb_strtolower($_GET["login"]), 0, 2) !== "db")){
+		    # #1036: login — имя таблицы в SQL ниже; addslashes идентификатор не защищает (UNION → токен владельца чужой базы)
+		    if(!Cabinet_login_ok($_GET["login"]))
+		        login($z, "", "InvalidToken");
 		    if(isset($_COOKIE["idb_".$_GET["login"]])){
         		$data_set = Exec_sql("SELECT u.val FROM ".addslashes($_GET["login"])." tok, ".addslashes($_GET["login"])." u"
             						." WHERE u.t=".USER." AND u.val='".addslashes($_GET["login"])."' AND tok.up=u.id AND tok.val='".addslashes($_COOKIE["idb_".$_GET["login"]])."' AND tok.t=".TOKEN
@@ -5278,6 +5300,11 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 										if(strpos($headers, "[$a]"))
 											$headers = str_replace("[$a]", $cur_line[$i], $headers);
 									}
+                                # #1036: хост проверяется ПОСЛЕ подстановки колонок — [поле] могло быть в имени хоста
+                                if(!Report_url_allowed($val)){
+                                    $val = $file_failed = "URL must point to a public host";
+                                    break;
+                                }
 #print_r($GLOBALS);die($_SERVER["HTTP_HOST"].":".parse_url($val, 1));
                                 $hash = hash("sha512", $val.$post.$headers);
                                 trace("curl_exec headers $headers");
@@ -5316,9 +5343,7 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
                                     curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
                                     #curl_setopt($ch, CURLOPT_CAPATH, "/var/www/isboxon1/data/www/etc/ssl/certs/cacert.pem");
                                     #curl_setopt($ch, CURLOPT_FAILONERROR, true);
-    								curl_setopt($ch, CURLOPT_URL, $val);
-    								curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-    								$GLOBALS["STORED_REPS"][$id]["CURL_EXECS"][$hash] = curl_exec($ch);
+    								$GLOBALS["STORED_REPS"][$id]["CURL_EXECS"][$hash] = Report_curl_exec($ch, $val);
 								    $GLOBALS["STORED_REPS"][$id]["CURLINFO_HTTP_CODE"][$hash] = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     								if(trim($GLOBALS["STORED_REPS"][$id]["CURL_EXECS"][$hash]) === "")
     								    $GLOBALS["STORED_REPS"][$id]["CURL_EXECS"][$hash] = $GLOBALS["STORED_REPS"][$id]["CURLINFO_HTTP_CODE"][$hash];
@@ -5991,6 +6016,45 @@ function fetchUrlSafe($url, $maxBytes = 10485760, $timeout = 15){
         }
         return strlen($data) > $maxBytes ? false : $data;
     }
+}
+# #1036: адрес колонки abn_URL отчёта и коннектора _connect — только http(s) на публичный хост.
+# Иначе сервер по просьбе владельца базы читает метаданные облака (169.254.169.254, ключи
+# сервисного аккаунта), 127.0.0.1 и внутреннюю сеть, а ответ отдаёт в ячейке отчёта.
+function Report_url_allowed($url){
+    if(!is_string($url) || !preg_match('#^https?://#i', $url))
+        return false;
+    return fetchUrlHostIsPublic(parse_url($url, PHP_URL_HOST));
+}
+# #1036: curl_exec с редиректами вручную — каждый новый адрес проходит Report_url_allowed
+# (автоматический FOLLOWLOCATION увёл бы запрос с публичного хоста во внутреннюю сеть).
+# 301/302/303 продолжаются GET-ом, как это делает браузер и сам curl.
+function Report_curl_exec($ch, $url, $maxRedirects = 5){
+    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, false);
+    curl_setopt($ch, CURLOPT_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
+    for($i = 0; ; $i++){
+        curl_setopt($ch, CURLOPT_URL, $url);
+        $res = curl_exec($ch);
+        $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $redir = curl_getinfo($ch, CURLINFO_REDIRECT_URL);
+        if($res === false || $code < 300 || $code >= 400 || !$redir)
+            return $res;
+        if($i >= $maxRedirects || !Report_url_allowed($redir))
+            return "Redirect is not allowed";
+        if($code == 301 || $code == 302 || $code == 303){
+            curl_setopt($ch, CURLOPT_CUSTOMREQUEST, null);
+            curl_setopt($ch, CURLOPT_HTTPGET, true);
+        }
+        $url = $redir;
+    }
+}
+# #1036: адрес вызова коннектора — его URL плюс параметры запроса, кроме учётных данных
+# Интеграма: токен и xsrf пользователя не уходят на внешний хост (token passthrough).
+function Connect_url($base, $params){
+    $url = "";
+    foreach($params as $k => $v)
+        if(!in_array(strtolower($k), array("token", "secret", "_xsrf", "xsrf", "jwt", "pwd", "password"), true))
+            $url .= "&$k=$v";
+    return $base . (strpos($base, "?") ? "&" : "?") . substr($url, 1);
 }
 function getJsonVal($jsonKey, $val){
     $seek=TRUE;
@@ -10760,8 +10824,6 @@ function check()
     if(isset($_POST["_xsrf"]) && is_string($_POST["_xsrf"]) && ($xsrf !== ""))
     	if(hash_equals($xsrf, $_POST["_xsrf"])) # Check the xsrf token
 	    	return true;
-	if($GLOBALS["GLOBAL_VARS"]["xsrf"] == ADMINHASH)
-    	return true;
     header('HTTP/1.0 403 Forbidden');
 	my_die(t9n("[RU]Неверный или устаревший токен CSRF<br/>[EN]Invalid or expired CSRF token <br/>"));
 }
@@ -14376,10 +14438,12 @@ switch($a)  # Check actions, which don't require authentication
 				{
 					Update_Val($row["pwd_id"], hash("sha512", Salt($u, $npw1)));
 					$msg = t9n("[RU]Пароль успешно изменен[EN]The password has been changed");
+					$pwdChanged = true;
 				}
 			}
-			# Токен, равный хешу пароля этой базы или кабинета my (копируется в базу при регистрации), заменяется
-			updateTokens($row, array(hash("sha512", Salt($u, $p)), hash("sha512", SALT."my".$p)));
+			# Токен, равный хешу пароля этой базы или кабинета my (копируется в базу при регистрации), заменяется.
+			# После смены пароля заменяется и текущий токен (#1036): украденная сессия не переживает смену пароля.
+			updateTokens($row, Rotate_token_hashes($row, $u, $p, !empty($pwdChanged)));
 #			if(isset($_POST["save"]))
 #				setcookie("idb_$z", $GLOBALS["GLOBAL_VARS"]["token"], 0, "/");  # The cookie to be deleted upon the session close
 #			else
@@ -14410,11 +14474,13 @@ switch($a)  # Check actions, which don't require authentication
 		break;
 
 	case "confirm":
-		if($row = mysqli_fetch_array(Exec_sql("SELECT pwd.id FROM $z pwd, $z u WHERE pwd.up=u.id AND pwd.t=".PASSWORD
+		if($row = mysqli_fetch_array(Exec_sql("SELECT pwd.id, pwd.up FROM $z pwd, $z u WHERE pwd.up=u.id AND pwd.t=".PASSWORD
 						." AND u.t=".USER." AND u.val='".addslashes($_REQUEST["u"])."' AND pwd.val='".addslashes($_REQUEST["o"])."'"
 						, "Get user's pwd")))
 		{
 			Exec_sql("UPDATE $z SET val='".addslashes($_REQUEST["p"])."' WHERE id=".$row[0], "Reset the password");
+			# #1036: сброс пароля гасит прежнюю сессию — токен пользователя заменяется новым
+			Exec_sql("UPDATE $z SET val='".secureToken()."' WHERE up=".(int)$row[1]." AND t=".TOKEN, "Reset the token");
 			if(isApi())
 				login($z, $_REQUEST["u"], "confirm");
 			else
@@ -15361,7 +15427,7 @@ if(Validate_Token())
     	case "exit":
             Exec_sql("DELETE FROM $z WHERE up=".$GLOBALS["GLOBAL_VARS"]["user_id"]." AND t=".TOKEN, "Exit - drop the token");
     		if(strlen($next_act))
-    			die("<script>document.location.href='/$z/$next_act'</script>");
+    			die(Exit_redirect_script($z, $next_act));
             login($z);
     		break;
 
@@ -15774,20 +15840,20 @@ if(Validate_Token())
 		case "_connect":
 			if($id == 0)
 				my_die(t9n("[RU]Неверный id ($id) [EN]Invalid id ($id)"));
+			Check_Grant($id, 0, "READ"); # #1036: чужой коннектор (с ключами в адресе) — только при доступе к записи
 			$sql = "SELECT val FROM $z WHERE up=$id AND t=".CONNECT;
 			if($row = mysqli_fetch_array(Exec_sql($sql, "Get the connector")))
 			{
 			    trace("Got connector: ".$row["val"]);
-				foreach($_GET as $k => $v)
-					$url .= "&$k=$v";
-				$url = $row["val"] . (strpos($row["val"],"?") ? "&" : "?") . substr($url, 1);
+				$url = Connect_url($row["val"], $_GET);
 			    trace("url: $url");
+				if(!Report_url_allowed($url))
+					my_die(t9n("[RU]Адрес коннектора должен быть http(s) на публичный хост [EN]Connector URL must be http(s) on a public host"));
 				$ch = curl_init();
 				curl_setopt($ch, CURLOPT_HEADER, 0);
 				curl_setopt($ch, CURLOPT_HTTPHEADER, array("User-Agent: Integram"));
 				curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-				curl_setopt($ch, CURLOPT_URL, $url);
-				$val = curl_exec($ch);
+				$val = Report_curl_exec($ch, $url);
 				if(curl_errno($ch)){
 					$val = curl_errno($ch).": $val";
 					$file_failed = true;

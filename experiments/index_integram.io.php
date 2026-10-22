@@ -24,6 +24,8 @@ define("TOKEN", 125);
 define("SECRET", 130);
 define("VERSION", 8);
 define("VAL_LIM", 127);  # Maximum length of the value (val) field in the DB
+define("CHECKCODE_RETRIES_LIMIT", 3);  # Вход по коду: неудач до блокировки (#1036)
+define("CHECKCODE_LOCK_TTL", 3600);  # Вход по коду: блокировка, сек с последней неудачи
 
 $com = explode("?", strtolower($_SERVER["REQUEST_URI"]));
 $com = explode("/", $com[0]);
@@ -39,7 +41,7 @@ $locale = isset($_COOKIE[$z."_locale"]) ? $_COOKIE[$z."_locale"] : (isset($_COOK
 																												
 # The trace cookie to be deleted upon the session close
 if(isset($_REQUEST["TRACE_IT"]) || isset($_COOKIE["TRACE_IT"])){
-	$GLOBALS["TRACE"] = "****".$_SERVER["REQUEST_URI"]."<br/>\n";
+	$GLOBALS["TRACE"] = "****".Log_uri($_SERVER["REQUEST_URI"])."<br/>\n";
     if(isset($_GET["TRACE_IT"]))
 	    setcookie("TRACE_IT", 1, time() + 3600*3, "/$z"); // 3 hours
 	$logPath = "templates/custom/$z/logs";
@@ -50,26 +52,19 @@ if(isset($_REQUEST["TRACE_IT"]) || isset($_COOKIE["TRACE_IT"])){
     fwrite($file, $GLOBALS["TRACE"]."\n");
     fclose($file);
 }
-# Fetch all the parameters and log them
-$params = "";
+# Fetch all the parameters and log them (secrets are masked: Log_params, Log_uri)
 if(strlen(file_get_contents('php://input'))){
     $json = json_decode(file_get_contents('php://input'), true);
     if(json_last_error() === JSON_ERROR_NONE)
         foreach($json AS $key => $value)
             $_POST[$key] = $_REQUEST[$key] = $value;
 }
-foreach($_POST AS $key => $value)
-	if(is_array($value))
-		$params .= "\n $key " . print_r($value, true) . "\n";
-	else
-		if(strlen($value) && ($key != "pwd"))	# Do not log passwords
-			$params .= " $key=$value;";
-wlog($_SERVER["REMOTE_ADDR"]." ".$_SERVER["REQUEST_URI"]." $params", "log");
+wlog($_SERVER["REMOTE_ADDR"]." ".Log_uri($_SERVER["REQUEST_URI"])." ".Log_params($_POST), "log");
 if($_SERVER["REQUEST_URI"] === "/alex?trace"){
     $headers =  getallheaders();
     $hdr = "";
     foreach($headers as $key=>$val)
-        $hdr .= $key . ': ' . $val . '<br>';
+        $hdr .= $key . ': ' . Log_header_value($key, $val) . '<br>';
     wlog(" headers: $hdr", "log");
 }
 if(($z === "my") && ((isset($com[2]) ? $com[2] : "") === "register")){ # Register the user
@@ -78,19 +73,11 @@ if(($z === "my") && ((isset($com[2]) ? $com[2] : "") === "register")){ # Registe
         include "include/connection.php";
     	$u = (int)$_GET["u"];
     	if($u > 0){
-        	$result = Exec_sql("SELECT user.val user, user.id uid, token.id tok, token.val token, xsrf.id xsrf, act.id act, pwd.val pwd, pwd.id pid, email.val email
-                                FROM $z user LEFT JOIN $z token ON token.up=user.id AND token.t=".TOKEN
-                                        ." LEFT JOIN $z xsrf ON xsrf.up=user.id AND xsrf.t=".XSRF
-                                        ." LEFT JOIN $z pwd ON pwd.up=user.id AND pwd.t=".PASSWORD
-                                        ." LEFT JOIN $z act ON act.up=user.id AND act.t=".ACTIVITY
-                                        ." LEFT JOIN $z email ON email.up=user.id AND email.t=".EMAIL
-                                ." WHERE user.id=$u AND user.t=".USER
-							, "Check user & conf code");
-        	if($row = mysqli_fetch_array($result))
+        	if($row = Reg_confirm_row($u, $_GET["c"]))
         		if($row["uid"]){ # User found
         			# Update the user in the CRM
         			Exec_sql("UPDATE $z SET val='".sha1(Salt($row["user"], $row["pwd"]))."' WHERE id=".$row["pid"], "Update user's password");
-        			updateTokens($row);
+        			updateTokens($row, array((string)$row["token"]));  # до подтверждения в токене лежал код из ссылки
                 	createDb($row["uid"], "", $row["email"], $row["pwd"]);
             		header("Location: /$z");
             		die();
@@ -124,7 +111,7 @@ if(($z === "my") && ((isset($com[2]) ? $com[2] : "") === "register")){ # Registe
         # Insert new user and its data into CRM
         $id = newUser($email, $email, "115", "", "");
         Insert($id, 1, PASSWORD, $_POST["regpwd"], "Insert password");
-        $confirm = md5("xz$email");
+        $confirm = Reg_confirm_code();
         Insert($id, 1, TOKEN, $confirm, "Insert confirmation code");
         if(isset($_COOKIE["_aff"]))
             Insert($id, 1, 1012, (int)$_COOKIE["_aff"], "Insert the affiliate ref");
@@ -377,10 +364,16 @@ function createDb($id, $name, $email, $pwd=""){
         $z = $db;
     }
 }
-function updateTokens($row){
+# $replace — значения, которые токеном оставаться не должны (код подтверждения из ссылки,
+# прежние md5-коды регистрации — Reg_code_tokens): такой токен заменяется случайным
+function updateTokens($row, $replace = array()){
 	global $z;
 	# Токен присваивается до вывода xsrf и cookie (issue #5207, как в index.php #2122).
-	if($row["tok"])
+	if($row["tok"] && in_array(strtolower((string)$row["token"]), $replace, TRUE)){
+    	$token = $GLOBALS["GLOBAL_VARS"]["token"] = secureToken();
+		Update_Val($row["tok"], $token);
+	}
+	elseif($row["tok"])
     	$token = $GLOBALS["GLOBAL_VARS"]["token"] = $row["token"];
 	else{
     	$token = $GLOBALS["GLOBAL_VARS"]["token"] = secureToken();
@@ -500,6 +493,291 @@ function secureToken(){
 		throw $e;
 	}
 }
+# ── #1036: вход, журнал и dir_admin (перенос правок index.php #5201/#5202 и смежных) ──
+# Ключи параметров, значения которых в журнал не пишутся: пароли, токены, коды входа и ссылок
+function Log_sensitive_key($key){
+	return in_array(strtolower((string)$key), array("pwd", "password", "regpwd", "regpwd1", "npw1", "npw2", "token", "secret"
+		, "jwt", "c", "p", "o", "code", "reset", "_xsrf", "xsrf", "t".PASSWORD, "t".TOKEN, "t".SECRET, "t".XSRF), TRUE);
+}
+# Значение для журнала: секретное — «***», массив — с замаскированными секретными ключами
+function Log_mask_value($key, $value){
+	if(Log_sensitive_key($key))
+		return "***";
+	if(is_array($value)){
+		foreach($value as $k => $v)
+			$value[$k] = Log_mask_value($k, $v);
+		return $value;
+	}
+	return $value;
+}
+# Строка параметров POST для журнала запросов
+function Log_params($params){
+	$out = "";
+	if(is_array($params))
+		foreach($params as $key => $value)
+			if(is_array($value))
+				$out .= "\n $key " . print_r(Log_mask_value($key, $value), true) . "\n";
+			elseif(strlen((string)$value))
+				$out .= " $key=".Log_mask_value($key, (string)$value).";";
+	return $out;
+}
+# Адрес запроса для журнала: значения секретных параметров строки запроса скрыты
+function Log_uri($uri){
+	$uri = (string)$uri;
+	$q = strpos($uri, "?");
+	if($q === false)
+		return $uri;
+	$pairs = explode("&", substr($uri, $q + 1));
+	foreach($pairs as $i => $pair){
+		$kv = explode("=", $pair, 2);
+		if((count($kv) === 2) && Log_sensitive_key(urldecode($kv[0])))
+			$pairs[$i] = $kv[0]."=***";
+	}
+	return substr($uri, 0, $q + 1).implode("&", $pairs);
+}
+# Значение заголовка для журнала: учётные данные и куки скрыты
+function Log_header_value($key, $value){
+	if(in_array(strtolower((string)$key), array("authorization", "x-authorization", "cookie", "set-cookie", "proxy-authorization"), TRUE))
+		return "***";
+	return $value;
+}
+# Код подтверждения регистрации — случайный, по адресу почты не вычисляется
+function Reg_confirm_code(){
+	return secureToken();
+}
+# Пользователь кабинета по ссылке подтверждения: код обязан совпасть с сохранённым в токене
+# (прежде код не проверялся — ?u=<id>&c=x выдавал куку с токеном пользователя <id>)
+function Reg_confirm_row($u, $c){
+	global $z;
+	$u = (int)$u;
+	if(($u <= 0) || !is_string($c) || (preg_match('/^[a-z0-9]{6,128}$/', $c) !== 1))
+		return FALSE;
+	$row = mysqli_fetch_array(Exec_sql("SELECT user.val user, user.id uid, token.id tok, token.val token, xsrf.id xsrf, act.id act, pwd.val pwd, pwd.id pid, email.val email
+                                FROM $z user JOIN $z token ON token.up=user.id AND token.t=".TOKEN
+                                        ." LEFT JOIN $z xsrf ON xsrf.up=user.id AND xsrf.t=".XSRF
+                                        ." LEFT JOIN $z pwd ON pwd.up=user.id AND pwd.t=".PASSWORD
+                                        ." LEFT JOIN $z act ON act.up=user.id AND act.t=".ACTIVITY
+                                        ." LEFT JOIN $z email ON email.up=user.id AND email.t=".EMAIL
+                                ." WHERE user.id=$u AND user.t=".USER." AND token.val='$c'"
+							, "Check user & conf code"));
+	if(!$row || !hash_equals((string)$row["token"], $c))
+		return FALSE;
+	return $row;
+}
+# Токен равен прежнему коду регистрации md5("xz".<почта>) — его вычислит любой, кто знает адрес.
+# Такие токены оставались у подтвердивших регистрацию (и копировались в их базы): вход по ним
+# не принимается, при входе паролем или кодом токен заменяется случайным
+function Token_is_reg_code($tok, $names){
+	$tok = strtolower((string)$tok);
+	if(strlen($tok) !== 32)
+		return FALSE;
+	foreach($names as $n)
+		if(strlen((string)$n) && hash_equals(md5("xz".$n), $tok))
+			return TRUE;
+	return FALSE;
+}
+# Имя пользователя и его адреса почты — из них вычислялся прежний код регистрации
+function User_names_for_reg_code($uid, $user){
+	global $z;
+	$names = array((string)$user);
+	if((int)$uid > 0){
+		$data_set = Exec_sql("SELECT val FROM $z WHERE up=".(int)$uid." AND t=".EMAIL, "Get user emails");
+		while($row = mysqli_fetch_array($data_set))
+			$names[] = (string)$row["val"];
+	}
+	return $names;
+}
+# Прежние коды регистрации пользователя (md5("xz".<имя или почта>)) — для замены такого токена в updateTokens
+function Reg_code_tokens($uid, $user){
+	$out = array();
+	foreach(User_names_for_reg_code($uid, $user) as $n)
+		if(strlen($n))
+			$out[] = md5("xz".$n);
+	return $out;
+}
+# Вход по Authorization: Basic (base64 «логин:пароль» или открытым текстом) — токен пользователя или FALSE.
+# Логин экранирован для SQL; токен, равный хешу пароля (так Basic-вход сохранял его прежде), заменяется случайным
+function Basic_auth_token($value){
+	global $z;
+	if(strpos($value, ":") === FALSE)
+		$value = base64_decode($value);
+	$tmp = explode(":", $value, 2);
+	$u = addslashes($tmp[0]);
+	$pwd = sha1(Salt($u, isset($tmp[1]) ? $tmp[1] : ""));
+	$data_set = Exec_sql("SELECT tok.val tok, tok.id tok_id, u.id FROM $z pwd, $z u"
+							." LEFT JOIN $z tok ON tok.up=u.id AND tok.t=".TOKEN
+						." WHERE u.t=".USER." AND u.val='$u' AND pwd.up=u.id AND pwd.val='$pwd'"
+				, "Basic authentication");
+	if(!($row = mysqli_fetch_array($data_set)))
+		return FALSE;
+	if(isset($row["tok"]) && ($row["tok"] !== $pwd) && !Token_is_reg_code($row["tok"], array($tmp[0])))
+		return $row["tok"];
+	$tok = secureToken();
+	if(isset($row["tok"]))
+		Update_Val($row["tok_id"], $tok);
+	else
+		Insert($row["id"], 1, TOKEN, $tok, "Save basic token");
+	return $tok;
+}
+# Токен из заголовка API-запроса, экранированный для SQL-литерала: X-Authorization,
+# Authorization: Basic / Bearer / <токен>. NULL — заголовок не про вход; FALSE — неверная пара Basic
+function Header_auth_token($key, $value){
+	$key = strtolower((string)$key);
+	if(($key !== "x-authorization") && ($key !== "authorization"))
+		return NULL;
+	$value = htmlentities((string)$value);
+	if($key === "authorization"){
+		if(strtolower(substr($value, 0, 5)) === "basic"){  // Basic HTML authorization
+			$tok = Basic_auth_token(trim(substr($value, 5)));
+			return $tok === FALSE ? FALSE : addslashes($tok);
+		}
+		if(strtolower(substr($value, 0, 6)) === "bearer")  // Bearer-token
+			return addslashes(trim(substr($value, 6)));
+	}
+	return addslashes($value);
+}
+# Неудачные попытки входа по коду (checkcode): счётчик на пользователя в файле журналов базы,
+# а не реквизитом — в схеме integram.io реквизита RETRIES нет. Окно CHECKCODE_LOCK_TTL с последней
+# неудачи. $op: 0 — прочитать, 1 — прибавить неудачу, -1 — сбросить. Файл недоступен — 0 (вход не ломается)
+function Checkcode_retries($uid, $op = 0){
+	global $z;
+	$f = @fopen(LOGS_DIR.$z."_checkcode.json", "c+");
+	if(!$f)
+		return 0;
+	flock($f, $op ? LOCK_EX : LOCK_SH);
+	$all = json_decode(stream_get_contents($f), TRUE);
+	if(!is_array($all))
+		$all = array();
+	$now = time();
+	foreach($all as $k => $v)
+		if(!is_array($v) || !isset($v[1]) || ($now - (int)$v[1] > CHECKCODE_LOCK_TTL))
+			unset($all[$k]);
+	$key = (string)(int)$uid;
+	$n = isset($all[$key]) ? (int)$all[$key][0] : 0;
+	if($op > 0)
+		$all[$key] = array(++$n, $now);
+	elseif($op < 0){
+		unset($all[$key]);
+		$n = 0;
+	}
+	if($op){
+		ftruncate($f, 0);
+		rewind($f);
+		fwrite($f, json_encode($all));
+		fflush($f);
+	}
+	flock($f, LOCK_UN);
+	fclose($f);
+	return $n;
+}
+# Вход по коду из письма (первые 4 символа токена): точное сравнение, лимит неудач,
+# прежний код регистрации кодом не служит. Ответ — массив для JSON
+function Checkcode_login($u, $c){
+	global $z;
+	$c = strtolower(is_string($c) ? $c : "");
+	$u = addslashes(strtolower(is_string($u) ? $u : ""));
+	if(!preg_match(MAIL_MASK, $u) || (preg_match('/^[a-z0-9]{4}$/', $c) !== 1))
+		return array("error" => "invalid data");
+	$row = mysqli_fetch_array(Exec_sql("SELECT u.id, tok.id tok, tok.val token, xsrf.id xsrf, act.id act FROM $z tok, $z u"
+		                        ." LEFT JOIN $z act ON act.up=u.id AND act.t=".ACTIVITY
+								." LEFT JOIN $z xsrf ON xsrf.up=u.id AND xsrf.t=".XSRF
+		                    ." WHERE u.t=".USER." AND u.val='$u' AND tok.up=u.id AND tok.t=".TOKEN
+						, "Check the user token"));
+	if(!$row)
+		return array("error" => "user not found");
+	$tooMany = array("error" => t9n("[RU]Превышено количество попыток входа с кодом. Войдите с паролем.[EN]Too many code login attempts. Please sign in with your password."));
+	if(Checkcode_retries($row["id"]) >= CHECKCODE_RETRIES_LIMIT)
+		return $tooMany;
+	$token = (string)$row["token"];
+	if((strlen($token) < 4) || !hash_equals(strtolower(substr($token, 0, 4)), $c)
+			|| Token_is_reg_code($token, User_names_for_reg_code($row["id"], stripslashes($u)))){
+		if(Checkcode_retries($row["id"], 1) >= CHECKCODE_RETRIES_LIMIT)
+			return $tooMany;
+		return array("error" => "user not found");
+	}
+	Checkcode_retries($row["id"], -1);
+	$token = secureToken();
+	$xsrf = xsrf($token, $u);
+	Update_Val($row["tok"], $token);
+	if($row["xsrf"])
+		Update_Val($row["xsrf"], $xsrf);
+	else
+		Insert($row["id"], 1, XSRF, $xsrf, "Save xsrf");
+	if($row["act"])
+		Update_Val($row["act"], microtime(TRUE), FALSE);
+	else
+		Insert($row["id"], 1, ACTIVITY, microtime(TRUE), "Save activity time");
+	return array("token" => $token, "_xsrf" => $xsrf);
+}
+# Подкаталог dir_admin внутри папки базы: «» или «/a/b». Ведущий «/» обязателен — иначе
+# «download/abc» + «d» = папка чужой базы abcd; «..» отбрасывает путь целиком
+function Dir_admin_add_path($p){
+	$p = trim(str_replace("\\", "/", (string)$p), "/");
+	if(($p === "") || (strpos($p, "..") !== false) || (strpos($p, "\0") !== false))
+		return "";
+	return "/$p";
+}
+# Имя файла или каталога внутри текущей папки dir_admin (удаление, загрузка): простое, без / \ .. и \0
+function Dir_admin_entry_name($v){
+	return is_string($v) && ($v !== "") && (strpos($v, "..") === false) && (strpos($v, "/") === false)
+		&& (strpos($v, "\\") === false) && (strpos($v, "\0") === false);
+}
+# Имя базы из ?login= кабинета my: идёт в SQL именем таблицы, поэтому — только по маске имени базы
+function Cabinet_login_db($v){
+	return (is_string($v) && preg_match(DB_MASK, $v)) ? $v : "";
+}
+# Хост указывает на публичный адрес: имя резолвится в IP, приватные/служебные/loopback отбраковываются
+function fetchUrlHostIsPublic($host){
+    if(!is_string($host) || ($host === ""))
+        return false;
+    $host = trim($host, "[]");
+    if(filter_var($host, FILTER_VALIDATE_IP))
+        $ips = array($host);
+    else{
+        $ips = @gethostbynamel($host);
+        if($ips === false || count($ips) === 0)
+            return false;
+    }
+    foreach($ips as $ip)
+        if(!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE))
+            return false;
+    return true;
+}
+# Адрес коннектора _connect — только http(s) на публичный хост (иначе сервер читает метаданные
+# облака 169.254.169.254, 127.0.0.1 и внутреннюю сеть и отдаёт ответ вызвавшему)
+function Report_url_allowed($url){
+    if(!is_string($url) || !preg_match('#^https?://#i', $url))
+        return false;
+    return fetchUrlHostIsPublic(parse_url($url, PHP_URL_HOST));
+}
+# curl_exec с редиректами вручную — каждый новый адрес проходит Report_url_allowed
+function Report_curl_exec($ch, $url, $maxRedirects = 5){
+    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, false);
+    curl_setopt($ch, CURLOPT_PROTOCOLS, CURLPROTO_HTTP | CURLPROTO_HTTPS);
+    for($i = 0; ; $i++){
+        curl_setopt($ch, CURLOPT_URL, $url);
+        $res = curl_exec($ch);
+        $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $redir = curl_getinfo($ch, CURLINFO_REDIRECT_URL);
+        if($res === false || $code < 300 || $code >= 400 || !$redir)
+            return $res;
+        if($i >= $maxRedirects || !Report_url_allowed($redir))
+            return "Redirect is not allowed";
+        if($code == 301 || $code == 302 || $code == 303){
+            curl_setopt($ch, CURLOPT_CUSTOMREQUEST, null);
+            curl_setopt($ch, CURLOPT_HTTPGET, true);
+        }
+        $url = $redir;
+    }
+}
+# Адрес вызова коннектора — его URL плюс параметры запроса, кроме учётных данных Интеграма
+function Connect_url($base, $params){
+    $url = "";
+    foreach($params as $k => $v)
+        if(!in_array(strtolower($k), array("token", "secret", "_xsrf", "xsrf", "jwt", "pwd", "password"), true))
+            $url .= "&$k=$v";
+    return $base . (strpos($base, "?") ? "&" : "?") . substr($url, 1);
+}
 function login($z="", $u="", $message="", $details=""){
 	wlog(" @".$_SERVER["REMOTE_ADDR"], "log");
 	if(isApi())
@@ -609,7 +887,7 @@ function t9n($msg)
 # Check file extension
 function BlackList($ext)
 {
-	if(stripos(". php cgi pl fcgi fpl phtml shtml php2 php3 php4 php5 asp jsp ", " $ext "))
+	if(stripos(". php php2 php3 php4 php5 php6 php7 php8 phps phtml pht phar shtml cgi pl fcgi fpl asp jsp htaccess htpasswd sh ", " $ext "))
 		my_die(t9n("[RU]Недопустимый тип файла![EN]Wrong file extension!"));
 }
 # Get a hashed string
@@ -1343,41 +1621,16 @@ function Validate_Token() # Validates the cookie token and gathers the user perm
 	elseif(isApi())
 	{
 		foreach(getallheaders() as $key => $value){
-	        $value = htmlentities($value);
-	        wlog("$key => $value");
-    		if(strtolower($key) === "x-authorization"){
-        		$tok = htmlentities($value);
+	        wlog("$key => ".htmlentities(Log_header_value($key, $value)));
+	        $t = Header_auth_token($key, $value);
+	        if($t === FALSE){
+    	        header("HTTP/1.0 401 Unauthorized");
+    		    die("[{\"error\":\"Invalid login/password\"}]");
+	        }
+	        if($t !== NULL){
+        		$tok = $t;
         		break;
-    		}
-    		elseif(strtolower($key) === "authorization"){
-    		    if(strtolower(substr($value, 0, 5)) === "basic"){  // Basic HTML authorization
-        		    $value = trim(substr($value, 5));
-        		    if(strpos($value, ":") === FALSE)
-                        $value = base64_decode($value);
-        		    $tmp = explode(":", $value);
-                    $u = $tmp[0];
-                    $pwd = sha1(Salt($u, $tmp[1]));
-            		$data_set = Exec_sql("SELECT tok.val tok, u.id FROM $z pwd, $z u"
-            									." LEFT JOIN $z tok ON tok.up=u.id AND tok.t=".TOKEN
-            								." WHERE u.t=".USER." AND u.val='$u' AND pwd.up=u.id AND pwd.val='$pwd'"
-            						, "Basic authentication");
-            		if($row = mysqli_fetch_array($data_set)){
-            		    if(isset($row["tok"]))
-                    		$tok = $row["tok"];
-                    	else
-                    	    insert($row["id"], 1, TOKEN, $tok = $pwd, "Save basic token");
-            		}
-                	else{
-            	        header("HTTP/1.0 401 Unauthorized");
-            		    die("[{\"error\":\"Invalid login/password (login:$u)\"}]");
-                	}
-    		    }
-    		    elseif(strtolower(substr($value, 0, 6)) === "bearer")  // Bearer-token
-        		    $tok = trim(substr($value, 6));
-    		    else // Auth token
-            		$tok = htmlentities($value);
-        		break;
-    		}
+	        }
 		}
 		$typ = TOKEN;
 		if(!isset($tok)){
@@ -1388,12 +1641,18 @@ function Validate_Token() # Validates the cookie token and gathers the user perm
 
     if(isset($tok))
 	{
-		$data_set = Exec_sql("SELECT u.id, u.val, role_def.id r, role_def.val role, xsrf.val xsrf, tok.id tok, xsrf.id xsrf_id, act.id act_id
+		$data_set = Exec_sql("SELECT u.id, u.val, role_def.id r, role_def.val role, xsrf.val xsrf, tok.id tok, xsrf.id xsrf_id, act.id act_id, em.val email
 		                FROM $z tok, $z u LEFT JOIN ($z r CROSS JOIN $z role_def) ON r.up=u.id AND role_def.id=r.t AND role_def.t=".ROLE
 						." LEFT JOIN $z xsrf ON xsrf.up=u.id AND xsrf.t=".XSRF
 						." LEFT JOIN $z act ON act.up=u.id AND act.t=".ACTIVITY
+						." LEFT JOIN $z em ON em.up=u.id AND em.t=".EMAIL
 						." WHERE u.t=".USER." AND tok.up=u.id AND tok.val='$tok' AND tok.t=$typ", "Validate token");
-		if($row = mysqli_fetch_array($data_set))
+		$row = mysqli_fetch_array($data_set);
+		# Токен, равный прежнему коду регистрации md5("xz".<почта>), вычисляется по адресу — вход по нему
+		# не принимается; пользователь входит паролем или кодом, и токен заменяется случайным (updateTokens)
+		if($row && Token_is_reg_code($tok, array($row["val"], $row["email"])))
+			$row = NULL;
+		if($row)
 		{
 			$GLOBALS["GLOBAL_VARS"]["user"] = strtolower($row["val"]);
 			$GLOBALS["GLOBAL_VARS"]["role"] = strtolower($row["role"]);
@@ -1460,13 +1719,15 @@ function Validate_Token() # Validates the cookie token and gathers the user perm
 	        header("HTTP/1.0 401 Unauthorized");
             my_die(t9n("[RU]Ошибка авторизации $z"."[EN]Authentication failed in $z"));
         }
-		elseif($z === "my" && isset($_GET["login"])){
-		    if(isset($_COOKIE[$_GET["login"]])){
-        		$data_set = Exec_sql("SELECT u.val FROM ".addslashes($_GET["login"])." tok, ".addslashes($_GET["login"])." u"
-            						." WHERE u.t=".USER." AND u.val='".addslashes($_GET["login"])."' AND tok.up=u.id AND tok.val='".addslashes($_COOKIE[$_GET["login"]])."' AND tok.t=".TOKEN
+		elseif($z === "my" && isset($_GET["login"]) && ($ldb = Cabinet_login_db($_GET["login"])) !== ""){  # имя таблицы — по маске ДО SQL
+		    if(isset($_COOKIE[$ldb]) && is_string($_COOKIE[$ldb])){
+        		$data_set = Exec_sql("SELECT u.val, em.val email FROM $ldb tok, $ldb u LEFT JOIN $ldb em ON em.up=u.id AND em.t=".EMAIL
+            						." WHERE u.t=".USER." AND u.val='$ldb' AND tok.up=u.id AND tok.val='".addslashes($_COOKIE[$ldb])."' AND tok.t=".TOKEN
             					, "Validate token for cabinet");
-            	#die("SELECT u.val FROM $z tok, $z u"." WHERE u.t=".USER." AND tok.up=u.id AND tok.val='".addslashes($_COOKIE[$_GET["login"]])."' AND tok.t=".TOKEN);
-        		if($row = mysqli_fetch_array($data_set)){
+        		$row = mysqli_fetch_array($data_set);
+        		if($row && Token_is_reg_code($_COOKIE[$ldb], array($row["val"], $row["email"])))  # прежний код регистрации — не вход
+        		    $row = NULL;
+        		if($row){
             		#login($z, "", "login");
             		$data_set = Exec_sql("SELECT tok.val FROM $z db, $z u LEFT JOIN $z tok ON tok.up=u.id AND tok.t=".TOKEN
                 						." WHERE u.t=".USER." AND db.up=u.id AND db.val='".$row["val"]."' AND db.t=".DATABASE
@@ -1486,7 +1747,10 @@ function Validate_Token() # Validates the cookie token and gathers the user perm
         						." WHERE u.t=".USER." AND tok.up=u.id AND tok.val='".addslashes($_COOKIE["my"])."' AND tok.t=".TOKEN
         						    ." AND db.val='$z' AND db.up=u.id AND db.t=".DATABASE
         					, "Validate token for cabinet");
-    		if($row = mysqli_fetch_array($data_set)){
+    		$row = mysqli_fetch_array($data_set);
+    		if($row && Token_is_reg_code($_COOKIE["my"], array($row["val"])))  # прежний код регистрации (вычислим по почте) — не вход
+    		    $row = NULL;
+    		if($row){
         		$data_set = Exec_sql("SELECT tok.val FROM $z u, $z tok WHERE u.t=".USER." AND tok.up=u.id AND u.val='$z' AND tok.t=".TOKEN
             					, "Get token in current db");
         		if($row = mysqli_fetch_array($data_set)){
@@ -6978,9 +7242,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 				$path = "templates/custom/$z";
 			if(!file_exists($path))
 				mkdir($path);
-			$add_path = isset($_REQUEST["add_path"]) ? $_REQUEST["add_path"] : "";
-			if(strpos($add_path, "..") !== false)
-            	$add_path = "";
+			$add_path = Dir_admin_add_path(isset($_REQUEST["add_path"]) ? $_REQUEST["add_path"] : "");
 			if(isset($_REQUEST["gf"]))
 				if((strpos($_REQUEST["gf"], "..") === false) && file_exists($path.$add_path."/".$_REQUEST["gf"]))
 				{
@@ -7056,6 +7318,10 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 						if(strlen($value["name"]) > 0)
 						{
             			    trace("upload ".$value["name"]);
+							# Только базовое имя файла (без .. / \)
+							$value["name"] = basename(str_replace("\\", "/", $value["name"]));
+							if(!Dir_admin_entry_name($value["name"]))
+								die(t9n("[RU]Недопустимое имя файла[EN]Invalid file name".BACK_LINK));
 							BlackList(substr(strrchr($value["name"], '.'), 1)); # Check the file extension
 							if(file_exists($path."/".$value["name"]))
 								if(isset($_REQUEST["rewrite"]))
@@ -7081,7 +7347,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 				check();
 				if(is_array($_POST["del"]))
 					foreach($_POST["del"] as $value)
-						if(strlen($value))
+						if(Dir_admin_entry_name($value))  # без / \ .. — не выйти за текущую папку
 							RemoveDir($path."/".$value);
 #print_r($GLOBALS); die("is_dir($path./.$value) =".is_dir($path."/".$value));
 				header("Location: /$z/dir_admin/?".$blocks[$block]["folder"][0]."=1&add_path=$add_path");
@@ -7853,8 +8119,9 @@ function pwd_reset($u)
 }
 function check()
 {
-    if(isset($_POST["_xsrf"]))
-    	if($GLOBALS["GLOBAL_VARS"]["xsrf"] == $_POST["_xsrf"]) # Check the xsrf token
+    $xsrf = isset($GLOBALS["GLOBAL_VARS"]["xsrf"]) ? (string)$GLOBALS["GLOBAL_VARS"]["xsrf"] : "";
+    if(isset($_POST["_xsrf"]) && is_string($_POST["_xsrf"]) && ($xsrf !== ""))
+    	if(hash_equals($xsrf, $_POST["_xsrf"])) # Check the xsrf token (strictly: no "0e…" == "0e…")
 	    	return true;
 	if($GLOBALS["GLOBAL_VARS"]["xsrf"] == ADMINHASH)
     	return true;
@@ -8090,7 +8357,7 @@ switch($a)  # Check actions, which don't require authentication
 					$msg = t9n("[RU]Пароль успешно изменен[EN]The password has been changed");
 				}
 			}
-			updateTokens($row);
+			updateTokens($row, Reg_code_tokens($row["uid"], $row["val"]));  # прежний md5-код регистрации в токене заменяется
 #			if(isset($_POST["save"]))
 #				setcookie($z, $GLOBALS["GLOBAL_VARS"]["token"], 0, "/");  # The cookie to be deleted upon the session close
 #			else
@@ -8141,10 +8408,13 @@ switch($a)  # Check actions, which don't require authentication
     			$GLOBALS["tzone"] = round(((int)$_POST["tzone"] - time() - date("Z"))/1800)*1800; # Round the time zone shift to 30 min
     			setcookie("tzone", $GLOBALS["tzone"], time() + COOKIES_EXPIRE, "/"); # 30 days
     		}
-    		$data_set = Exec_sql("SELECT tok.val FROM $z u LEFT JOIN $z tok ON tok.up=u.id AND tok.t=".TOKEN." WHERE u.t=".USER." AND u.val='$u'"
+    		$data_set = Exec_sql("SELECT tok.val, tok.id tok, u.id uid FROM $z u LEFT JOIN $z tok ON tok.up=u.id AND tok.t=".TOKEN." WHERE u.t=".USER." AND u.val='$u'"
     						, "Get the user token");
     		if($row = mysqli_fetch_array($data_set))
     		{
+    			# Прежний код регистрации в токене вычисляется по адресу — до отправки кода заменяется случайным
+    			if($row["tok"] && Token_is_reg_code($row["val"], User_names_for_reg_code($row["uid"], stripslashes($u))))
+    				Update_Val($row["tok"], $row["val"] = secureToken());
 				mysendmail($u, t9n("[RU]Одноразовый пароль [EN]One time password ").$u
 					, t9n("[RU]Ваш код для входа: [EN]Your password is: ").strtoupper(substr($row["val"], 0, 4))
                 		."\r\n\r\n".t9n("[RU]Если вы не хотите получать от нас писем, связанных с регистрацией $u, вы можете отписаться от оповещений:"
@@ -8161,35 +8431,9 @@ switch($a)  # Check actions, which don't require authentication
 		break;
 		
 	case "checkcode":
-		$c = addslashes(strtolower($_REQUEST["c"]));
-		$u = addslashes(strtolower($_REQUEST["u"]));
-		if(preg_match(MAIL_MASK, $u) && (strlen($c) == 4))
-		{
-    		$data_set = Exec_sql("SELECT u.id, tok.id tok, xsrf.id xsrf, act.id act FROM $z tok, $z u"
-    		                        ." LEFT JOIN $z act ON act.up=u.id AND act.t=".ACTIVITY
-									." LEFT JOIN $z xsrf ON xsrf.up=u.id AND xsrf.t=".XSRF
-    		                    ." WHERE u.t=".USER." AND u.val='$u' AND tok.up=u.id AND tok.t=".TOKEN." AND tok.val LIKE '$c%'"
-    						, "Check the user token");
-    		if($row = mysqli_fetch_array($data_set))
-    		{
-    			$token = secureToken();
-    			$xsrf = xsrf($token, $u);
-				Update_Val($row["tok"], $token);
-
-    			if($row["xsrf"])
-    				Update_Val($row["xsrf"], $xsrf);
-    			else
-    				Insert($row["id"], 1, XSRF, $xsrf, "Save xsrf");
-    			if($row["act"])
-    				Update_Val($row["act"], microtime(TRUE), FALSE);
-    			else
-    				Insert($row["id"], 1, ACTIVITY, microtime(TRUE), "Save activity time");
-    		    die('{"token":"'.$token.'","_xsrf":"'.$xsrf.'"}');
-    		}
-    		else
-    		    die('{"error":"user not found"}');
-		}
-	    die('{"error":"invalid data"}');
+		# Точное сравнение кода (прежний LIKE '$c%' пускал по «%%%%» и «____») и лимит неудач — Checkcode_login
+		die(json_encode(Checkcode_login(isset($_REQUEST["u"]) ? $_REQUEST["u"] : "", isset($_REQUEST["c"]) ? $_REQUEST["c"] : "")
+			, JSON_UNESCAPED_UNICODE));
 		break;
 }
 
@@ -8969,7 +9213,6 @@ if(Validate_Token())
 			break;
 # Type editor commands
 		case "_d_req":
-		case "_attributes":
 			if(($id == 0) || ($t == 0))
 				my_die(t9n("[RU]Неверный реквизит ($t) или ID ($id)[EN] Invalid requisite($t) or ID ($id)"));
 			if($row = mysqli_fetch_array(Exec_sql("SELECT obj.up objup, new.t, obj.val, new.id, new.up, ex.id existing"
@@ -9001,7 +9244,6 @@ if(Validate_Token())
 			break;
 			
 		case "_d_save":
-		case "_patchterm":
 			if($val == "")
 				my_die(t9n("[RU]Неверный тип ($val) [EN]Invalid type ($val)"));
 			if($row = mysqli_fetch_array(Exec_sql("SELECT obj.t, obj.val, obj.ord FROM $z obj
@@ -9019,7 +9261,6 @@ if(Validate_Token())
 			break;
 
 		case "_d_alias":
-		case "_setalias":
 			if(strpos($val, ":") !== false)
 				my_die(t9n("[RU]Недопустимый символ &laquo;:&raquo; в псевдониме $val [EN] Invalid character &laquo;:&raquo; in the alias $val"));
 			if($row = mysqli_fetch_array(Exec_sql("SELECT $z.val, par.up, $z.up myup FROM $z, $z par WHERE $z.id=$id AND par.id=$z.t", "Get Ref alias")))
@@ -9047,7 +9288,6 @@ if(Validate_Token())
 			break;
 
 		case "_d_new":
-		case "_terms":
 			if($val == "")
 				my_die(t9n("[RU]Пустой тип[EN]Empty type"));
 			if(!isset($_REQUEST["t"]))
@@ -9064,7 +9304,6 @@ if(Validate_Token())
 			break;
 
 		case "_d_ref":
-		case "_references":
 			if($id == 0)
 				my_die(t9n("[RU]Неверная ссылка ($id) [EN]Invalid link ($id)"));
 			if($row = mysqli_fetch_array(Exec_sql("SELECT obj.up, obj.t, ref.id FROM $z obj LEFT JOIN $z ref ON ref.up=0 AND ref.t=$id AND ref.val='' WHERE obj.id=$id"
@@ -9083,7 +9322,6 @@ if(Validate_Token())
 			break;
 
 		case "_d_null":
-		case "_setnull":
 			$result = Exec_sql("SELECT obj.id FROM $z req LEFT JOIN $z obj ON obj.id=req.up WHERE req.id=$id and obj.up=0"
 							, "Check the req and obj");
 			if($row = mysqli_fetch_array($result))
@@ -9095,7 +9333,6 @@ if(Validate_Token())
 			break;
 
 		case "_d_multi":
-		case "_setmulti":
 			$result = Exec_sql("SELECT obj.id FROM $z req LEFT JOIN $z obj ON obj.id=req.up WHERE req.id=$id and obj.up=0"
 							, "Check the req and obj");
 			if($row = mysqli_fetch_array($result))
@@ -9119,7 +9356,6 @@ if(Validate_Token())
 			break;
 
 		case "_d_up":
-		case "_moveup":
 			$result = Exec_sql("SELECT obj.up, obj.ord, max(peers.ord) new_ord
 								FROM $z obj LEFT JOIN $z peers ON peers.up=obj.up AND peers.ord<obj.ord WHERE obj.id=$id"
 							, "Get new Order");
@@ -9137,7 +9373,6 @@ if(Validate_Token())
 			break;
 
 		case "_d_ord":
-		case "_setorder":
 	        if(!is_numeric($_REQUEST["order"]) || ((int)$_REQUEST["order"] < 1))
         		die("Invalid order");
         	$newOrd = (int)$_REQUEST["order"];
@@ -9157,7 +9392,6 @@ if(Validate_Token())
 			break;
 
 		case "_d_del":
-		case "_deleteterm":
 			$data_set = Exec_sql("SELECT COUNT(id) FROM $z WHERE t=$id", "Check, if the Typ is being used");
 			if($row = mysqli_fetch_array($data_set))
 				if($row[0] > 0)
@@ -9176,7 +9410,6 @@ if(Validate_Token())
 			break;
 
 		case "_d_del_req":
-		case "_deletereq":
 			$data_set = Exec_sql("SELECT def.up, def.t typ, def.ord, r.t, r.val FROM $z def, $z r WHERE def.id=$id AND r.id=def.t", "Get Req's typ");
 			if($row = mysqli_fetch_array($data_set))
 			{
@@ -9508,20 +9741,20 @@ if(Validate_Token())
 		case "_connect":
 			if($id == 0)
 				my_die(t9n("[RU]Неверный id ($id) [EN]Invalid id ($id)"));
+			Check_Grant($id, 0, "READ"); # #1036: чужой коннектор (с ключами в адресе) — только при доступе к записи
 			$sql = "SELECT val FROM $z WHERE up=$id AND t=".CONNECT;
 			if($row = mysqli_fetch_array(Exec_sql($sql, "Get the connector")))
 			{
 			    trace("Got connector: ".$row["val"]);
-				foreach($_GET as $k => $v)
-					$url .= "&$k=$v";
-				$url = $row["val"] . (strpos($row["val"],"?") ? "&" : "?") . substr($url, 1);
-			    trace("url: $url");
+				$url = Connect_url($row["val"], $_GET);  # токен и xsrf пользователя на внешний хост не уходят
+			    trace("url: ".Log_uri($url));
+				if(!Report_url_allowed($url))
+					my_die(t9n("[RU]Адрес коннектора должен быть http(s) на публичный хост [EN]Connector URL must be http(s) on a public host"));
 				$ch = curl_init();
 				curl_setopt($ch, CURLOPT_HEADER, 0);
 				curl_setopt($ch, CURLOPT_HTTPHEADER, array("User-Agent: Integram"));
 				curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-				curl_setopt($ch, CURLOPT_URL, $url);
-				$val = curl_exec($ch);
+				$val = Report_curl_exec($ch, $url);
 				if(curl_errno($ch)){
 					$val = curl_errno($ch).": $val";
 					$file_failed = true;
