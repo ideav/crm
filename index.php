@@ -2817,10 +2817,8 @@ function Validate_Token(){ # Validates the cookie token and gathers the user per
     		}
 		}
 		$typ = TOKEN;
-		if(!isset($tok)){
-	        header("HTTP/1.0 401 Unauthorized");
-		    die("[{\"error\":\"No authorization token provided\"}]");
-		}
+		# #5221: без токена запрос обслуживает гость, если он заведён (см. ниже)
+		$noTok = !isset($tok);
 	}
 
     if(isset($tok)){
@@ -2866,40 +2864,20 @@ function Validate_Token(){ # Validates the cookie token and gathers the user per
 	}
 	if(!isset($GLOBALS["GLOBAL_VARS"]["user"])){ # Check, if we got a Guest user defined
 										  
-		$data_set = Exec_sql("SELECT u.id u, tok.val tok, tok.id token, xsrf.id xsrf, role_def.id r"
+		$data_set = Exec_sql("SELECT u.id u, tok.val tok, tok.id token, xsrf.id xsrf, xsrf.val xsrf_val, role_def.id r, role_def.val role"
 		                        ." FROM $z u LEFT JOIN $z tok ON tok.up=u.id AND tok.t=".TOKEN
 								." LEFT JOIN $z xsrf ON xsrf.up=u.id AND xsrf.t=".XSRF
         						." LEFT JOIN ($z r CROSS JOIN $z role_def) ON r.up=u.id AND role_def.id=r.t AND role_def.t=".ROLE
     		                    ." WHERE u.t=".USER." AND u.val='guest'"
 		                    , "Get Guest credentials");
-#        print_r($GLOBALS);print_r($GLOBALS["TRACE"]);my_die("ok");
-		if($row = mysqli_fetch_array($data_set)){
+		if(($row = mysqli_fetch_array($data_set)) && $row["r"]){
 		    $tok = "gtuoeksetn";
-    		if(!$row["tok"])
-    			Insert($row["u"], 1, TOKEN, $tok, "Save guest token");
-    		else if($row["tok"] !== $tok)
-				my_die(t9n("[RU]Неверный токен пользователя GUEST[EN]Invalid token for GUEST")." <a href=\"/$z/login\">login</a>");
-    		else
-    		    Update_Val($row["token"], $xsrf);
-			$xsrf = xsrf("gtuoeksetn", "guest");
-    		if(!$row["xsrf"])
-    			Insert($row["u"], 1, XSRF, $xsrf, "Save guest xsrf");
-    		else
-    		    Update_Val($row["xsrf"], $xsrf);
-    		setcookie("idb_$z", "gtuoeksetn", time() + COOKIES_EXPIRE, "/"); # 30 days
-			if(isApi()){
-                getGrants($row["r"]);
-    			$GLOBALS["GLOBAL_VARS"]["user"] = "guest";
-    			$GLOBALS["GLOBAL_VARS"]["user_id"] = $row["u"];
-            	$GLOBALS["GLOBAL_VARS"]["xsrf"] = $xsrf;
-                $GLOBALS["GLOBAL_VARS"]["token"] = $tok;
-            	return isset($GLOBALS["GLOBAL_VARS"]["user"]);
-			}
-    		header("Location: ".$_SERVER["REQUEST_URI"]);
-            die();
+		    $xsrf = Guest_session($row, $tok);
 		}
         elseif(isApi()){
 	        header("HTTP/1.0 401 Unauthorized");
+	        if(!empty($noTok))
+			    die("[{\"error\":\"No authorization token provided\"}]");
             my_die(t9n("[RU]Ошибка авторизации $z"."[EN]Authentication failed in $z"));
         }
 		elseif($z === "my" && isset($_GET["login"]) && (substr(mb_strtolower($_GET["login"]), 0, 2) !== "db")){
@@ -2937,12 +2915,37 @@ function Validate_Token(){ # Validates the cookie token and gathers the user per
         		}
     		}
 		}
-		login($z, "", "InvalidToken");
-        die();
+		if(!isset($GLOBALS["GLOBAL_VARS"]["user"])){
+			login($z, "", "InvalidToken");
+			die();
+		}
 	}
 	$GLOBALS["GLOBAL_VARS"]["xsrf"] = isset($xsrf) ? $xsrf : xsrf($_SERVER["REMOTE_ADDR"], "guest");
     $GLOBALS["GLOBAL_VARS"]["token"] = $tok;
 	return isset($GLOBALS["GLOBAL_VARS"]["user"]);  # Return TRUE in case the token is OK
+}
+# Вход гостем (#5221): посетитель без токена работает пользователем guest, если тот заведён
+# и ему задана роль. Токен гостя общий для всех посетителей, поэтому вход — в этом же запросе:
+# и страница, и JSON API отвечают гостю сразу, без перенаправления на себя. Запись токена
+# приводится к общему значению, xsrf — к производному от него. Возвращает xsrf сессии.
+function Guest_session($row, $tok){
+	global $z;
+	if(!$row["token"])
+		Insert($row["u"], 1, TOKEN, $tok, "Save guest token");
+	elseif($row["tok"] !== $tok)
+		Update_Val($row["token"], $tok);
+	$xsrf = xsrf($tok, "guest");
+	if(!$row["xsrf"])
+		Insert($row["u"], 1, XSRF, $xsrf, "Save guest xsrf");
+	elseif($row["xsrf_val"] !== $xsrf)
+		Update_Val($row["xsrf"], $xsrf);
+	setcookie("idb_$z", $tok, time() + COOKIES_EXPIRE, "/"); # 30 days
+	$GLOBALS["GLOBAL_VARS"]["user"] = "guest";
+	$GLOBALS["GLOBAL_VARS"]["role"] = strtolower($row["role"]);
+	$GLOBALS["GLOBAL_VARS"]["role_id"] = $row["r"];
+	$GLOBALS["GLOBAL_VARS"]["user_id"] = $row["u"];
+	getGrants($row["r"]);
+	return $xsrf;
 }
 function getGrants($r){
     global $z, $blocks;
