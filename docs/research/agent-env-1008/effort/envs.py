@@ -244,7 +244,7 @@ class CoreEnv:
         data = None
         if form is not None:
             if login not in self.xsrf:
-                self.xsrf[login] = json.loads(self._call(login, via, "GET", "xsrf", {"JSON": 1})[1]).get("_xsrf")
+                self.xsrf[login] = self._xsrf(login, via)
             headers["Content-Type"] = "application/x-www-form-urlencoded"
             data = urllib.parse.urlencode({**form, "_xsrf": self.xsrf[login]}).encode()
         url = f"{self.base_url}/{self.db}/{path}?{urllib.parse.urlencode(q)}"
@@ -259,7 +259,15 @@ class CoreEnv:
             P.mysql(f"DELETE FROM {self.db} WHERE up={uid} AND t={F.TOKEN_REQ};\n"
                     f"INSERT INTO {self.db} (id, up, ord, t, val) SELECT MAX(id)+1, {uid}, 0, {F.TOKEN_REQ}, "
                     f"'{self.tokens[login]}' FROM {self.db};")
-        self.xsrf[login] = json.loads(self._call(login, via, "GET", "xsrf", {"JSON": 1})[1]).get("_xsrf")
+        self.xsrf[login] = self._xsrf(login, via)
+
+    def _xsrf(self, login: str, via: str):
+        """_xsrf сессии; пользователю без роли ядро отвечает ошибкой — тогда None, запрос получит отказ ядра."""
+        try:
+            r = json.loads(self._call(login, via, "GET", "xsrf", {"JSON": 1})[1])
+        except ValueError:
+            return None
+        return r.get("_xsrf") if isinstance(r, dict) else None
 
     def act(self, login: str, via: str, op: str, number: str = None, fields: dict = None, select=None):
         fields = fields or {}
@@ -342,9 +350,13 @@ class PgrstEnv:
     container = os.getenv("R1055_A1_DB", "crm1055a-db")
     WORK = "app"
 
-    def __init__(self, db: str = WORK):
+    def __init__(self, db: str = WORK, stand: Path = None, base_url: str = None, container: str = None):
+        """stand/base_url/container — другой стенд PostgreSQL + PostgREST (реестр A″ #1060)."""
         self.db = db
+        self.stand, self.base_url = stand or self.stand, base_url or self.base_url
+        self.container = container or self.container
         env = dict(line.split("=", 1) for line in (self.stand / ".env").read_text().split() if "=" in line)
+        self.env_file = env
         self.secret = env["JWT_SECRET"]
         self.users = {}
 

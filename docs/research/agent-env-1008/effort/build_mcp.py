@@ -4,8 +4,9 @@ stdio, JSON-RPC, MCP 2024-11-05, как variant_a/mcp_server.py пилота #10
 сервер, агенту они не видны. Каждый вызов пишется в журнал R1055_CALLS (jsonl): по нему считаются
 ходы и итерации «проверка → правка».
 
-Окружение: R1055_ENV (b | a1), R1055_DB (база ядра в B), R1055_CALLS (журнал вызовов),
-R1055_KB (каталог docs/kb для B).
+Окружение: R1055_ENV (b | a1 | a2), R1055_DB (база ядра в B), R1055_CALLS (журнал вызовов),
+R1055_KB (каталог docs/kb для B), R1060_REG_* (реестр контрагентов A″, python2node#1060).
+  A″ — как A′ (S1 «Заявки») плюс crm_api: PostgREST реестра контрагентов (S2) от имени его админа.
   B  — api: HTTP API ядра от имени админа фонда или любого пользователя базы; kb_list/kb_read/kb_search.
   A′ — sql: SQL суперпользователем в базу app; api: PostgREST от имени любого пользователя.
        Документация — WebFetch по docs.postgrest.org и www.postgresql.org (встроенный инструмент Claude).
@@ -26,6 +27,11 @@ KIND = os.environ["R1055_ENV"]
 CALLS = Path(os.environ["R1055_CALLS"]).resolve()
 KB = Path(os.getenv("R1055_KB", "/nonexistent"))
 ENV = E.CoreEnv(os.environ["R1055_DB"]) if KIND == "b" else E.PgrstEnv()
+# A″ (python2node#1060): вторая система — реестр контрагентов, свой PostgreSQL + PostgREST.
+REG = E.PgrstEnv(os.getenv("R1060_REG_DB", "registry"), stand=Path(os.getenv("R1060_REG_STAND", "/root/crm1055c")),
+                 base_url=os.getenv("R1060_REG_URL", "http://127.0.0.1:18691"),
+                 container=os.getenv("R1060_REG_CONTAINER", "crm1055c-db")) if KIND == "a2" else None
+REG_ROLE = os.getenv("R1060_REG_ROLE", "registry_admin")
 LIMIT = 20000  # символов ответа: длиннее — обрезается с пометкой
 
 AS = {"type": "string", "description": "Логин пользователя, от имени которого запрос (по умолчанию admin_f). "
@@ -59,6 +65,14 @@ else:
              "body": {}, "headers": {"type": "object"}, "as_user": AS,
              "ai": {"type": "boolean", "description": "запрос от ИИ (заголовок X-Client: ai), по умолчанию да"}}}},
     ]
+if KIND == "a2":
+    TOOLS.append(
+        {"name": "crm_api", "description": "HTTP-запрос к PostgREST реестра контрагентов (вторая система, схема api) "
+         "от имени администратора реестра. path — например «counterparty?select=inn,legal_name». body — JSON для "
+         "POST/PATCH. headers — дополнительные заголовки (Prefer и т.п.).",
+         "inputSchema": {"type": "object", "required": ["method", "path"], "properties": {
+             "method": {"type": "string", "enum": ["GET", "POST", "PATCH", "DELETE"]}, "path": {"type": "string"},
+             "body": {}, "headers": {"type": "object"}}}})
 
 
 def _cut(text: str) -> str:
@@ -82,6 +96,14 @@ def call(name: str, a: dict) -> tuple:
             headers["X-Client"] = "ai"
         data = json.dumps(a["body"], ensure_ascii=False).encode() if a.get("body") is not None else None
         req = urllib.request.Request(f"{ENV.base_url}/{a['path'].lstrip('/')}", data=data, method=a["method"],
+                                     headers=headers)
+        st, body = E.http(req)
+        return f"HTTP {st}\n{body}", st >= 400
+    if name == "crm_api" and REG is not None:
+        tok = E.jwt(REG.secret, {"role": REG_ROLE, "exp": int(time.time()) + 3600})
+        headers = {"Authorization": f"Bearer {tok}", "Content-Type": "application/json", **(a.get("headers") or {})}
+        data = json.dumps(a["body"], ensure_ascii=False).encode() if a.get("body") is not None else None
+        req = urllib.request.Request(f"{REG.base_url}/{a['path'].lstrip('/')}", data=data, method=a["method"],
                                      headers=headers)
         st, body = E.http(req)
         return f"HTTP {st}\n{body}", st >= 400
