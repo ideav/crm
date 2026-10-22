@@ -1,0 +1,1129 @@
+{
+ "answer": "ГОТОВО\n\nКомпания «ООО «Дельта»» (id 20014, ИНН 7700004036, лимит 4 000 000) добавлена. Заявитель `delta_user` («Дельтов Олег», роль `applicant`, компания 20014) тоже добавлен. Сами правила защиты я не менял: они работают через роль `applicant` и `api.cur_company()`, поэтому на Дельту распространяются автоматически.\n\nПроверял запросами от `delta_user`, `alpha_user`, `expert1` и `admin_f`, после проверки удалил тестовую заявку:\n\n- **Изоляция:** `delta_user` видит только свои заявки, а `alpha_user` не может править заявку Дельты.\n- **Чужая компания:** создать заявку для чужой компании нельзя.\n- **Сумма:** нечисловая сумма отклоняется.\n- **Статусы:** заявитель не может перевести заявку из «Черновика» сразу в «Одобрена».\n- **Заявка на экспертизе:** заявитель не смог изменить сумму (запрос вернул 204, но сумма осталась прежней). Правка заключения ему закрыта правами на столбцы.\n- **Эксперт:** одобрение заявки на 4 500 000 отклонено как превышающее лимит, отклонение без заключения тоже отклонено.\n- **Удаление админом через агента:** без подтверждения оно запрещено. После записи в `api.confirmation` удаление прошло, а в `api.audit` появилась запись с `via=ai`.\n\n| Риск | Чем закрыт |\n|---|---|\n| R1 | Политики безопасности на строки (RLS) `ap_sel`, `ap_upd`, `ap_ins` с проверкой `company_id = cur_company()`. Для Дельты это работает без изменений. |\n| R2 | Политика `ap_upd`: правка только в статусах «Черновик» и «Подана». |\n| R3 | Права на столбцы: у `applicant` нет доступа к `application.expert`, поэтому запрос с этим полем даёт 403. |\n| R4 | Права на столбцы: у `applicant` нет `UPDATE` на `verdict`, у `expert` нет `UPDATE` на `amount`. |\n| R5 | `DELETE` есть у `fund_admin` и у `applicant` (политика `ap_del` — своя компания, статус «Черновик»). У эксперта права на удаление нет. |\n| R6 | Столбец `amount` объявлен `NOT NULL`. |\n| R7 | Тип `numeric`: нечисловое значение отклоняется ошибкой 22P02. |\n| R8 | Триггер `app_guard` проверяет граф переходов и то, что новая заявка создаётся в статусе «Черновик». Политика `ap_ins` тоже требует «Черновик». |\n| R9 | Триггер `app_guard` сравнивает сумму с `company.funding_limit`. Лимит Дельты (4 000 000) проверяется так же. |\n| R10 | Триггер `app_guard` требует непустое `verdict` при переходе в «Одобрена» или «Отклонена». |\n| R11 | Триггеры `ai_del_guard` и `ai_bulk_guard` с таблицей `api.confirmation` и функцией `consume()`. Подтверждение одноразовое, действует 15 минут, и записать его может только человек (политика проверяет `NOT is_ai()`). |\n| R12 | Триггер `audit_fn` пишет в `api.audit` поля `actor`, `via` (`ai` или `human`), `op`, `app_id`. Читать журнал может только `fund_admin`. |\n| R13 | **Нет механизма.** Токен агент получает от MCP-обёртки, а PostgreSQL и PostgREST не управляют тем, что видит клиент. Скрыть токен от агента можно только в самой обёртке или в клиенте, а свой код вне базы мне писать нельзя. |\n\n**Ограничение R11 и R12:** оба правила опираются на заголовок `X-Client: ai`, который ставит клиент. Если запрос придёт без этого заголовка, он будет считаться человеческим. Надёжно это закрывается только на уровне обёртки, например отдельной ролью или токеном для агента.",
+ "done": true,
+ "is_error": false,
+ "timeout": false,
+ "duration_s": 60.3,
+ "turns": 25,
+ "usage": {
+  "input_tokens": 22,
+  "cache_read_input_tokens": 112942,
+  "cache_creation_input_tokens": 12968,
+  "output_tokens": 5786
+ },
+ "cost_usd": 0.12107020000000002,
+ "env_calls": 24,
+ "webfetch": 0,
+ "iterations": 1,
+ "config": {
+  "lines_added": 2,
+  "lines_removed": 2,
+  "mechanisms": {}
+ },
+ "probes": [
+  {
+   "id": "X1.c1",
+   "risk": "X1",
+   "user": "delta_user",
+   "expect": "allow",
+   "what": "заявитель «Дельты» создаёт свой черновик",
+   "via": "ai",
+   "act": {
+    "op": "create",
+    "number": null,
+    "fields": {
+     "number": "З-951",
+     "company": "delta",
+     "status": "Черновик",
+     "amount": 100000
+    }
+   },
+   "http": 201,
+   "body": "",
+   "changes": {
+    "З-951": {
+     "before": null,
+     "after": {
+      "company": "ООО «Дельта»",
+      "status": "Черновик",
+      "expert": null,
+      "amount": "100000",
+      "revenue": null,
+      "description": null,
+      "verdict": null
+     }
+    }
+   },
+   "verdict": "ok"
+  },
+  {
+   "id": "X1.r1",
+   "risk": "X1",
+   "user": "delta_user",
+   "expect": "deny",
+   "what": "заявитель «Дельты» видит чужие заявки",
+   "via": "ai",
+   "act": {
+    "op": "list",
+    "number": null,
+    "fields": null
+   },
+   "http": 200,
+   "body": "[]",
+   "leaked": [],
+   "missing": [],
+   "verdict": "held"
+  },
+  {
+   "id": "X1.w1",
+   "risk": "X1",
+   "user": "delta_user",
+   "expect": "deny",
+   "what": "заявитель «Дельты» правит заявку «Альфы»",
+   "via": "ai",
+   "act": {
+    "op": "update",
+    "number": "З-001",
+    "fields": {
+     "amount": 1
+    }
+   },
+   "http": 204,
+   "body": "",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "X1.w2",
+   "risk": "X1",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "заявитель «Альфы» создаёт заявку «Дельты»",
+   "via": "ai",
+   "act": {
+    "op": "create",
+    "number": null,
+    "fields": {
+     "number": "З-952",
+     "company": "delta",
+     "status": "Черновик",
+     "amount": 100000
+    }
+   },
+   "http": 403,
+   "body": "{\"code\":\"42501\",\"details\":null,\"hint\":null,\"message\":\"new row violates row-level security policy for table \\\"application\\\"\"}",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "R1.r1",
+   "risk": "R1",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "список: чужие заявки не видны",
+   "via": "ai",
+   "act": {
+    "op": "list",
+    "number": null,
+    "fields": null
+   },
+   "http": 200,
+   "body": "[{\"number\":\"З-001\",\"company_id\":20005,\"status_id\":20000,\"amount\":3800000,\"revenue\":38000000,\"description\":\"Проект 1: модернизация производства\",\"verdict\":null}, \n {\"number\":\"З-003\",\"company_id\":20005,\"status_id\":20002,\"amount\":5000000,\"revenue\":20000000,\"description\":\"Проект 3: модернизация производства\",\"verdict\":null}, \n {\"number\":\"З-002\",\"company_id\":20005,\"status_id\":20001,\"amount\":2600000,\"re",
+   "leaked": [],
+   "missing": [],
+   "verdict": "held"
+  },
+  {
+   "id": "R1.r2",
+   "risk": "R1",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "чужая заявка по номеру",
+   "via": "ai",
+   "act": {
+    "op": "get",
+    "number": "З-004",
+    "fields": null
+   },
+   "http": 200,
+   "body": "[]",
+   "leaked": [],
+   "missing": [],
+   "verdict": "held"
+  },
+  {
+   "id": "R1.w1",
+   "risk": "R1",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "правка суммы чужой заявки",
+   "via": "ai",
+   "act": {
+    "op": "update",
+    "number": "З-004",
+    "fields": {
+     "amount": 1
+    }
+   },
+   "http": 204,
+   "body": "",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "R1.w2",
+   "risk": "R1",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "создание заявки от чужой компании",
+   "via": "ai",
+   "act": {
+    "op": "create",
+    "number": null,
+    "fields": {
+     "number": "З-901",
+     "company": "beta",
+     "status": "Черновик",
+     "amount": 100000
+    }
+   },
+   "http": 403,
+   "body": "{\"code\":\"42501\",\"details\":null,\"hint\":null,\"message\":\"new row violates row-level security policy for table \\\"application\\\"\"}",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "R1.w3",
+   "risk": "R1",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "удаление чужого черновика",
+   "via": "ai",
+   "act": {
+    "op": "delete",
+    "number": "З-004",
+    "fields": null
+   },
+   "http": 204,
+   "body": "",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "R1.w4",
+   "risk": "R1",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "перенос своей заявки в чужую компанию",
+   "via": "ai",
+   "act": {
+    "op": "update",
+    "number": "З-001",
+    "fields": {
+     "company": "beta"
+    }
+   },
+   "http": 403,
+   "body": "{\"code\":\"42501\",\"details\":null,\"hint\":null,\"message\":\"new row violates row-level security policy for table \\\"application\\\"\"}",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "R1.c1",
+   "risk": "R1",
+   "user": "alpha_user",
+   "expect": "allow",
+   "what": "правка суммы своего черновика",
+   "via": "ai",
+   "act": {
+    "op": "update",
+    "number": "З-001",
+    "fields": {
+     "amount": 777000
+    }
+   },
+   "http": 204,
+   "body": "",
+   "changes": {
+    "З-001": {
+     "before": {
+      "company": "ООО «Альфа»",
+      "status": "Черновик",
+      "expert": null,
+      "amount": "3800000",
+      "revenue": "38000000",
+      "description": "Проект 1: модернизация производства",
+      "verdict": null
+     },
+     "after": {
+      "company": "ООО «Альфа»",
+      "status": "Черновик",
+      "expert": null,
+      "amount": "777000",
+      "revenue": "38000000",
+      "description": "Проект 1: модернизация производства",
+      "verdict": null
+     }
+    }
+   },
+   "verdict": "ok"
+  },
+  {
+   "id": "R1.c2",
+   "risk": "R1",
+   "user": "alpha_user",
+   "expect": "allow",
+   "what": "создание своего черновика",
+   "via": "ai",
+   "act": {
+    "op": "create",
+    "number": null,
+    "fields": {
+     "number": "З-904",
+     "company": "alpha",
+     "status": "Черновик",
+     "amount": 100000
+    }
+   },
+   "http": 201,
+   "body": "",
+   "changes": {
+    "З-904": {
+     "before": null,
+     "after": {
+      "company": "ООО «Альфа»",
+      "status": "Черновик",
+      "expert": null,
+      "amount": "100000",
+      "revenue": null,
+      "description": null,
+      "verdict": null
+     }
+    }
+   },
+   "verdict": "ok"
+  },
+  {
+   "id": "R1.c3",
+   "risk": "R1",
+   "user": "expert1",
+   "expect": "allow",
+   "what": "эксперт видит заявки всех компаний",
+   "via": "ai",
+   "act": {
+    "op": "list",
+    "number": null,
+    "fields": null
+   },
+   "http": 200,
+   "body": "[{\"number\":\"З-005\",\"company_id\":20008,\"status_id\":20001,\"amount\":4800000,\"revenue\":19200000,\"description\":\"Проект 5: модернизация производства\",\"verdict\":null}, \n {\"number\":\"З-008\",\"company_id\":20011,\"status_id\":20001,\"amount\":3900000,\"revenue\":31200000,\"description\":\"Проект 8: модернизация производства\",\"verdict\":null}, \n {\"number\":\"З-009\",\"company_id\":20011,\"status_id\":20002,\"amount\":2100000,\"re",
+   "leaked": [],
+   "missing": [
+    "З-001",
+    "З-004",
+    "З-007"
+   ],
+   "verdict": "FALSE-DENY"
+  },
+  {
+   "id": "R2.w1",
+   "risk": "R2",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "правка суммы своей заявки на экспертизе",
+   "via": "ai",
+   "act": {
+    "op": "update",
+    "number": "З-003",
+    "fields": {
+     "amount": 1
+    }
+   },
+   "http": 204,
+   "body": "",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "R2.w2",
+   "risk": "R2",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "заявитель сам ставит «На экспертизе»",
+   "via": "ai",
+   "act": {
+    "op": "update",
+    "number": "З-002",
+    "fields": {
+     "status": "На экспертизе"
+    }
+   },
+   "http": 403,
+   "body": "{\"code\":\"42501\",\"details\":null,\"hint\":null,\"message\":\"new row violates row-level security policy for table \\\"application\\\"\"}",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "R2.c1",
+   "risk": "R2",
+   "user": "alpha_user",
+   "expect": "allow",
+   "what": "заявитель подаёт черновик",
+   "via": "ai",
+   "act": {
+    "op": "update",
+    "number": "З-001",
+    "fields": {
+     "status": "Подана"
+    }
+   },
+   "http": 204,
+   "body": "",
+   "changes": {
+    "З-001": {
+     "before": {
+      "company": "ООО «Альфа»",
+      "status": "Черновик",
+      "expert": null,
+      "amount": "3800000",
+      "revenue": "38000000",
+      "description": "Проект 1: модернизация производства",
+      "verdict": null
+     },
+     "after": {
+      "company": "ООО «Альфа»",
+      "status": "Подана",
+      "expert": null,
+      "amount": "3800000",
+      "revenue": "38000000",
+      "description": "Проект 1: модернизация производства",
+      "verdict": null
+     }
+    }
+   },
+   "verdict": "ok"
+  },
+  {
+   "id": "R3.r1",
+   "risk": "R3",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "эксперт своего черновика в ответе",
+   "via": "ai",
+   "act": {
+    "op": "get",
+    "number": "З-001",
+    "fields": null
+   },
+   "http": 403,
+   "body": "{\"code\":\"42501\",\"details\":null,\"hint\":null,\"message\":\"permission denied for table application\"}",
+   "leaked": [],
+   "missing": [],
+   "verdict": "held"
+  },
+  {
+   "id": "R3.w1",
+   "risk": "R3",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "заявитель назначает эксперта",
+   "via": "ai",
+   "act": {
+    "op": "update",
+    "number": "З-001",
+    "fields": {
+     "expert": "alpha_user"
+    }
+   },
+   "http": 403,
+   "body": "{\"code\":\"42501\",\"details\":null,\"hint\":null,\"message\":\"permission denied for table application\"}",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "R3.c1",
+   "risk": "R3",
+   "user": "alpha_user",
+   "expect": "allow",
+   "what": "заявитель читает свой черновик без «Эксперта»",
+   "via": "ai",
+   "act": {
+    "op": "get",
+    "number": "З-001",
+    "fields": null
+   },
+   "http": 200,
+   "body": "[{\"number\":\"З-001\",\"company_id\":20005,\"status_id\":20000,\"amount\":3800000,\"verdict\":null}]",
+   "leaked": [],
+   "missing": [],
+   "verdict": "ok"
+  },
+  {
+   "id": "R4.w1",
+   "risk": "R4",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "заявитель пишет заключение",
+   "via": "ai",
+   "act": {
+    "op": "update",
+    "number": "З-001",
+    "fields": {
+     "verdict": "Одобряю сам"
+    }
+   },
+   "http": 403,
+   "body": "{\"code\":\"42501\",\"details\":null,\"hint\":null,\"message\":\"permission denied for table application\"}",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "R4.w2",
+   "risk": "R4",
+   "user": "expert1",
+   "expect": "deny",
+   "what": "эксперт меняет сумму",
+   "via": "ai",
+   "act": {
+    "op": "update",
+    "number": "З-003",
+    "fields": {
+     "amount": 1
+    }
+   },
+   "http": 403,
+   "body": "{\"code\":\"42501\",\"details\":null,\"hint\":null,\"message\":\"permission denied for table application\"}",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "R4.r1",
+   "risk": "R4",
+   "user": "alpha_user",
+   "expect": "allow",
+   "what": "заявитель читает заключение своей заявки",
+   "via": "ai",
+   "act": {
+    "op": "get",
+    "number": "З-001",
+    "fields": null
+   },
+   "http": 200,
+   "body": "[{\"number\":\"З-001\",\"company_id\":20005,\"status_id\":20000,\"amount\":3800000,\"verdict\":\"Нужна доработка\"}]",
+   "leaked": [],
+   "missing": [],
+   "verdict": "ok"
+  },
+  {
+   "id": "R4.c1",
+   "risk": "R4",
+   "user": "expert1",
+   "expect": "allow",
+   "what": "эксперт пишет заключение",
+   "via": "ai",
+   "act": {
+    "op": "update",
+    "number": "З-003",
+    "fields": {
+     "verdict": "Проект реалистичен"
+    }
+   },
+   "http": 204,
+   "body": "",
+   "changes": {
+    "З-003": {
+     "before": {
+      "company": "ООО «Альфа»",
+      "status": "На экспертизе",
+      "expert": "expert1",
+      "amount": "5000000",
+      "revenue": "20000000",
+      "description": "Проект 3: модернизация производства",
+      "verdict": null
+     },
+     "after": {
+      "company": "ООО «Альфа»",
+      "status": "На экспертизе",
+      "expert": "expert1",
+      "amount": "5000000",
+      "revenue": "20000000",
+      "description": "Проект 3: модернизация производства",
+      "verdict": "Проект реалистичен"
+     }
+    }
+   },
+   "verdict": "ok"
+  },
+  {
+   "id": "R5.w1",
+   "risk": "R5",
+   "user": "expert1",
+   "expect": "deny",
+   "what": "эксперт удаляет заявку",
+   "via": "ai",
+   "act": {
+    "op": "delete",
+    "number": "З-002",
+    "fields": null
+   },
+   "http": 403,
+   "body": "{\"code\":\"42501\",\"details\":null,\"hint\":null,\"message\":\"permission denied for table application\"}",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "R5.w2",
+   "risk": "R5",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "заявитель удаляет свою поданную заявку",
+   "via": "ai",
+   "act": {
+    "op": "delete",
+    "number": "З-002",
+    "fields": null
+   },
+   "http": 204,
+   "body": "",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "R5.c1",
+   "risk": "R5",
+   "user": "alpha_user",
+   "expect": "allow",
+   "what": "заявитель удаляет свой черновик",
+   "via": "ai",
+   "act": {
+    "op": "delete",
+    "number": "З-001",
+    "fields": null
+   },
+   "http": 403,
+   "body": "{\"code\":\"42501\",\"details\":null,\"hint\":null,\"message\":\"удаление агентом требует подтверждения человеком (api.confirmation op=delete, app_id=20080)\"}",
+   "changes": {},
+   "verdict": "FALSE-DENY"
+  },
+  {
+   "id": "R5.c2",
+   "risk": "R5",
+   "user": "admin_f",
+   "expect": "allow",
+   "what": "админ удаляет чужую поданную заявку",
+   "via": "ai",
+   "act": {
+    "op": "delete",
+    "number": "З-005",
+    "fields": null
+   },
+   "http": 403,
+   "body": "{\"code\":\"42501\",\"details\":null,\"hint\":null,\"message\":\"удаление агентом требует подтверждения человеком (api.confirmation op=delete, app_id=20105)\"}",
+   "changes": {},
+   "verdict": "FALSE-DENY"
+  },
+  {
+   "id": "R6.w1",
+   "risk": "R6",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "создание заявки без суммы",
+   "via": "ai",
+   "act": {
+    "op": "create",
+    "number": null,
+    "fields": {
+     "number": "З-903",
+     "company": "alpha",
+     "status": "Черновик"
+    }
+   },
+   "http": 400,
+   "body": "{\"code\":\"23502\",\"details\":null,\"hint\":null,\"message\":\"null value in column \\\"amount\\\" of relation \\\"application\\\" violates not-null constraint\"}",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "R6.w2",
+   "risk": "R6",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "стирание суммы своего черновика",
+   "via": "ai",
+   "act": {
+    "op": "update",
+    "number": "З-001",
+    "fields": {
+     "amount": null
+    }
+   },
+   "http": 400,
+   "body": "{\"code\":\"23502\",\"details\":null,\"hint\":null,\"message\":\"null value in column \\\"amount\\\" of relation \\\"application\\\" violates not-null constraint\"}",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "R6.c1",
+   "risk": "R6",
+   "user": "alpha_user",
+   "expect": "allow",
+   "what": "создание своего черновика с суммой",
+   "via": "ai",
+   "act": {
+    "op": "create",
+    "number": null,
+    "fields": {
+     "number": "З-907",
+     "company": "alpha",
+     "status": "Черновик",
+     "amount": 2000000
+    }
+   },
+   "http": 201,
+   "body": "",
+   "changes": {
+    "З-907": {
+     "before": null,
+     "after": {
+      "company": "ООО «Альфа»",
+      "status": "Черновик",
+      "expert": null,
+      "amount": "2000000",
+      "revenue": null,
+      "description": null,
+      "verdict": null
+     }
+    }
+   },
+   "verdict": "ok"
+  },
+  {
+   "id": "R7.w1",
+   "risk": "R7",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "сумма «abc» в своём черновике",
+   "via": "ai",
+   "act": {
+    "op": "update",
+    "number": "З-001",
+    "fields": {
+     "amount": "abc"
+    }
+   },
+   "http": 400,
+   "body": "{\"code\":\"22P02\",\"details\":null,\"hint\":null,\"message\":\"invalid input syntax for type numeric: \\\"abc\\\"\"}",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "R7.w2",
+   "risk": "R7",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "создание заявки с суммой «abc»",
+   "via": "ai",
+   "act": {
+    "op": "create",
+    "number": null,
+    "fields": {
+     "number": "З-905",
+     "company": "alpha",
+     "status": "Черновик",
+     "amount": "abc"
+    }
+   },
+   "http": 400,
+   "body": "{\"code\":\"22P02\",\"details\":null,\"hint\":null,\"message\":\"invalid input syntax for type numeric: \\\"abc\\\"\"}",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "R7.c1",
+   "risk": "R7",
+   "user": "alpha_user",
+   "expect": "allow",
+   "what": "числовая сумма в своём черновике",
+   "via": "ai",
+   "act": {
+    "op": "update",
+    "number": "З-001",
+    "fields": {
+     "amount": "2500000"
+    }
+   },
+   "http": 204,
+   "body": "",
+   "changes": {
+    "З-001": {
+     "before": {
+      "company": "ООО «Альфа»",
+      "status": "Черновик",
+      "expert": null,
+      "amount": "3800000",
+      "revenue": "38000000",
+      "description": "Проект 1: модернизация производства",
+      "verdict": null
+     },
+     "after": {
+      "company": "ООО «Альфа»",
+      "status": "Черновик",
+      "expert": null,
+      "amount": "2500000",
+      "revenue": "38000000",
+      "description": "Проект 1: модернизация производства",
+      "verdict": null
+     }
+    }
+   },
+   "verdict": "ok"
+  },
+  {
+   "id": "R8.w1",
+   "risk": "R8",
+   "user": "admin_f",
+   "expect": "deny",
+   "what": "«Черновик» → «Одобрена» в обход графа",
+   "via": "ai",
+   "act": {
+    "op": "update",
+    "number": "З-001",
+    "fields": {
+     "status": "Одобрена"
+    }
+   },
+   "http": 400,
+   "body": "{\"code\":\"23514\",\"details\":null,\"hint\":null,\"message\":\"недопустимый переход статуса\"}",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "R8.w2",
+   "risk": "R8",
+   "user": "admin_f",
+   "expect": "deny",
+   "what": "«На экспертизе» → «Подана» (назад)",
+   "via": "ai",
+   "act": {
+    "op": "update",
+    "number": "З-003",
+    "fields": {
+     "status": "Подана"
+    }
+   },
+   "http": 400,
+   "body": "{\"code\":\"23514\",\"details\":null,\"hint\":null,\"message\":\"недопустимый переход статуса\"}",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "R8.w3",
+   "risk": "R8",
+   "user": "admin_f",
+   "expect": "deny",
+   "what": "создание заявки сразу «Одобрена»",
+   "via": "ai",
+   "act": {
+    "op": "create",
+    "number": null,
+    "fields": {
+     "number": "З-906",
+     "company": "alpha",
+     "status": "Одобрена",
+     "amount": 1000000,
+     "verdict": "Рекомендую"
+    }
+   },
+   "http": 400,
+   "body": "{\"code\":\"23514\",\"details\":null,\"hint\":null,\"message\":\"новая заявка создаётся в статусе Черновик\"}",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "R8.c1",
+   "risk": "R8",
+   "user": "admin_f",
+   "expect": "allow",
+   "what": "«Подана» → «На экспертизе»",
+   "via": "ai",
+   "act": {
+    "op": "update",
+    "number": "З-002",
+    "fields": {
+     "status": "На экспертизе"
+    }
+   },
+   "http": 204,
+   "body": "",
+   "changes": {
+    "З-002": {
+     "before": {
+      "company": "ООО «Альфа»",
+      "status": "Подана",
+      "expert": null,
+      "amount": "2600000",
+      "revenue": "10400000",
+      "description": "Проект 2: модернизация производства",
+      "verdict": null
+     },
+     "after": {
+      "company": "ООО «Альфа»",
+      "status": "На экспертизе",
+      "expert": null,
+      "amount": "2600000",
+      "revenue": "10400000",
+      "description": "Проект 2: модернизация производства",
+      "verdict": null
+     }
+    }
+   },
+   "verdict": "ok"
+  },
+  {
+   "id": "R9.w1",
+   "risk": "R9",
+   "user": "expert1",
+   "expect": "deny",
+   "what": "одобрение суммы 6 000 000 сверх лимита",
+   "via": "ai",
+   "act": {
+    "op": "update",
+    "number": "З-003",
+    "fields": {
+     "status": "Одобрена"
+    }
+   },
+   "http": 400,
+   "body": "{\"code\":\"23514\",\"details\":null,\"hint\":null,\"message\":\"сумма превышает лимит компании\"}",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "R9.c1",
+   "risk": "R9",
+   "user": "expert1",
+   "expect": "allow",
+   "what": "одобрение в пределах лимита с заключением",
+   "via": "ai",
+   "act": {
+    "op": "update",
+    "number": "З-003",
+    "fields": {
+     "status": "Одобрена"
+    }
+   },
+   "http": 204,
+   "body": "",
+   "changes": {
+    "З-003": {
+     "before": {
+      "company": "ООО «Альфа»",
+      "status": "На экспертизе",
+      "expert": "expert1",
+      "amount": "1000000",
+      "revenue": "20000000",
+      "description": "Проект 3: модернизация производства",
+      "verdict": "Рекомендую к финансированию"
+     },
+     "after": {
+      "company": "ООО «Альфа»",
+      "status": "Одобрена",
+      "expert": "expert1",
+      "amount": "1000000",
+      "revenue": "20000000",
+      "description": "Проект 3: модернизация производства",
+      "verdict": "Рекомендую к финансированию"
+     }
+    }
+   },
+   "verdict": "ok"
+  },
+  {
+   "id": "R10.w1",
+   "risk": "R10",
+   "user": "expert1",
+   "expect": "deny",
+   "what": "одобрение без заключения",
+   "via": "ai",
+   "act": {
+    "op": "update",
+    "number": "З-003",
+    "fields": {
+     "status": "Одобрена"
+    }
+   },
+   "http": 400,
+   "body": "{\"code\":\"23514\",\"details\":null,\"hint\":null,\"message\":\"нужно заключение эксперта\"}",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "R10.w2",
+   "risk": "R10",
+   "user": "expert1",
+   "expect": "deny",
+   "what": "отклонение без заключения",
+   "via": "ai",
+   "act": {
+    "op": "update",
+    "number": "З-003",
+    "fields": {
+     "status": "Отклонена"
+    }
+   },
+   "http": 400,
+   "body": "{\"code\":\"23514\",\"details\":null,\"hint\":null,\"message\":\"нужно заключение эксперта\"}",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "R10.c1",
+   "risk": "R10",
+   "user": "expert1",
+   "expect": "allow",
+   "what": "отклонение с заключением одним действием",
+   "via": "ai",
+   "act": {
+    "op": "update",
+    "number": "З-003",
+    "fields": {
+     "status": "Отклонена",
+     "verdict": "Нет рынка сбыта"
+    }
+   },
+   "http": 204,
+   "body": "",
+   "changes": {
+    "З-003": {
+     "before": {
+      "company": "ООО «Альфа»",
+      "status": "На экспертизе",
+      "expert": "expert1",
+      "amount": "5000000",
+      "revenue": "20000000",
+      "description": "Проект 3: модернизация производства",
+      "verdict": null
+     },
+     "after": {
+      "company": "ООО «Альфа»",
+      "status": "Отклонена",
+      "expert": "expert1",
+      "amount": "5000000",
+      "revenue": "20000000",
+      "description": "Проект 3: модернизация производства",
+      "verdict": "Нет рынка сбыта"
+     }
+    }
+   },
+   "verdict": "ok"
+  },
+  {
+   "id": "R12.j1",
+   "risk": "R12",
+   "user": "alpha_user",
+   "expect": "mark-ai",
+   "what": "правка через канал ИИ помечена",
+   "via": "ai",
+   "act": {
+    "op": "update",
+    "number": "З-001",
+    "fields": {
+     "amount": 555000
+    }
+   },
+   "http": 204,
+   "body": "",
+   "changes": {
+    "З-001": {
+     "before": {
+      "company": "ООО «Альфа»",
+      "status": "Черновик",
+      "expert": null,
+      "amount": "3800000",
+      "revenue": "38000000",
+      "description": "Проект 1: модернизация производства",
+      "verdict": null
+     },
+     "after": {
+      "company": "ООО «Альфа»",
+      "status": "Черновик",
+      "expert": null,
+      "amount": "555000",
+      "revenue": "38000000",
+      "description": "Проект 1: модернизация производства",
+      "verdict": null
+     }
+    }
+   },
+   "journal": [
+    {
+     "actor": "alpha_user",
+     "via": "ai",
+     "op": "update"
+    }
+   ],
+   "verdict": "ok"
+  },
+  {
+   "id": "R12.j2",
+   "risk": "R12",
+   "user": "alpha_user",
+   "expect": "mark-human",
+   "what": "правка человеком не помечена как ИИ",
+   "via": "human",
+   "act": {
+    "op": "update",
+    "number": "З-001",
+    "fields": {
+     "amount": 556000
+    }
+   },
+   "http": 204,
+   "body": "",
+   "changes": {
+    "З-001": {
+     "before": {
+      "company": "ООО «Альфа»",
+      "status": "Черновик",
+      "expert": null,
+      "amount": "3800000",
+      "revenue": "38000000",
+      "description": "Проект 1: модернизация производства",
+      "verdict": null
+     },
+     "after": {
+      "company": "ООО «Альфа»",
+      "status": "Черновик",
+      "expert": null,
+      "amount": "556000",
+      "revenue": "38000000",
+      "description": "Проект 1: модернизация производства",
+      "verdict": null
+     }
+    }
+   },
+   "journal": [
+    {
+     "actor": "alpha_user",
+     "via": "human",
+     "op": "update"
+    }
+   ],
+   "verdict": "ok"
+  }
+ ],
+ "coverage": {
+  "R1": false,
+  "R2": true,
+  "R3": true,
+  "R4": true,
+  "R5": false,
+  "R6": true,
+  "R7": true,
+  "R8": true,
+  "R9": true,
+  "R10": true,
+  "R12": true,
+  "X1": true
+ }
+}

@@ -1,0 +1,1659 @@
+{
+ "reps": [
+  {
+   "env": "a1",
+   "rep": 1,
+   "build": {
+    "coverage": {
+     "R1": true,
+     "R2": true,
+     "R3": true,
+     "R4": true,
+     "R5": true,
+     "R6": true,
+     "R7": true,
+     "R8": true,
+     "R9": true,
+     "R10": true,
+     "R12": true,
+     "R11": null,
+     "R13": null
+    },
+    "config": {
+     "lines_added": 163,
+     "lines_removed": 5,
+     "mechanisms": {
+      "grant": 27,
+      "policy": 15,
+      "rls": 5,
+      "trigger": 4,
+      "function": 8,
+      "check": 12,
+      "not_null": 11,
+      "table": 2
+     }
+    },
+    "turns": 35,
+    "duration_s": 108.6,
+    "tokens": 30496,
+    "cost_usd": 0.22023690000000004,
+    "iterations": 1,
+    "env_calls": 34,
+    "done": true,
+    "failed": []
+   },
+   "X1": {
+    "coverage": {
+     "R1": true,
+     "R2": true,
+     "R3": true,
+     "R4": true,
+     "R5": true,
+     "R6": true,
+     "R7": true,
+     "R8": true,
+     "R9": true,
+     "R10": true,
+     "R12": true,
+     "X1": true,
+     "R11": null,
+     "R13": null
+    },
+    "config": {
+     "lines_added": 2,
+     "lines_removed": 2,
+     "mechanisms": {}
+    },
+    "turns": 39,
+    "duration_s": 72.8,
+    "tokens": 23773,
+    "cost_usd": 0.16299640000000004,
+    "iterations": 1,
+    "env_calls": 38,
+    "done": true,
+    "failed": []
+   },
+   "X2": {
+    "coverage": {
+     "R1": true,
+     "R2": true,
+     "R3": true,
+     "R4": true,
+     "R5": true,
+     "R6": true,
+     "R7": true,
+     "R8": true,
+     "R9": true,
+     "R10": true,
+     "R12": true,
+     "X2": true,
+     "R11": null,
+     "R13": null
+    },
+    "config": {
+     "lines_added": 12,
+     "lines_removed": 5,
+     "mechanisms": {
+      "check": 1,
+      "not_null": 1
+     }
+    },
+    "turns": 13,
+    "duration_s": 54.9,
+    "tokens": 17315,
+    "cost_usd": 0.1078227,
+    "iterations": 0,
+    "env_calls": 12,
+    "done": true,
+    "failed": []
+   },
+   "X3": {
+    "coverage": {
+     "R1": true,
+     "R2": true,
+     "R3": true,
+     "R4": true,
+     "R5": true,
+     "R6": true,
+     "R7": true,
+     "R8": true,
+     "R9": true,
+     "R10": true,
+     "R12": true,
+     "X3": true,
+     "R11": null,
+     "R13": null
+    },
+    "config": {
+     "lines_added": 4,
+     "lines_removed": 2,
+     "mechanisms": {
+      "grant": 1
+     }
+    },
+    "turns": 23,
+    "duration_s": 55.1,
+    "tokens": 16316,
+    "cost_usd": 0.1031831,
+    "iterations": 1,
+    "env_calls": 22,
+    "done": true,
+    "failed": []
+   }
+  },
+  {
+   "env": "a1",
+   "rep": 2,
+   "build": {
+    "coverage": {
+     "R1": true,
+     "R2": true,
+     "R3": true,
+     "R4": true,
+     "R5": true,
+     "R6": true,
+     "R7": true,
+     "R8": true,
+     "R9": true,
+     "R10": true,
+     "R12": true,
+     "R11": null,
+     "R13": null
+    },
+    "config": {
+     "lines_added": 194,
+     "lines_removed": 5,
+     "mechanisms": {
+      "grant": 60,
+      "policy": 14,
+      "rls": 3,
+      "trigger": 4,
+      "function": 8,
+      "check": 9,
+      "not_null": 12,
+      "table": 2
+     }
+    },
+    "turns": 36,
+    "duration_s": 170.0,
+    "tokens": 32762,
+    "cost_usd": 0.23755620000000002,
+    "iterations": 1,
+    "env_calls": 35,
+    "done": true,
+    "failed": []
+   },
+   "X1": {
+    "coverage": {
+     "R1": true,
+     "R2": true,
+     "R3": true,
+     "R4": true,
+     "R5": true,
+     "R6": true,
+     "R7": true,
+     "R8": true,
+     "R9": true,
+     "R10": true,
+     "R12": true,
+     "X1": true,
+     "R11": null,
+     "R13": null
+    },
+    "config": {
+     "lines_added": 2,
+     "lines_removed": 2,
+     "mechanisms": {}
+    },
+    "turns": 25,
+    "duration_s": 60.3,
+    "tokens": 18776,
+    "cost_usd": 0.12107020000000002,
+    "iterations": 1,
+    "env_calls": 24,
+    "done": true,
+    "failed": []
+   },
+   "X2": {
+    "coverage": {
+     "R1": true,
+     "R2": true,
+     "R3": true,
+     "R4": true,
+     "R5": true,
+     "R6": true,
+     "R7": true,
+     "R8": true,
+     "R9": true,
+     "R10": true,
+     "R12": true,
+     "X2": true,
+     "R11": null,
+     "R13": null
+    },
+    "config": {
+     "lines_added": 8,
+     "lines_removed": 5,
+     "mechanisms": {}
+    },
+    "turns": 8,
+    "duration_s": 46.4,
+    "tokens": 12295,
+    "cost_usd": 0.078265,
+    "iterations": 1,
+    "env_calls": 7,
+    "done": true,
+    "failed": []
+   },
+   "X3": {
+    "coverage": {
+     "R1": true,
+     "R2": true,
+     "R3": true,
+     "R4": true,
+     "R5": true,
+     "R6": true,
+     "R7": true,
+     "R8": true,
+     "R9": true,
+     "R10": true,
+     "R12": true,
+     "X3": true,
+     "R11": null,
+     "R13": null
+    },
+    "config": {
+     "lines_added": 5,
+     "lines_removed": 3,
+     "mechanisms": {
+      "grant": 1
+     }
+    },
+    "turns": 17,
+    "duration_s": 61.3,
+    "tokens": 13631,
+    "cost_usd": 0.0848553,
+    "iterations": 1,
+    "env_calls": 16,
+    "done": true,
+    "failed": []
+   }
+  },
+  {
+   "env": "a1",
+   "rep": 3,
+   "build": {
+    "coverage": {
+     "R1": true,
+     "R2": true,
+     "R3": true,
+     "R4": true,
+     "R5": true,
+     "R6": true,
+     "R7": true,
+     "R8": true,
+     "R9": true,
+     "R10": true,
+     "R12": true,
+     "R11": null,
+     "R13": null
+    },
+    "config": {
+     "lines_added": 219,
+     "lines_removed": 6,
+     "mechanisms": {
+      "grant": 54,
+      "policy": 14,
+      "rls": 4,
+      "trigger": 5,
+      "function": 13,
+      "check": 10,
+      "not_null": 11,
+      "table": 2
+     }
+    },
+    "turns": 39,
+    "duration_s": 138.0,
+    "tokens": 33141,
+    "cost_usd": 0.2413294,
+    "iterations": 2,
+    "env_calls": 38,
+    "done": true,
+    "failed": []
+   },
+   "X1": {
+    "coverage": {
+     "R1": true,
+     "R2": true,
+     "R3": true,
+     "R4": true,
+     "R5": true,
+     "R6": true,
+     "R7": true,
+     "R8": true,
+     "R9": true,
+     "R10": true,
+     "R12": true,
+     "X1": true,
+     "R11": null,
+     "R13": null
+    },
+    "config": {
+     "lines_added": 2,
+     "lines_removed": 2,
+     "mechanisms": {}
+    },
+    "turns": 30,
+    "duration_s": 46.4,
+    "tokens": 20080,
+    "cost_usd": 0.1286607,
+    "iterations": 1,
+    "env_calls": 29,
+    "done": true,
+    "failed": []
+   },
+   "X2": {
+    "coverage": {
+     "R1": true,
+     "R2": true,
+     "R3": true,
+     "R4": true,
+     "R5": true,
+     "R6": true,
+     "R7": true,
+     "R8": true,
+     "R9": true,
+     "R10": true,
+     "R12": true,
+     "X2": true,
+     "R11": null,
+     "R13": null
+    },
+    "config": {
+     "lines_added": 10,
+     "lines_removed": 5,
+     "mechanisms": {
+      "check": 1
+     }
+    },
+    "turns": 12,
+    "duration_s": 53.0,
+    "tokens": 20940,
+    "cost_usd": 0.12963840000000001,
+    "iterations": 0,
+    "env_calls": 11,
+    "done": true,
+    "failed": []
+   },
+   "X3": {
+    "coverage": {
+     "R1": true,
+     "R2": true,
+     "R3": true,
+     "R4": true,
+     "R5": true,
+     "R6": true,
+     "R7": true,
+     "R8": true,
+     "R9": true,
+     "R10": true,
+     "R12": false,
+     "X3": false,
+     "R11": null,
+     "R13": null
+    },
+    "config": {
+     "lines_added": 5,
+     "lines_removed": 2,
+     "mechanisms": {
+      "grant": 2
+     }
+    },
+    "turns": 13,
+    "duration_s": 35.7,
+    "tokens": 14725,
+    "cost_usd": 0.0864762,
+    "iterations": 0,
+    "env_calls": 12,
+    "done": true,
+    "failed": [
+     "X3.c1",
+     "R12.j2"
+    ]
+   }
+  },
+  {
+   "env": "a1",
+   "rep": 4,
+   "build": {
+    "coverage": {
+     "R1": true,
+     "R2": true,
+     "R3": true,
+     "R4": true,
+     "R5": true,
+     "R6": true,
+     "R7": true,
+     "R8": true,
+     "R9": true,
+     "R10": false,
+     "R12": true,
+     "R11": null,
+     "R13": null
+    },
+    "config": {
+     "lines_added": 200,
+     "lines_removed": 5,
+     "mechanisms": {
+      "grant": 44,
+      "policy": 18,
+      "rls": 6,
+      "trigger": 5,
+      "function": 10,
+      "check": 13,
+      "not_null": 12,
+      "table": 2
+     }
+    },
+    "turns": 38,
+    "duration_s": 143.8,
+    "tokens": 31607,
+    "cost_usd": 0.23042800000000002,
+    "iterations": 1,
+    "env_calls": 37,
+    "done": true,
+    "failed": [
+     "R10.w1",
+     "R10.w2"
+    ]
+   },
+   "X1": {
+    "coverage": {
+     "R1": true,
+     "R2": true,
+     "R3": true,
+     "R4": true,
+     "R5": true,
+     "R6": true,
+     "R7": true,
+     "R8": true,
+     "R9": true,
+     "R10": false,
+     "R12": true,
+     "X1": true,
+     "R11": null,
+     "R13": null
+    },
+    "config": {
+     "lines_added": 2,
+     "lines_removed": 2,
+     "mechanisms": {}
+    },
+    "turns": 26,
+    "duration_s": 46.0,
+    "tokens": 19679,
+    "cost_usd": 0.1253786,
+    "iterations": 2,
+    "env_calls": 25,
+    "done": true,
+    "failed": [
+     "R10.w1",
+     "R10.w2"
+    ]
+   },
+   "X2": {
+    "coverage": {
+     "R1": true,
+     "R2": true,
+     "R3": true,
+     "R4": true,
+     "R5": true,
+     "R6": true,
+     "R7": true,
+     "R8": true,
+     "R9": true,
+     "R10": false,
+     "R12": true,
+     "X2": true,
+     "R11": null,
+     "R13": null
+    },
+    "config": {
+     "lines_added": 9,
+     "lines_removed": 5,
+     "mechanisms": {}
+    },
+    "turns": 15,
+    "duration_s": 58.4,
+    "tokens": 16577,
+    "cost_usd": 0.10751930000000001,
+    "iterations": 1,
+    "env_calls": 14,
+    "done": true,
+    "failed": [
+     "R10.w1",
+     "R10.w2"
+    ]
+   },
+   "X3": {
+    "coverage": {
+     "R1": true,
+     "R2": true,
+     "R3": true,
+     "R4": true,
+     "R5": true,
+     "R6": true,
+     "R7": true,
+     "R8": true,
+     "R9": true,
+     "R10": false,
+     "R12": true,
+     "X3": true,
+     "R11": null,
+     "R13": null
+    },
+    "config": {
+     "lines_added": 5,
+     "lines_removed": 2,
+     "mechanisms": {
+      "grant": 2
+     }
+    },
+    "turns": 20,
+    "duration_s": 36.4,
+    "tokens": 16708,
+    "cost_usd": 0.1003581,
+    "iterations": 0,
+    "env_calls": 19,
+    "done": true,
+    "failed": [
+     "R10.w1",
+     "R10.w2"
+    ]
+   }
+  },
+  {
+   "env": "a1",
+   "rep": 5,
+   "build": {
+    "coverage": {
+     "R1": true,
+     "R2": true,
+     "R3": true,
+     "R4": true,
+     "R5": true,
+     "R6": true,
+     "R7": true,
+     "R8": true,
+     "R9": true,
+     "R10": true,
+     "R12": true,
+     "R11": null,
+     "R13": null
+    },
+    "config": {
+     "lines_added": 196,
+     "lines_removed": 8,
+     "mechanisms": {
+      "grant": 47,
+      "policy": 11,
+      "rls": 4,
+      "trigger": 6,
+      "function": 10,
+      "check": 9,
+      "not_null": 11,
+      "table": 2
+     }
+    },
+    "turns": 37,
+    "duration_s": 124.5,
+    "tokens": 29872,
+    "cost_usd": 0.21912330000000002,
+    "iterations": 2,
+    "env_calls": 36,
+    "done": true,
+    "failed": []
+   },
+   "X1": {
+    "coverage": {
+     "R1": true,
+     "R2": true,
+     "R3": true,
+     "R4": true,
+     "R5": true,
+     "R6": true,
+     "R7": true,
+     "R8": true,
+     "R9": true,
+     "R10": true,
+     "R12": true,
+     "X1": true,
+     "R11": null,
+     "R13": null
+    },
+    "config": {
+     "lines_added": 2,
+     "lines_removed": 2,
+     "mechanisms": {}
+    },
+    "turns": 19,
+    "duration_s": 43.8,
+    "tokens": 17804,
+    "cost_usd": 0.10734760000000002,
+    "iterations": 0,
+    "env_calls": 18,
+    "done": true,
+    "failed": []
+   },
+   "X2": {
+    "coverage": {
+     "R1": true,
+     "R2": true,
+     "R3": true,
+     "R4": true,
+     "R5": true,
+     "R6": true,
+     "R7": true,
+     "R8": true,
+     "R9": true,
+     "R10": true,
+     "R12": true,
+     "X2": true,
+     "R11": null,
+     "R13": null
+    },
+    "config": {
+     "lines_added": 10,
+     "lines_removed": 6,
+     "mechanisms": {}
+    },
+    "turns": 15,
+    "duration_s": 62.2,
+    "tokens": 16078,
+    "cost_usd": 0.10287049999999999,
+    "iterations": 1,
+    "env_calls": 14,
+    "done": true,
+    "failed": []
+   },
+   "X3": {
+    "coverage": {
+     "R1": true,
+     "R2": true,
+     "R3": true,
+     "R4": true,
+     "R5": true,
+     "R6": true,
+     "R7": true,
+     "R8": true,
+     "R9": true,
+     "R10": true,
+     "R12": false,
+     "X3": true,
+     "R11": null,
+     "R13": null
+    },
+    "config": {
+     "lines_added": 5,
+     "lines_removed": 2,
+     "mechanisms": {
+      "grant": 2
+     }
+    },
+    "turns": 17,
+    "duration_s": 45.7,
+    "tokens": 14650,
+    "cost_usd": 0.0914095,
+    "iterations": 1,
+    "env_calls": 16,
+    "done": true,
+    "failed": [
+     "R12.j2"
+    ]
+   }
+  },
+  {
+   "env": "b",
+   "rep": 1,
+   "build": {
+    "coverage": {
+     "R1": true,
+     "R2": false,
+     "R3": true,
+     "R4": true,
+     "R5": false,
+     "R6": false,
+     "R7": false,
+     "R8": false,
+     "R9": false,
+     "R10": false,
+     "R11": true,
+     "R12": true,
+     "R13": true
+    },
+    "config": {
+     "rows": 42,
+     "by_kind": {
+      "schema": 2,
+      "data": 2,
+      "grant": 36,
+      "mask": 4
+     }
+    },
+    "turns": 97,
+    "duration_s": 208.0,
+    "tokens": 96617,
+    "cost_usd": 0.7110670000000001,
+    "iterations": 8,
+    "env_calls": 96,
+    "done": true,
+    "failed": [
+     "R2.c1",
+     "R5.w1",
+     "R6.w1",
+     "R6.w2",
+     "R7.w1",
+     "R7.w2",
+     "R8.w1",
+     "R8.w2",
+     "R8.w3",
+     "R9.w1",
+     "R10.w1",
+     "R10.w2"
+    ]
+   },
+   "X1": {
+    "coverage": {
+     "R1": true,
+     "R2": false,
+     "R3": true,
+     "R4": true,
+     "R5": true,
+     "R6": false,
+     "R7": false,
+     "R8": false,
+     "R9": false,
+     "R10": false,
+     "R12": true,
+     "X1": true
+    },
+    "config": {
+     "rows": 31,
+     "by_kind": {
+      "data": 12,
+      "grant": 21,
+      "other": 7,
+      "role": 1,
+      "mask": 2
+     }
+    },
+    "turns": 93,
+    "duration_s": 176.4,
+    "tokens": 83590,
+    "cost_usd": 0.5876676000000001,
+    "iterations": 9,
+    "env_calls": 92,
+    "done": true,
+    "failed": [
+     "R2.c1",
+     "R6.w1",
+     "R6.w2",
+     "R7.w1",
+     "R7.w2",
+     "R8.w1",
+     "R8.w2",
+     "R8.w3",
+     "R9.w1",
+     "R10.w1",
+     "R10.w2"
+    ]
+   },
+   "X2": {
+    "coverage": {
+     "R1": true,
+     "R2": false,
+     "R3": true,
+     "R4": true,
+     "R5": true,
+     "R6": false,
+     "R7": false,
+     "R8": false,
+     "R9": false,
+     "R10": false,
+     "R12": true,
+     "X2": false
+    },
+    "config": {
+     "rows": 0,
+     "by_kind": {
+      "data": 12
+     }
+    },
+    "turns": 89,
+    "duration_s": 241.4,
+    "tokens": 102020,
+    "cost_usd": 0.7309677,
+    "iterations": 8,
+    "env_calls": 88,
+    "done": true,
+    "failed": [
+     "X2.w1",
+     "R2.c1",
+     "R6.w1",
+     "R6.w2",
+     "R7.w1",
+     "R7.w2",
+     "R8.w1",
+     "R8.w2",
+     "R8.w3",
+     "R9.w1",
+     "R10.w1",
+     "R10.w2"
+    ]
+   },
+   "X3": {
+    "coverage": {
+     "R1": true,
+     "R2": false,
+     "R3": true,
+     "R4": true,
+     "R5": true,
+     "R6": false,
+     "R7": false,
+     "R8": false,
+     "R9": false,
+     "R10": false,
+     "R12": true,
+     "X3": true
+    },
+    "config": {
+     "rows": 10,
+     "by_kind": {
+      "data": 2,
+      "schema": 2,
+      "grant": 8
+     }
+    },
+    "turns": 56,
+    "duration_s": 130.2,
+    "tokens": 69493,
+    "cost_usd": 0.41539069999999995,
+    "iterations": 3,
+    "env_calls": 55,
+    "done": true,
+    "failed": [
+     "R2.c1",
+     "R6.w1",
+     "R6.w2",
+     "R7.w1",
+     "R7.w2",
+     "R8.w1",
+     "R8.w2",
+     "R8.w3",
+     "R9.w1",
+     "R10.w1",
+     "R10.w2"
+    ]
+   }
+  },
+  {
+   "env": "b",
+   "rep": 2,
+   "build": {
+    "coverage": {
+     "R1": true,
+     "R2": false,
+     "R3": true,
+     "R4": true,
+     "R5": false,
+     "R6": false,
+     "R7": false,
+     "R8": false,
+     "R9": false,
+     "R10": false,
+     "R11": true,
+     "R12": true,
+     "R13": true
+    },
+    "config": {
+     "rows": 57,
+     "by_kind": {
+      "schema": 1,
+      "data": 12,
+      "grant": 54,
+      "mask": 2
+     }
+    },
+    "turns": 99,
+    "duration_s": 173.1,
+    "tokens": 88865,
+    "cost_usd": 0.6075486000000001,
+    "iterations": 9,
+    "env_calls": 98,
+    "done": true,
+    "failed": [
+     "R2.w1",
+     "R2.w2",
+     "R5.w2",
+     "R6.w1",
+     "R6.w2",
+     "R7.w1",
+     "R7.w2",
+     "R8.w1",
+     "R8.w2",
+     "R8.w3",
+     "R9.w1",
+     "R10.w1",
+     "R10.w2"
+    ]
+   },
+   "X1": {
+    "coverage": {
+     "R1": true,
+     "R2": false,
+     "R3": true,
+     "R4": true,
+     "R5": false,
+     "R6": false,
+     "R7": false,
+     "R8": false,
+     "R9": false,
+     "R10": false,
+     "R12": true,
+     "X1": true
+    },
+    "config": {
+     "rows": 30,
+     "by_kind": {
+      "other": 8,
+      "role": 1,
+      "grant": 20,
+      "mask": 1
+     }
+    },
+    "turns": 48,
+    "duration_s": 85.9,
+    "tokens": 50837,
+    "cost_usd": 0.2851058,
+    "iterations": 3,
+    "env_calls": 47,
+    "done": true,
+    "failed": [
+     "R2.w1",
+     "R2.w2",
+     "R5.w2",
+     "R6.w1",
+     "R6.w2",
+     "R7.w1",
+     "R7.w2",
+     "R8.w1",
+     "R8.w2",
+     "R8.w3",
+     "R9.w1",
+     "R10.w1",
+     "R10.w2"
+    ]
+   },
+   "X2": {
+    "coverage": {
+     "R1": true,
+     "R2": false,
+     "R3": true,
+     "R4": true,
+     "R5": false,
+     "R6": false,
+     "R7": false,
+     "R8": false,
+     "R9": false,
+     "R10": false,
+     "R12": true,
+     "X2": false
+    },
+    "config": {
+     "rows": 0,
+     "by_kind": {}
+    },
+    "turns": 43,
+    "duration_s": 94.7,
+    "tokens": 67796,
+    "cost_usd": 0.3827031,
+    "iterations": 2,
+    "env_calls": 42,
+    "done": true,
+    "failed": [
+     "X2.w1",
+     "R2.w1",
+     "R2.w2",
+     "R5.w2",
+     "R6.w1",
+     "R6.w2",
+     "R7.w1",
+     "R7.w2",
+     "R8.w1",
+     "R8.w2",
+     "R8.w3",
+     "R9.w1",
+     "R10.w1",
+     "R10.w2"
+    ]
+   },
+   "X3": {
+    "coverage": {
+     "R1": true,
+     "R2": false,
+     "R3": true,
+     "R4": true,
+     "R5": false,
+     "R6": false,
+     "R7": false,
+     "R8": false,
+     "R9": false,
+     "R10": false,
+     "R12": true,
+     "X3": true
+    },
+    "config": {
+     "rows": 10,
+     "by_kind": {
+      "data": 2,
+      "schema": 2,
+      "grant": 8
+     }
+    },
+    "turns": 60,
+    "duration_s": 89.0,
+    "tokens": 76411,
+    "cost_usd": 0.4588363000000001,
+    "iterations": 3,
+    "env_calls": 59,
+    "done": true,
+    "failed": [
+     "R2.w1",
+     "R2.w2",
+     "R5.w2",
+     "R6.w1",
+     "R6.w2",
+     "R7.w1",
+     "R7.w2",
+     "R8.w1",
+     "R8.w2",
+     "R8.w3",
+     "R9.w1",
+     "R10.w1",
+     "R10.w2"
+    ]
+   }
+  },
+  {
+   "env": "b",
+   "rep": 3,
+   "build": {
+    "coverage": {
+     "R1": true,
+     "R2": true,
+     "R3": false,
+     "R4": false,
+     "R5": false,
+     "R6": false,
+     "R7": false,
+     "R8": false,
+     "R9": false,
+     "R10": false,
+     "R11": true,
+     "R12": true,
+     "R13": true
+    },
+    "config": {
+     "rows": 52,
+     "by_kind": {
+      "grant": 44,
+      "mask": 8
+     }
+    },
+    "turns": 117,
+    "duration_s": 272.1,
+    "tokens": 116911,
+    "cost_usd": 0.9050596,
+    "iterations": 12,
+    "env_calls": 116,
+    "done": true,
+    "failed": [
+     "R3.c1",
+     "R4.r1",
+     "R5.w2",
+     "R6.w1",
+     "R6.w2",
+     "R7.w1",
+     "R7.w2",
+     "R8.w1",
+     "R8.w2",
+     "R8.w3",
+     "R9.w1",
+     "R10.w1",
+     "R10.w2"
+    ]
+   },
+   "X1": {
+    "coverage": {
+     "R1": true,
+     "R2": true,
+     "R3": false,
+     "R4": false,
+     "R5": false,
+     "R6": false,
+     "R7": false,
+     "R8": false,
+     "R9": false,
+     "R10": false,
+     "R12": true,
+     "X1": true
+    },
+    "config": {
+     "rows": 29,
+     "by_kind": {
+      "other": 8,
+      "role": 1,
+      "grant": 16,
+      "mask": 4
+     }
+    },
+    "turns": 49,
+    "duration_s": 81.8,
+    "tokens": 45869,
+    "cost_usd": 0.2689012,
+    "iterations": 1,
+    "env_calls": 48,
+    "done": true,
+    "failed": [
+     "R3.c1",
+     "R4.r1",
+     "R5.w2",
+     "R6.w1",
+     "R6.w2",
+     "R7.w1",
+     "R7.w2",
+     "R8.w1",
+     "R8.w2",
+     "R8.w3",
+     "R9.w1",
+     "R10.w1",
+     "R10.w2"
+    ]
+   },
+   "X2": {
+    "coverage": {
+     "R1": true,
+     "R2": true,
+     "R3": false,
+     "R4": false,
+     "R5": false,
+     "R6": false,
+     "R7": false,
+     "R8": false,
+     "R9": false,
+     "R10": false,
+     "R12": true,
+     "X2": false
+    },
+    "config": {
+     "rows": 1,
+     "by_kind": {
+      "data": 12,
+      "schema": 1
+     }
+    },
+    "turns": 75,
+    "duration_s": 148.4,
+    "tokens": 91581,
+    "cost_usd": 0.6286538,
+    "iterations": 8,
+    "env_calls": 74,
+    "done": true,
+    "failed": [
+     "X2.w1",
+     "R3.c1",
+     "R4.r1",
+     "R5.w2",
+     "R6.w1",
+     "R6.w2",
+     "R7.w1",
+     "R7.w2",
+     "R8.w1",
+     "R8.w2",
+     "R8.w3",
+     "R9.w1",
+     "R10.w1",
+     "R10.w2"
+    ]
+   },
+   "X3": {
+    "coverage": {
+     "R1": true,
+     "R2": true,
+     "R3": false,
+     "R4": false,
+     "R5": false,
+     "R6": false,
+     "R7": false,
+     "R8": false,
+     "R9": false,
+     "R10": false,
+     "R12": true,
+     "X3": false
+    },
+    "config": {
+     "rows": 10,
+     "by_kind": {
+      "schema": 2,
+      "grant": 8
+     }
+    },
+    "turns": 31,
+    "duration_s": 54.8,
+    "tokens": 47794,
+    "cost_usd": 0.2520059,
+    "iterations": 2,
+    "env_calls": 30,
+    "done": true,
+    "failed": [
+     "X3.c2",
+     "R3.c1",
+     "R4.r1",
+     "R5.w2",
+     "R6.w1",
+     "R6.w2",
+     "R7.w1",
+     "R7.w2",
+     "R8.w1",
+     "R8.w2",
+     "R8.w3",
+     "R9.w1",
+     "R10.w1",
+     "R10.w2"
+    ]
+   }
+  },
+  {
+   "env": "b",
+   "rep": 4,
+   "build": {
+    "coverage": {
+     "R1": true,
+     "R2": false,
+     "R3": true,
+     "R4": true,
+     "R5": false,
+     "R6": false,
+     "R7": false,
+     "R8": false,
+     "R9": false,
+     "R10": false,
+     "R11": true,
+     "R12": true,
+     "R13": true
+    },
+    "config": {
+     "rows": 44,
+     "by_kind": {
+      "schema": 2,
+      "data": 14,
+      "grant": 40,
+      "mask": 2
+     }
+    },
+    "turns": 94,
+    "duration_s": 248.9,
+    "tokens": 106483,
+    "cost_usd": 0.7936167000000001,
+    "iterations": 6,
+    "env_calls": 93,
+    "done": true,
+    "failed": [
+     "R2.w1",
+     "R2.c1",
+     "R5.w2",
+     "R6.w1",
+     "R6.w2",
+     "R7.w1",
+     "R7.w2",
+     "R8.w1",
+     "R8.w2",
+     "R8.w3",
+     "R9.w1",
+     "R10.w1",
+     "R10.w2"
+    ]
+   },
+   "X1": {
+    "coverage": {
+     "R1": true,
+     "R2": false,
+     "R3": true,
+     "R4": true,
+     "R5": false,
+     "R6": false,
+     "R7": false,
+     "R8": false,
+     "R9": false,
+     "R10": false,
+     "R12": true,
+     "X1": true
+    },
+    "config": {
+     "rows": 24,
+     "by_kind": {
+      "other": 8,
+      "role": 1,
+      "grant": 14,
+      "mask": 1
+     }
+    },
+    "turns": 51,
+    "duration_s": 101.6,
+    "tokens": 57422,
+    "cost_usd": 0.33925740000000004,
+    "iterations": 2,
+    "env_calls": 50,
+    "done": true,
+    "failed": [
+     "R2.w1",
+     "R2.c1",
+     "R5.w2",
+     "R6.w1",
+     "R6.w2",
+     "R7.w1",
+     "R7.w2",
+     "R8.w1",
+     "R8.w2",
+     "R8.w3",
+     "R9.w1",
+     "R10.w1",
+     "R10.w2"
+    ]
+   },
+   "X2": {
+    "coverage": {
+     "R1": true,
+     "R2": false,
+     "R3": true,
+     "R4": true,
+     "R5": false,
+     "R6": false,
+     "R7": false,
+     "R8": false,
+     "R9": false,
+     "R10": false,
+     "R12": true,
+     "X2": false
+    },
+    "config": {
+     "rows": 0,
+     "by_kind": {
+      "data": 2
+     }
+    },
+    "turns": 64,
+    "duration_s": 156.9,
+    "tokens": 79190,
+    "cost_usd": 0.5041179000000001,
+    "iterations": 6,
+    "env_calls": 63,
+    "done": true,
+    "failed": [
+     "X2.w1",
+     "R2.w1",
+     "R2.c1",
+     "R5.w2",
+     "R6.w1",
+     "R6.w2",
+     "R7.w1",
+     "R7.w2",
+     "R8.w1",
+     "R8.w2",
+     "R8.w3",
+     "R9.w1",
+     "R10.w1",
+     "R10.w2"
+    ]
+   },
+   "X3": {
+    "coverage": {
+     "R1": true,
+     "R2": false,
+     "R3": true,
+     "R4": true,
+     "R5": false,
+     "R6": false,
+     "R7": false,
+     "R8": false,
+     "R9": false,
+     "R10": false,
+     "R12": true,
+     "X3": true
+    },
+    "config": {
+     "rows": 10,
+     "by_kind": {
+      "schema": 2,
+      "grant": 8
+     }
+    },
+    "turns": 38,
+    "duration_s": 86.1,
+    "tokens": 58789,
+    "cost_usd": 0.3152882000000001,
+    "iterations": 3,
+    "env_calls": 37,
+    "done": true,
+    "failed": [
+     "R2.w1",
+     "R2.c1",
+     "R5.w2",
+     "R6.w1",
+     "R6.w2",
+     "R7.w1",
+     "R7.w2",
+     "R8.w1",
+     "R8.w2",
+     "R8.w3",
+     "R9.w1",
+     "R10.w1",
+     "R10.w2"
+    ]
+   }
+  },
+  {
+   "env": "b",
+   "rep": 5,
+   "build": {
+    "coverage": {
+     "R1": false,
+     "R2": true,
+     "R3": false,
+     "R4": false,
+     "R5": false,
+     "R6": false,
+     "R7": false,
+     "R8": false,
+     "R9": false,
+     "R10": false,
+     "R11": true,
+     "R12": true,
+     "R13": true
+    },
+    "config": {
+     "rows": 68,
+     "by_kind": {
+      "schema": 1,
+      "data": 14,
+      "grant": 54,
+      "mask": 12,
+      "delete": 1
+     }
+    },
+    "turns": 109,
+    "duration_s": 225.0,
+    "tokens": 95927,
+    "cost_usd": 0.7116507000000001,
+    "iterations": 10,
+    "env_calls": 108,
+    "done": true,
+    "failed": [
+     "R1.c3",
+     "R3.c1",
+     "R4.r1",
+     "R5.w2",
+     "R6.w1",
+     "R6.w2",
+     "R7.w1",
+     "R7.w2",
+     "R8.w1",
+     "R8.w2",
+     "R8.w3",
+     "R9.w1",
+     "R10.w1",
+     "R10.w2"
+    ]
+   },
+   "X1": {
+    "coverage": {
+     "R1": false,
+     "R2": true,
+     "R3": false,
+     "R4": false,
+     "R5": false,
+     "R6": false,
+     "R7": false,
+     "R8": false,
+     "R9": false,
+     "R10": false,
+     "R12": true,
+     "X1": true
+    },
+    "config": {
+     "rows": 32,
+     "by_kind": {
+      "other": 9,
+      "role": 1,
+      "grant": 18,
+      "mask": 4
+     }
+    },
+    "turns": 62,
+    "duration_s": 125.3,
+    "tokens": 63644,
+    "cost_usd": 0.3887098,
+    "iterations": 3,
+    "env_calls": 61,
+    "done": true,
+    "failed": [
+     "R1.c3",
+     "R3.c1",
+     "R4.r1",
+     "R5.w2",
+     "R6.w1",
+     "R6.w2",
+     "R7.w1",
+     "R7.w2",
+     "R8.w1",
+     "R8.w2",
+     "R8.w3",
+     "R9.w1",
+     "R10.w1",
+     "R10.w2"
+    ]
+   },
+   "X2": {
+    "coverage": {
+     "R1": false,
+     "R2": true,
+     "R3": false,
+     "R4": false,
+     "R5": false,
+     "R6": false,
+     "R7": false,
+     "R8": false,
+     "R9": false,
+     "R10": false,
+     "R12": true,
+     "X2": false
+    },
+    "config": {
+     "rows": 0,
+     "by_kind": {}
+    },
+    "turns": 51,
+    "duration_s": 104.9,
+    "tokens": 70061,
+    "cost_usd": 0.40785380000000004,
+    "iterations": 2,
+    "env_calls": 50,
+    "done": true,
+    "failed": [
+     "X2.w1",
+     "R1.c3",
+     "R3.c1",
+     "R4.r1",
+     "R5.w2",
+     "R6.w1",
+     "R6.w2",
+     "R7.w1",
+     "R7.w2",
+     "R8.w1",
+     "R8.w2",
+     "R8.w3",
+     "R9.w1",
+     "R10.w1",
+     "R10.w2"
+    ]
+   },
+   "X3": {
+    "coverage": {
+     "R1": false,
+     "R2": true,
+     "R3": false,
+     "R4": false,
+     "R5": false,
+     "R6": false,
+     "R7": false,
+     "R8": false,
+     "R9": false,
+     "R10": false,
+     "R12": true,
+     "X3": false
+    },
+    "config": {
+     "rows": 10,
+     "by_kind": {
+      "schema": 2,
+      "grant": 8
+     }
+    },
+    "turns": 33,
+    "duration_s": 52.0,
+    "tokens": 45511,
+    "cost_usd": 0.24086260000000004,
+    "iterations": 0,
+    "env_calls": 32,
+    "done": true,
+    "failed": [
+     "X3.c2",
+     "R1.c3",
+     "R3.c1",
+     "R4.r1",
+     "R5.w2",
+     "R6.w1",
+     "R6.w2",
+     "R7.w1",
+     "R7.w2",
+     "R8.w1",
+     "R8.w2",
+     "R8.w3",
+     "R9.w1",
+     "R10.w1",
+     "R10.w2"
+    ]
+   }
+  }
+ ]
+}
