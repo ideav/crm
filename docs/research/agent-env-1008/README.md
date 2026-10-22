@@ -13,6 +13,8 @@
 | `pilot/` | Пилот с LLM: протокол (`PROTOCOL.md`), сценарии и оракулы (`scenarios.py`, самопроверка `selftest.py`), адаптеры вариантов A / B0 / B1, раннер `run.py`, сводка `analyze.py` |
 | `results/*.json` | Сырые результаты проб без LLM |
 | `results/pilot-<дата>/` | Результаты пилота с LLM и сводка (`README.md`) |
+| `results/rerun-20261022-n8/` | Повтор N8 после фиксов agent-chat и ideav-mcp |
+| `results/m-20261022/` | Фаза 2: сценарии, в которых модель ошибается (`pilot/PROTOCOL-M.md`), и сводка (`README.md`) |
 
 ## Пробы механизмов: что держит ядро
 
@@ -29,7 +31,7 @@
 | Граф переходов статусов, межполевые условия | механизма нет | механизма нет |
 | Контроль: разрешённые действия | своя карточка при маске по ссылке закрыта | все проходят |
 
-Файлы: `results/probes-20261020-main.json`, `results/probes-20261020-1008.json` — стенд; `results/prod-20261020-1008.json` — боевое ядро.
+Файлы: `results/probes-20261020-main.json`, `results/probes-20261020-1008.json` — стенд; `results/prod-20261020-1008.json` — боевое ядро; `results/probes-20261022-f9cc935.json` — стенд на ядре ideav.ru 22.10 (те же вердикты). Обязательность и NUMBER — crm#5219, crm#5220.
 
 ## Запуск
 
@@ -51,3 +53,15 @@ python3 pilot/run.py --out results/pilot-<дата> --variants A,B0 --reps 5 --m
 python3 pilot/run_b1a.py --out results/pilot-<дата>-b1a --variants B1a --parallel 2
 python3 pilot/analyze.py results/pilot-<дата>/results.jsonl results/pilot-<дата>-b1a/results.jsonl --rename=B1=B1-noapply,B1a=B1
 ```
+
+## Фаза 2: модель ошибается
+
+Сводка и находки — [`results/m-20261022/README.md`](results/m-20261022/README.md).
+
+```bash
+R1008_MCP_ALLOW=schema,delete R1008_AC_PIN=agent-chat-app-c749774 \
+  python3 pilot/run.py --set m --variants A,B0,B1a --reps 5 --parallel 3 --out results/m-<дата>
+python3 pilot/analyze.py results/m-<дата>/results.jsonl
+```
+
+Если `claude -p` упрётся в лимит подписки, раннер остановится. Повторный запуск с тем же `--out` догонит оставшиеся прогоны.
