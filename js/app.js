@@ -58,18 +58,21 @@ const CookieUtil = {
     },
     delete(name) {
         document.cookie = name + '=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/';
+        // Метка idbs_<db> живёт парой с HttpOnly-кукой idb_<db> (python2node#1043)
+        if (name.startsWith('idb_')) {
+            document.cookie = 'idbs_' + name.slice(4) + '=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/';
+        }
     },
     getAllIdb() {
-        // Returns array of db names for all idb_* cookies found
+        // Returns array of db names with a login: idb_* cookies are HttpOnly (python2node#1043),
+        // so the page sees their idbs_* markers; a readable idb_* is a cookie set before that.
         const result = [];
         const cookies = document.cookie.split(';');
         for (const c of cookies) {
-            const trimmed = c.trim();
-            if (trimmed.startsWith('idb_')) {
-                const name = trimmed.split('=')[0].trim();
-                const dbName = name.slice(4); // remove 'idb_' prefix
-                if (dbName) result.push(dbName);
-            }
+            const name = c.trim().split('=')[0].trim();
+            const prefix = name.startsWith('idbs_') ? 5 : (name.startsWith('idb_') ? 4 : 0);
+            const dbName = prefix ? name.slice(prefix) : '';
+            if (dbName && !result.includes(dbName)) result.push(dbName);
         }
         return result;
     }

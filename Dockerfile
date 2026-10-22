@@ -10,7 +10,7 @@ RUN apt-get update \
         openssl \
         unzip \
     && docker-php-ext-install mysqli mbstring zip \
-    && a2enmod rewrite ssl \
+    && a2enmod rewrite ssl headers \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /var/www/html

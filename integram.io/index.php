@@ -29,6 +29,19 @@ define("VERSION", 8);
 define("VAL_LIM", 127);  # Maximum length of the value (val) field in the DB
 define("CHECKCODE_RETRIES_LIMIT", 3);  # Вход по коду: неудач до блокировки (#1036)
 define("CHECKCODE_LOCK_TTL", 3600);  # Вход по коду: блокировка, сек с последней неудачи
+# python2node#1043: сессии на устройство, MCP-токены, блокировка подбора (функции — в блоке auth-1043)
+defined("SESSION_IDLE") || define("SESSION_IDLE", 30*86400);
+defined("SESSION_LIFETIME") || define("SESSION_LIFETIME", 365*86400);
+define("SESSION_TOUCH", 86400);
+define("SESSION_ROTATE", 7*86400);
+define("SESSION_MAX", 30);           # сессий на пользователя: старые сверх этого удаляются
+define("MCP_EXCHANGE_TTL", 600);
+define("MCP_TOKEN_TTL_DAYS", 90);    # наибольший срок MCP-токена
+define("MCP_SCOPES", "read:r,write:w,delete:d,rights:g,schema:s");
+define("RETRIES_LIMIT", 5);          # неудач входа по паролю подряд до окна блокировки
+define("LOGIN_LOCK_S", 900);         # после RETRIES_LIMIT неудач подряд вход закрыт на столько секунд
+defined("AUTH_COOKIE_SAMESITE") || define("AUTH_COOKIE_SAMESITE", "Lax");
+defined("AUTH_COOKIE_HTTPONLY") || define("AUTH_COOKIE_HTTPONLY", TRUE);
 
 $com = explode("?", strtolower($_SERVER["REQUEST_URI"]));
 $com = explode("/", $com[0]);
@@ -79,7 +92,9 @@ if(($z === "my") && ((isset($com[2]) ? $com[2] : "") === "register")){ # Registe
         	if($row = Reg_confirm_row($u, $_GET["c"]))
         		if($row["uid"]){ # User found
         			# Update the user in the CRM
-        			Exec_sql("UPDATE $z SET val='".sha1(Salt($row["user"], $row["pwd"]))."' WHERE id=".$row["pid"], "Update user's password");
+        			# В кабинете уже хеш (python2node#1043); регистрация, начатая до этого, держит пароль текстом
+        			if(!Pwd_is_modern($row["pwd"]))
+        				Exec_sql("UPDATE $z SET val='".addslashes(Pwd_hash($row["pwd"]))."' WHERE id=".$row["pid"], "Update user's password");
         			updateTokens($row, array((string)$row["token"]));  # до подтверждения в токене лежал код из ссылки
                 	createDb($row["uid"], "", $row["email"], $row["pwd"]);
             		header("Location: /$z");
@@ -113,7 +128,7 @@ if(($z === "my") && ((isset($com[2]) ? $com[2] : "") === "register")){ # Registe
 
         # Insert new user and its data into CRM
         $id = newUser($email, $email, "115", "", "");
-        Insert($id, 1, PASSWORD, $_POST["regpwd"], "Insert password");
+        Insert($id, 1, PASSWORD, Pwd_hash($_POST["regpwd"]), "Insert password");  # до подтверждения — уже хеш, не текст
         $confirm = Reg_confirm_code();
         Insert($id, 1, TOKEN, $confirm, "Insert confirmation code");
         if(isset($_COOKIE["_aff"]))
@@ -185,7 +200,7 @@ elseif(($z == "auth.asp") && !empty($_GET['code'])){
         
         $db = isset($_GET['state'])?(checkDbName(USER_DB_MASK, $_GET['state'])?$_GET['state']:""):"";
         if($row = mysqli_fetch_array(Exec_sql("SELECT user.id uid, token.id tok, token.val token, xsrf.id xsrf, act.id act, db.val db
-                                        FROM $z user LEFT JOIN $z token ON token.up=user.id AND token.t=".TOKEN
+                                        FROM $z user LEFT JOIN $z token ON token.up=user.id AND token.t=".TOKEN." AND ".Token_key_sql("token")
                                                 ." LEFT JOIN $z xsrf ON xsrf.up=user.id AND xsrf.t=".XSRF
                                                 ." LEFT JOIN $z act ON act.up=user.id AND act.t=".ACTIVITY
                                                 ." LEFT JOIN $z db ON db.up=user.id AND db.t=".DATABASE
@@ -196,7 +211,7 @@ elseif(($z == "auth.asp") && !empty($_GET['code'])){
     	    if($row["db"]){
     	        $z = $row["db"];
     	        # Get the token of the target DB to let the google user use it
-                if($row = mysqli_fetch_array(Exec_sql("SELECT user.id, token.val tok, xsrf.val xsrf FROM $z user LEFT JOIN $z token ON token.up=user.id AND token.t=".TOKEN
+                if($row = mysqli_fetch_array(Exec_sql("SELECT user.id, token.val tok, xsrf.val xsrf FROM $z user LEFT JOIN $z token ON token.up=user.id AND token.t=".TOKEN." AND ".Token_key_sql("token")
                                                         ." LEFT JOIN $z xsrf ON xsrf.up=user.id AND xsrf.t=".XSRF
                                                     ." WHERE user.val='$z' AND user.t=".USER
                                                     , "Get token for google user"))){
@@ -208,26 +223,25 @@ elseif(($z == "auth.asp") && !empty($_GET['code'])){
             	    }
         	        if(!$row["xsrf"])
                         Insert($row["id"], 1, XSRF, xsrf($token, $z), "Reset xsrf for G admin");
+                    Auth_cookie($z, Session_new($row["id"]), NULL);  # #1043: сессия, не ключ API
                 }
     	        else
             		login($z, "", "adminNotFound");
     	    }
-    	    else
-    	        $token = $row["token"];
-        	setcookie($z, $token, time() + 2592000*12, "/"); # 30*12 days
     	}
         else{
-			$GLOBALS["GLOBAL_VARS"]["token"] = secureToken();
-			$GLOBALS["GLOBAL_VARS"]["xsrf"] = xsrf($GLOBALS["GLOBAL_VARS"]["token"], $z);
+			$key = secureToken();
             $id = newUser($info["id"], $info["email"], "115", $info["name"], $info["picture"]);
             Insert($id, 1, 274, "Google", "Set social for new G user");
-            Insert($id, 1, TOKEN, $GLOBALS["GLOBAL_VARS"]["token"], "Set token for new G user");
-            Insert($id, 1, XSRF, $GLOBALS["GLOBAL_VARS"]["xsrf"], "Set xsrf for new G user");
+            Insert($id, 1, TOKEN, $key, "Set token for new G user");
+            Insert($id, 1, XSRF, xsrf($key, $z), "Set xsrf for new G user");
+			$GLOBALS["GLOBAL_VARS"]["token"] = Session_new($id);
+			$GLOBALS["GLOBAL_VARS"]["xsrf"] = xsrf($GLOBALS["GLOBAL_VARS"]["token"], $z);
             #Insert($id, 1, 1143, "1146", "Insert new Plan ref");
             #Insert($id, 1, 1145, date("Ymd", strtotime("+1 months") + $GLOBALS["tzone"]), "Insert new Plan date");
             if(isset($_COOKIE["_aff"]))
                 Insert($id, 1, 1012, (int)$_COOKIE["_aff"], "Insert the googel affiliate ref");
-        	setcookie($z, $GLOBALS["GLOBAL_VARS"]["token"], time() + 2592000*12, "/"); # 30*12 days
+        	Auth_cookie($z, $GLOBALS["GLOBAL_VARS"]["token"], NULL);
         	createDb($id, $info["name"], $info["email"]);
         }
 		header("Location: ".(isset($_GET['state'])?$_GET['state']:"/$z"));
@@ -367,27 +381,31 @@ function createDb($id, $name, $email, $pwd=""){
         $z = $db;
     }
 }
-# $replace — значения, которые токеном оставаться не должны (код подтверждения из ссылки,
-# прежние md5-коды регистрации — Reg_code_tokens): такой токен заменяется случайным
+# Вход пользователя $row: ключ API (прежний постоянный токен) приводится в порядок, а браузеру или
+# клиенту выдаётся СВОЯ сессия этого входа со скользящим сроком (python2node#1043) — не общий ключ.
+# $replace — значения, которые ключом оставаться не должны (код подтверждения из ссылки, прежние
+# md5-коды регистрации — Reg_code_tokens): такой ключ заменяется случайным.
+# $row["tok"]/$row["token"] — строка ключа API (выбирать с Token_key_sql, не сессию).
 function updateTokens($row, $replace = array()){
 	global $z;
-	# Токен присваивается до вывода xsrf и cookie (issue #5207, как в index.php #2122).
+	# Ключ присваивается до вывода xsrf (issue #5207, как в index.php #2122).
 	if($row["tok"] && in_array(strtolower((string)$row["token"]), $replace, TRUE)){
-    	$token = $GLOBALS["GLOBAL_VARS"]["token"] = secureToken();
-		Update_Val($row["tok"], $token);
+    	$key = secureToken();
+		Update_Val($row["tok"], $key);
 	}
 	elseif($row["tok"])
-    	$token = $GLOBALS["GLOBAL_VARS"]["token"] = $row["token"];
+    	$key = $row["token"];
 	else{
-    	$token = $GLOBALS["GLOBAL_VARS"]["token"] = secureToken();
-		Insert($row["uid"], 1, TOKEN, $token, "Save token");
+    	$key = secureToken();
+		Insert($row["uid"], 1, TOKEN, $key, "Save token");
 	}
-	$xsrf = $GLOBALS["GLOBAL_VARS"]["xsrf"] = xsrf($token, $z);
-	setcookie($z, $token, time() + 2592000*12, "/"); # 30*12 days
 	if($row["xsrf"])
-		Update_Val($row["xsrf"], $xsrf);
+		Update_Val($row["xsrf"], xsrf($key, $z));
 	else
-		Insert($row["uid"], 1, XSRF, $xsrf, "Save xsrf");
+		Insert($row["uid"], 1, XSRF, xsrf($key, $z), "Save xsrf");
+	$token = $GLOBALS["GLOBAL_VARS"]["token"] = Session_new($row["uid"]);
+	$GLOBALS["GLOBAL_VARS"]["xsrf"] = xsrf($token, $z);
+	Auth_cookie($z, $token, NULL);
 	if($row["act"])
 		Update_Val($row["act"], microtime(TRUE), FALSE);
 	else
@@ -414,13 +432,14 @@ function newDb($db, $template, $name, $email, $pwd){
 		Insert($id, 1, 33, $name, "Insert user name");
 	Insert($id, 1, 145, "115", "Insert Admin role link");
 	
-    # Set token and xsfr as of the current user's
-	Insert($id, 1, TOKEN, $GLOBALS["GLOBAL_VARS"]["token"], "Save token DB");
-	Insert($id, 1, XSRF, $GLOBALS["GLOBAL_VARS"]["xsrf"], "Save xsrf DB");
+    # Ключ API владельца новой базы — свой; вход в неё — сессией этого браузера (python2node#1043)
+    $key = secureToken();
+	Insert($id, 1, TOKEN, $key, "Save token DB");
+	Insert($id, 1, XSRF, xsrf($key, $z), "Save xsrf DB");
 	Insert($id, 1, ACTIVITY, microtime(TRUE), "Save activity time DB");
     if(strlen($pwd))
-        Insert($id, 1, PASSWORD, sha1(Salt($z, $pwd)), "Insert user password");
-	setcookie($z, $GLOBALS["GLOBAL_VARS"]["token"], time() + 2592000*12, "/"); # 30*12 days
+        Insert($id, 1, PASSWORD, Reg_db_password($pwd), "Insert user password");
+	Auth_cookie($z, Session_new($id), NULL);
 	
 	# Create folders for files and templates
 	exec("cp -r templates/custom/$template templates/custom/$z");
@@ -496,6 +515,366 @@ function secureToken(){
 		throw $e;
 	}
 }
+# <auth-1043>
+# python2node#1043 (перенос из index.php): пароли, сессии на устройство, куки входа, блокировка подбора, MCP-токены.
+#
+# Пароль — password_hash (bcrypt) от HMAC-SHA256 пароля ключом SALT.<база>: перец в базе не лежит,
+# а HMAC снимает предел bcrypt в 72 байта. Прежний sha1(Salt(<логин>, <пароль>)) принимается и при
+# входе перехешируется.
+function Pwd_legacy($u, $p){
+	return sha1(Salt((string)$u, (string)$p));
+}
+function Pwd_prehash($p){
+	global $z;
+	return base64_encode(hash_hmac("sha256", (string)$p, SALT.$z, TRUE));
+}
+function Pwd_hash($p){
+	return password_hash(Pwd_prehash($p), PASSWORD_DEFAULT);
+}
+function Pwd_is_modern($stored){
+	return is_string($stored) && ($stored !== "") && !empty(password_get_info($stored)["algo"]);
+}
+# $u — логин, которым солился прежний sha1 (Salt берёт его в верхнем регистре)
+function Pwd_verify($p, $stored, $u){
+	global $z;
+	$stored = (string)$stored;
+	if($stored === "")
+		return FALSE;
+	# my:<хеш> — пароль кабинета, перенесённый в новую базу при регистрации (Reg_db_password): перец кабинета
+	if(strpos($stored, "my:") === 0){
+		$cab = substr($stored, 3);
+		if(!Pwd_is_modern($cab))
+			return FALSE;
+		$prevz = $z;
+		$z = "my";
+		$ok = password_verify(Pwd_prehash($p), $cab);
+		$z = $prevz;
+		return $ok;
+	}
+	if(Pwd_is_modern($stored))
+		return password_verify(Pwd_prehash($p), $stored);
+	return hash_equals(strtolower($stored), Pwd_legacy($u, $p));
+}
+function Pwd_needs_rehash($stored){
+	return !Pwd_is_modern($stored) || password_needs_rehash($stored, PASSWORD_DEFAULT);
+}
+# Пароль владельца новой базы из ожидающей регистрации кабинета: хеш кабинета с пометкой my:
+# (пароль открытым текстом нигде не лежит, при первом входе хеш переводится на перец базы).
+# Регистрация, начатая до python2node#1043, держит пароль текстом — его хешируем для базы $z.
+function Reg_db_password($pending){
+	return Pwd_is_modern($pending) ? "my:".$pending : Pwd_hash($pending);
+}
+# Подпись ссылки подтверждения сброса пароля: без неё confirm ставил любой p, зная хеш o
+function Pwd_reset_sig($u, $newHash, $oldHash){
+	global $z;
+	return hash_hmac("sha256", mb_strtolower((string)$u)."|".$newHash."|".$oldHash, SALT.$z."|confirm");
+}
+
+# Сессия на устройство: каждый вход — своя строка «Токен» (t=125). Наружу уходит
+#   s.<срок>.<64 hex>, в базе лежит s.<срок>.<sha256 секрета> — по базе (админка, дамп) токен не восстановить.
+#   Сессия живёт, пока ею пользуются: гаснет после SESSION_IDLE без запросов (время последнего запроса —
+#   в ord строки, в минутах, обновляется не чаще SESSION_TOUCH) и не позже <срок> = вход + SESSION_LIFETIME;
+#   за SESSION_ROTATE до него страница браузера сама получает новую сессию — активный пользователь не входит заново.
+#   m.<срок>.<права>.<64 hex>   — короткий токен ядра, выданный обменом MCP-токена (_mcp_exchange);
+#   mcp.<срок>.<права>.<64 hex> — MCP-токен: его аудитория — ideav-mcp, ядро его токеном не принимает.
+# Прежний токен без срока остаётся ключом API пользователя и источником кода входа по почте.
+# Константы сессий, MCP и блокировки входа — в начале файла (их читает код регистрации и входа выше этого блока).
+
+# Разбор токена нового вида: array(вид, срок, права, секрет) или NULL для прежнего токена
+function Token_parse($tok){
+	if(!is_string($tok) || !preg_match('/^(s|m|mcp)\.([0-9]{1,12})\.(?:([a-z]{1,5})\.)?([0-9a-f]{64})$/', $tok, $m))
+		return NULL;
+	if(($m[1] === "s") !== ($m[3] === ""))  # у сессии прав нет, у m и mcp — есть
+		return NULL;
+	return array("kind" => $m[1], "exp" => (int)$m[2], "scope" => $m[3], "secret" => $m[4]);
+}
+function Token_stored_val($kind, $exp, $scope, $secret){
+	return "$kind.$exp.".($scope === "" ? "" : "$scope.").hash("sha256", $secret);
+}
+# Значение строки «Токен» для поиска по предъявленному токену; FALSE — такой токен не принимается
+# (истёк или это MCP-токен). Прежний токен ищется как есть.
+function Token_db_val($tok, $now = NULL){
+	$p = Token_parse($tok);
+	if($p === NULL)
+		return (string)$tok;
+	if(($p["kind"] === "mcp") || ($p["exp"] <= ($now === NULL ? time() : $now)))
+		return FALSE;
+	return Token_stored_val($p["kind"], $p["exp"], $p["scope"], $p["secret"]);
+}
+# Условие SQL на строку токена: прежний ключ пользователя, а не сессия/MCP-токен
+function Token_key_sql($alias){
+	return "$alias.val NOT REGEXP '^(s|m|mcp)[.][0-9]+[.]'";
+}
+# Условие SQL на простой сессии: последний запрос не раньше SESSION_IDLE назад (ord — минуты)
+function Token_idle_sql($alias, $parsed, $now = NULL){
+	if(!$parsed || ($parsed["kind"] !== "s"))
+		return "";
+	return " AND $alias.ord>=".(int)floor((($now === NULL ? time() : $now) - SESSION_IDLE) / 60);
+}
+# Условие SQL «предъявлен этот токен» для строки $alias; «0» — токен не принимается
+function Token_match_sql($alias, $tok){
+	$v = Token_db_val($tok);
+	return $v === FALSE ? "0" : "$alias.val='".addslashes($v)."'".Token_idle_sql($alias, Token_parse($tok));
+}
+# Срок куки сессии: следующий простой или конец жизни сессии — что раньше
+function Session_cookie_exp($tok, $now = NULL){
+	$p = Token_parse($tok);
+	$now = $now === NULL ? time() : $now;
+	return $p === NULL ? $now + SESSION_IDLE : min($p["exp"], $now + SESSION_IDLE);
+}
+# Что сделать с сессией на этом запросе: "touch" — отметить активность (и продлить куку),
+# "rotate" — выдать странице новую сессию (конец жизни близко), "" — ничего
+function Session_refresh_action($parsed, $ord, $now, $pageGet){
+	if(!$parsed || ($parsed["kind"] !== "s"))
+		return "";
+	if($pageGet && ($parsed["exp"] - $now < SESSION_ROTATE))
+		return "rotate";
+	return ((int)floor($now / 60) - (int)$ord) * 60 >= SESSION_TOUCH ? "touch" : "";
+}
+# Права m-/mcp-токена буквами по алфавиту из списка через запятую (read всегда есть); FALSE — неизвестное право
+function Token_scope_code($list){
+	$map = array();
+	foreach(explode(",", MCP_SCOPES) as $pair){
+		list($name, $code) = explode(":", $pair);
+		$map[$name] = $code;
+	}
+	$codes = array("r" => TRUE);
+	foreach(is_array($list) ? $list : explode(",", (string)$list) as $name){
+		$name = strtolower(trim((string)$name));
+		if($name === "")
+			continue;
+		if(!isset($map[$name]))
+			return FALSE;
+		$codes[$map[$name]] = TRUE;
+	}
+	$codes = array_keys($codes);
+	sort($codes);
+	return implode("", $codes);
+}
+function Token_scope_names($code){
+	$names = array();
+	foreach(explode(",", MCP_SCOPES) as $pair){
+		list($name, $c) = explode(":", $pair);
+		if(strpos((string)$code, $c) !== FALSE)
+			$names[] = $name;
+	}
+	return $names;
+}
+# Новая строка «Токен» вида $kind у пользователя $uid; возвращает предъявляемый токен
+function Session_new($uid, $kind = "s", $scope = "", $ttl = SESSION_LIFETIME){
+	$secret = secureToken();
+	$exp = time() + (int)$ttl;
+	Insert((int)$uid, $kind === "s" ? (int)floor(time() / 60) : 1, TOKEN, Token_stored_val($kind, $exp, $scope, $secret), "Save $kind-session");
+	Session_prune($uid);
+	return "$kind.$exp.".($scope === "" ? "" : "$scope.").$secret;
+}
+# Что удалить из строк «Токен» пользователя: истёкшие и простаивающие сессии, истёкшие MCP-токены
+# и сессии сверх SESSION_MAX (сначала старые). $rows — array(id => array("val", "ord")) в порядке выдачи.
+# Ключ API не трогается.
+function Session_prune_ids($rows, $now, $max = SESSION_MAX){
+	$drop = array();
+	$live = array();
+	foreach($rows as $id => $row)
+		if(preg_match('/^(s|m|mcp)\.([0-9]{1,12})\./', (string)$row["val"], $m)){
+			if(((int)$m[2] <= $now) || (($m[1] === "s") && ((int)$row["ord"] * 60 < $now - SESSION_IDLE)))
+				$drop[] = $id;
+			elseif($m[1] === "s")
+				$live[] = $id;
+		}
+	if(count($live) > $max)
+		$drop = array_merge($drop, array_slice($live, 0, count($live) - $max));
+	return $drop;
+}
+function Session_prune($uid){
+	global $z;
+	$rows = array();
+	$data_set = Exec_sql("SELECT id, val, ord FROM $z WHERE up=".(int)$uid." AND t=".TOKEN." AND val REGEXP '^(s|m|mcp)[.]' ORDER BY id"
+				, "Sessions of the user");
+	while($row = mysqli_fetch_array($data_set))
+		$rows[$row["id"]] = array("val" => $row["val"], "ord" => $row["ord"]);
+	$drop = Session_prune_ids($rows, time());
+	if(count($drop))
+		Exec_sql("DELETE FROM $z WHERE up=".(int)$uid." AND t=".TOKEN." AND id IN (".implode(",", array_map("intval", $drop)).")"
+			, "Drop stale sessions");
+}
+# Выход этой сессии: строка сессии удаляется; для прежнего токена — FALSE (вызывающий решает сам)
+function Session_drop($tok, $db = NULL){
+	global $z;
+	$p = Token_parse($tok);
+	if(($p === NULL) || ($p["kind"] === "mcp"))
+		return FALSE;
+	$db = $db === NULL ? $z : $db;
+	Exec_sql("DELETE FROM $db WHERE t=".TOKEN." AND val='".Token_stored_val($p["kind"], $p["exp"], $p["scope"], $p["secret"])."'"
+		, "Drop the session");
+	return TRUE;
+}
+function Is_https(){
+	return (!empty($_SERVER["HTTPS"]) && strtolower($_SERVER["HTTPS"]) !== "off")
+		|| (isset($_SERVER["HTTP_X_FORWARDED_PROTO"]) && strtolower($_SERVER["HTTP_X_FORWARDED_PROTO"]) === "https");
+}
+# Кука входа (в integram.io её имя — имя базы): HttpOnly (AUTH_COOKIE_HTTPONLY), SameSite, Secure на https
+function Auth_cookie_opts($expires, $httponly = AUTH_COOKIE_HTTPONLY){
+	return array("expires" => (int)$expires, "path" => "/", "secure" => Is_https(), "httponly" => (bool)$httponly
+		, "samesite" => AUTH_COOKIE_SAMESITE);
+}
+# $expires NULL — срок сессии $tok (Session_cookie_exp)
+function Auth_cookie($db, $tok, $expires){
+	if(($expires === NULL) && ($tok !== ""))
+		$expires = Session_cookie_exp($tok);
+	$clear = ($tok === "") || ($expires && ($expires < time()));
+	setcookie($db, $clear ? "" : $tok, Auth_cookie_opts($clear ? time() - 3600 : $expires));
+}
+# Блокировка подбора пароля: после RETRIES_LIMIT неудач подряд вход закрыт на LOGIN_LOCK_S — и с верным
+# паролем тоже, но только на окно: дальше одна попытка, и снова окно при неудаче. $retries — «<неудач>:<время>».
+function Login_lock_left($retries, $now){
+	$parts = explode(":", (string)$retries, 2);
+	if((int)$parts[0] < RETRIES_LIMIT)
+		return 0;
+	return max(0, (isset($parts[1]) ? (int)$parts[1] : 0) + LOGIN_LOCK_S - $now);
+}
+# Счётчик неудач входа по паролю: в схеме integram.io реквизита RETRIES нет — файл журналов базы, как у
+# Checkcode_retries. $op: 0 — прочитать, 1 — прибавить неудачу, -1 — сбросить. Ответ — «<неудач>:<время>».
+# Записи без неудач сутки удаляются; файл недоступен — «0:0» (вход не ломается)
+function Login_retries($uid, $op = 0){
+	global $z;
+	$f = @fopen(LOGS_DIR.$z."_login.json", "c+");
+	if(!$f)
+		return "0:0";
+	flock($f, $op ? LOCK_EX : LOCK_SH);
+	$all = json_decode(stream_get_contents($f), TRUE);
+	if(!is_array($all))
+		$all = array();
+	$now = time();
+	foreach($all as $k => $v)
+		if(!is_array($v) || !isset($v[1]) || ($now - (int)$v[1] > max(86400, LOGIN_LOCK_S)))
+			unset($all[$k]);
+	$key = (string)(int)$uid;
+	$n = isset($all[$key]) ? (int)$all[$key][0] : 0;
+	$ts = isset($all[$key]) ? (int)$all[$key][1] : 0;
+	if($op > 0)
+		$all[$key] = array(++$n, $ts = $now);
+	elseif($op < 0){
+		unset($all[$key]);
+		$n = $ts = 0;
+	}
+	if($op){
+		ftruncate($f, 0);
+		rewind($f);
+		fwrite($f, json_encode($all));
+		fflush($f);
+	}
+	flock($f, LOCK_UN);
+	fclose($f);
+	return "$n:$ts";
+}
+function Login_locked_die($u, $left){
+	$min = max(1, (int)ceil($left / 60));
+	$msg = t9n("[RU]Слишком много неудачных попыток входа. Повторите через $min мин. или сбросьте пароль."
+	         ."[EN]Too many failed login attempts. Try again in $min min or reset your password.");
+	wlog("Authenticate user: $u locked for {$left}s", "log");
+	if(isApi()){
+		header("HTTP/1.0 429 Too Many Requests");
+		header("Retry-After: ".(int)$left);
+		api_dump(json_encode(array("error" => $msg), JSON_UNESCAPED_UNICODE));
+	}
+	login($GLOBALS["z"], $u, "LOCKED", $msg);
+}
+# Права короткого токена ядра (m.*) действуют на маршрут: только чтение API и разрешённая запись
+function Token_scope_allows($scope, $a, $method){
+	if(in_array($a, array("metadata", "object", "edit_obj", "report", "xsrf"), TRUE))
+		return ($method === "GET") || ($method === "HEAD") || ($method === "POST" && $a === "report");
+	if(substr($a, 0, 6) === "_m_del")
+		return (strpos($scope, "w") !== FALSE) && (strpos($scope, "d") !== FALSE);
+	if(substr($a, 0, 3) === "_m_")
+		return strpos($scope, "w") !== FALSE;
+	if(substr($a, 0, 3) === "_d_")
+		return (strpos($scope, "s") !== FALSE) && (substr($a, 0, 6) !== "_d_del");
+	return FALSE;
+}
+# MCP-токен по предъявленному виду: строка в базе или NULL (не тот вид, истёк, отозван)
+function Mcp_token_row($tok){
+	global $z;
+	$p = Token_parse($tok);
+	if(($p === NULL) || ($p["kind"] !== "mcp") || ($p["exp"] <= time()))
+		return NULL;
+	$row = mysqli_fetch_array(Exec_sql("SELECT u.id uid, u.val user, tok.id tok FROM $z tok, $z u WHERE u.t=".USER." AND tok.up=u.id"
+				." AND tok.t=".TOKEN." AND tok.val='".Token_stored_val("mcp", $p["exp"], $p["scope"], $p["secret"])."' LIMIT 1"
+				, "MCP token"));
+	if(!$row)
+		return NULL;
+	return array("uid" => (int)$row["uid"], "user" => $row["user"], "id" => (int)$row["tok"], "exp" => $p["exp"], "scope" => $p["scope"]);
+}
+function Mcp_json($data, $status = "200 OK"){
+	header("HTTP/1.0 $status");
+	header("Cache-Control: no-store");
+	if(substr($status, 0, 3) === "401")
+		header('WWW-Authenticate: Bearer realm="ideav", error="'.(isset($data["error"]) ? $data["error"] : "invalid_token").'"');
+	api_dump(json_encode($data, JSON_UNESCAPED_UNICODE), "mcp.json");
+}
+# Секрет клиента ideav-mcp из заголовка Authorization: Bearer
+function Mcp_client_ok(){
+	# Секрет клиента ideav-mcp: define("MCP_EXCHANGE_SECRET", …) в include/connection.php или переменная окружения
+	$secret = defined("MCP_EXCHANGE_SECRET") ? (string)constant("MCP_EXCHANGE_SECRET") : (string)getenv("INTEGRAM_MCP_EXCHANGE_SECRET");
+	if($secret === "")
+		return NULL;
+	$presented = Mcp_client_secret_presented(getallheaders(), $_SERVER);
+	return ($presented !== "") && hash_equals($secret, $presented);
+}
+# Предъявленный секрет клиента: Authorization: Bearer или X-MCP-Client-Secret. PHP через FastCGI/fcgid
+# (так на ideav.ru) заголовка Authorization не видит — свой заголовок доходит всегда; Authorization
+# берётся и из $_SERVER, если сервер его туда передал (CGIPassAuth / SetEnvIf).
+function Mcp_client_secret_presented($headers, $server){
+	foreach((array)$headers as $key => $value)
+		if(strtolower($key) === "x-mcp-client-secret" && trim((string)$value) !== "")
+			return trim((string)$value);
+	$auth = "";
+	foreach((array)$headers as $key => $value)
+		if(strtolower($key) === "authorization")
+			$auth = (string)$value;
+	foreach(array("HTTP_AUTHORIZATION", "REDIRECT_HTTP_AUTHORIZATION") as $k)
+		if(($auth === "") && isset($server[$k]))
+			$auth = (string)$server[$k];
+	return preg_match('/^Bearer\s+(\S+)$/i', trim($auth), $m) ? $m[1] : "";
+}
+# MCP-токены пользователя: array(array(id, exp, scope)) — секрета в базе нет, только хеш
+function Mcp_token_list($uid){
+	global $z;
+	$list = array();
+	$data_set = Exec_sql("SELECT id, val FROM $z WHERE up=".(int)$uid." AND t=".TOKEN." AND val LIKE 'mcp.%' ORDER BY id", "MCP tokens of the user");
+	while($row = mysqli_fetch_array($data_set))
+		if(preg_match('/^mcp\.([0-9]{1,12})\.([a-z]{1,5})\./', $row["val"], $m) && ((int)$m[1] > time()))
+			$list[] = array("id" => (int)$row["id"], "exp" => (int)$m[1], "scope" => Token_scope_names($m[2]));
+	return $list;
+}
+function Mcp_token_page($db, $list, $xsrf){
+	$h = function($s){ return htmlspecialchars((string)$s, ENT_QUOTES, "UTF-8"); };
+	$rows = "";
+	foreach($list as $t)
+		$rows .= "<tr><td>".$h(date("d.m.Y H:i", $t["exp"]))."</td><td>".$h(implode(", ", $t["scope"]))."</td>"
+			."<td><button data-revoke=\"".(int)$t["id"]."\">".t9n("[RU]Отозвать[EN]Revoke")."</button></td></tr>";
+	$checks = "";
+	foreach(array("write" => TRUE, "delete" => FALSE, "rights" => FALSE, "schema" => FALSE) as $s => $on)
+		$checks .= "<label><input type=\"checkbox\" name=\"scope\" value=\"$s\"".($on ? " checked" : "")."> $s</label> ";
+	$cfg = json_encode(array("db" => $db, "xsrf" => $xsrf), JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP);
+	return "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+		."<title>MCP</title><style>body{font:15px system-ui,sans-serif;max-width:720px;margin:24px auto;padding:0 16px}"
+		."code{word-break:break-all;background:#f2f2f2;padding:2px 4px}td{padding:4px 8px}</style></head><body>"
+		."<h1>".t9n("[RU]MCP-токены[EN]MCP tokens")." · ".$h($db)."</h1>"
+		."<p>".t9n("[RU]Токен для подключения ИИ-клиента через ideav-mcp: права — не шире ваших, срок — до ".MCP_TOKEN_TTL_DAYS." дней. Показывается один раз."
+		        ."[EN]A token for connecting an AI client via ideav-mcp: no wider than your rights, valid up to ".MCP_TOKEN_TTL_DAYS." days. Shown once.")."</p>"
+		."<form id=\"f\"><p>read ".$checks."</p><p><label>".t9n("[RU]Срок, дней[EN]Valid, days")
+		." <input name=\"ttl\" type=\"number\" min=\"1\" max=\"".MCP_TOKEN_TTL_DAYS."\" value=\"30\"></label> "
+		."<button>".t9n("[RU]Выпустить[EN]Issue")."</button></p></form><p id=\"out\"></p>"
+		."<table><tr><th>".t9n("[RU]Действует до[EN]Expires")."</th><th>".t9n("[RU]Права[EN]Scope")."</th><th></th></tr>$rows</table>"
+		."<script>(function(){var c=$cfg;function post(a,d){d._xsrf=c.xsrf;return fetch('/'+c.db+'/'+a+'?JSON',{method:'POST',credentials:'same-origin',"
+		."headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(d)}).then(function(r){return r.json();});}"
+		."document.getElementById('f').addEventListener('submit',function(e){e.preventDefault();var s=[].map.call(document.querySelectorAll('[name=scope]:checked'),"
+		."function(i){return i.value;});post('_mcp_token',{scope:['read'].concat(s).join(','),ttl:this.ttl.value}).then(function(j){var o=document.getElementById('out');"
+		."o.textContent='';if(j.token){var k=document.createElement('code');k.textContent=j.token;o.appendChild(k);}else o.textContent=j.error||'error';});});"
+		."[].forEach.call(document.querySelectorAll('[data-revoke]'),function(b){b.addEventListener('click',function(){post('_mcp_revoke',{id:b.getAttribute('data-revoke')})"
+		.".then(function(){location.reload();});});});})();</script></body></html>";
+}
+# </auth-1043>
 # ── #1036: вход, журнал и dir_admin (перенос правок index.php #5201/#5202 и смежных) ──
 # Ключи параметров, значения которых в журнал не пишутся: пароли, токены, коды входа и ссылок
 function Log_sensitive_key($key){
@@ -606,14 +985,28 @@ function Basic_auth_token($value){
 		$value = base64_decode($value);
 	$tmp = explode(":", $value, 2);
 	$u = addslashes($tmp[0]);
-	$pwd = sha1(Salt($u, isset($tmp[1]) ? $tmp[1] : ""));
-	$data_set = Exec_sql("SELECT tok.val tok, tok.id tok_id, u.id FROM $z pwd, $z u"
-							." LEFT JOIN $z tok ON tok.up=u.id AND tok.t=".TOKEN
-						." WHERE u.t=".USER." AND u.val='$u' AND pwd.up=u.id AND pwd.val='$pwd'"
+	$p = isset($tmp[1]) ? $tmp[1] : "";
+	$pwd = Pwd_legacy($tmp[0], $p);
+	$data_set = Exec_sql("SELECT tok.val tok, tok.id tok_id, u.id, pwd.id pwd_id, pwd.val pwd FROM $z pwd, $z u"
+							." LEFT JOIN $z tok ON tok.up=u.id AND tok.t=".TOKEN." AND ".Token_key_sql("tok")
+						." WHERE u.t=".USER." AND u.val='$u' AND pwd.up=u.id AND pwd.t=".PASSWORD
 				, "Basic authentication");
 	if(!($row = mysqli_fetch_array($data_set)))
 		return FALSE;
-	if(isset($row["tok"]) && ($row["tok"] !== $pwd) && !Token_is_reg_code($row["tok"], array($tmp[0])))
+	# python2node#1043: пароль сверяется в PHP (password_hash в SQL не сравнить), подбор закрыт окном
+	$row += array("pwd" => "", "pwd_id" => NULL);
+	$tries = Login_retries($row["id"]);
+	if(Login_lock_left($tries, time()) > 0)
+		return FALSE;
+	if(!Pwd_verify($p, $row["pwd"], $tmp[0])){
+		Login_retries($row["id"], 1);
+		return FALSE;
+	}
+	if((int)$tries > 0)
+		Login_retries($row["id"], -1);
+	if(Pwd_needs_rehash($row["pwd"]) && $row["pwd_id"])
+		Update_Val($row["pwd_id"], Pwd_hash($p));
+	if(isset($row["tok"]) && ($row["tok"] !== $pwd) && ($row["tok"] !== $row["pwd"]) && !Token_is_reg_code($row["tok"], array($tmp[0])))
 		return $row["tok"];
 	$tok = secureToken();
 	if(isset($row["tok"]))
@@ -684,7 +1077,7 @@ function Checkcode_login($u, $c){
 	$row = mysqli_fetch_array(Exec_sql("SELECT u.id, tok.id tok, tok.val token, xsrf.id xsrf, act.id act FROM $z tok, $z u"
 		                        ." LEFT JOIN $z act ON act.up=u.id AND act.t=".ACTIVITY
 								." LEFT JOIN $z xsrf ON xsrf.up=u.id AND xsrf.t=".XSRF
-		                    ." WHERE u.t=".USER." AND u.val='$u' AND tok.up=u.id AND tok.t=".TOKEN
+		                    ." WHERE u.t=".USER." AND u.val='$u' AND tok.up=u.id AND tok.t=".TOKEN." AND ".Token_key_sql("tok")
 						, "Check the user token"));
 	if(!$row)
 		return array("error" => "user not found");
@@ -699,13 +1092,16 @@ function Checkcode_login($u, $c){
 		return array("error" => "user not found");
 	}
 	Checkcode_retries($row["id"], -1);
-	$token = secureToken();
-	$xsrf = xsrf($token, $u);
-	Update_Val($row["tok"], $token);
+	# Код одноразовый: ключ, из которого он взят, заменяется. Входу — своя сессия (python2node#1043).
+	$key = secureToken();
+	Update_Val($row["tok"], $key);
 	if($row["xsrf"])
-		Update_Val($row["xsrf"], $xsrf);
+		Update_Val($row["xsrf"], xsrf($key, $z));
 	else
-		Insert($row["id"], 1, XSRF, $xsrf, "Save xsrf");
+		Insert($row["id"], 1, XSRF, xsrf($key, $z), "Save xsrf");
+	$token = Session_new($row["id"]);
+	$xsrf = xsrf($token, $z);
+	Auth_cookie($z, $token, NULL);
 	if($row["act"])
 		Update_Val($row["act"], microtime(TRUE), FALSE);
 	else
@@ -1589,13 +1985,13 @@ function Validate_Token() # Validates the cookie token and gathers the user perm
 	{
 		$tok = addslashes($_POST["secret"]);
 		$typ = SECRET;
-		setcookie("secret", $tok, 0, "/");  # The cookie to be deleted upon the session close
+		setcookie("secret", $tok, Auth_cookie_opts(0));  # The cookie to be deleted upon the session close
 	}
 	elseif(isset($_GET["secret"]))
 	{
 		$tok = addslashes($_GET["secret"]);
 		$typ = SECRET;
-		setcookie("secret", $tok, 0, "/");  # The cookie to be deleted upon the session close
+		setcookie("secret", $tok, Auth_cookie_opts(0));  # The cookie to be deleted upon the session close
 	}
 	elseif(isset($dumpAPI))
 	{
@@ -1649,12 +2045,16 @@ function Validate_Token() # Validates the cookie token and gathers the user perm
 
     if(isset($tok))
 	{
-		$data_set = Exec_sql("SELECT u.id, u.val, role_def.id r, role_def.val role, xsrf.val xsrf, tok.id tok, xsrf.id xsrf_id, act.id act_id, em.val email
+		# python2node#1043: сессия и короткий токен ищутся по хешу и со сроком; MCP-токен ядро не принимает
+		$tokDb = $typ === TOKEN ? Token_db_val($tok) : $tok;
+		$tokSession = $typ === TOKEN ? Token_parse($tok) : NULL;
+		$data_set = Exec_sql("SELECT u.id, u.val, role_def.id r, role_def.val role, xsrf.val xsrf, tok.id tok, tok.ord tok_ord, xsrf.id xsrf_id, act.id act_id, em.val email
 		                FROM $z tok, $z u LEFT JOIN ($z r CROSS JOIN $z role_def) ON r.up=u.id AND role_def.id=r.t AND role_def.t=".ROLE
 						." LEFT JOIN $z xsrf ON xsrf.up=u.id AND xsrf.t=".XSRF
 						." LEFT JOIN $z act ON act.up=u.id AND act.t=".ACTIVITY
 						." LEFT JOIN $z em ON em.up=u.id AND em.t=".EMAIL
-						." WHERE u.t=".USER." AND tok.up=u.id AND tok.val='$tok' AND tok.t=$typ", "Validate token");
+						." WHERE u.t=".USER." AND tok.up=u.id AND ".($tokDb === FALSE ? "0" : "tok.val='$tokDb'".Token_idle_sql("tok", $tokSession))
+						." AND tok.t=$typ", "Validate token");
 		$row = mysqli_fetch_array($data_set);
 		# Токен, равный прежнему коду регистрации md5("xz".<почта>), вычисляется по адресу — вход по нему
 		# не принимается; пользователь входит паролем или кодом, и токен заменяется случайным (updateTokens)
@@ -1670,15 +2070,35 @@ function Validate_Token() # Validates the cookie token and gathers the user perm
 			if(!$row["r"])
 				my_die(t9n("[RU]Пользователю ".$GLOBALS["GLOBAL_VARS"]["user"]." не задана роль"
 				        ."[EN]No role assigned to user ".$GLOBALS["GLOBAL_VARS"]["user"]));
+			if($tokSession !== NULL){
+				# Скользящий срок: запрос отмечает активность сессии (раз в SESSION_TOUCH) и продлевает куку;
+				# у конца жизни сессии страница браузера получает новую — xsrf страницы берётся уже от неё.
+				$fromCookie = isset($_COOKIE[$z]) && is_string($_COOKIE[$z]) && (addslashes($_COOKIE[$z]) === $tok);
+				$refresh = Session_refresh_action($tokSession, $row["tok_ord"], time()
+					, $fromCookie && ($_SERVER["REQUEST_METHOD"] === "GET") && !isApi());
+				if($refresh === "rotate"){
+					$tok = Session_new($row["id"]);
+					$tokSession = Token_parse($tok);
+					Auth_cookie($z, $tok, NULL);
+				}
+				elseif($refresh === "touch"){
+					Exec_sql("UPDATE $z SET ord=".(int)floor(time() / 60)." WHERE id=".(int)$row["tok"], "Session activity", FALSE);
+					if($fromCookie)
+						Auth_cookie($z, $tok, NULL);
+				}
+				$xsrf = xsrf($tok, $z);  # у сессии xsrf свой на устройство — производный от её токена
+				if($tokSession["kind"] === "m")
+					$GLOBALS["TOKEN_SCOPE"] = $tokSession["scope"];
+			}
 			if($row["act_id"])
                 Exec_sql("UPDATE $z SET val=".microtime(TRUE)." WHERE id=".$row["act_id"], "Update activity time", FALSE);
             else
                 Exec_sql("INSERT INTO $z (up, ord, t, val) VALUES (".$row["id"].",0,".ACTIVITY.",".microtime(TRUE).")", "Set activity time", FALSE);
             if($typ === SECRET){
-        		setcookie($z, "", time() - 3600, "/");  # Remove the password cookie
+        		Auth_cookie($z, "", 0);  # Remove the password cookie
             	if(!$row["xsrf"])
             		Insert($row["id"], 1, XSRF, $xsrf=xsrf($tok, $GLOBALS["GLOBAL_VARS"]["user"]), "Save xsrf for secret");
-        		$data_tok = Exec_sql("SELECT tok.id FROM $z tok WHERE tok.t=".TOKEN." AND tok.up=".$row["id"], "Check if token exists");
+        		$data_tok = Exec_sql("SELECT tok.id FROM $z tok WHERE tok.t=".TOKEN." AND ".Token_key_sql("tok")." AND tok.up=".$row["id"], "Check if token exists");
         		if(!mysqli_fetch_array($data_tok))
             		Insert($row["id"], 1, TOKEN, $tok, "Save token for secret");
             }
@@ -1691,6 +2111,9 @@ function Validate_Token() # Validates the cookie token and gathers the user perm
 			$GLOBALS["GLOBAL_VARS"]["role_id"] = 145;
 			$xsrf = sha1($z.ADMINHASH);
 		}
+		elseif(($typ === TOKEN) && isset($_COOKIE[$z]) && is_string($_COOKIE[$z])
+				&& ($_COOKIE[$z] !== "gtuoeksetn") && (addslashes($_COOKIE[$z]) === $tok))
+			Auth_cookie($z, "", 0);  # кука с истёкшей или неизвестной сессией: скрипт её не снимет (HttpOnly)
 		$GLOBALS["tzone"] = isset($_COOKIE["tzone"]) ? (int)$_COOKIE["tzone"] : 0;  # PHP 8: "" + 1 — TypeError
 	}
 	if(!isset($GLOBALS["GLOBAL_VARS"]["user"]))
@@ -1711,7 +2134,7 @@ function Validate_Token() # Validates the cookie token and gathers the user perm
 			$xsrf = xsrf("gtuoeksetn", "guest");
     		if(!$row["xsrf"])
     			Insert($row["u"], 1, XSRF, $xsrf, "Save guest xsrf");
-    		setcookie($z, "gtuoeksetn", time() + COOKIES_EXPIRE, "/"); # 30 days
+    		setcookie($z, "gtuoeksetn", Auth_cookie_opts(time() + COOKIES_EXPIRE)); # 30 days
 			if(isApi()){
                 getGrants($row["r"]);
     			$GLOBALS["GLOBAL_VARS"]["user"] = "guest";
@@ -1730,39 +2153,38 @@ function Validate_Token() # Validates the cookie token and gathers the user perm
 		elseif($z === "my" && isset($_GET["login"]) && ($ldb = Cabinet_login_db($_GET["login"])) !== ""){  # имя таблицы — по маске ДО SQL
 		    if(isset($_COOKIE[$ldb]) && is_string($_COOKIE[$ldb])){
         		$data_set = Exec_sql("SELECT u.val, em.val email FROM $ldb tok, $ldb u LEFT JOIN $ldb em ON em.up=u.id AND em.t=".EMAIL
-            						." WHERE u.t=".USER." AND u.val='$ldb' AND tok.up=u.id AND tok.val='".addslashes($_COOKIE[$ldb])."' AND tok.t=".TOKEN
+            						." WHERE u.t=".USER." AND u.val='$ldb' AND tok.up=u.id AND ".Token_match_sql("tok", $_COOKIE[$ldb])." AND tok.t=".TOKEN
             					, "Validate token for cabinet");
         		$row = mysqli_fetch_array($data_set);
         		if($row && Token_is_reg_code($_COOKIE[$ldb], array($row["val"], $row["email"])))  # прежний код регистрации — не вход
         		    $row = NULL;
         		if($row){
             		#login($z, "", "login");
-            		$data_set = Exec_sql("SELECT tok.val FROM $z db, $z u LEFT JOIN $z tok ON tok.up=u.id AND tok.t=".TOKEN
-                						." WHERE u.t=".USER." AND db.up=u.id AND db.val='".$row["val"]."' AND db.t=".DATABASE
+            		$data_set = Exec_sql("SELECT u.id FROM $z db, $z u"
+                						." WHERE u.t=".USER." AND db.up=u.id AND db.val='".addslashes($row["val"])."' AND db.t=".DATABASE
                 					, "Seek cabinet");
             		if($row = mysqli_fetch_array($data_set)){
-                		setcookie($z, $row["val"], time() + 2592000*12, "/"); # 12*30 days
+                		Auth_cookie($z, Session_new($row["id"]), NULL);  # python2node#1043: своя сессия, не общий ключ
                 		login($z, "", "reenter");
             		}
         		}
 	    	}
 		}
-		elseif(isset($_COOKIE["my"])){ // Log in the DB using the cabinet's token
+		elseif(isset($_COOKIE["my"]) && is_string($_COOKIE["my"])){ // Log in the DB using the cabinet's token
 #		    die("SELECT u.val FROM my tok, my u, my db"
 #        						." WHERE u.t=".USER." AND tok.up=u.id AND tok.val='".addslashes($_COOKIE["my"])."' AND tok.t=".TOKEN
 #        						    ." AND db.val='$z' AND db.up=u.id AND db.t=".DATABASE);
     		$data_set = Exec_sql("SELECT u.val FROM my tok, my u, my db"
-        						." WHERE u.t=".USER." AND tok.up=u.id AND tok.val='".addslashes($_COOKIE["my"])."' AND tok.t=".TOKEN
+        						." WHERE u.t=".USER." AND tok.up=u.id AND ".Token_match_sql("tok", $_COOKIE["my"])." AND tok.t=".TOKEN
         						    ." AND db.val='$z' AND db.up=u.id AND db.t=".DATABASE
         					, "Validate token for cabinet");
     		$row = mysqli_fetch_array($data_set);
     		if($row && Token_is_reg_code($_COOKIE["my"], array($row["val"])))  # прежний код регистрации (вычислим по почте) — не вход
     		    $row = NULL;
     		if($row){
-        		$data_set = Exec_sql("SELECT tok.val FROM $z u, $z tok WHERE u.t=".USER." AND tok.up=u.id AND u.val='$z' AND tok.t=".TOKEN
-            					, "Get token in current db");
+        		$data_set = Exec_sql("SELECT u.id FROM $z u WHERE u.t=".USER." AND u.val='$z'", "Get the owner in current db");
         		if($row = mysqli_fetch_array($data_set)){
-            		setcookie($z, $row["val"], time() + 2592000*12, "/"); # 12*30 days
+            		Auth_cookie($z, Session_new($row["id"]), NULL);  # python2node#1043: своя сессия, не общий ключ
             		login($z, "", "reenter");
         		}
     		}
@@ -8090,14 +8512,14 @@ function pwd_reset($u)
 	if($row){
 	    $u = $row["u"];
 		$pwd = substr(md5(mt_rand()), 0, 6);	# Create the password
-		$sha = sha1(Salt($u, $pwd));	# Make the password hash
+		$sha = Pwd_hash($pwd);	# Make the password hash
 		if(preg_match(MAIL_MASK, $row["val"])){
 			if($row["pwd"])  # There is a password already
 			{
 				mysendmail($row["val"], t9n("[RU]Сброс пароля [EN]Password reset for ").$z
 					, t9n("[RU]Ваш новый пароль [EN]Your new password ")."$pwd\r\n"
 					    .t9n("[RU]Для подтверждения его перейдите по ссылке:[EN]Confirm it here before use")
-					    .": https://".$_SERVER["SERVER_NAME"]."/$z/confirm?u=".urlencode($u)."&p=$sha&o=".$row["old"]
+					    .": https://".$_SERVER["SERVER_NAME"]."/$z/confirm?u=".urlencode($u)."&p=".urlencode($sha)."&o=".Pwd_reset_sig($u, $sha, (string)$row["old"])
                 		."\r\n\r\n".t9n("[RU]С уважением,\r\nКоманда Интеграл[EN]Best regards,\r\nIdeaV team")
                 		."\r\n\r\n".t9n("[RU]Если вы не хотите получать от нас писем, связанных с регистрацией $z, вы можете отписаться от оповещений:"
                                         ."\r\nhttps://".$_SERVER["SERVER_NAME"]."/my/register?optout=$z"
@@ -8132,7 +8554,7 @@ function pwd_reset($u)
                 	login($z, $u, "SMS", t9n("[RU]Пароль отправлен в SMS[EN]The password is sent via SMS"));
 				}
 		}
-		setcookie($z, "", time() - 3600, "/");  # Remove the password and secret cookies
+		Auth_cookie($z, "", 0);  # Remove the password and secret cookies
 		setcookie("secret", "", time() - 3600, "/");
 	}
 	login($z, $u,"WRONG_CONT", t9n("[RU]Неверное имя, email или телефон в ЛК[EN]The user name, email or phone invalid set in your Space"));
@@ -8262,9 +8684,9 @@ function removeMasks($attrs){
 }
 function authJWT($u){
 	global $z;
-	$data_set = Exec_sql("SELECT u.id uid, u.val, tok.id tok, act.id act, xsrf.id xsrf
+	$data_set = Exec_sql("SELECT u.id uid, u.val, tok.id tok, tok.val token, act.id act, xsrf.id xsrf
 							FROM $z u LEFT JOIN $z act ON act.up=u.id AND act.t=".ACTIVITY
-								." LEFT JOIN $z tok ON tok.up=u.id AND tok.t=".TOKEN
+								." LEFT JOIN $z tok ON tok.up=u.id AND tok.t=".TOKEN." AND ".Token_key_sql("tok")
 								." LEFT JOIN $z xsrf ON xsrf.up=u.id AND xsrf.t=".XSRF
 							." WHERE u.t=".USER." AND u.val='$u'"
 					, "Authenticate user");
@@ -8274,7 +8696,7 @@ function authJWT($u){
 		$GLOBALS["GLOBAL_VARS"]["user_id"] = $row["uid"];
 		updateTokens($row);
 #		setcookie($z, $GLOBALS["GLOBAL_VARS"]["token"], time() + COOKIES_EXPIRE, "/"); # 30 days
-		setcookie($z, $GLOBALS["GLOBAL_VARS"]["token"], 0, "/"); # Uon browser close
+		setcookie($z, $GLOBALS["GLOBAL_VARS"]["token"], Auth_cookie_opts(0)); # Uon browser close
     	api_dump(json_encode(array("_xsrf"=>$GLOBALS["GLOBAL_VARS"]["xsrf"],"token"=>$GLOBALS["GLOBAL_VARS"]["token"],"id"=>$GLOBALS["GLOBAL_VARS"]["user_id"],"user"=>$GLOBALS["GLOBAL_VARS"]["user"])), "login.json");
 	}
 	else
@@ -8310,6 +8732,45 @@ Exec_sql("SET SESSION optimizer_search_depth = 9", "Search depth");
 
 switch($a)  # Check actions, which don't require authentication
 {
+	# python2node#1043: обмен MCP-токена на короткий токен ядра (RFC 8693). Клиент — ideav-mcp со своим секретом
+	# (client credentials); MCP-токен в API не ходит, ядро получает токен со своей аудиторией и сроком.
+	case "_mcp_exchange":
+		if($_SERVER["REQUEST_METHOD"] !== "POST")
+			Mcp_json(array("error" => "invalid_request"), "405 Method Not Allowed");
+		$mcpClient = Mcp_client_ok();
+		if($mcpClient === NULL)
+			Mcp_json(array("error" => "exchange_disabled"), "503 Service Unavailable");
+		if(!$mcpClient)
+			Mcp_json(array("error" => "invalid_client"), "401 Unauthorized");
+		$mcpRow = Mcp_token_row(isset($_POST["token"]) && is_string($_POST["token"]) ? trim($_POST["token"]) : "");
+		if(!$mcpRow)
+			Mcp_json(array("error" => "invalid_token"), "401 Unauthorized");
+		$mcpTtl = max(1, min(MCP_EXCHANGE_TTL, $mcpRow["exp"] - time()));
+		$mcpAccess = Session_new($mcpRow["uid"], "m", $mcpRow["scope"], $mcpTtl);
+		Mcp_json(array("access_token" => $mcpAccess, "token_type" => "Bearer", "expires_in" => $mcpTtl
+			, "scope" => Token_scope_names($mcpRow["scope"]), "user" => strtolower($mcpRow["user"]), "user_id" => $mcpRow["uid"]
+			, "_xsrf" => xsrf($mcpAccess, $z)));
+		break;
+
+	# python2node#1043: выход браузера. Кука входа HttpOnly — скрипт страницы её не снимет, снимает сервер:
+	# эта база (или все базы браузера при all=1 — куки с сессией), строки сессий удаляются. GET уводит на вход, POST — JSON.
+	case "_logout":
+		foreach($_COOKIE as $ckName => $ckVal){
+			if(!is_string($ckVal) || !checkDbName(DB_MASK, $ckName) || (!isset($_REQUEST["all"]) && ($ckName !== $z)))
+				continue;
+			$ckTok = Token_parse($ckVal);
+			if(($ckTok === NULL) || ($ckTok["kind"] !== "s"))
+				continue;
+			@mysqli_query($connection, "DELETE FROM $ckName WHERE t=".TOKEN." AND val='"
+				.Token_stored_val("s", $ckTok["exp"], "", $ckTok["secret"])."'");
+			Auth_cookie($ckName, "", 0);
+		}
+		Auth_cookie($z, "", 0);
+		if($_SERVER["REQUEST_METHOD"] === "POST")
+			api_dump(json_encode(array("result" => "ok")), "logout.json");
+		header("Location: /".($z === "my" ? "" : $z));
+		die();
+
 	case "jwt":
         $params = verifyJWT($_POST["jwt"], JWT_PUBLIC_KEY);
         if($params){
@@ -8331,28 +8792,51 @@ switch($a)  # Check actions, which don't require authentication
 			setcookie("tzone", $GLOBALS["tzone"], time() + COOKIES_EXPIRE, "/"); # 30 days
 		}
 		$msg = "";
-		$p = $_POST["pwd"];
-		$pwd = sha1(Salt($u, $p)); # Add some salt
+		$p = isset($_POST["pwd"]) && is_string($_POST["pwd"]) ? $_POST["pwd"] : "";
 		$data_set = Exec_sql("SELECT u.id uid, u.val, pwd.id pwd_id, pwd.val pwd, tok.id tok, tok.val token, act.id act, xsrf.id xsrf
 								FROM $z pwd, $z u LEFT JOIN $z act ON act.up=u.id AND act.t=".ACTIVITY
-									." LEFT JOIN $z tok ON tok.up=u.id AND tok.t=".TOKEN
+									." LEFT JOIN $z tok ON tok.up=u.id AND tok.t=".TOKEN." AND ".Token_key_sql("tok")
 									." LEFT JOIN $z xsrf ON xsrf.up=u.id AND xsrf.t=".XSRF
-								." WHERE u.t=".USER." AND u.val='$u' AND pwd.up=u.id AND pwd.val='$pwd'"
+								." WHERE u.t=".USER." AND u.val='$u' AND pwd.up=u.id AND pwd.t=".PASSWORD
 						, "Authenticate user");
 		$row = mysqli_fetch_array($data_set);
+		if($row){
+			# python2node#1043: пароль сверяется в PHP (password_hash в SQL не сравнить); после RETRIES_LIMIT
+			# неудач подряд — окно LOGIN_LOCK_S, в которое не входит и верный пароль
+			$tries = Login_retries($row["uid"]);
+			$lockLeft = Login_lock_left($tries, time());
+			if($lockLeft > 0)
+				Login_locked_die($u, $lockLeft);
+			if(!Pwd_verify($p, $row["pwd"], $u)){
+				Login_retries($row["uid"], 1);
+				$row = FALSE;
+			}
+			else{
+				if((int)$tries > 0)
+					Login_retries($row["uid"], -1);
+				if(Pwd_needs_rehash($row["pwd"]))
+					Update_Val($row["pwd_id"], Pwd_hash($p));  # прежний sha1 — в password_hash при входе
+			}
+		}
 		if(!$row){ # Check the user Cabinet
-		    $prevz = $z;
-		    $z = "my";
-    		$pwd = sha1(Salt($u, $p)); # Add some salt
-		    $z = $prevz;
-    		$data_set = Exec_sql("SELECT 1 FROM my email JOIN my pwd ON pwd.up=email.up AND pwd.val='$pwd'"
+    		$data_set = Exec_sql("SELECT pwd.id, pwd.val FROM my email JOIN my pwd ON pwd.up=email.up AND pwd.t=".PASSWORD
                 					."     JOIN my db ON db.up=email.up AND db.val='$z' AND db.t=".DATABASE
                 					." WHERE email.t=".EMAIL." AND email.val='$u'"
 					    , "Authenticate in Cabinet");
-    		if($row = mysqli_fetch_array($data_set)){
+		    $prevz = $z;
+		    $z = "my";  # перец пароля кабинета — SALT."my"
+		    $cabOk = FALSE;
+    		while(!$cabOk && ($cab = mysqli_fetch_array($data_set)))
+    			if(Pwd_verify($p, $cab["val"], $u)){
+    				$cabOk = TRUE;
+    				if(Pwd_needs_rehash($cab["val"]))
+    					Exec_sql("UPDATE my SET val='".addslashes(Pwd_hash($p))."' WHERE id=".(int)$cab["id"], "Rehash the cabinet password");
+    			}
+		    $z = $prevz;
+    		if($cabOk){
         		$data_set = Exec_sql("SELECT u.id uid, u.val, pwd.id pwd_id, pwd.val pwd, tok.id tok, tok.val token, act.id act, xsrf.id xsrf
         								FROM $z pwd, $z u LEFT JOIN $z act ON act.up=u.id AND act.t=".ACTIVITY
-        									." LEFT JOIN $z tok ON tok.up=u.id AND tok.t=".TOKEN
+        									." LEFT JOIN $z tok ON tok.up=u.id AND tok.t=".TOKEN." AND ".Token_key_sql("tok")
         									." LEFT JOIN $z xsrf ON xsrf.up=u.id AND xsrf.t=".XSRF
         								." WHERE u.t=".USER." AND u.val='$z' AND pwd.up=u.id"
         						, "Authenticate user from Cabinet");
@@ -8375,25 +8859,30 @@ switch($a)  # Check actions, which don't require authentication
 					$msg .= t9n("[RU]Введите новый пароль дважды одинаково[EN]Please input the same password twice")." [errDiffer]. ";
 				else
 				{
-					Update_Val($row["pwd_id"], sha1(Salt($u, $npw1)));
+					Update_Val($row["pwd_id"], Pwd_hash($npw1));
 					$msg = t9n("[RU]Пароль успешно изменен[EN]The password has been changed");
+					$pwdChanged = TRUE;
 				}
 			}
-			updateTokens($row, Reg_code_tokens($row["uid"], $row["val"]));  # прежний md5-код регистрации в токене заменяется
-#			if(isset($_POST["save"]))
-#				setcookie($z, $GLOBALS["GLOBAL_VARS"]["token"], 0, "/");  # The cookie to be deleted upon the session close
-#			else
-				setcookie($z, $GLOBALS["GLOBAL_VARS"]["token"], time() + COOKIES_EXPIRE, "/"); # 30 days
+			$replace = Reg_code_tokens($row["uid"], $row["val"]);  # прежний md5-код регистрации в ключе заменяется
+			# Смена пароля закрывает все сессии пользователя и меняет ключ: украденная сессия её не переживает
+			if(!empty($pwdChanged)){
+				Exec_sql("DELETE FROM $z WHERE up=".(int)$row["uid"]." AND t=".TOKEN." AND val REGEXP '^(s|m)[.]'", "Drop sessions on password change");
+				$replace[] = strtolower((string)$row["token"]);
+			}
+			updateTokens($row, $replace);
 		}
 		elseif((strtolower($u) == "admin") && (sha1(sha1($_SERVER["SERVER_NAME"].$z.$p).$z) === sha1(ADMINHASH.$z))){
 			$GLOBALS["GLOBAL_VARS"]["user"] = $GLOBALS["GLOBAL_VARS"]["role"] = "admin";
 			$GLOBALS["GLOBAL_VARS"]["user_id"] = 0;
 			$GLOBALS["GLOBAL_VARS"]["xsrf"] = sha1($z.ADMINHASH);
 			$GLOBALS["GLOBAL_VARS"]["token"] = sha1(ADMINHASH.$z);
-			setcookie($z, sha1(ADMINHASH.$z), 0, "/");
+			setcookie($z, sha1(ADMINHASH.$z), Auth_cookie_opts(0));
 		}
-		elseif(isApi())
+		elseif(isApi()){
+			header("HTTP/1.0 401 Unauthorized");  # python2node#1043: неверная пара — 401, а не 200 с ошибкой
 		    my_die(t9n("[RU]Неверный логин или пароль $u @ $z".". Логин и пароль следует отправлять POST-параметрами.[EN]Wrong credentials for user $u in $z".". Please send login and password as POST-parameters."));
+		}
 		else
 			login($z, $_REQUEST["u"], "wrong");
 		if(isApi())
@@ -8407,14 +8896,29 @@ switch($a)  # Check actions, which don't require authentication
 		break;
 
 	case "confirm":
-		if($row = mysqli_fetch_array(Exec_sql("SELECT pwd.id FROM $z pwd, $z u WHERE pwd.up=u.id AND pwd.t=".PASSWORD
-						." AND u.t=".USER." AND u.val='".addslashes($_REQUEST["u"])."' AND pwd.val='".addslashes($_REQUEST["o"])."'"
-						, "Get user's pwd")))
-		{
-			Exec_sql("UPDATE $z SET val='".addslashes($_REQUEST["p"])."' WHERE id=".$row[0], "Reset the password");
-			login($z,$_REQUEST["u"],"confirm");
+		# python2node#1043: в ссылке — новый хеш p и подпись o (Pwd_reset_sig) от имени, p и текущего хеша:
+		# без письма ссылку не собрать, и p не подменить; после смены пароля подпись уже не сходится.
+		$cu = isset($_REQUEST["u"]) && is_string($_REQUEST["u"]) ? $_REQUEST["u"] : "";
+		$cp = isset($_REQUEST["p"]) && is_string($_REQUEST["p"]) ? $_REQUEST["p"] : "";
+		$co = isset($_REQUEST["o"]) && is_string($_REQUEST["o"]) ? $_REQUEST["o"] : "";
+		$row = FALSE;
+		if(Pwd_is_modern($cp) && ($co !== "")){
+			$data_set = Exec_sql("SELECT pwd.id, pwd.up, pwd.val FROM $z pwd, $z u WHERE pwd.up=u.id AND pwd.t=".PASSWORD
+						." AND u.t=".USER." AND u.val='".addslashes($cu)."'", "Get user's pwd");
+			while(!$row && ($cand = mysqli_fetch_array($data_set)))
+				if(hash_equals(Pwd_reset_sig($cu, $cp, (string)$cand["val"]), $co))
+					$row = $cand;
 		}
-		login($z, urlencode($_REQUEST["u"]), "obsolete");
+		if($row)
+		{
+			Exec_sql("UPDATE $z SET val='".addslashes($cp)."' WHERE id=".(int)$row["id"], "Reset the password");
+			# Сброс пароля гасит прежние сессии: ключ пользователя заменяется новым, сессии удаляются
+			Exec_sql("UPDATE $z SET val='".secureToken()."' WHERE up=".(int)$row["up"]." AND t=".TOKEN." AND ".str_replace("tok.", "", Token_key_sql("tok")), "Reset the token");
+			Exec_sql("DELETE FROM $z WHERE up=".(int)$row["up"]." AND t=".TOKEN." AND val REGEXP '^(s|m)[.]'", "Drop sessions on reset");
+			Login_retries($row["up"], -1);
+			login($z, $cu, "confirm");
+		}
+		login($z, urlencode($cu), "obsolete");
 		break;
 
 	case "login":
@@ -8430,7 +8934,7 @@ switch($a)  # Check actions, which don't require authentication
     			$GLOBALS["tzone"] = round(((int)$_POST["tzone"] - time() - date("Z"))/1800)*1800; # Round the time zone shift to 30 min
     			setcookie("tzone", $GLOBALS["tzone"], time() + COOKIES_EXPIRE, "/"); # 30 days
     		}
-    		$data_set = Exec_sql("SELECT tok.val, tok.id tok, u.id uid FROM $z u LEFT JOIN $z tok ON tok.up=u.id AND tok.t=".TOKEN." WHERE u.t=".USER." AND u.val='$u'"
+    		$data_set = Exec_sql("SELECT tok.val, tok.id tok, u.id uid FROM $z u LEFT JOIN $z tok ON tok.up=u.id AND tok.t=".TOKEN." AND ".Token_key_sql("tok")." WHERE u.t=".USER." AND u.val='$u'"
     						, "Get the user token");
     		if($row = mysqli_fetch_array($data_set))
     		{
@@ -8463,6 +8967,11 @@ $GLOBALS["GLOBAL_VARS"]["uri"] = htmlentities($_SERVER["REQUEST_URI"]);
 if(Validate_Token())
 {
 #print_r($GLOBALS); die();
+	# python2node#1043: короткий токен MCP (m.*) действует только в пределах своих прав
+	if(isset($GLOBALS["TOKEN_SCOPE"]) && !Token_scope_allows($GLOBALS["TOKEN_SCOPE"], $a, $_SERVER["REQUEST_METHOD"])){
+		header("HTTP/1.0 403 Forbidden");
+		api_dump(json_encode(array("error" => "insufficient_scope", "scope" => Token_scope_names($GLOBALS["TOKEN_SCOPE"]))), "scope.json");
+	}
     $_REQUEST = array_merge($_POST, $_GET);
     $up = isset($_REQUEST["up"]) ? (int)$_REQUEST["up"] : 0;
     $t = isset($_REQUEST["t"]) ? (int)$_REQUEST["t"] : 0;
@@ -8819,7 +9328,7 @@ if(Validate_Token())
 						}
 						else{
         					if($t == PASSWORD) // Encrypt the password in case it's updated
-        						$v = sha1(Salt(isset($_REQUEST["t".USER]) ? trim($_REQUEST["t".USER]) : $cur_val, $v)); // Salt it with the new or current user name
+        						$v = Pwd_hash($v);
             				trace("BuiltIn $v of ".$t." = ".BuiltIn($v));
             				trace(" base = ".$GLOBALS["REV_BT"][$t]);
         					#$v = Format_Val($t, BuiltIn($v));
@@ -9190,7 +9699,7 @@ if(Validate_Token())
 #							my_die(t9n("[RU]Неверный тип объекта ($t) с ID=$v или объект не найден [EN]Invalid object type with ID=$v or the object was not found"));
 					}
 					elseif($t == PASSWORD)
-						Insert($i, 1, $t, sha1(Salt($val, $v)), "Insert a first time password");
+						Insert($i, 1, $t, Pwd_hash($v), "Insert a first time password");
 					else
 						Insert($i, 1, $t, $v, "Insert new non-empty req");
 				}
@@ -9580,11 +10089,40 @@ if(Validate_Token())
 		    break;
 		    
     	case "exit":
-            Exec_sql("DELETE FROM $z WHERE up=".$GLOBALS["GLOBAL_VARS"]["user_id"]." AND t=".TOKEN, "Exit - drop the token");
+            # python2node#1043: выход сессии гасит только её; exit?all=1, а также выход по ключу API — все токены пользователя
+            if(isset($_REQUEST["all"]) || !Session_drop($GLOBALS["GLOBAL_VARS"]["token"]))
+                Exec_sql("DELETE FROM $z WHERE up=".(int)$GLOBALS["GLOBAL_VARS"]["user_id"]." AND t=".TOKEN, "Exit - drop the token");
+            Auth_cookie($z, "", 0);
     		if(strlen($next_act))
     			die(Exit_redirect_script($z, $next_act));
             login($z);
     		break;
+
+		# python2node#1043: MCP-токены пользователя. GET — страница выпуска и списка, POST — выпуск (токен показывается
+		# один раз), _mcp_revoke — отзыв своего. Права токена не шире прав пользователя: ядро проверяет роль.
+		case "_mcp_token":
+			if((int)$GLOBALS["GLOBAL_VARS"]["user_id"] <= 0)
+				Mcp_json(array("error" => t9n("[RU]MCP-токен выпускается пользователю базы[EN]An MCP token is issued to a DB user")), "403 Forbidden");
+			if($_SERVER["REQUEST_METHOD"] === "POST"){
+				check();
+				$mcpScope = Token_scope_code(isset($_REQUEST["scope"]) && is_string($_REQUEST["scope"]) ? $_REQUEST["scope"] : "read,write");
+				$mcpDays = isset($_REQUEST["ttl"]) ? (int)$_REQUEST["ttl"] : 30;
+				if(($mcpScope === FALSE) || ($mcpDays < 1) || ($mcpDays > MCP_TOKEN_TTL_DAYS))
+					Mcp_json(array("error" => "scope: read,write,delete,rights,schema; ttl: 1..".MCP_TOKEN_TTL_DAYS), "400 Bad Request");
+				$mcpTok = Session_new($GLOBALS["GLOBAL_VARS"]["user_id"], "mcp", $mcpScope, $mcpDays * 86400);
+				$mcpP = Token_parse($mcpTok);
+				Mcp_json(array("token" => $mcpTok, "expires" => $mcpP["exp"], "scope" => Token_scope_names($mcpScope)));
+			}
+			header("Content-Type: text/html; charset=UTF-8");
+			die(Mcp_token_page($z, Mcp_token_list($GLOBALS["GLOBAL_VARS"]["user_id"]), $GLOBALS["GLOBAL_VARS"]["xsrf"]));
+
+		case "_mcp_revoke":
+			if($_SERVER["REQUEST_METHOD"] !== "POST")
+				Mcp_json(array("error" => "POST only"), "405 Method Not Allowed");
+			check();
+			Exec_sql("DELETE FROM $z WHERE id=".(isset($_REQUEST["id"]) ? (int)$_REQUEST["id"] : 0)." AND up=".(int)$GLOBALS["GLOBAL_VARS"]["user_id"]
+				." AND t=".TOKEN." AND val LIKE 'mcp.%'", "Revoke an MCP token");
+			Mcp_json(array("result" => "ok"));
 
 		case "xsrf":
 			api_dump(json_encode(array("_xsrf"=>$GLOBALS["GLOBAL_VARS"]["xsrf"],"token"=>$GLOBALS["GLOBAL_VARS"]["token"],"user"=>$GLOBALS["GLOBAL_VARS"]["user"]

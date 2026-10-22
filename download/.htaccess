@@ -1,0 +1,9 @@
+# Загруженный html/svg/xml открывается на том же origin, что и все базы: его скрипт ходил бы в API
+# любой базы с куками посетителя. CSP sandbox даёт такой странице отдельный (opaque) origin.
+# То же правило — в docker/apache/integram.conf (там AllowOverride None, этот файл не читается).
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    <FilesMatch "\.(?i:html?|xhtml|shtml|svgz?|xml|xsl)$">
+        Header always set Content-Security-Policy "sandbox allow-scripts allow-forms allow-popups allow-modals allow-downloads"
+    </FilesMatch>
+</IfModule>

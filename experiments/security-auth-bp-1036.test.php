@@ -40,7 +40,7 @@ $indexPhp = getenv("INDEX_PHP") ?: __DIR__."/../index.php";
 $source = file_get_contents($indexPhp);
 $missing = array();
 foreach(array("Salt", "checkDbName", "Cabinet_login_ok", "fetchUrlHostIsPublic", "Report_url_allowed", "Connect_url",
-              "Exit_redirect_script", "logCut", "maskSensitiveLogValue", "logParams", "Rotate_token_hashes") as $fn){
+              "Exit_redirect_script", "logCut", "maskSensitiveLogValue", "logParams", "Rotate_token_hashes", "Pwd_legacy") as $fn){
     try { eval(extract_function_source($source, $fn)); } catch(Exception $e){ $missing[] = $fn; }
 }
 expect(!$missing, "в index.php есть все проверяемые функции".($missing ? " (нет: ".implode(", ", $missing).")" : ""));

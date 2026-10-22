@@ -154,11 +154,11 @@ class CabinetController {
     }
 
     async checkAuth() {
-        // Check for any valid idb_* cookie
+        // Check for any idb_* login: the cookie itself is HttpOnly (python2node#1043), its idbs_* marker is visible
         const cookies = document.cookie.split(';');
         for (const c of cookies) {
             const trimmed = c.trim();
-            if (trimmed.startsWith('idb_')) {
+            if (trimmed.startsWith('idb_') || trimmed.startsWith('idbs_')) {
                 console.log('[cabinet] Found auth cookie:', trimmed.split('=')[0]);
                 return true;
             }
@@ -2276,24 +2276,24 @@ class CabinetController {
         const logoutBtn = document.getElementById('logout-btn');
         if (logoutBtn) {
             logoutBtn.addEventListener('click', () => {
-                // Delete all idb_* cookies
+                // Delete all idb_* cookies: readable ones here, HttpOnly ones (python2node#1043) — by the server
                 const cookies = document.cookie.split(';');
                 cookies.forEach(c => {
                     const name = c.split('=')[0].trim();
-                    if (name.startsWith('idb_')) {
+                    if (name.startsWith('idb_') || name.startsWith('idbs_')) {
                         document.cookie = name + '=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/';
                     }
                 });
 
-                // Redirect to index
-                window.location.href = 'start.html';
+                // /my/_logout?all=1 drops the sessions of every DB of this browser and redirects to the login page
+                window.location.href = '/my/_logout?all=1';
             });
         }
 
         const logoutEverywhereBtn = document.getElementById('logout-everywhere-btn');
         if (logoutEverywhereBtn) {
             logoutEverywhereBtn.addEventListener('click', async () => {
-                try { await fetch('/my/exit'); } catch (e) {}
+                try { await fetch('/my/exit?all=1'); } catch (e) {}
                 window.location.href = '/my';
             });
         }

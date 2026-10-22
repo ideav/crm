@@ -175,17 +175,28 @@
         return (root.Date || Date).now();
     }
 
+    // Кука с токеном — HttpOnly (python2node#1043): скрипт её не снимет, снимает сервер
+    // (`POST /<база>/_logout` гасит сессию). Уходим на форму входа, когда сервер ответил.
     function logout(db, user) {
         var app = shell();
+        var done = null;
         if (app && typeof app.deleteCurrentDbCookies === 'function') {
-            app.deleteCurrentDbCookies(db);
+            done = app.deleteCurrentDbCookies(db);
         } else {
             cookieClearStrings(db).forEach(function(item) { root.document.cookie = item; });
+            if (typeof root.fetch === 'function') {
+                done = root.fetch('/' + encodeURIComponent(db) + '/_logout',
+                    { method: 'POST', credentials: 'same-origin', keepalive: true });
+            }
         }
         // `replace`, а не `href`: возврат «назад» на пульт без токена — пустой экран.
         var url = logoutUrl(db, user);
-        if (root.location && typeof root.location.replace === 'function') root.location.replace(url);
-        else root.location.href = url;
+        var go = function() {
+            if (root.location && typeof root.location.replace === 'function') root.location.replace(url);
+            else root.location.href = url;
+        };
+        if (done && typeof done.then === 'function') done.then(go, go);
+        else go();
     }
 
     function boot(currentScript) {
@@ -249,6 +260,7 @@
         idleMsFromAttr: idleMsFromAttr,
         logoutUrl: logoutUrl,
         cookieClearStrings: cookieClearStrings,
+        logout: logout,
         createWatch: createWatch,
         boot: boot
     };

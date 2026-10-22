@@ -38,6 +38,9 @@ define("LOGS_DIR", $logsDir);
 # Лимиты входа по коду — как заданы в ядре
 foreach(array("CHECKCODE_RETRIES_LIMIT" => 3, "CHECKCODE_LOCK_TTL" => 3600) as $k => $v)
     define($k, preg_match('/define\("'.$k.'",\s*(\d+)\)/', $source, $m) ? (int)$m[1] : $v);
+# Константы сессий и блокировки (python2node#1043) — как в ядре
+if(preg_match_all('/^(?:defined\("\w+"\) \|\| )?define\("(SESSION_IDLE|SESSION_LIFETIME|SESSION_MAX|RETRIES_LIMIT|LOGIN_LOCK_S|AUTH_COOKIE_SAMESITE|AUTH_COOKIE_HTTPONLY)", (.+?)\);/m', $source, $mm, PREG_SET_ORDER))
+    foreach($mm as $m) defined($m[1]) || eval('define("'.$m[1].'", '.$m[2].');');
 $z = "abc";
 class Died extends Exception {}
 function t9n($v){ return preg_match('/^\[RU\](.*?)\[EN\]/s', $v, $m) ? $m[1] : $v; }
@@ -84,7 +87,10 @@ foreach(array("Salt", "secureToken", "xsrf", "check", "updateTokens", "BlackList
               "Basic_auth_token", "Header_auth_token", "Checkcode_retries", "Checkcode_login",
               "Dir_admin_add_path", "Dir_admin_entry_name", "Cabinet_login_db",
               "fetchUrlHostIsPublic", "Report_url_allowed", "Connect_url",
-              "Log_sensitive_key", "Log_mask_value", "Log_params", "Log_uri", "Log_header_value") as $fn){
+              "Log_sensitive_key", "Log_mask_value", "Log_params", "Log_uri", "Log_header_value",
+              "Pwd_legacy", "Pwd_prehash", "Pwd_hash", "Pwd_is_modern", "Pwd_verify", "Pwd_needs_rehash", "Token_parse",
+              "Token_stored_val", "Token_key_sql", "Session_new", "Session_prune", "Session_prune_ids", "Session_cookie_exp",
+              "Is_https", "Auth_cookie_opts", "Auth_cookie", "Login_lock_left", "Login_retries") as $fn){
     try {
         eval(str_replace(array("mysqli_fetch_array(", "setcookie("), array("fk_fetch_array(", "test_setcookie("),
             extract_function_source($source, $fn)));
@@ -124,7 +130,10 @@ if(function_exists("updateTokens")){
     $row = array("uid" => 5, "user" => "ivan@x.ru", "tok" => 75, "token" => $code, "xsrf" => 0, "act" => 0);
     updateTokens($row, array($code));
     $t = isset($GLOBALS["GLOBAL_VARS"]["token"]) ? $GLOBALS["GLOBAL_VARS"]["token"] : "";
-    expect(($t !== $code) && (strlen($t) === 64), "A: после подтверждения токен — новый случайный, не код из ссылки");
+    $newKey = null;
+    foreach($GLOBALS["LOG"] as $l) if(($l[0] === "upd") && ($l[1] === 75)) $newKey = $l[2];
+    expect(($newKey !== null) && ($newKey !== $code) && (strlen($newKey) === 64) && ($t !== $code),
+        "A: после подтверждения токен — новый случайный, не код из ссылки (ключ заменён, браузеру — сессия)");
     expect(log_has("cookie", $t) && !log_has("cookie", $code), "A: кука выдана с новым токеном");
     $legacy = md5("xzivan@x.ru");
     $GLOBALS["LOG"] = array(); $GLOBALS["GLOBAL_VARS"] = array();
@@ -133,8 +142,11 @@ if(function_exists("updateTokens")){
     updateTokens(array("uid" => 9, "val" => "abc", "tok" => 79, "token" => $legacy, "xsrf" => 0, "act" => 0), $repl);
     expect($GLOBALS["GLOBAL_VARS"]["token"] !== $legacy, "A: прежний md5-код регистрации в токене при входе заменяется");
     $GLOBALS["GLOBAL_VARS"] = array();
+    $GLOBALS["LOG"] = array();
     updateTokens(array("uid" => 9, "val" => "abc", "tok" => 79, "token" => $liveTok, "xsrf" => 0, "act" => 0), $repl);
-    expect($GLOBALS["GLOBAL_VARS"]["token"] === $liveTok, "A: обычный токен при входе сохраняется");
+    $keyTouched = FALSE;
+    foreach($GLOBALS["LOG"] as $l) if(($l[0] === "upd") && ($l[1] === 79)) $keyTouched = TRUE;
+    expect(!$keyTouched && ($GLOBALS["GLOBAL_VARS"]["token"] !== $liveTok), "A: обычный токен при входе сохраняется (ключ API; браузеру — своя сессия)");
 }
 if(function_exists("Reg_confirm_code")){
     $c1 = Reg_confirm_code(); $c2 = Reg_confirm_code();
@@ -165,7 +177,9 @@ if(function_exists("Checkcode_login") && function_exists("Checkcode_retries")){
     }
     Checkcode_retries(11, -1);
     $r = checkcode_as($tok, "AB12", 11);
-    expect(isset($r["token"]) && ($r["token"] !== $tok) && log_has("upd", $r["token"]), "B: верный код — вход, токен заменён");
+    $codeKey = null;
+    foreach($GLOBALS["LOG"] as $l) if(($l[0] === "upd") && ($l[1] === 111)) $codeKey = $l[2];
+    expect(isset($r["token"]) && ($r["token"] !== $tok) && ($codeKey !== null) && ($codeKey !== $tok), "B: верный код — вход, токен заменён");
     $r = checkcode_as($tok, "zz99", 12);
     expect(isset($r["error"]) && !isset($r["token"]), "B: неверный код — отказ");
     for($i = 1; $i < CHECKCODE_RETRIES_LIMIT; $i++) checkcode_as($tok, "zz99", 12);
@@ -185,14 +199,14 @@ if(function_exists("Basic_auth_token")){
         $r = Basic_auth_token(base64_encode("$login:secret"));
         $sql = isset($GLOBALS["SQL"]["Basic authentication"]) ? $GLOBALS["SQL"]["Basic authentication"] : "";
         list($lit, $rest) = sql_literal_after($sql, "u.val='");
-        expect(($lit === $login) && (strpos($rest, " AND pwd.up=u.id AND pwd.val='") === 0),
+        expect(($lit === $login) && (strpos($rest, " AND pwd.up=u.id AND pwd.t=") === 0),
             "C: логин ".json_encode($login)." целиком внутри литерала u.val, запрос не переписан");
         expect($r === FALSE, "C: неверная пара ".json_encode($login)." — вход не выдан");
     }
-    $GLOBALS["ANSWER"]["Basic authentication"] = function($sql){ return array(array("tok" => "T0K", "tok_id" => 3, "id" => 7)); };
-    expect(Basic_auth_token(base64_encode("alice:secret")) === "T0K", "C: верная пара — токен пользователя");
     $pwdHash = sha1(Salt("alice", "secret"));
-    $GLOBALS["ANSWER"]["Basic authentication"] = function($sql) use ($pwdHash){ return array(array("tok" => $pwdHash, "tok_id" => 3, "id" => 7)); };
+    $GLOBALS["ANSWER"]["Basic authentication"] = function($sql) use ($pwdHash){ return array(array("tok" => "T0K", "tok_id" => 3, "id" => 7, "pwd" => $pwdHash, "pwd_id" => 4)); };
+    expect(Basic_auth_token(base64_encode("alice:secret")) === "T0K", "C: верная пара — токен пользователя");
+    $GLOBALS["ANSWER"]["Basic authentication"] = function($sql) use ($pwdHash){ return array(array("tok" => $pwdHash, "tok_id" => 3, "id" => 7, "pwd" => $pwdHash, "pwd_id" => 4)); };
     $GLOBALS["LOG"] = array();
     $t = Basic_auth_token("alice:secret");
     expect(($t !== $pwdHash) && log_has("upd", $t), "C: токен, равный хешу пароля, заменяется случайным");

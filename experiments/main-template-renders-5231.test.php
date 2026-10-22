@@ -31,7 +31,7 @@ function ", $start + 1);
 }
 
 $src = file_get_contents(__DIR__."/../index.php");
-foreach(array("Make_tree", "Parse_block", "Get_file") as $fn)
+foreach(array("Make_tree", "Parse_block", "Get_file", "Asset_versions") as $fn)
     eval(extract_function_source($src, $fn));
 
 # Окружение: данные блоков — как у Get_block_data для &main (имя базы), прочие блоки без данных.

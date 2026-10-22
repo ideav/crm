@@ -130,10 +130,16 @@ class MainAppController {
         return '/start.html?' + params.toString();
     }
 
+    // Кука входа idb_<база> — HttpOnly (python2node#1043): скрипт её не видит и не снимает,
+    // поэтому выход идёт на сервер (`/<база>/_logout` гасит сессию и куку). Возвращает Promise.
     static deleteCurrentDbCookies(dbName) {
-        if (!dbName) return;
+        if (!dbName) return Promise.resolve();
         document.cookie = 'idb_' + dbName + '=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/';
+        document.cookie = 'idbs_' + dbName + '=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/';
         document.cookie = dbName + '=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/';
+        if (typeof fetch !== 'function') return Promise.resolve();
+        return fetch('/' + encodeURIComponent(dbName) + '/_logout', { method: 'POST', credentials: 'same-origin', keepalive: true })
+            .catch(() => {});
     }
 
     isMobile() {
@@ -1889,8 +1895,8 @@ class MainAppController {
             logoutBtn.addEventListener('click', () => {
                 const dbName = typeof db !== 'undefined' ? db : '';
                 const username = typeof user !== 'undefined' ? user : '';
-                MainAppController.deleteCurrentDbCookies(dbName);
-                window.location.href = MainAppController.getLogoutStartUrl(dbName, username);
+                const go = () => { window.location.href = MainAppController.getLogoutStartUrl(dbName, username); };
+                MainAppController.deleteCurrentDbCookies(dbName).then(go, go);
             });
         }
 
@@ -1898,7 +1904,7 @@ class MainAppController {
         if (logoutEverywhereBtn) {
             logoutEverywhereBtn.addEventListener('click', async () => {
                 const dbName = typeof db !== 'undefined' ? db : '';
-                try { await fetch('/' + dbName + '/exit'); } catch (e) {}
+                try { await fetch('/' + dbName + '/exit?all=1'); } catch (e) {}
                 window.location.href = '/' + dbName;
             });
         }
