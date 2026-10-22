@@ -635,6 +635,13 @@ class MainAppController {
         if (!canEditMenu) {
             return;
         }
+        // Issue #5221: правка меню — в левом меню; право, найденное по метаданным, видно
+        // только здесь, поэтому верхняя раскладка уступает левой
+        const root = document.documentElement;
+        if (root.classList.contains('menu-layout-top')) {
+            root.classList.remove('menu-layout-top');
+            root.classList.add('menu-layout-left');
+        }
 
         settingsBtn.style.display = '';
         settingsBtn.addEventListener('click', async () => {
