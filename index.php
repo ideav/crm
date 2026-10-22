@@ -2862,7 +2862,7 @@ function Validate_Token(){ # Validates the cookie token and gathers the user per
 			$GLOBALS["GLOBAL_VARS"]["role_id"] = ADMINROLE;
 			$xsrf = hash("sha512", $z.ADMINHASH);
 		}
-		$GLOBALS["tzone"] = isset($_COOKIE["tzone"]) ? $_COOKIE["tzone"] : 0;
+		$GLOBALS["tzone"] = isset($_COOKIE["tzone"]) ? (int)$_COOKIE["tzone"] : 0;  # PHP 8: "" + 1 — TypeError
 	}
 	if(!isset($GLOBALS["GLOBAL_VARS"]["user"])){ # Check, if we got a Guest user defined
 										  
@@ -3083,7 +3083,7 @@ function Format_Val_View($typ, $val, $id=0)
 					$val = "X";
 				break;
 			case "NUMBER":
-				if($val != 0)
+				if((float)$val != 0)  # PHP 8: "З-1" != 0 — true, и значение показывалось как «0»
 					$val = number_format(floatval($val), 0, "", "");
 				break;
 			case "FILE":
@@ -8153,7 +8153,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 			$GLOBALS["BT"]["REFERENCE"] = 0;  # Reference type
 			$GLOBALS["REV_BT"][0] = "REFERENCE";
 			$GLOBALS["DESC"] = isset($_REQUEST["desc"]) ? "DESC" : "";
-			$GLOBALS["PG"] = isset($_REQUEST["pg"]) ? max($_REQUEST["pg"], 1) : 1;
+			$GLOBALS["PG"] = isset($_REQUEST["pg"]) ? max((int)$_REQUEST["pg"], 1) : 1;  # PHP 8: "abc" - 1 — TypeError
 			$sql = "SELECT CASE WHEN arrs.id IS NULL THEN a.id ELSE typs.id END t, CASE WHEN refs.id IS NULL THEN typs.t ELSE refs.t END base_typ
 						, CASE WHEN a.t=1 THEN a.val WHEN refs.id IS NULL THEN typs.val ELSE refs.val END val
 						, CASE WHEN a.t=1 THEN 1 ELSE refs.id END ref_id, arrs.id arr_id, a.val attrs, a.id
@@ -9600,7 +9600,7 @@ function Kill_processlist($pid)
                   ."[EN]Session $pid has already finished or belongs to another database");
     if(@mysqli_query($connection, "KILL $pid"))
         return t9n("[RU]Сессия $pid снята[EN]Session $pid killed");
-    return t9n("[RU]Не удалось снять сессию $pid[EN]Couldn't kill session $pid");
+    return t9n("[RU]Не удалось снять сессию {$pid}[EN]Couldn't kill session $pid");
 }
 # </processlist-4590>
 # <crontab-dir-admin>
@@ -12523,8 +12523,10 @@ function mywrite($t, $mode="a+")
 {
     global $z;
 	if(!is_dir($path="templates/custom/$z/logs"))
-		mkdir($path);
-    $file = fopen("$path/trace.log", $mode);
+		@mkdir($path, 0777, true);
+    $file = @fopen("$path/trace.log", $mode);
+    if(!$file)  # PHP 8: fwrite(false) — TypeError, отчёт падал из-за трассировки
+        return;
     fwrite($file, "$t\r\n");
     fclose($file);
 }
@@ -13191,7 +13193,7 @@ function ApplyMDel($id)
 {
 	global $z, $a, $arg, $obj;
 			if($id == 0)
-				my_die(t9n("[RU]Неверный id: $id[EN]Wrong id: $id"));
+				my_die(t9n("[RU]Неверный id: {$id}[EN]Wrong id: $id"));
 			Check_Grant($id);
 			Check_Rec_masks($id);
 			if($id == $GLOBALS["GLOBAL_VARS"]["user_id"])
@@ -14813,7 +14815,7 @@ if(Validate_Token())
 
 		case "_m_move":
 			if($id==0)
-				die(t9n("[RU]Неверный id: $id[EN]Wrong id: $id"));
+				die(t9n("[RU]Неверный id: {$id}[EN]Wrong id: $id"));
 			Check_Grant($id);
 			Check_Rec_masks($id);
 			if($up > 1)
@@ -14988,7 +14990,7 @@ if(Validate_Token())
 					$id = Insert($id, Get_Ord($id), 1, $val, "Add free link Req");
 				}
 				else
-					my_die(t9n("[RU]Некорректный тип $id[EN]Incorrect term $id"));
+					my_die(t9n("[RU]Некорректный тип {$id}[EN]Incorrect term $id"));
 				break;
 			}
 			if($row = mysqli_fetch_array(Exec_sql("SELECT obj.up objup, new.t, obj.val, new.id, new.up, ex.id existing"
@@ -15159,7 +15161,7 @@ if(Validate_Token())
 		case "_d_action":
 			$action = FieldAttrsNormalizeAction(isset($_REQUEST["action"]) ? $_REQUEST["action"] : "", $actionError);
 			if($action === false)
-				my_die(t9n("[RU]Неверное описание действия кнопки: $actionError[EN]Invalid button action: $actionError"));
+				my_die(t9n("[RU]Неверное описание действия кнопки: {$actionError}[EN]Invalid button action: $actionError"));
 			# python2node#866: исполнитель хранится id записи пользователя (логин переименовывают)
 			if(is_array($action) && isset($action["user"])){
 				$userWhere = is_int($action["user"]) ? "id=".$action["user"] : "val='".addslashes($action["user"])."'";
@@ -15911,7 +15913,7 @@ if(Validate_Token())
 	}
 }
 elseif(isApi())
-    my_die(t9n("[RU]Ошибка проверки токена $z[EN]Not logged into $z"));
+    my_die(t9n("[RU]Ошибка проверки токена {$z}[EN]Not logged into $z"));
 else
 	login($z);
 #print_r($GLOBALS); die();

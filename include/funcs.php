@@ -118,6 +118,7 @@ global $_1_2, $_1_19, $des, $hang, $namerub, $nametho, $namemil, $namemrd, $kope
 $s="";
 $s1="";
 $s2="";
+$L=(float)$L;  // PHP 8: "" или «много» в арифметике — TypeError; PHP 7 считал их нулём
 $kop=intval(round(($L-intval( $L ))*100));
 $L=intval($L);
 if($L>=1000000000){

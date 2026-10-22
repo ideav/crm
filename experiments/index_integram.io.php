@@ -6,6 +6,9 @@ header('Access-Control-Allow-Headers: X-Authorization, x-authorization,Content-T
 header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
 header('Access-Control-Allow-Origin: *');
 mb_internal_encoding("UTF-8");
+# PHP 8.1+: mysqli по умолчанию бросает исключения — ошибка SQL становилась фаталом мимо Exec_sql (как в index.php)
+if(function_exists('mysqli_report'))
+    mysqli_report(MYSQLI_REPORT_OFF);
 
 define("DB_MASK", "/^[a-z0-9_]\w{1,14}$/i");  # Mask for the DB name validation
 define("USER_DB_MASK", "/^[a-z]\w{2,14}$/i");  # Mask for the DB name validation
@@ -770,6 +773,11 @@ function Report_curl_exec($ch, $url, $maxRedirects = 5){
         $url = $redir;
     }
 }
+# Переход после выхода: next_act экранирован только addslashes — «</script><script>…» исполнялся;
+# адрес уходит в JS строкой JSON с \u-экранами (как в index.php)
+function Exit_redirect_script($z, $next_act){
+    return "<script>document.location.href=".json_encode("/$z/$next_act", JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)."</script>";
+}
 # Адрес вызова коннектора — его URL плюс параметры запроса, кроме учётных данных Интеграма
 function Connect_url($base, $params){
     $url = "";
@@ -1202,7 +1210,7 @@ function Construct_WHERE($key, $filter, $cur_typ, $join_req=0, $ignore_tailed=FA
 				}
 				elseif(isset($filter["TO"]) && isset($filter["FR"]))
 				{	# Apply range filter
-					if($value == 0)  # Add '...' in case $value isn't numeric
+					if((float)$value == 0)  # Add '...' in case $value isn't numeric
 						$value = "'$value'";
 					else
 						$value = (float)$value;
@@ -1683,7 +1691,7 @@ function Validate_Token() # Validates the cookie token and gathers the user perm
 			$GLOBALS["GLOBAL_VARS"]["role_id"] = 145;
 			$xsrf = sha1($z.ADMINHASH);
 		}
-		$GLOBALS["tzone"] = isset($_COOKIE["tzone"]) ? $_COOKIE["tzone"] : 0;
+		$GLOBALS["tzone"] = isset($_COOKIE["tzone"]) ? (int)$_COOKIE["tzone"] : 0;  # PHP 8: "" + 1 — TypeError
 	}
 	if(!isset($GLOBALS["GLOBAL_VARS"]["user"]))
 	{ # Check, if we got a Guest user defined
@@ -1837,7 +1845,7 @@ function Format_Val($typ, $val){
     				    else
     				    {
         					$v = explode("/", str_replace(".", "/", str_replace(",", "/", str_replace(" ", "/", $val))));
-        					$dy = (isset($v[2])) ? (int)((strlen($v[2])==4) ? $v[2] : 2000+$v[2]) : date("Y");
+        					$dy = (isset($v[2])) ? (int)((strlen($v[2])==4) ? $v[2] : 2000+(int)$v[2]) : date("Y");
         					$dm = isset($v[1]) ? (int)$v[1] : date("m");
         					$dd = (int)$v[0];
         					if(!checkdate($dm, $dd, $dy))
@@ -1867,7 +1875,7 @@ function Format_Val($typ, $val){
     				    $val = trim($val);
     				    if(preg_match("/^\d{4}[\.\/\-\,]\d{2}[\.\/\-\,]\d{2}/", $val))
         				    $val = preg_replace("/^(\d{4})(.)(\d{2})(.)(\d{2})/", "$5.$3.$1", $val);
-    					if($val > 10000)	# Timestamp is OK
+    					if((float)$val > 10000)	# Timestamp is OK
     						$val = $val - $GLOBALS["tzone"];
     					elseif(strtotime($val) < 10000)	# An inadequate Timestamp & non-valid string time
     						$val = strtotime(Format_Val($GLOBALS["BT"]["DATE"], $val)) - $GLOBALS["tzone"];	# Try to apply DATE validation
@@ -1892,7 +1900,7 @@ function Format_Val_View($typ, $val, $id=0)
 				if($val != "")
 				{
 					if(strlen($val) > 8)	# This might be DATETIME
-						$val = date("d.m.Y", $val + $GLOBALS["tzone"]);	# Microtime
+						$val = date("d.m.Y", (int)$val + $GLOBALS["tzone"]);	# Microtime
 					else
 						$val = substr($val, 6, 2).".".substr($val, 4, 2).".".substr($val, 0, 4);
 				}
@@ -1905,7 +1913,7 @@ function Format_Val_View($typ, $val, $id=0)
 					$val = "X";
 				break;
 			case "NUMBER":
-				if($val != 0)
+				if((float)$val != 0)
 					$val = number_format(floatval($val), 0, "", "");
 				break;
 			case "FILE":
@@ -2233,12 +2241,12 @@ function Export_reqs($id, $obj, $val, $ref=""){
 				$reqs[$row["t"]] = MaskDelimiters($row["up"] ? Get_tail($row["up"],$row["val"]) : $row["val"]);
 		}
 		foreach($GLOBALS["local_struct"][$id] as $key => $value)
-			if($key == 0)
+			if((float)$key == 0)
 				$str = MaskDelimiters($val).";";
 			else
 				$str .= isset($reqs[$key]) ? $reqs[$key].";" : ";";
 		if(isset($GLOBALS["arrays"][$id]) || !isset($GLOBALS["linx"][$id])	# Array or Link values
-				|| (($GLOBALS["id"] == $id) && ($_REQUEST["F_U"] > 1)))
+				|| (($GLOBALS["id"] == $id) && ((float)$_REQUEST["F_U"] > 1)))
 			$str = "$id::$str\r\n";
 		else	# Save the ID for we could have links to it later
 		{
@@ -3239,8 +3247,8 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
                         else
     						$key = $fields[$key];
             			trace("order: $key");
-						if($value < 0)
-							$GLOBALS["STORED_REPS"][$id][REP_COL_SORT][$key." DESC"] = -$value;
+						if((float)$value < 0)
+							$GLOBALS["STORED_REPS"][$id][REP_COL_SORT][$key." DESC"] = -(float)$value;
 						else
 							$GLOBALS["STORED_REPS"][$id][REP_COL_SORT][$key] = $value;
 					}
@@ -3833,7 +3841,9 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 	$rownum = 1;
 															 
 	$GLOBALS["STORED_REPS"][$id]["last_res_empty"] = 1;
-	$GLOBALS["STORED_REPS"][$id]["rownum"] = mysqli_num_rows($data_set);
+	# Exec_sql() с $fatal=FALSE возвращает текст ошибки MySQL (строку): на PHP 8 mysqli_num_rows(строка) —
+	# TypeError, и ошибка не доходила до показа ниже (как в index.php)
+	$GLOBALS["STORED_REPS"][$id]["rownum"] = gettype($data_set)==="string" ? 1 : mysqli_num_rows($data_set);
 	foreach($GLOBALS["STORED_REPS"][$id]["names"] as $key => $value)
 	    if(substr($value,0,1) == "'")
 	    {
@@ -4247,7 +4257,7 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 			{
 				$k = array_search($key, $GLOBALS["STORED_REPS"][$id]["names"]);
 				if(isset($GLOBALS["STORED_REPS"][$id][REP_COL_TOTAL][$k]))
-    				if(strtoupper($GLOBALS["STORED_REPS"][$id][REP_COL_TOTAL][$k]) == "AVG")
+    				if((strtoupper($GLOBALS["STORED_REPS"][$id][REP_COL_TOTAL][$k]) == "AVG") && ((float)$GLOBALS["STORED_REPS"][$id]["rownum"] != 0))  # PHP 8: деление на 0 — DivisionByZeroError
     					$value = $value / $GLOBALS["STORED_REPS"][$id]["rownum"];
     			if(isset($GLOBALS["STORED_REPS"][$id]["base_out"][$k]))
     				$blocks["col_totals"][$id][$key] = Format_Val_View($GLOBALS["BT"][$GLOBALS["STORED_REPS"][$id]["base_out"][$k]], $value);
@@ -4569,7 +4579,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 			switch($GLOBALS["GLOBAL_VARS"]["action"]) # Show the current mode & object in the page header
 			{
 				case "object":
-					if($id == 0)
+					if((float)$id == 0)
 						die(t9n("[RU]Ошибка: id=0 или не задан[EN]Object id is empty or 0"));
 					$data_set = Exec_sql("SELECT obj.val, obj.t, par.id, obj.ord FROM $z obj
 										LEFT JOIN ($z par CROSS JOIN $z req USE INDEX (up_t)) ON par.up=0 AND req.up=par.id AND req.t=obj.id
@@ -4586,7 +4596,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 					    die(t9n("[RU]Тип $id не найден[EN]Type $id not found"));
 					break;
 				case "edit_obj":
-					if($id == 0)
+					if((float)$id == 0)
 						die(t9n("[RU]Ошибка: id=0 или не задан[EN]Object id is empty or 0"));
 					$data_set = Exec_sql("SELECT typs.val, typs.t, a.val, typs.id
 											FROM $z a, $z typs WHERE a.id=$id AND a.up!=0 AND typs.id=a.t AND typs.up=0"
@@ -4609,9 +4619,11 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                                 GROUP BY reqs.id ORDER BY a.id, reqs.ord";
         			$data_set = Exec_sql($sql, "Get Typs for backup");
             		if(!is_dir($path="templates/custom/$z/backups"))
-            			mkdir($path);
+            			@mkdir($path, 0777, true);
             		$name = $z."_".date("Ymd_His").".csv";
-                    $file = fopen("$path/$name", "a+");
+                    $file = @fopen("$path/$name", "a+");
+                    if(!$file)  # PHP 8: fwrite(false) — TypeError
+                        die(t9n("[RU]Не удалось создать файл выгрузки[EN]Cannot create the export file"));
 					fwrite($file, pack('CCC', 0xef, 0xbb, 0xbf));
         			while($row = mysqli_fetch_array($data_set))  # All but buttons and calculatables
         				if(($GLOBALS["REV_BT"][$row["t"]] != "CALCULATABLE") && ($GLOBALS["REV_BT"][$row["t"]] != "BUTTON"))
@@ -4767,9 +4779,11 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 					if(!isset($GLOBALS["GRANTS"]["EXPORT"][1]) && ($GLOBALS["GLOBAL_VARS"]["user"] != "admin") && ($GLOBALS["GLOBAL_VARS"]["user"] != $z))
 						die(t9n("[RU]У вас нет прав на выгрузку базы[EN]You do not have grants to export the database"));
             		if(!is_dir($path="templates/custom/$z/backups"))
-            			mkdir($path);
+            			@mkdir($path, 0777, true);
             		$name = $z."_".date("Ymd_His").".dmp";
-                    $file = fopen("$path/$name", "a+");
+                    $file = @fopen("$path/$name", "a+");
+                    if(!$file)  # PHP 8: fwrite(false) — TypeError
+                        die(t9n("[RU]Не удалось создать файл выгрузки[EN]Cannot create the export file"));
 					fwrite($file, pack('CCC', 0xef, 0xbb, 0xbf));
             		$last = 0;
             		$lastup = $lastt = "";
@@ -4856,7 +4870,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 			break;
 
 		case "&object":
-			if($id == 0)
+			if((float)$id == 0)
 				die(t9n("[RU]Ошибка: id=0 или не задан[EN]Object id is empty or 0"));
 			$data_set = Exec_sql("SELECT a.id, a.val, a.up, a.t, typs.val typ_name, typs.t base_typ FROM $z a, $z typs WHERE a.id=$id AND typs.id=a.t AND typs.up=0"
 								, "Get Object");
@@ -5172,7 +5186,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 			{
 				$blocks[$block]["tab"][] = "$key";
 				$blocks[$block]["val"][] = "$value";
-				if($tab == $key || ($tab == 0 && !count($blocks[$block]["class"])))
+				if($tab == $key || ((float)$tab == 0 && !count($blocks[$block]["class"])))
 				{
 					$has_active = true;
 					$blocks[$block]["class"][] = "class=\"tab-link active\"";
@@ -6081,7 +6095,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
     					#array_pop($object); 	# Cut off the empty item after the last semi-colon
     					$order = 0;
     					foreach($GLOBALS["local_struct"][$id] as $key => $value){
-                            if($key == 0)
+                            if((float)$key == 0)
                                 continue;
                             $order++;
         				    trace(" Parse $key ".$object[$order]." of $value");
@@ -6339,7 +6353,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 			$GLOBALS["REV_BT"][0] = "REFERENCE";
 			$GLOBALS["DESC"] = isset($_REQUEST["desc"]) ? "DESC" : "";
 			if(isset($_REQUEST["pg"]))
-				$GLOBALS["PG"] = max($_REQUEST["pg"], 1);
+				$GLOBALS["PG"] = max((int)$_REQUEST["pg"], 1);  # PHP 8: "abc" - 1 — TypeError
 			else
 				$GLOBALS["PG"] = 1;
 			
@@ -6538,9 +6552,9 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 				foreach($GLOBALS["CONDS"] as $key => $value){
 					if($key == "U") # Filter on Up
 						continue;
-					elseif(($key == "I") && ($value["F"] != 0)) # Filter on ID
+					elseif(($key == "I") && ((float)$value["F"] != 0)) # Filter on ID
 						$filter_by_id = " AND vals.id=".(int)$value["F"]." ";
-					elseif($key != 0){ # Not U or I
+					elseif((float)$key != 0){ # Not U or I
 						$filter_by_id_off = TRUE; # Clear $filter_by_id in case we have other conditions
 						if(isset($GLOBALS["STORED_REPS"][$key]["ddl"])){
 							trace("We got a query for the $key DDL \r\n".$GLOBALS["STORED_REPS"][$key]["ddl"]);
@@ -7429,7 +7443,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 					return $rep_id;
 				$bak_id = $id;
 				$id = $rep_id;
-				if(isset($_REQUEST["obj"]) && ($_REQUEST["obj"] != 0))
+				if(isset($_REQUEST["obj"]) && ((float)$_REQUEST["obj"] != 0))
 					$obj = $_REQUEST["obj"];
 
 				$id = $rep_id;
@@ -7489,7 +7503,7 @@ function GetObjectReqs($typ, $id)
 			if(count($GLOBALS["REQS"]) && !(isset($GLOBALS["TABS"])))	# And there were Reqs already - tab them as 'Reqs'
 			{
 				$GLOBALS["TABS"][0] = t9n("[RU]Реквизиты[EN]Attributes");
-				if(!isset($_REQUEST["tab"]) || ($_REQUEST["tab"] == 0))	# This was the Tab we need
+				if(!isset($_REQUEST["tab"]) || ((float)$_REQUEST["tab"] == 0))	# This was the Tab we need
 				{
 					$tab_from = 0;
 					$tab_to = $row["ord"];
@@ -7818,7 +7832,7 @@ function Make_tree($text, $cur_block)
 		}
 		elseif($a)	# Not a block delimiter - leave as is
 		{
-			if($key != 0)
+			if((float)$key != 0)
 				$blocks[$cur_block]["CONTENT"] .= $begin_delimiter.$a;	# Restore the starting $begin_delimiter
 			else
 				$blocks[$cur_block]["CONTENT"] = $a;
@@ -8151,8 +8165,10 @@ function mywrite($t, $mode="a+")
 {
     global $z;
 	if(!is_dir($path="templates/custom/$z/logs"))
-		mkdir($path);
-    $file = fopen("$path/trace.log", $mode);
+		@mkdir($path, 0777, true);
+    $file = @fopen("$path/trace.log", $mode);
+    if(!$file)  # PHP 8: fwrite(false) — TypeError, отчёт падал из-за трассировки
+        return;
     fwrite($file, "$t\r\n");
     fclose($file);
 }
@@ -8583,9 +8599,9 @@ if(Validate_Token())
             				if(!in_array($t, array(101, 102, 103, 132, 49)))
             					$val = BuiltIn($val);
         					# Format the value
-        					if(($GLOBALS["REV_BT"][$row["t"]] == "NUMBER") && ($val != 0))
+        					if(($GLOBALS["REV_BT"][$row["t"]] == "NUMBER") && ((float)$val != 0))
         						$val = (int)$val;
-        					elseif(($GLOBALS["REV_BT"][$row["t"]] == "SIGNED") && ($val != 0))
+        					elseif(($GLOBALS["REV_BT"][$row["t"]] == "SIGNED") && ((float)$val != 0))
         						$val = (double)str_replace(",",".",$val);
         					else
         						$val = Format_Val($row["t"], $val);
@@ -8900,8 +8916,8 @@ if(Validate_Token())
 			break;
 
 		case "_m_move":
-			if($id==0)
-				die(t9n("[RU]Неверный id: $id[EN]Wrong id: $id"));
+			if((float)$id == 0)
+				die(t9n("[RU]Неверный id: {$id}[EN]Wrong id: $id"));
 			Check_Grant($id);
 			# Get the Object
 			$result = Exec_sql("SELECT a.up, a.t, up.t ut, a.ord, target.t tt, COALESCE(MAX(reqs.ord)+1,1) new_ord
@@ -8938,8 +8954,8 @@ if(Validate_Token())
 			break;
 
 		case "_m_del":
-			if($id == 0)
-				my_die(t9n("[RU]Неверный id: $id[EN]Wrong id: $id"));
+			if((float)$id == 0)
+				my_die(t9n("[RU]Неверный id: {$id}[EN]Wrong id: $id"));
 			Check_Grant($id);
 			if($id == $GLOBALS["GLOBAL_VARS"]["user_id"])
 			    my_die(t9n("[RU]Нельзя удалить себя как пользователя[EN]The user is not able to delete himself, sorry"));
@@ -8976,7 +8992,7 @@ if(Validate_Token())
 		case "_m_new":
 			if($up == 0)
 				my_die(t9n("[RU]Недопустимые данные: up=0. Установите значение=1 для независимых объектов.[EN]Data is invalid: up=0. Set up=1 for independent objects."));
-			if($id == 0)
+			if((float)$id == 0)
 				my_die(t9n("[RU]Недопустимый id=0.[EN]Invalid id=0."));
 		    # Check if the Type exists and has reqs
 			$data_set = Exec_sql("SELECT obj.t, obj.ord, req.id, req.t reqt, req.val, def.t base"
@@ -9213,7 +9229,7 @@ if(Validate_Token())
 			break;
 # Type editor commands
 		case "_d_req":
-			if(($id == 0) || ($t == 0))
+			if(((float)$id == 0) || ($t == 0))
 				my_die(t9n("[RU]Неверный реквизит ($t) или ID ($id)[EN] Invalid requisite($t) or ID ($id)"));
 			if($row = mysqli_fetch_array(Exec_sql("SELECT obj.up objup, new.t, obj.val, new.id, new.up, ex.id existing"
 		                                        ." FROM $z obj LEFT JOIN $z new ON new.id=$t"
@@ -9304,7 +9320,7 @@ if(Validate_Token())
 			break;
 
 		case "_d_ref":
-			if($id == 0)
+			if((float)$id == 0)
 				my_die(t9n("[RU]Неверная ссылка ($id) [EN]Invalid link ($id)"));
 			if($row = mysqli_fetch_array(Exec_sql("SELECT obj.up, obj.t, ref.id FROM $z obj LEFT JOIN $z ref ON ref.up=0 AND ref.t=$id AND ref.val='' WHERE obj.id=$id"
 			                                    , "Check the new ref")))
@@ -9560,7 +9576,7 @@ if(Validate_Token())
     	case "exit":
             Exec_sql("DELETE FROM $z WHERE up=".$GLOBALS["GLOBAL_VARS"]["user_id"]." AND t=".TOKEN, "Exit - drop the token");
     		if(strlen($next_act))
-    			die("<script>document.location.href='/$z/$next_act'</script>");
+    			die(Exit_redirect_script($z, $next_act));
             login($z);
     		break;
 
@@ -9739,7 +9755,7 @@ if(Validate_Token())
 			break;
 			
 		case "_connect":
-			if($id == 0)
+			if((float)$id == 0)
 				my_die(t9n("[RU]Неверный id ($id) [EN]Invalid id ($id)"));
 			Check_Grant($id, 0, "READ"); # #1036: чужой коннектор (с ключами в адресе) — только при доступе к записи
 			$sql = "SELECT val FROM $z WHERE up=$id AND t=".CONNECT;
@@ -9775,7 +9791,7 @@ if(Validate_Token())
     			unset($blocks); # We might get some stuff there already
     			$text = Get_file("report.html"); # Avoid UI header and styles
     			if(isset($_REQUEST["obj"]))
-    				if($_REQUEST["obj"] != 0)
+    				if((float)$_REQUEST["obj"] != 0)
     					$obj = (int)$_REQUEST["obj"];  # Set the exact object for calculatables
     		}
     		elseif($a == "dir_admin") # Admin should be able to fix the files anyway,
@@ -9814,7 +9830,7 @@ if(Validate_Token())
 	}
 }
 elseif(isApi())
-    my_die(t9n("[RU]Ошибка проверки токена $z[EN]Not logged into $z"));
+    my_die(t9n("[RU]Ошибка проверки токена {$z}[EN]Not logged into $z"));
 else
 	login($z);
 #print_r($GLOBALS); die();
