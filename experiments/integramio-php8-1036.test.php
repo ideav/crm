@@ -1,5 +1,5 @@
 <?php
-# Мерка #1036: ядро integram.io (experiments/index_integram.io.php) и include/funcs.php под PHP 8.
+# Мерка #1036: ядро integram.io (integram.io/index.php) и include/funcs.php под PHP 8.
 # PHP 8 сравнивает нечисловую строку с числом как строки и бросает TypeError на арифметике над ""/«abc»,
 # PHP 7 приводил такие строки к числу. Ядро писалось под 7.x — проверяем, что поведение 7.x сохранено:
 #   A) вид NUMBER: нечисловое значение показывается как есть, а не «0»;
@@ -39,7 +39,7 @@ function extract_function_source($source, $name){
     }
     throw new Exception("not closed: ".$name);
 }
-$core = file_get_contents(getenv("INDEX_PHP") ?: __DIR__."/index_integram.io.php");
+$core = file_get_contents(getenv("INDEX_PHP") ?: __DIR__."/../integram.io/index.php");
 $missing = array();
 foreach(array("Format_Val", "Format_Val_View", "mywrite") as $fn){
     try { eval(extract_function_source($core, $fn)); } catch(Exception $e){ $missing[] = $fn; }

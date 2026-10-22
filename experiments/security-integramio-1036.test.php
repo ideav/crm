@@ -1,5 +1,5 @@
 <?php
-# Мерка к правкам авторизации ядра integram.io (experiments/index_integram.io.php), issue #1036.
+# Мерка к правкам авторизации ядра integram.io (integram.io/index.php), issue #1036.
 #
 # Запуск: php experiments/security-integramio-1036.test.php (в гейте — через одноимённый .test.js)
 # INDEX_PHP=<путь> — проверить другую версию ядра (так тест виден красным на прежней версии).
@@ -23,7 +23,7 @@ function expect($cond, $name){
     if($cond){ echo "PASS: $name\n"; } else { echo "FAIL: $name\n"; $failures++; }
 }
 
-$indexPhp = getenv("INDEX_PHP") ?: __DIR__."/index_integram.io.php";
+$indexPhp = getenv("INDEX_PHP") ?: __DIR__."/../integram.io/index.php";
 $source = file_get_contents($indexPhp);
 
 foreach(array("USER"=>18, "PASSWORD"=>20, "XSRF"=>40, "EMAIL"=>41, "ACTIVITY"=>124, "TOKEN"=>125, "SECRET"=>130, "DATABASE"=>271) as $k => $v)
