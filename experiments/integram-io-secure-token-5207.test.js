@@ -1,6 +1,6 @@
 // #5207: ядро integram.io выдаёт токен сессии из CSPRNG (secureToken, 64 hex), а не md5(microtime).
 // updateTokens выводит xsrf и cookie из уже присвоенного токена — и для нового, и для старого.
-// Функции вырезаются из experiments/index_integram.io.php и исполняются в php с заглушками
+// Функции вырезаются из integram.io/index.php и исполняются в php с заглушками
 // Insert/Update_Val/setcookie: подключить ядро целиком без БД нельзя.
 
 const { spawnSync } = require('child_process');
@@ -25,7 +25,7 @@ function phpFunction(core, name) {
     return core.slice(start + 1, i + 1);
 }
 
-const core = fs.readFileSync(path.join(root, 'experiments', 'index_integram.io.php'), 'utf8');
+const core = fs.readFileSync(path.join(root, 'integram.io', 'index.php'), 'utf8');
 const funcs = ['secureToken', 'xsrf', 'Salt', 'updateTokens']
     .map((n) => phpFunction(core, n)).join('\n')
     .replace(/\bsetcookie\(/g, 'test_setcookie(');
@@ -78,7 +78,7 @@ test('#5207 updateTokens: существующий токен сохраняет
 // Выдача токена в Google-входе и в checkcode — внутри веток обработчика запроса, исполнить их
 // без БД нельзя; поэтому правило «токен не из часов» для обоих ядер проверяется по тексту.
 test('#5207 ни одно ядро не выдаёт токен из md5(microtime)', () => {
-    for (const f of ['index.php', 'experiments/index_integram.io.php']) {
+    for (const f of ['index.php', 'integram.io/index.php']) {
         const text = fs.readFileSync(path.join(root, f), 'utf8');
         const hits = text.split('\n').map((l, i) => [i + 1, l]).filter(([, l]) => /md5\(\s*microtime/.test(l));
         assert.deepStrictEqual(hits, [], f + ': токен из md5(microtime) в строках ' + hits.map((h) => h[0]).join(', '));

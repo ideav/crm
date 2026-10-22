@@ -1,5 +1,5 @@
 // Обёртка гейта для experiments/security-integramio-1036.test.php.
-// Предмет на PHP — вход, журнал, диспетчер и dir_admin ядра experiments/index_integram.io.php (#1036).
+// Предмет на PHP — вход, журнал, диспетчер и dir_admin ядра integram.io/index.php (#1036).
 
 const { spawnSync } = require('child_process');
 const path = require('path');

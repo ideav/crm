@@ -57,7 +57,7 @@ function core_function($src, $name){
 
 # Оба ядра: index.php (ideav.ru) и снапшот живого ядра integram.io (issue #5184 —
 # тот же потерянный реквизит в r7ohr, а фикс #5170 был только в index.php).
-$cores = array("index.php", "experiments/index_integram.io.php");
+$cores = array("index.php", "integram.io/index.php");
 
 # ── Таблица «входы × ожидания» ─────────────────────────────────────────────────────────────
 # [имя, $_REQUEST, parent_obj, ожидаемый $filter_cond, ожидаемый $parent_cond]

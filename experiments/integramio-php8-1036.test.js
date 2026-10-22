@@ -1,5 +1,5 @@
 // Обёртка гейта для experiments/integramio-php8-1036.test.php: разбор и вид значений под PHP 8.
-// Мерка гоняется на обоих ядрах — integram.io (experiments/index_integram.io.php) и ideav.ru (index.php).
+// Мерка гоняется на обоих ядрах — integram.io (integram.io/index.php) и ideav.ru (index.php).
 
 const { spawnSync } = require('child_process');
 const path = require('path');
@@ -15,7 +15,7 @@ if (probe.error) {
     return;
 }
 
-for (const core of ['index_integram.io.php', path.join('..', 'index.php')]) {
+for (const core of [path.join('..', 'integram.io', 'index.php'), path.join('..', 'index.php')]) {
     const run = spawnSync('php', [phpTest], {
         encoding: 'utf8',
         env: { ...process.env, INDEX_PHP: path.join(__dirname, core) },
