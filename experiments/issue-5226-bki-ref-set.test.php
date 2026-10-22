@@ -98,6 +98,18 @@ check(array(), $plan["insert"], "повторный импорт того же �
 $plan = Import_ref_set_plan(array(), array(5004, 5002, 5004, 5003));
 check(array(5004, 5002, 5003), $plan["insert"], "новая запись: порядок файла, без повторов");
 
+echo "\n=== Поле без единого id не трогает ссылки, очищает только пробел (NULL) ===\n";
+
+if (!function_exists('Import_ref_set_skip')) {
+    echo "  FAIL Import_ref_set_skip() нет в include/import_reconcile.php\n";
+    exit(1);
+}
+check(TRUE,  Import_ref_set_skip(array(0)),       "поле «0» - ссылки не трогаются");
+check(TRUE,  Import_ref_set_skip(array(0, 0)),    "поле «0,0» - ссылки не трогаются");
+check(TRUE,  Import_ref_set_skip(array()),        "пустой разбор («:» без значения) - ссылки не трогаются");
+check(FALSE, Import_ref_set_skip(array(0, 5003)), "есть валидный id - набор применяется");
+check(FALSE, Import_ref_set_skip(NULL),           "пробел (NULL) - очистка применяется");
+
 echo "\n";
 echo $failed ? "ПРОВАЛЕНО: $failed\n" : "Все проверки прошли\n";
 exit($failed ? 1 : 0);
