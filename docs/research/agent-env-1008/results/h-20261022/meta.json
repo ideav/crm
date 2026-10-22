@@ -1,0 +1,1 @@
+{"out": "results/h-20261022", "set": "h", "variants": "A,B0,B1a", "only": "", "reps": 5, "model": "sonnet", "parallel": 3, "max_turns": 30, "seed": 1008}
