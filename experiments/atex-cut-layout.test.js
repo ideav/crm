@@ -86,8 +86,8 @@ var res = layout.planLayouts({
   preferred: [{width:50,popularity:8}],
   options: { windowDays:3, tolerance:0 }
 });
-assertEqual(res.layouts.length, 1, 'planLayouts: a+b (одно окно) → ровно одна раскладка');
-assertEqual(res.layouts[0].positionsCovered.indexOf('a')>=0 && res.layouts[0].positionsCovered.indexOf('b')>=0, true, 'a и b в одной раскладке (окно)');
+assertEqual(res.layouts.length, 2, 'planLayouts: a+b не слиты — слияние меняло производство 110мм (56→50), #5223');
+assertEqual(res.layouts.reduce(function(s,l){ return s + l.positionsCovered.length; }, 0), 2, 'a и b покрыты своими раскладками (окно)');
 assertEqual(res.skipped.map(function(s){return s.positionId;}), ['big'], 'big (шире джамбо) → skipped');
 // чистота
 var inp={jumboWidth:910,positions:[{id:'a',width:110,qty:1,dueKey:20260601}],preferred:[],options:{}};
