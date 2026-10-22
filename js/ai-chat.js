@@ -471,11 +471,11 @@
                 return CookieUtil.getAllIdb();
             }
 
+            // idb_* is HttpOnly (python2node#1043) — the page sees its idbs_* marker
             return document.cookie.split(';').map(cookie => cookie.trim()).reduce((items, cookie) => {
-                if (cookie.indexOf('idb_') === 0) {
-                    const name = cookie.split('=')[0].slice(4);
-                    if (name) items.push(name);
-                }
+                const prefix = cookie.indexOf('idbs_') === 0 ? 5 : (cookie.indexOf('idb_') === 0 ? 4 : 0);
+                const name = prefix ? cookie.split('=')[0].slice(prefix) : '';
+                if (name && items.indexOf(name) < 0) items.push(name);
                 return items;
             }, []);
         }

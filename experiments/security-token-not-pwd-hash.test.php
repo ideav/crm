@@ -18,9 +18,11 @@ function expect($cond, $name){
     if($cond){ echo "PASS: $name\n"; } else { echo "FAIL: $name\n"; $failures++; }
 }
 
-foreach(array("USER"=>18, "PASSWORD"=>20, "XSRF"=>40, "TOKEN"=>125, "ACTIVITY"=>124) as $k => $v)
+foreach(array("USER"=>18, "PASSWORD"=>20, "XSRF"=>40, "TOKEN"=>125, "ACTIVITY"=>124, "RETRIES"=>301, "RETRIES_LIMIT"=>5,
+              "LOGIN_LOCK_S"=>900, "SESSION_IDLE"=>2592000, "SESSION_LIFETIME"=>31536000, "SESSION_MAX"=>30) as $k => $v)
     define($k, $v);
 define("SALT", "yyy");
+define("AUTH_COOKIE_SAMESITE", "Lax");
 $z = "abc";
 function Exec_sql($sql, $label){
     $fn = isset($GLOBALS["ANSWER"][$label]) ? $GLOBALS["ANSWER"][$label] : null;
@@ -43,7 +45,10 @@ function extract_function_source($source, $name){
     throw new Exception("not closed: ".$name);
 }
 $source = file_get_contents(getenv("INDEX_PHP") ?: __DIR__."/../index.php");
-foreach(array("Salt", "secureToken", "xsrf", "updateTokens", "Basic_auth_token") as $fn){
+foreach(array("Salt", "secureToken", "xsrf", "updateTokens", "Basic_auth_token", "Pwd_legacy", "Pwd_prehash", "Pwd_hash",
+              "Pwd_is_modern", "Pwd_verify", "Pwd_needs_rehash", "Token_key_sql", "Token_stored_val", "Session_new",
+              "Session_prune", "Session_prune_ids", "Session_cookie_exp", "Token_parse", "Auth_cookie", "Auth_cookie_opts", "qrLoginIsHttps",
+              "Login_lock_left", "incrementRetries") as $fn){
     try {
         eval(str_replace("mysqli_fetch_array(", "fk_fetch_array(", extract_function_source($source, $fn)));
     } catch(Exception $e){
@@ -61,35 +66,36 @@ function saved_token($tokId){
 $hash = hash("sha512", SALT."my"."secret1");
 $GLOBALS["W"] = array();
 updateTokens(array("uid" => 7, "tok" => 70, "token" => $hash, "xsrf" => 71, "act" => 72), array($hash));
-$tok = $GLOBALS["GLOBAL_VARS"]["token"];
-expect($tok !== $hash, "A: токен, равный хешу пароля, заменён");
+$tok = saved_token(70);
+expect($tok !== null && $tok !== $hash, "A: токен, равный хешу пароля, заменён");
 expect(preg_match('/^[0-9a-f]{64}$/', (string)$tok) === 1, "A: новый токен — случайные 32 байта");
-expect(saved_token(70) === $tok, "A: новый токен сохранён в записи токена пользователя");
+expect(!in_array($GLOBALS["GLOBAL_VARS"]["token"], array($tok, $hash), true), "A: входу выдана своя сессия, не ключ и не хеш пароля");
 
 $GLOBALS["W"] = array();
 updateTokens(array("uid" => 7, "tok" => 70, "token" => "keepme", "xsrf" => 71, "act" => 72), array($hash, "other"));
-expect($GLOBALS["GLOBAL_VARS"]["token"] === "keepme", "A: токен, не равный хешу пароля, сохраняется");
+expect($GLOBALS["GLOBAL_VARS"]["token"] !== "keepme", "A: ключ, не равный хешу пароля, браузеру не отдаётся — у входа своя сессия");
 expect(saved_token(70) === null, "A: такой токен не перезаписывается");
 
 $GLOBALS["W"] = array();
 updateTokens(array("uid" => 7, "tok" => 70, "token" => "keepme", "xsrf" => 71, "act" => 72));
-expect($GLOBALS["GLOBAL_VARS"]["token"] === "keepme", "A: без списка хешей — прежнее поведение (токен сохраняется)");
+expect(saved_token(70) === null, "A: без списка хешей — ключ сохраняется");
 
 # ── B) Basic-вход ──────────────────────────────────────────────────────────────────────────
 $pwd = hash("sha512", SALT.$z."secret2");
-$GLOBALS["ANSWER"]["Basic authentication"] = function($sql){ return array(array("tok" => null, "tok_id" => null, "id" => 8)); };
+$stored = Pwd_hash("secret2");
+$GLOBALS["ANSWER"]["Basic authentication"] = function($sql) use ($stored){ return array(array("tok" => null, "tok_id" => null, "id" => 8, "pwd" => $stored)); };
 $GLOBALS["W"] = array();
 $t = Basic_auth_token(base64_encode("bob:secret2"));
 expect(is_string($t) && ($t !== $pwd), "B: пользователю без токена выдан токен, не равный хешу пароля");
 expect(count($GLOBALS["W"]) === 1 && $GLOBALS["W"][0][0] === "insert" && $GLOBALS["W"][0][3] === $t, "B: выданный токен сохранён");
 
-$GLOBALS["ANSWER"]["Basic authentication"] = function($sql) use ($pwd){ return array(array("tok" => $pwd, "tok_id" => 80, "id" => 8)); };
+$GLOBALS["ANSWER"]["Basic authentication"] = function($sql) use ($pwd, $stored){ return array(array("tok" => $pwd, "tok_id" => 80, "id" => 8, "pwd" => $stored)); };
 $GLOBALS["W"] = array();
 $t = Basic_auth_token(base64_encode("bob:secret2"));
 expect(is_string($t) && ($t !== $pwd), "B: токен, равный хешу пароля, при Basic-входе заменён");
 expect(saved_token(80) === $t, "B: заменённый токен сохранён в той же записи");
 
-$GLOBALS["ANSWER"]["Basic authentication"] = function($sql){ return array(array("tok" => "T0K", "tok_id" => 80, "id" => 8)); };
+$GLOBALS["ANSWER"]["Basic authentication"] = function($sql) use ($stored){ return array(array("tok" => "T0K", "tok_id" => 80, "id" => 8, "pwd" => $stored)); };
 $GLOBALS["W"] = array();
 expect(Basic_auth_token(base64_encode("bob:secret2")) === "T0K" && !$GLOBALS["W"], "B: обычный токен возвращается без записи");
 

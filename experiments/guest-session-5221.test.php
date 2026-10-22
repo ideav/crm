@@ -100,11 +100,15 @@ function extract_function_source($source, $name){
 
 function run_case($case){
     foreach(array("USER"=>18, "TOKEN"=>125, "XSRF"=>40, "ROLE"=>42, "ACTIVITY"=>124, "SECRET"=>130,
-                  "ADMINROLE"=>145, "COOKIES_EXPIRE"=>2592000, "ADMINHASH"=>"adminhash", "SALT"=>"salt") as $k=>$v)
+                  "ADMINROLE"=>145, "COOKIES_EXPIRE"=>2592000, "ADMINHASH"=>"adminhash", "SALT"=>"salt",
+                  "AUTH_COOKIE_SAMESITE"=>"Lax", "SESSION_IDLE"=>2592000, "SESSION_LIFETIME"=>31536000,
+                  "SESSION_TOUCH"=>86400, "SESSION_ROTATE"=>604800) as $k=>$v)
         define($k, $v);
     $src = file_get_contents(__DIR__."/../index.php");
     $code = "";
-    foreach(array("Validate_Token", "Guest_session") as $fn)
+    # python2node#1043: Validate_Token зовёт разбор токена сессии и флаги куки — берутся из ядра как есть
+    foreach(array("Validate_Token", "Guest_session", "Token_parse", "Token_stored_val", "Token_db_val", "Token_idle_sql",
+                  "Session_refresh_action", "Session_cookie_exp", "Auth_cookie_opts", "Auth_cookie", "qrLoginIsHttps") as $fn)
         $code .= extract_function_source($src, $fn)."\n";
     eval("namespace G5221;\n".stubs()."\n".$code);
 

@@ -26,17 +26,25 @@ function phpFunction(core, name) {
 }
 
 const core = fs.readFileSync(path.join(root, 'integram.io', 'index.php'), 'utf8');
-const funcs = ['secureToken', 'xsrf', 'Salt', 'updateTokens']
+// С python2node#1043 updateTokens выдаёт браузеру сессию (Session_new), а ключ API остаётся в строке «Токен».
+const funcs = ['secureToken', 'xsrf', 'Salt', 'updateTokens',
+    'Token_parse', 'Token_stored_val', 'Session_new', 'Session_cookie_exp', 'Auth_cookie_opts', 'Auth_cookie']
     .map((n) => phpFunction(core, n)).join('\n')
     .replace(/\bsetcookie\(/g, 'test_setcookie(');
+
+const KEY_RE = /^[0-9a-f]{64}$/;
+const SESSION_RE = /^s\.\d+\.[0-9a-f]{64}$/;
 
 // Прогоняет updateTokens на строке $row и возвращает, что ядро записало и отдало.
 function run(row) {
     const code = 'define("SALT","s");define("TOKEN",125);define("XSRF",40);define("ACTIVITY",124);'
+        + 'define("SESSION_IDLE",30*86400);define("SESSION_LIFETIME",365*86400);'
+        + 'define("AUTH_COOKIE_SAMESITE","Lax");define("AUTH_COOKIE_HTTPONLY",TRUE);'
         + '$z="db";$GLOBALS["GLOBAL_VARS"]=[];$log=[];'
         + 'function Insert($up,$ord,$t,$val,$m){global $log;$log[]=["ins",$t,(string)$val];return 1;}'
         + 'function Update_Val($id,$val,$nt=FALSE){global $log;$log[]=["upd",$id,(string)$val];}'
-        + 'function test_setcookie($n,$v){global $log;$log[]=["cookie",$n,$v];return true;}'
+        + 'function test_setcookie($n,$v,$o=[]){global $log;$log[]=["cookie",$n,$v];return true;}'
+        + 'function Session_prune($uid){}function Is_https(){return TRUE;}'
         + funcs.replace(/^<\?php/, '')
         + '$row=json_decode(' + JSON.stringify(JSON.stringify(row)) + ',true);'
         + 'if(!function_exists("secureToken")){ function secureToken(){ return "нет secureToken"; } }'
@@ -58,21 +66,25 @@ test('#5207 secureToken в ядре integram.io', { skip }, () => {
 
 test('#5207 updateTokens: новый пользователь получает случайный токен', { skip }, () => {
     const out = run({ uid: 7, tok: null, xsrf: null, act: null });
+    const keys = out.log.filter((e) => e[0] === 'ins' && e[1] === 125 && KEY_RE.test(e[2]));
+    assert.strictEqual(keys.length, 1, 'ключ API (64 hex) не сохранён');
     const token = out.vars.token;
-    assert.match(token, /^[0-9a-f]{64}$/, 'токен не 64 hex: ' + token);
-    assert.ok(out.log.some((e) => e[0] === 'ins' && e[1] === 125 && e[2] === token), 'токен не сохранён');
+    assert.match(token, SESSION_RE, 'браузеру выдана не сессия: ' + token);
     assert.strictEqual(out.vars.xsrf, out.expectXsrf, 'xsrf выведен не из выданного токена');
     assert.deepStrictEqual(out.log.find((e) => e[0] === 'cookie'), ['cookie', 'db', token]);
-    assert.notStrictEqual(run({ uid: 7, tok: null, xsrf: null, act: null }).vars.token, token);
+    const again = run({ uid: 7, tok: null, xsrf: null, act: null });
+    assert.notStrictEqual(again.vars.token, token);
+    assert.notStrictEqual(again.log.find((e) => e[0] === 'ins' && e[1] === 125 && KEY_RE.test(e[2]))[2], keys[0][2]);
 });
 
-test('#5207 updateTokens: существующий токен сохраняется, xsrf и cookie — от него', { skip }, () => {
+test('#5207 updateTokens: существующий ключ сохраняется, xsrf и cookie — от выданной сессии', { skip }, () => {
     const old = 'a'.repeat(32);
     const out = run({ uid: 7, tok: 11, token: old, xsrf: 12, act: 13 });
-    assert.strictEqual(out.vars.token, old);
+    assert.match(out.vars.token, SESSION_RE, 'браузеру выдана не сессия: ' + out.vars.token);
     assert.strictEqual(out.vars.xsrf, out.expectXsrf, 'xsrf выведен не из токена пользователя');
-    assert.deepStrictEqual(out.log.find((e) => e[0] === 'cookie'), ['cookie', 'db', old]);
-    assert.ok(!out.log.some((e) => e[0] === 'ins' && e[1] === 125), 'токен перевыпущен без нужды');
+    assert.deepStrictEqual(out.log.find((e) => e[0] === 'cookie'), ['cookie', 'db', out.vars.token]);
+    assert.ok(!out.log.some((e) => e[0] === 'upd' && e[1] === 11), 'ключ API перевыпущен без нужды');
+    assert.ok(!out.log.some((e) => e[0] === 'ins' && e[1] === 125 && KEY_RE.test(e[2])), 'ключ API перевыпущен без нужды');
 });
 
 // Выдача токена в Google-входе и в checkcode — внутри веток обработчика запроса, исполнить их

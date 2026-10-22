@@ -22,7 +22,7 @@ function expect($cond, $name){
     if($cond){ echo "PASS: $name\n"; } else { echo "FAIL: $name\n"; $failures++; }
 }
 
-foreach(array("USER"=>18, "PASSWORD"=>20, "XSRF"=>40, "TOKEN"=>125, "DATABASE"=>271) as $k => $v)
+foreach(array("USER"=>18, "PASSWORD"=>20, "XSRF"=>40, "TOKEN"=>125, "DATABASE"=>271, "RETRIES"=>301, "RETRIES_LIMIT"=>5, "LOGIN_LOCK_S"=>900, "SESSION_IDLE"=>2592000) as $k => $v)
     define($k, $v);
 define("SALT", "yyy");
 define("ADMINHASH", "adminhash");
@@ -70,7 +70,9 @@ $indexPhp = getenv("INDEX_PHP") ?: __DIR__."/../index.php";
 $source = file_get_contents($indexPhp);
 $missing = array();
 foreach(array("Salt", "secureToken", "xsrf", "check", "Xsrf_is_legacy", "Basic_auth_token", "Reg_confirm_code",
-              "Dir_admin_add_path", "Restore_admin_allowed") as $fn){
+              "Dir_admin_add_path", "Restore_admin_allowed", "Pwd_legacy", "Pwd_prehash", "Pwd_hash", "Pwd_is_modern",
+              "Pwd_verify", "Pwd_needs_rehash", "Token_key_sql", "Token_parse", "Token_stored_val", "Token_db_val",
+              "Token_match_sql", "Token_idle_sql", "Login_lock_left", "incrementRetries") as $fn){
     try {
         eval(str_replace("mysqli_fetch_array(", "fk_fetch_array(", extract_function_source($source, $fn)));
     } catch(Exception $e){
@@ -116,11 +118,12 @@ if(function_exists("Basic_auth_token")){
         $r = Basic_auth_token(base64_encode("$login:secret"));
         $sql = isset($GLOBALS["SQL"]["Basic authentication"]) ? $GLOBALS["SQL"]["Basic authentication"] : "";
         list($lit, $rest) = sql_literal_after($sql, "u.val='");
-        expect(($lit === $login) && (strpos($rest, " AND pwd.up=u.id AND pwd.val='") === 0),
+        expect(($lit === $login) && (strpos($rest, " AND pwd.up=u.id AND pwd.t=") === 0),
             "C: логин ".json_encode($login)." целиком внутри литерала u.val, запрос не переписан");
         expect($r === FALSE, "C: неверная пара ".json_encode($login)." — вход не выдан");
     }
-    $GLOBALS["ANSWER"]["Basic authentication"] = function($sql){ return array(array("tok" => "T0K", "id" => 7)); };
+    $stored = Pwd_hash("secret");
+    $GLOBALS["ANSWER"]["Basic authentication"] = function($sql) use ($stored){ return array(array("tok" => "T0K", "id" => 7, "pwd" => $stored)); };
     expect(Basic_auth_token(base64_encode("alice:secret")) === "T0K", "C: верная пара — токен пользователя");
     expect(Basic_auth_token("alice:secret") === "T0K", "C: открытый текст «логин:пароль» тоже принимается");
 }
