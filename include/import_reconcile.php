@@ -182,7 +182,8 @@ function Import_subst_literals($str, $subst, $exists, $count, &$warning)
 #   - переданный набор заменяет прежний: лишние строки-ссылки удаляются, общие остаются
 #     той же строкой;
 #   - пустое поле не доходит до разбора ссылок - набор записи не меняется;
-#   - пробел " " - пустой набор: все ссылки записи по реквизиту удаляются.
+#   - поле без единого валидного id («0», «:») набор записи тоже не меняет;
+#   - пробел " " (в Import_ref_set - NULL): все ссылки записи по реквизиту удаляются.
 # --------------------------------------------------------------------------------------------
 
 # План сверки. $have - ссылки записи в базе: id строки-ссылки => id цели. $incoming - id
@@ -207,11 +208,28 @@ function Import_ref_set_plan($have, $incoming)
     return array("delete" => $delete, "insert" => $insert);
 }
 
-# Применить набор целей $incoming к ссылкам реквизита $key записи $up типа $t. Ссылки
-# записи, которой до этой строки файла в базе не было ($existing = FALSE), не читаются.
+# Набор из файла не несёт ни одного id цели - ссылки записи не трогаются. Очистка - только
+# явная: $incoming = NULL (пробел в поле).
+function Import_ref_set_skip($incoming)
+{
+    if($incoming === NULL)
+        return FALSE;
+    foreach($incoming as $target)
+        if((int)$target > 0)
+            return FALSE;
+    return TRUE;
+}
+
+# Применить набор целей $incoming к ссылкам реквизита $key записи $up типа $t; NULL -
+# удалить все ссылки. Ссылки записи, которой до этой строки файла в базе не было
+# ($existing = FALSE), не читаются.
 function Import_ref_set($up, $t, $key, $incoming, $existing, $message)
 {
     global $z;
+    if(Import_ref_set_skip($incoming))
+        return;
+    if($incoming === NULL)
+        $incoming = array();
     $have = array();
     if($existing)
     {

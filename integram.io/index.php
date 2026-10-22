@@ -6242,7 +6242,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 									Insert_batch($new_id, 1, $key, $value, "Import req");
 								}
 								elseif($value === " ") # issue #5226: пробел - очистить ссылки записи по реквизиту
-									Import_ref_set($new_id, $t, $key, array(), $rec_existing, "Import refs clear");
+									Import_ref_set($new_id, $t, $key, NULL, $rec_existing, "Import refs clear");
 								elseif(isset($GLOBALS["MULTI"][$key])){ // Reference might be set by multi ID
 									$multies = array();
 									foreach(explode(",", $value) as $ref)	# Get multiselect items set
