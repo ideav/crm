@@ -232,6 +232,9 @@ class IntegCoreEnv(E.CoreEnv):
         sch = self.schema()
         if not all(k in sch for k in ("table", "app", "amount", "status")):
             raise KeyError(f"нет таблицы «Договор» или её колонок: {sch}")
+        # предусловие задаёт договоры целиком: тестовые договоры агента (b-t1-4 оставил свой «Д-002») убираем
+        P.mysql(f"DELETE k FROM {self.db} k JOIN {self.db} c ON k.up = c.id WHERE c.up = 1 AND c.t = {sch['table']};\n"
+                f"DELETE FROM {self.db} WHERE up = 1 AND t = {sch['table']};")
         rows = []
         for n, (num, app, amount, status, date) in enumerate(contracts):
             k = f"c{n}"
@@ -414,7 +417,8 @@ class IntegPgEnv(E.PgrstEnv):
     def force_contracts(self, contracts):
         if not self.psql("SELECT to_regclass('api.contract');").strip():
             raise KeyError("нет таблицы api.contract")
-        self.psql("SET session_replication_role = replica;\n" + "".join(
+        # предусловие задаёт договоры целиком: тестовые договоры агента убираем
+        self.psql("SET session_replication_role = replica;\nDELETE FROM api.contract;\n" + "".join(
             f"INSERT INTO api.contract (number, application_id, amount, signed_on, status) "
             f"SELECT {q(num)}, id, {amount}, {q(date)}, {q(status)} FROM api.application WHERE number = {q(app)};\n"
             for num, app, amount, status, date in contracts))
