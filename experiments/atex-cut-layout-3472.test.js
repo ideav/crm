@@ -49,8 +49,10 @@ assertEqual(layout.layoutRuns(L89.strips, { '89': 80 }), 8, 'issue: 89 → 8 п�
 var sepRuns = layout.layoutRuns(L110.strips, {'110':80}) + layout.layoutRuns(L89.strips, {'89':80});
 assertEqual(sepRuns, 18, 'issue: Σ прогонов раздельно = 18 (оптимум, не 20)');
 
-// ── Слияние ПО ВЫГОДЕ: 110×50 + 70×30. Раздельно 110 даёт скрап (8×7=56, −50=6),
-//    слитно 5×110+3×70 (10 прогонов, скрап 0) — те же прогоны, меньше скрапа → слить.
+// ── Слияние ПО ВЫГОДЕ: 110×50 + 70×30. Раньше сливалось (та же цель по прогонам, меньше
+//    скрапа: 110 давал 8×7=56, −50=6 лишних). С #5223 слияние запрещено: слитая резка
+//    ({110:5, 70:3} × 10) меняет производство 110мм с 56 до 50 шт. — совмещать заказы
+//    можно только с сохранением количества (решение заказчика #5223). → две резки.
 var merge = layout.planLayouts({
   jumboWidth: 910,
   positions: [
@@ -60,8 +62,10 @@ var merge = layout.planLayouts({
   preferred: [{ width: 50, popularity: 8 }],
   options: { windowDays: 3, tolerance: 0 }
 });
-assertEqual(merge.layouts.length, 1, 'merge: 110+70 выгодно слить (меньше скрапа) → одна раскладка');
-assertEqual(merge.layouts[0].positionsCovered.slice().sort(), ['a', 'b'], 'merge: обе позиции в одной резке');
+assertEqual(merge.layouts.length, 2, 'merge: слияние меняло производство 110мм (56→50) — запрещено #5223 → две резки');
+var mergeCov = {};
+merge.layouts.forEach(function(l){ l.positionsCovered.forEach(function(pid){ mergeCov[pid] = 1; }); });
+assertEqual(Object.keys(mergeCov).sort(), ['a', 'b'], 'merge: обе позиции покрыты своими резками');
 
 // ── Маленький НЕзапасной заказ не перепроизводится (как было в #3423, одиночно). ──
 var small = layout.planLayouts({
@@ -93,10 +97,18 @@ function capPlan(cap){
 function widthsOf(l){ var w = {}; l.strips.forEach(function(s){ if (s.purpose === 'Заказ') w[s.width] = 1; }); return Object.keys(w).length; }
 function maxOver(res, fn){ return res.layouts.reduce(function(m, l){ return Math.max(m, fn(l)); }, 0); }
 
-// без ограничения (большой cap) — все 4 ширины в одной резке (контроль кейса).
+// без ограничения (большой cap) — слилась только пара, СОХРАНЯЮЩАЯ количество:
+// 50×20 + 40×10 → {50:10, 40:5} × 2 (ровно 20 и 10 шт., −8 прогонов). Пара 110+70
+// меняла производство (56→50) — запрещена #5223. Лимит ширин здесь не активный ограничитель.
 var uncapped = capPlan(1e9);
-assertEqual(uncapped.layouts.length === 1 && widthsOf(uncapped.layouts[0]) === 4, true,
-  'cap: без ограничения 4 ширины сливаются в одну резку (контроль)');
+var uncappedCov = {};
+uncapped.layouts.forEach(function(l){ l.positionsCovered.forEach(function(pid){ uncappedCov[pid] = 1; }); });
+var capMerged = uncapped.layouts.filter(function(l){ return l.positionsCovered.length === 2; })[0];
+assertEqual(uncapped.layouts.length === 3 && Object.keys(uncappedCov).length === 4, true,
+  'cap: из четырёх позиций слилась только сохраняющая количество пара (#5223)');
+assertEqual(!!capMerged && layout.orderStripQty(capMerged.strips, 50) === 10 &&
+            layout.orderStripQty(capMerged.strips, 40) === 5, true,
+  'cap: слияние 50×20+40×10 — ровно 10×2 и 5×2 шт. (количество сохранено)');
 
 // дефолт (ограничения не переданы → 3): ни одна резка не превышает 3 ширин/3 позиций.
 var def = layout.planLayouts({ jumboWidth: 910, positions: capPos, preferred: [], options: { windowDays: 3, tolerance: 0 } });
