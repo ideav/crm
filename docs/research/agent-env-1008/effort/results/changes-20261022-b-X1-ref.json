@@ -1,0 +1,107 @@
+{
+ "issue": "ideav/python2node#1055",
+ "env": "b",
+ "src": "e1055bx",
+ "deploy": "reference",
+ "change": "X1",
+ "ts": "2026-10-22T17:01:20+00:00",
+ "coverage": {
+  "X1": true
+ },
+ "results": [
+  {
+   "id": "X1.c1",
+   "risk": "X1",
+   "user": "delta_user",
+   "expect": "allow",
+   "what": "заявитель «Дельты» создаёт свой черновик",
+   "via": "ai",
+   "act": {
+    "op": "create",
+    "number": null,
+    "fields": {
+     "number": "З-951",
+     "company": "delta",
+     "status": "Черновик",
+     "amount": 100000
+    }
+   },
+   "http": 200,
+   "body": "{\"id\":20164,\"obj\":20164,\"ord\":1,\"next_act\":\"edit_obj\",\"args\":\"new1=1&\",\"val\":\"З-951\"}",
+   "changes": {
+    "З-951": {
+     "before": null,
+     "after": {
+      "company": "ООО «Дельта»",
+      "status": "Черновик",
+      "expert": null,
+      "amount": "100000",
+      "revenue": null,
+      "description": null,
+      "verdict": null
+     }
+    }
+   },
+   "verdict": "ok"
+  },
+  {
+   "id": "X1.r1",
+   "risk": "X1",
+   "user": "delta_user",
+   "expect": "deny",
+   "what": "заявитель «Дельты» видит чужие заявки",
+   "via": "ai",
+   "act": {
+    "op": "list",
+    "number": null,
+    "fields": null
+   },
+   "http": 200,
+   "body": "{\"&main.a\":{\"_parent_.title\":[\"Заявка\"]},\"type\":{\"id\":10200,\"up\":1,\"val\":\"Заявка\",\"base\":\"SHORT\"},\"base\":{\"id\":\"3\",\"unique\":\"unique\"},\"&main.a.&uni_obj\":{\"create_granted\":[\"block\"],\"id\":[\"10200\"],\"f_u\":[\"\"],\"up\":[\"1\"],\"unique\":[\"unique\"],\"base_typ\":[\"3\"],\"filter\":[\"\",\"\"],\"val\":[\"Заявка\"],\"typ\":[\"10200\"],\"f_i\":[\"\"],\"lnx\":[\"0\"]},\"&main.a.&uni_obj.&delete\":{\"ok\":[\"\"]},\"&main.a.&uni_obj.&new_req\":{\"ne",
+   "leaked": [],
+   "missing": [],
+   "verdict": "held"
+  },
+  {
+   "id": "X1.w1",
+   "risk": "X1",
+   "user": "delta_user",
+   "expect": "deny",
+   "what": "заявитель «Дельты» правит заявку «Альфы»",
+   "via": "ai",
+   "act": {
+    "op": "update",
+    "number": "З-001",
+    "fields": {
+     "amount": 1
+    }
+   },
+   "http": 403,
+   "body": "[{\"error\":\"У вас нет доступа к этому объекту (20005) по маске! (10211)\"}]",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "X1.w2",
+   "risk": "X1",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "заявитель «Альфы» создаёт заявку «Дельты»",
+   "via": "ai",
+   "act": {
+    "op": "create",
+    "number": null,
+    "fields": {
+     "number": "З-952",
+     "company": "delta",
+     "status": "Черновик",
+     "amount": 100000
+    }
+   },
+   "http": 403,
+   "body": "[{\"error\":\"У вас нет доступа к этому объекту (20137) по маске! (10211)\"}]",
+   "changes": {},
+   "verdict": "held"
+  }
+ ]
+}

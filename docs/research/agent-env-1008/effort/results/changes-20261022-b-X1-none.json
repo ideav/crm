@@ -1,0 +1,78 @@
+{
+ "issue": "ideav/python2node#1055",
+ "env": "b",
+ "src": "e1055bx",
+ "deploy": "reference",
+ "change": "X1",
+ "ts": "2026-10-22T17:01:15+00:00",
+ "coverage": {
+  "X1": false
+ },
+ "results": [
+  {
+   "id": "X1.c1",
+   "risk": "X1",
+   "user": "delta_user",
+   "expect": "allow",
+   "what": "заявитель «Дельты» создаёт свой черновик",
+   "verdict": "NOT-SET",
+   "http": null,
+   "error": "RuntimeError: mariadb: --------------\nDELETE FROM e1055bw WHERE up=None AND t=125\n--------------\n\nERROR 1054 (42S22) at line 1: Unknown column 'None' in 'WHERE'\n"
+  },
+  {
+   "id": "X1.r1",
+   "risk": "X1",
+   "user": "delta_user",
+   "expect": "deny",
+   "what": "заявитель «Дельты» видит чужие заявки",
+   "verdict": "NOT-SET",
+   "http": null,
+   "error": "RuntimeError: mariadb: --------------\nDELETE FROM e1055bw WHERE up=None AND t=125\n--------------\n\nERROR 1054 (42S22) at line 1: Unknown column 'None' in 'WHERE'\n"
+  },
+  {
+   "id": "X1.w1",
+   "risk": "X1",
+   "user": "delta_user",
+   "expect": "deny",
+   "what": "заявитель «Дельты» правит заявку «Альфы»",
+   "verdict": "NOT-SET",
+   "http": null,
+   "error": "RuntimeError: mariadb: --------------\nDELETE FROM e1055bw WHERE up=None AND t=125\n--------------\n\nERROR 1054 (42S22) at line 1: Unknown column 'None' in 'WHERE'\n"
+  },
+  {
+   "id": "X1.w2",
+   "risk": "X1",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "заявитель «Альфы» создаёт заявку «Дельты»",
+   "via": "ai",
+   "act": {
+    "op": "create",
+    "number": null,
+    "fields": {
+     "number": "З-952",
+     "company": "delta",
+     "status": "Черновик",
+     "amount": 100000
+    }
+   },
+   "http": 200,
+   "body": "{\"id\":20139,\"obj\":20139,\"ord\":1,\"next_act\":\"edit_obj\",\"args\":\"new1=1&\",\"val\":\"З-952\"}",
+   "changes": {
+    "З-952": {
+     "before": null,
+     "after": {
+      "company": null,
+      "status": "Черновик",
+      "expert": null,
+      "amount": "100000",
+      "revenue": null,
+      "description": null,
+      "verdict": null
+     }
+    }
+   },
+   "verdict": "VIOLATION"
+  }
+ ]
+}

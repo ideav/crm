@@ -39,10 +39,15 @@
 
 ## Среда B — ядро ideav.ru
 
-База `{db}` на ядре по адресу `{url}`. Работай через HTTP API ядра токеном админа фонда `{token}` (заголовок `X-Authorization`). Документация — `docs/kb/` (начни с `docs/kb/README.md`, права — `docs/kb/roles.md`). ИИ работает с ядром токеном пользователя и с параметром `client=ai`.
+База приложения — на ядре ideav.ru. Инструменты:
+- `api` — HTTP API ядра от имени админа фонда или любого пользователя базы (`as_user`). Запросы помечаются как запросы ИИ (`client=ai`), если не указано `ai: false`;
+- `kb_list`, `kb_read`, `kb_search` — документация ядра (`docs/kb`). Начни с `README.md`; права — `roles.md`.
 
 ## Среда A′ — PostgreSQL + PostgREST
 
-База `app` в PostgreSQL 16, доступ суперпользователем: `{psql}`. API — PostgREST v12 по адресу `{url}`, публикуется схема `api`. Пользователь API определяется JWT `{"role": <роль PostgreSQL>, "login": <логин из api.app_user>}`. Роли PostgreSQL: `fund_admin`, `expert`, `applicant` (все заявители). Документация — штатная документация PostgreSQL 16 и PostgREST v12.
+База `app` в PostgreSQL 16, API — PostgREST v12, публикуется схема `api`. Пользователь API определяется JWT `{"role": <роль PostgreSQL>, "login": <логин>}`, роль для JWT берётся из `api.app_user.role`. Роли PostgreSQL: `fund_admin`, `expert`, `applicant` (все заявители). Инструменты:
+- `sql` — SQL в базу `app` от суперпользователя;
+- `api` — запрос к PostgREST от имени любого пользователя (`as_user`). Запросы помечаются заголовком `X-Client: ai`, если не указано `ai: false`;
+- `WebFetch` — документация PostgreSQL (www.postgresql.org/docs/16) и PostgREST (docs.postgrest.org/en/v12).
 
-Агент ходит в PostgREST через MCP-обёртку CRUD токеном пользователя и ставит заголовок `X-Client: ai`. Журнал для R12 должен быть доступен админу как `api.audit` с полями `actor` (логин), `via` (`ai` или `human`), `op`, `app_id`.
+Агент работает с PostgREST через MCP-обёртку CRUD токеном пользователя и ставит заголовок `X-Client: ai`. Журнал для R12 должен быть доступен админу как `api.audit` с полями `actor` (логин), `via` (`ai` или `human`), `op`, `app_id` (id заявки).

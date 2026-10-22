@@ -35,6 +35,9 @@ import funding as F  # noqa: E402
 import probe as P  # noqa: E402  mysql, snapshot (стенд ядра #1008)
 
 COMPANY_NAME = {key: name for name, key, _ in F.COMPANIES}
+# Поля и сущности, которые появляются правками цены изменения (CHANGES.md): имя в ТЗ → имя в среде.
+COMPANY_NAME["delta"] = "ООО «Дельта»"
+EXTRA_FIELDS = {"score": ("Внутренняя оценка", "internal_score")}
 PG_ROLE = {"Админ фонда": "fund_admin", "Эксперт": "expert"}  # остальные — «Заявитель <компания>»
 
 
@@ -179,6 +182,14 @@ class CoreEnv:
            "amount": F.R_APP_AMOUNT, "revenue": F.R_APP_REVENUE, "description": F.R_APP_TEXT,
            "verdict": F.R_APP_VERDICT}
 
+    def _req(self, field: str):
+        """Реквизит заявки: штатный — по id, добавленный правкой — по имени его типа."""
+        if field in self.REQ:
+            return self.REQ[field]
+        r = P.mysql(f"SELECT r.id FROM {self.db} r JOIN {self.db} ty ON ty.id = r.t "
+                    f"WHERE r.up = {F.T_APP} AND ty.val = {F.sql_quote(EXTRA_FIELDS[field][0])}")
+        return int(r[0][0]) if r else None
+
     def _form(self, fields: dict) -> dict:
         form = {}
         for k, v in fields.items():
@@ -187,13 +198,18 @@ class CoreEnv:
             elif k in ("company", "status", "expert"):
                 form[f"t{self.REQ[k]}"] = str(self._ref(k, v))
             else:
-                form[f"t{self.REQ[k]}"] = "" if v is None else str(v)
+                form[f"t{self._req(k)}"] = "" if v is None else str(v)
         return form
+
+    def field_value(self, number: str, field: str):
+        aid, req = self._id(F.T_APP, number), self._req(field)
+        r = P.mysql(f"SELECT val FROM {self.db} WHERE up={aid} AND t={req}") if aid and req else []
+        return r[0][0] if r else None
 
     # предусловие в обход API
     def force(self, number: str, field: str, value):
         aid = self._id(F.T_APP, number)
-        req = self.REQ[field]
+        req = self._req(field)
         if field in ("company", "status", "expert"):
             P.mysql(f"DELETE FROM {self.db} WHERE up={aid} AND val='{req}';\n"
                     f"INSERT INTO {self.db} (id, up, ord, t, val) SELECT MAX(id)+1, {aid}, 0, "
@@ -220,7 +236,14 @@ class CoreEnv:
         return http(urllib.request.Request(url, data=data, method=method, headers=headers))
 
     def login(self, login: str, via: str):
-        """Вход до снимка: служебные поля пользователя ядро пишет при первом запросе."""
+        """Вход до снимка: служебные поля пользователя ядро пишет при первом запросе.
+        Пользователю, созданному правкой, токен выдаётся здесь — строкой ядра, как при входе."""
+        if login not in self.tokens:
+            uid = self._id(F.USER, login)
+            self.tokens[login] = secrets.token_hex(16)
+            P.mysql(f"DELETE FROM {self.db} WHERE up={uid} AND t={F.TOKEN_REQ};\n"
+                    f"INSERT INTO {self.db} (id, up, ord, t, val) SELECT MAX(id)+1, {uid}, 0, {F.TOKEN_REQ}, "
+                    f"'{self.tokens[login]}' FROM {self.db};")
         self.xsrf[login] = json.loads(self._call(login, via, "GET", "xsrf", {"JSON": 1})[1]).get("_xsrf")
 
     def act(self, login: str, via: str, op: str, number: str = None, fields: dict = None, select=None):
@@ -351,7 +374,7 @@ class PgrstEnv:
         raise RuntimeError("PostgREST не поднялся после пересоздания базы")
 
     def token(self, login: str) -> str:
-        if not self.users:
+        if login not in self.users:
             self.users = dict(line.split("|") for line in self.psql(
                 "SELECT login, role FROM api.app_user;").splitlines())
         return jwt(self.secret, {"role": self.users[login], "login": login, "exp": int(time.time()) + 3600})
@@ -384,11 +407,19 @@ class PgrstEnv:
             if k in ("company", "status"):
                 body[f"{k}_id"] = self._ref(k, v)
             else:
-                body[k] = v
+                body[EXTRA_FIELDS[k][1] if k in EXTRA_FIELDS else k] = v
         return body
 
+    def field_value(self, number: str, field: str):
+        col = EXTRA_FIELDS[field][1] if field in EXTRA_FIELDS else field
+        try:
+            out = self.psql(f"SELECT {col} FROM api.application WHERE number = '{number}';").strip()
+        except RuntimeError:
+            return None
+        return out or None
+
     def force(self, number: str, field: str, value):
-        col = f"{field}_id" if field in ("company", "status") else field
+        col = f"{field}_id" if field in ("company", "status") else EXTRA_FIELDS.get(field, (0, field))[1]
         val = self._ref(field, value) if field in ("company", "status") else (
             "NULL" if value is None else "'" + str(value).replace("'", "''") + "'")
         self.psql(f"SET session_replication_role = replica;\n"

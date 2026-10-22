@@ -1,0 +1,53 @@
+{
+ "issue": "ideav/python2node#1055",
+ "env": "a1",
+ "src": "app_x",
+ "deploy": "reference",
+ "change": "X1",
+ "ts": "2026-10-22T17:01:40+00:00",
+ "coverage": {
+  "X1": false
+ },
+ "results": [
+  {
+   "id": "X1.c1",
+   "risk": "X1",
+   "user": "delta_user",
+   "expect": "allow",
+   "what": "заявитель «Дельты» создаёт свой черновик",
+   "verdict": "NOT-SET",
+   "http": null,
+   "error": "ValueError: invalid literal for int() with base 10: ''"
+  },
+  {
+   "id": "X1.r1",
+   "risk": "X1",
+   "user": "delta_user",
+   "expect": "deny",
+   "what": "заявитель «Дельты» видит чужие заявки",
+   "verdict": "NOT-SET",
+   "http": null,
+   "error": "KeyError: 'delta_user'"
+  },
+  {
+   "id": "X1.w1",
+   "risk": "X1",
+   "user": "delta_user",
+   "expect": "deny",
+   "what": "заявитель «Дельты» правит заявку «Альфы»",
+   "verdict": "NOT-SET",
+   "http": null,
+   "error": "KeyError: 'delta_user'"
+  },
+  {
+   "id": "X1.w2",
+   "risk": "X1",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "заявитель «Альфы» создаёт заявку «Дельты»",
+   "verdict": "NOT-SET",
+   "http": null,
+   "error": "ValueError: invalid literal for int() with base 10: ''"
+  }
+ ]
+}

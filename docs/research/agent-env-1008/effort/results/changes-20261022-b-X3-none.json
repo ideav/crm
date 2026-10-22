@@ -1,0 +1,71 @@
+{
+ "issue": "ideav/python2node#1055",
+ "env": "b",
+ "src": "e1055bx",
+ "deploy": "reference",
+ "change": "X3",
+ "ts": "2026-10-22T17:01:30+00:00",
+ "coverage": {
+  "X3": false
+ },
+ "results": [
+  {
+   "id": "X3.c1",
+   "risk": "X3",
+   "user": "expert1",
+   "expect": "allow",
+   "what": "эксперт ставит внутреннюю оценку",
+   "via": "ai",
+   "act": {
+    "op": "update",
+    "number": "З-003",
+    "fields": {
+     "score": 7
+    }
+   },
+   "http": 200,
+   "body": "Нет набора атрибутов (ai_job) или пустое значение (probe-1055) ",
+   "changes": {},
+   "verdict": "FALSE-DENY"
+  },
+  {
+   "id": "X3.r1",
+   "risk": "X3",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "заявитель видит внутреннюю оценку",
+   "verdict": "NOT-SET",
+   "http": null,
+   "error": "RuntimeError: mariadb: --------------\nDELETE FROM e1055bw WHERE up=20080 AND t=None\n--------------\n\nERROR 1054 (42S22) at line 1: Unknown column 'None' in 'WHERE'\n"
+  },
+  {
+   "id": "X3.w1",
+   "risk": "X3",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "заявитель пишет внутреннюю оценку",
+   "via": "ai",
+   "act": {
+    "op": "update",
+    "number": "З-001",
+    "fields": {
+     "score": 1
+    }
+   },
+   "http": 200,
+   "body": "Нет набора атрибутов (ai_job) или пустое значение (probe-1055) ",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "X3.c2",
+   "risk": "X3",
+   "user": "alpha_user",
+   "expect": "allow",
+   "what": "заявитель по-прежнему читает свой черновик",
+   "verdict": "NOT-SET",
+   "http": null,
+   "error": "RuntimeError: mariadb: --------------\nDELETE FROM e1055bw WHERE up=20080 AND t=None\n--------------\n\nERROR 1054 (42S22) at line 1: Unknown column 'None' in 'WHERE'\n"
+  }
+ ]
+}

@@ -1,0 +1,107 @@
+{
+ "issue": "ideav/python2node#1055",
+ "env": "a1",
+ "src": "app_x",
+ "deploy": "reference",
+ "change": "X1",
+ "ts": "2026-10-22T17:01:46+00:00",
+ "coverage": {
+  "X1": true
+ },
+ "results": [
+  {
+   "id": "X1.c1",
+   "risk": "X1",
+   "user": "delta_user",
+   "expect": "allow",
+   "what": "заявитель «Дельты» создаёт свой черновик",
+   "via": "ai",
+   "act": {
+    "op": "create",
+    "number": null,
+    "fields": {
+     "number": "З-951",
+     "company": "delta",
+     "status": "Черновик",
+     "amount": 100000
+    }
+   },
+   "http": 201,
+   "body": "",
+   "changes": {
+    "З-951": {
+     "before": null,
+     "after": {
+      "company": "ООО «Дельта»",
+      "status": "Черновик",
+      "expert": null,
+      "amount": "100000",
+      "revenue": null,
+      "description": null,
+      "verdict": null
+     }
+    }
+   },
+   "verdict": "ok"
+  },
+  {
+   "id": "X1.r1",
+   "risk": "X1",
+   "user": "delta_user",
+   "expect": "deny",
+   "what": "заявитель «Дельты» видит чужие заявки",
+   "via": "ai",
+   "act": {
+    "op": "list",
+    "number": null,
+    "fields": null
+   },
+   "http": 200,
+   "body": "[]",
+   "leaked": [],
+   "missing": [],
+   "verdict": "held"
+  },
+  {
+   "id": "X1.w1",
+   "risk": "X1",
+   "user": "delta_user",
+   "expect": "deny",
+   "what": "заявитель «Дельты» правит заявку «Альфы»",
+   "via": "ai",
+   "act": {
+    "op": "update",
+    "number": "З-001",
+    "fields": {
+     "amount": 1
+    }
+   },
+   "http": 204,
+   "body": "",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "X1.w2",
+   "risk": "X1",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "заявитель «Альфы» создаёт заявку «Дельты»",
+   "via": "ai",
+   "act": {
+    "op": "create",
+    "number": null,
+    "fields": {
+     "number": "З-952",
+     "company": "delta",
+     "status": "Черновик",
+     "amount": 100000
+    }
+   },
+   "http": 403,
+   "body": "{\"code\":\"42501\",\"details\":null,\"hint\":null,\"message\":\"new row violates row-level security policy for table \\\"application\\\"\"}",
+   "changes": {},
+   "verdict": "held"
+  }
+ ]
+}

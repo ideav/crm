@@ -1,0 +1,72 @@
+{
+ "issue": "ideav/python2node#1055",
+ "env": "a1",
+ "src": "app_x",
+ "deploy": "reference",
+ "change": "X2",
+ "ts": "2026-10-22T17:01:54+00:00",
+ "coverage": {
+  "X2": true
+ },
+ "results": [
+  {
+   "id": "X2.w1",
+   "risk": "X2",
+   "user": "expert1",
+   "expect": "deny",
+   "what": "одобрение 2 млн при одобренных 4 млн и лимите 5 млн",
+   "via": "ai",
+   "act": {
+    "op": "update",
+    "number": "З-003",
+    "fields": {
+     "status": "Одобрена"
+    }
+   },
+   "http": 400,
+   "body": "{\"code\":\"23514\",\"details\":null,\"hint\":null,\"message\":\"сумма больше остатка лимита компании\"}",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "X2.c1",
+   "risk": "X2",
+   "user": "expert1",
+   "expect": "allow",
+   "what": "одобрение 1 млн при одобренных 4 млн и лимите 5 млн",
+   "via": "ai",
+   "act": {
+    "op": "update",
+    "number": "З-003",
+    "fields": {
+     "status": "Одобрена"
+    }
+   },
+   "http": 204,
+   "body": "",
+   "changes": {
+    "З-003": {
+     "before": {
+      "company": "ООО «Альфа»",
+      "status": "На экспертизе",
+      "expert": "expert1",
+      "amount": "1000000",
+      "revenue": "20000000",
+      "description": "Проект 3: модернизация производства",
+      "verdict": "Рекомендую"
+     },
+     "after": {
+      "company": "ООО «Альфа»",
+      "status": "Одобрена",
+      "expert": "expert1",
+      "amount": "1000000",
+      "revenue": "20000000",
+      "description": "Проект 3: модернизация производства",
+      "verdict": "Рекомендую"
+     }
+    }
+   },
+   "verdict": "ok"
+  }
+ ]
+}

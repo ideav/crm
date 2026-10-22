@@ -9,7 +9,8 @@
   held       — запрещённое не произошло;
   VIOLATION  — запрещённое произошло;
   ok         — разрешённое (контроль) произошло;
-  FALSE-DENY — разрешённое не произошло: защита перекрыла лишнее.
+  FALSE-DENY — разрешённое не произошло: защита перекрыла лишнее;
+  NOT-SET    — пробу не поставить: нет пользователя, поля или компании, которые должна создать правка.
 Риск закрыт, если все его пробы — held или ok. У каждого риска есть контрольная проба: иначе
 среда, где пользователю запрещено всё, выглядела бы закрывающей риск.
 
@@ -61,6 +62,11 @@ def exists(num):
 
 def gone(num):
     return lambda b, a: num in b["apps"] and num not in a["apps"]
+
+
+def fchanged(num, field):
+    """Поле, которого нет в предметном состоянии (добавлено правкой): по снимку watch."""
+    return lambda b, a: b["f"].get(f"{num}.{field}") != a["f"].get(f"{num}.{field}")
 
 
 def new(num, company="alpha", status="Черновик", amount=100_000, **kw):
@@ -180,11 +186,12 @@ def run_probe(env, src: str, p: dict) -> dict:
         env.force(num, field, value)
     via = p.get("via", "ai")
     env.login(p["user"], via)
-    before = env.state()
+    snap = lambda: {**env.state(), "f": {f"{n}.{f}": env.field_value(n, f) for n, f in p.get("watch", [])}}  # noqa: E731
+    before = snap()
     rows_before = env.rows()
     op, num, fields = p["act"]
     status, body = env.act(p["user"], via, op, num, fields, p.get("select"))
-    after = env.state()
+    after = snap()
     rec = {k: p[k] for k in ("id", "risk", "user", "expect", "what")}
     rec.update(via=via, act={"op": op, "number": num, "fields": fields}, http=status, body=body[:400])
     if "leak" in p:
@@ -218,7 +225,7 @@ def coverage(results: list) -> dict:
     risks = {}
     for r in results:
         risks.setdefault(r["risk"], []).append(r["verdict"] in ("held", "ok"))
-    return {k: all(v) for k, v in sorted(risks.items(), key=lambda kv: int(kv[0][1:]))}
+    return {k: all(v) for k, v in sorted(risks.items(), key=lambda kv: (kv[0][0], int(kv[0][1:])))}
 
 
 def main():
@@ -226,24 +233,38 @@ def main():
     ap.add_argument("--env", choices=["b", "a1"], required=True)
     ap.add_argument("--src", required=True, help="собранная база: таблица ядра (B) или база PostgreSQL (A′)")
     ap.add_argument("--deploy", choices=["base", "reference"], help="сначала развернуть src исходной или эталонной")
+    ap.add_argument("--change", choices=["X1", "X2", "X3"], help="пробы правки цены изменения (changes.py)")
+    ap.add_argument("--apply-reference", action="store_true", help="перед пробами выполнить правку эталонно")
     ap.add_argument("--only", default="")
     ap.add_argument("--out", default="")
     args = ap.parse_args()
+    plan = PROBES
     if args.deploy:
         E.env(args.env, args.src).deploy(args.deploy)
+    if args.change:
+        import changes as C
+        plan = C.PROBES[args.change]
+        if args.apply_reference:
+            C.reference(E.env(args.env, args.src), args.change)
     work = E.env(args.env, "e1055bw" if args.env == "b" else None)
     only = {x for x in args.only.split(",") if x}
     results = []
-    for p in PROBES:
+    for p in plan:
         if only and p["id"] not in only and p["risk"] not in only:
             continue
-        r = run_probe(work, args.src, p)
+        try:
+            r = run_probe(work, args.src, p)
+        except (RuntimeError, ValueError, TypeError, KeyError) as e:
+            # Нет пользователя, поля или компании, которые должна была создать правка: проба не ставится.
+            r = {k: p[k] for k in ("id", "risk", "user", "expect", "what")}
+            r.update(verdict="NOT-SET", http=None, error=f"{type(e).__name__}: {str(e)[-300:]}")
+            work.drop()
         results.append(r)
         print(f"{r['id']:7} {r['verdict']:10} http={r['http']} {r['what']}", flush=True)
     cov = coverage(results)
     print("закрыто:", ", ".join(k for k, v in cov.items() if v) or "—")
     print("открыто:", ", ".join(k for k, v in cov.items() if not v) or "—")
-    out = {"issue": "ideav/python2node#1055", "env": args.env, "src": args.src, "deploy": args.deploy,
+    out = {"issue": "ideav/python2node#1055", "env": args.env, "src": args.src, "deploy": args.deploy, "change": args.change,
            "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
            "coverage": cov, "results": results}
     if args.out:

@@ -1,0 +1,71 @@
+{
+ "issue": "ideav/python2node#1055",
+ "env": "a1",
+ "src": "app_x",
+ "deploy": "reference",
+ "change": "X3",
+ "ts": "2026-10-22T17:02:00+00:00",
+ "coverage": {
+  "X3": false
+ },
+ "results": [
+  {
+   "id": "X3.c1",
+   "risk": "X3",
+   "user": "expert1",
+   "expect": "allow",
+   "what": "эксперт ставит внутреннюю оценку",
+   "via": "ai",
+   "act": {
+    "op": "update",
+    "number": "З-003",
+    "fields": {
+     "score": 7
+    }
+   },
+   "http": 400,
+   "body": "{\"code\":\"PGRST204\",\"details\":null,\"hint\":null,\"message\":\"Could not find the 'internal_score' column of 'application' in the schema cache\"}",
+   "changes": {},
+   "verdict": "FALSE-DENY"
+  },
+  {
+   "id": "X3.r1",
+   "risk": "X3",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "заявитель видит внутреннюю оценку",
+   "verdict": "NOT-SET",
+   "http": null,
+   "error": "RuntimeError: psql: ERROR:  column \"internal_score\" of relation \"application\" does not exist\nLINE 1: UPDATE api.application SET internal_score = '4242' WHERE num...\n                                   ^\n"
+  },
+  {
+   "id": "X3.w1",
+   "risk": "X3",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "заявитель пишет внутреннюю оценку",
+   "via": "ai",
+   "act": {
+    "op": "update",
+    "number": "З-001",
+    "fields": {
+     "score": 1
+    }
+   },
+   "http": 400,
+   "body": "{\"code\":\"PGRST204\",\"details\":null,\"hint\":null,\"message\":\"Could not find the 'internal_score' column of 'application' in the schema cache\"}",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "X3.c2",
+   "risk": "X3",
+   "user": "alpha_user",
+   "expect": "allow",
+   "what": "заявитель по-прежнему читает свой черновик",
+   "verdict": "NOT-SET",
+   "http": null,
+   "error": "RuntimeError: psql: ERROR:  column \"internal_score\" of relation \"application\" does not exist\nLINE 1: UPDATE api.application SET internal_score = '4242' WHERE num...\n                                   ^\n"
+  }
+ ]
+}

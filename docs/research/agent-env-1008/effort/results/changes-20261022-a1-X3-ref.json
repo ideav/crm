@@ -1,0 +1,87 @@
+{
+ "issue": "ideav/python2node#1055",
+ "env": "a1",
+ "src": "app_x",
+ "deploy": "reference",
+ "change": "X3",
+ "ts": "2026-10-22T17:02:06+00:00",
+ "coverage": {
+  "X3": true
+ },
+ "results": [
+  {
+   "id": "X3.c1",
+   "risk": "X3",
+   "user": "expert1",
+   "expect": "allow",
+   "what": "эксперт ставит внутреннюю оценку",
+   "via": "ai",
+   "act": {
+    "op": "update",
+    "number": "З-003",
+    "fields": {
+     "score": 7
+    }
+   },
+   "http": 204,
+   "body": "",
+   "changes": {},
+   "verdict": "ok"
+  },
+  {
+   "id": "X3.r1",
+   "risk": "X3",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "заявитель видит внутреннюю оценку",
+   "via": "ai",
+   "act": {
+    "op": "get",
+    "number": "З-001",
+    "fields": null
+   },
+   "http": 403,
+   "body": "{\"code\":\"42501\",\"details\":null,\"hint\":null,\"message\":\"permission denied for table application\"}",
+   "leaked": [],
+   "missing": [],
+   "verdict": "held"
+  },
+  {
+   "id": "X3.w1",
+   "risk": "X3",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "заявитель пишет внутреннюю оценку",
+   "via": "ai",
+   "act": {
+    "op": "update",
+    "number": "З-001",
+    "fields": {
+     "score": 1
+    }
+   },
+   "http": 403,
+   "body": "{\"code\":\"42501\",\"details\":null,\"hint\":null,\"message\":\"permission denied for table application\"}",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "X3.c2",
+   "risk": "X3",
+   "user": "alpha_user",
+   "expect": "allow",
+   "what": "заявитель по-прежнему читает свой черновик",
+   "via": "ai",
+   "act": {
+    "op": "get",
+    "number": "З-001",
+    "fields": null
+   },
+   "http": 200,
+   "body": "[{\"number\":\"З-001\",\"company_id\":20005,\"status_id\":20000,\"amount\":3800000,\"verdict\":null}]",
+   "leaked": [],
+   "missing": [],
+   "verdict": "ok"
+  }
+ ]
+}
