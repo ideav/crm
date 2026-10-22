@@ -2,8 +2,9 @@
 
 Нужны, чтобы проверить пробы (на эталоне — зелёные, на нетронутом старте — красные) и чтобы собрать
 старт T2 (эталон T1 + договоры integ/seed.py). B строится через HTTP API ядра от имени админа фонда —
-теми же вызовами, что доступны агенту (docs/kb: schema.md, queries.md, roles.md); A′ и A″ — SQL
-(integ/a1/t1_reference.sql, integ/a2/t1_reference.sql) и PostgREST реестра.
+теми же вызовами, что доступны агенту (docs/kb: schema.md, queries.md, roles.md); A′ и A″-fdw (a2) — SQL
+(integ/a1/t1_reference.sql, integ/a2/t1_reference.sql) и PostgREST реестра; A″ (a3) — SQL A′ плюс ext_id
+(integ/a3/t1_reference.sql), эталонный sync.py (integ/a3/sync_reference.py) и OData-API реестра.
 """
 import sys
 from pathlib import Path
@@ -158,7 +159,40 @@ def _ok(resp):
 def t1_pg(env):
     s1 = env.s1 if isinstance(env, EI.TwoSysEnv) else env
     s1.psql(s1.T1_REFERENCE.read_text("utf-8"))
+    if isinstance(env, EI.A3Env):
+        env.psql(env.T1_EXTRA.read_text("utf-8"))
+        EI.A3.write_sync(env.db, env.SYNC_REFERENCE.read_text("utf-8"))
+        sync_ok(env)
     s1.ready()
+
+
+def sync_ok(env):
+    r = env.sync()
+    if r["rc"] != 0:
+        raise RuntimeError(f"эталонный sync.py: {r}")
+
+
+def e_a3(env, task: str):
+    """A″ (a3): правка компании — в источнике S2 через его API, затем синхронизация в S1."""
+    s2 = env.S2
+    key = lambda inn: f"{s2}(guid'{env.ref_key(inn)}')?$format=json"  # noqa: E731
+    beta, gamma = S.COMPANY_INN["beta"], S.COMPANY_INN["gamma"]
+    if task == "E1":
+        env.reg("PATCH", key(beta), {"ЛимитФинансирования": 4_000_000})
+    elif task == "E2":
+        env.reg("PATCH", key(beta), {"Description": S.BETA_NEW_NAME})
+    elif task == "E3":
+        d = S.DELTA
+        env.reg("POST", f"{s2}?$format=json", {"Description": d["name"], "ИНН": d["inn"],
+                                               "ЛимитФинансирования": d["limit"]})
+    elif task == "E6":
+        env.reg("PATCH", key(gamma), {"ИНН": S.GAMMA_NEW_INN})
+    else:
+        raise ValueError(task)
+    sync_ok(env)
+    if task == "E3":
+        env.psql(f"UPDATE api.app_user SET role = 'applicant', company_id = (SELECT id FROM api.company "
+                 f"WHERE inn = '{S.DELTA['inn']}') WHERE login = 'delta_user';")
 
 
 A1_E = {
@@ -178,6 +212,9 @@ def e_pg(env, task: str):
             {"app": "З-011", "amount": 1_000_000}
         _ok(env.contract_act("lawyer1", "create" if task == "E4" else "update", "Д-003" if task == "E4" else "Д-001",
                              fields))
+        return
+    if isinstance(env, EI.A3Env):
+        e_a3(env, task)
         return
     if not isinstance(env, EI.TwoSysEnv):
         env.psql(A1_E[task])

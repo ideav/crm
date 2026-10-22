@@ -8,8 +8,9 @@
 --reference вместо агента применяет эталон (T1 — integ/reference.py, T2 — правку или ответ эталона) и
 рядом прогоняет пробы на нетронутом старте: пробы должны быть зелёными на эталоне и красными без него.
 
-Снимки: B — таблицы ядра i60b_*, A′ — базы i60a1_* кластера crm1055a, A″ — i60a2_* в crm1055a и crm1055c.
-A′ и A″ работают с одной базой app стенда crm1055a: их прогоны идут по очереди, B — параллельно с ними.
+Снимки: B — таблицы ядра i60b_*, A′ — базы i60a1_* кластера crm1055a, A″-fdw (a2) — i60a2_* в crm1055a и
+crm1055c, A″ (a3) — базы i60a3_* в crm1055a, файлы S2 и каталоги sync.py i60a3_* в /root/crm1060r.
+A′ и оба A″ работают с одной базой app стенда crm1055a: их прогоны идут по очереди, B — параллельно с ними.
 Готовый прогон (rep.json) повторно не запускается; на лимите подписки раннер останавливается (код 3).
 """
 import argparse
@@ -33,9 +34,10 @@ SYSTEM_T1 = ("Ты — инженер, который строит прилож�
              "Закончив, напиши «ГОТОВО» и коротко, что сделано.")
 SYSTEM_T2 = ("Ты — инженер поддержки приложений фонда. Работай только доступными инструментами. Вопросов не "
              "задавай: отвечать некому. Закончив, напиши «ГОТОВО» и ответ на вопрос или что изменено.")
-PREFIX = {"b": "i60b", "a1": "i60a1", "a2": "i60a2"}
+PREFIX = {"b": "i60b", "a1": "i60a1", "a2": "i60a2", "a3": "i60a3"}
 LIVE_B = "i60bl"
-ENV_HEAD = {"b": "## Среда B", "a1": "## Среда A′", "a2": "## Среда A″"}
+ENV_HEAD = {"b": "## Среда B", "a1": "## Среда A′", "a2": "## Среда A″ — две системы",
+            "a3": "## Среда A″ (a3)"}
 
 
 def snap(kind: str, name: str) -> str:
@@ -130,6 +132,9 @@ def t1_rep(kind: str, n: int, out: Path, args):
     live(kind).save(built)
     res["snapshot"] = built
     res["config"] = RB.config_size(kind, RB.config_state(kind, snap(kind, "start")), RB.config_state(kind, built))
+    if kind == "a3":
+        code = EI.A3.sync_dir(built) / "sync.py"
+        res["config"]["sync_lines"] = len(code.read_text("utf-8").splitlines()) if code.exists() else 0
     res["probes"] = PI.run_probes(work(kind), built, PI.T1)
     res.update(summary_t1(res["probes"]))
     res.update(env=kind, rep=n, stage="t1", model=args.model)
@@ -144,12 +149,19 @@ def t1_reference(kind: str, out: Path):
     w = work(kind)
     result["start"] = PI.run_probes(w, snap(kind, "start"), PI.T1)
     result["reference"] = PI.run_probes(w, snap(kind, "t1"), PI.T1)
+    if kind == "a3":  # отрицательный контроль: эталон без sync.py — группа S красная
+        nosync = snap(kind, "t1_nosync")
+        w.clone(snap(kind, "t1"))
+        EI.A3.drop_sync(w.db)
+        w.save(nosync)
+        result["reference_nosync"] = PI.run_probes(w, nosync, [p for p in PI.T1 if p["group"] in ("R", "S")])
+        w.drop_snapshot(nosync)
     path = out / f"validate-{kind}-t1.json"
     path.write_text(json.dumps({k: {**summary_t1(v), "probes": v} for k, v in result.items()},
                                ensure_ascii=False, indent=1, default=str), "utf-8")
     for k, v in result.items():
         s = summary_t1(v)
-        print(f"{kind} T1 {k:9}: {s['passed']}/{s['total']} проб, группы закрыты "
+        print(f"{kind} T1 {k:16}: {s['passed']}/{s['total']} проб, группы закрыты "
               f"{[g for g, ok in s['coverage'].items() if ok]}; не прошли {s['failed']}", flush=True)
     return result
 
@@ -231,7 +243,7 @@ def t2_reference(kind: str, out: Path, tasks: list) -> dict:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--env", choices=["b", "a1", "a2"], required=True)
+    ap.add_argument("--env", choices=["b", "a1", "a2", "a3"], required=True)
     ap.add_argument("--stage", choices=["prepare", "t1", "t2"], required=True)
     ap.add_argument("--reps", type=int, default=5)
     ap.add_argument("--first", type=int, default=1)

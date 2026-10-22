@@ -269,12 +269,26 @@ def apply_pre(env, pre):
         raise ValueError(pre)
 
 
+def consistent(state: dict) -> list:
+    """A″ (a3): копия справочника в S1 совпадает с источником S2 — те же компании, ИНН и лимиты."""
+    s2 = sorted([name, c["inn"], c["limit"]] for name, c in state["companies"].items())
+    s1 = sorted(state["s1_companies"], key=lambda r: [str(x) for x in r])
+    if s1 == s2:
+        return []
+    only2 = [r for r in s2 if r not in s1]
+    only1 = [r for r in s1 if r not in s2]
+    return [f"S1 не совпадает с S2: только в S2 {only2}, только в S1 {only1}"]
+
+
 def run_probe(env, src: str, p: dict) -> dict:
     rec = {k: p[k] for k in ("id", "group", "user", "expect", "what")}
     try:
         env.clone(src)
         for pre in p.get("pre", []):
             apply_pre(env, pre)
+        if hasattr(env, "sync"):  # A″ (a3): раннер запускает sync.py сборки перед проверкой
+            s = env.sync()
+            rec["sync"] = {"rc": s["rc"], "timeout": s["timeout"], "stderr": s["stderr"][-600:]}
         env.login(p["user"], "human")
         before = env.state()
         status, body, rows = None, "", None
@@ -300,6 +314,9 @@ def run_probe(env, src: str, p: dict) -> dict:
             rec["note"] = "в ответе нет и своих данных"
     elif "check" in p:
         good, bad = p["check"](after, rows)
+        if "s1_companies" in after:
+            bad = bad + consistent(after)
+            good = not bad
         rec.update(report=rows, problems=bad)
         rec["verdict"] = "ok" if good else "WRONG"
         env.drop()

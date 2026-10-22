@@ -16,7 +16,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import probes_integ as PI  # noqa: E402
 
-ENVS = [("b", "B"), ("a1", "A′"), ("a2", "A″")]
+ENVS = [("b", "B"), ("a1", "A′"), ("a3", "A″ (разнородные системы)"), ("a2", "A″-fdw (связь заранее, один язык)")]
 
 
 def tokens(u: dict) -> int:

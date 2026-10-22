@@ -63,7 +63,8 @@ def change_text(x: str) -> str:
 
 def run_agent(kind: str, db: str, prompt: str, log: Path, model: str, max_turns: int, timeout: int,
               system: str = SYSTEM, mcp_env: dict = None) -> dict:
-    """kind: b — ядро; a1, a2 — PostgreSQL + PostgREST (a2 — две системы #1060, у MCP есть crm_api)."""
+    """kind: b — ядро; a1, a2, a3 — PostgreSQL + PostgREST (a2, a3 — две системы #1060: у MCP a2 есть crm_api,
+    у a3 — reg_api, reg_doc, sync_write, sync_run)."""
     log = log.resolve()  # MCP-сервер работает в своём временном каталоге
     log.mkdir(parents=True, exist_ok=True)
     calls = log / "calls.jsonl"
@@ -126,8 +127,10 @@ def is_config(kind: str, c: dict) -> bool:
     a = c.get("args") or {}
     if kind == "b":
         return c["tool"] == "api" and a.get("method") == "POST" and (a.get("as_user") or "admin_f") == "admin_f"
-    if c["tool"] == "crm_api":  # реестр A″ (#1060): правка — любой запрос, кроме чтения
+    if c["tool"] in ("crm_api", "reg_api"):  # реестр A″ (#1060): правка — любой запрос, кроме чтения
         return a.get("method", "GET") != "GET"
+    if c["tool"] == "sync_write":  # A″ (a3): программа синхронизации — тоже конфигурация
+        return True
     return c["tool"] == "sql" and re.search(r"\b(create|alter|grant|revoke|drop|insert|update|delete)\b",
                                             a.get("query", ""), re.I) is not None
 

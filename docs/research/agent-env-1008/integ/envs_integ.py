@@ -1,4 +1,5 @@
-"""Среды замера python2node#1060: B — ядро ideav.ru, A′ — одна PostgreSQL + PostgREST, A″ — две системы.
+"""Среды замера python2node#1060: B — ядро ideav.ru, A′ — одна PostgreSQL + PostgREST, A″ — две системы
+(a3 — разнородные: PostgreSQL + PostgREST и OData 1С; a2 — вариант A″-fdw: связь заранее, один язык).
 
 Драйверы наследуют драйверы #1055 (effort/envs.py) и добавляют то, что нужно задачам T1 и T2:
   deploy("start")       — стартовый набор (integ/seed.py) с эталонной защитой #1055 своей среды;
@@ -10,6 +11,7 @@
   report(login)         — строки отчёта «Остаток лимита» в одной записи для всех сред.
 Договоры и отчёт агент строит сам: драйвер находит их по именам из ТЗ (TASK_T1.md).
 """
+import base64
 import json
 import os
 import re
@@ -18,6 +20,7 @@ import sys
 import time
 import urllib.parse
 import urllib.request
+import uuid
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -599,6 +602,101 @@ class TwoSysEnv:
         return getattr(self.s1, item)
 
 
+# --- A″ (a3): две разнородные системы ------------------------------------------------------------
+
+sys.path.insert(0, str(HERE / "a3"))
+import a3lib as A3  # noqa: E402
+
+
+def registry_seed() -> dict:
+    """S2 старта: три контрагента стартового набора; Ref_Key постоянны (uuid5), чтобы снимки сравнивались."""
+    rows = []
+    for n, (name, key, limit) in enumerate(F.COMPANIES, 1):
+        rows.append({"Ref_Key": str(uuid.uuid5(uuid.NAMESPACE_URL, f"crm1060/a3/{key}")),
+                     "DataVersion": A3_version(n), "DeletionMark": False, "Code": f"00-{n:09d}",
+                     "Description": name, "ИНН": S.COMPANY_INN[key], "ЛимитФинансирования": limit})
+    return {"seq": len(rows), "Catalog_Контрагенты": rows}
+
+
+def A3_version(n: int) -> str:
+    return base64.b64encode(n.to_bytes(8, "big")).decode()
+
+
+class A3Env(IntegPgEnv):
+    """A″ (a3): S1 «Заявки» — база app стенда crm1055a со своей копией справочника api.company (схема A′);
+    S2 «Реестр контрагентов» — HTTP в стиле OData 1С (integ/a3/registry_odata.py, файл данных);
+    sync.py агента — в $STAND/sync/<имя снимка>/. Снимок — все три части под одним именем."""
+    name = "A3"
+    KIND = "a3"
+    T1_EXTRA = HERE / "a3" / "t1_reference.sql"
+    SYNC_REFERENCE = HERE / "a3" / "sync_reference.py"
+    S2 = "Catalog_Контрагенты"
+
+    def start_sql(self) -> str:
+        return (self.SCHEMA.read_text("utf-8") + seed_sql("a1") + self.REFERENCE.read_text("utf-8")
+                + (HERE / "a3" / "s1_guard.sql").read_text("utf-8"))
+
+    def deploy(self, config: str = "start"):
+        super().deploy(config)
+        A3.write_data(registry_seed())
+        A3.drop_sync(self.db)
+
+    def save(self, name: str):
+        super().save(name)
+        A3.copy_data(A3.LIVE, name)
+        A3.copy_sync(self.db, name)
+
+    def clone(self, src: str):
+        A3.copy_data(src, A3.LIVE)
+        A3.copy_sync(src, self.db)
+        super().clone(src)
+
+    def drop_snapshot(self, name: str):
+        super().drop_snapshot(name)
+        A3.data_file(name).unlink(missing_ok=True)
+        A3.drop_sync(name)
+
+    # синхронизация и S2
+    def sync(self) -> dict:
+        return A3.run_sync(self.db, self.db)
+
+    def reg(self, method: str, path: str, body=None):
+        st, text = A3.reg_call(method, path, body)
+        if st >= 400:
+            raise RuntimeError(f"S2 {method} {path}: HTTP {st} {text[:300]}")
+        return json.loads(text) if text else None
+
+    def ref_key(self, inn: str) -> str:
+        rows = self.reg("GET", f"{self.S2}?$format=json&$select=Ref_Key&$filter=ИНН eq '{inn}'")["value"]
+        return rows[0]["Ref_Key"]
+
+    def s2_rows(self) -> list:
+        return [r for r in A3.read_data()[self.S2] if not r.get("DeletionMark")]
+
+    # состояние: компании — из источника S2, заявки и договоры — S1; копия S1 — отдельно для сверки
+    def _companies(self) -> dict:
+        return {r["Description"]: {"inn": r["ИНН"], "limit": norm_num(str(r["ЛимитФинансирования"]))}
+                for r in self.s2_rows()}
+
+    def state(self) -> dict:
+        out = super().state()
+        out["s1_companies"] = sorted(json.loads(self.psql(
+            "SELECT coalesce(json_agg(json_build_array(name, inn, funding_limit::text)), '[]') FROM api.company;")),
+            key=lambda r: [str(x) for x in r])
+        for r in out["s1_companies"]:
+            r[2] = norm_num(r[2])
+        return out
+
+    def force_company(self, key: str, field: str, value):
+        """Правка в источнике S2 в обход API, как в других средах — в обход защиты."""
+        data = A3.read_data()
+        rec = next(r for r in data[self.S2] if r["ИНН"] == S.COMPANY_INN[key])
+        rec["Description" if field == "name" else "ЛимитФинансирования"] = value
+        data["seq"] += 1
+        rec["DataVersion"] = A3_version(data["seq"])
+        A3.write_data(data)
+
+
 def env(kind: str, db: str = None):
     if kind == "b":
         return IntegCoreEnv(db or "i60bw")
@@ -606,4 +704,6 @@ def env(kind: str, db: str = None):
         return IntegPgEnv(db or E.PgrstEnv.WORK)
     if kind == "a2":
         return TwoSysEnv(db)
+    if kind == "a3":
+        return A3Env(db or E.PgrstEnv.WORK)
     raise ValueError(kind)
