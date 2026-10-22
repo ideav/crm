@@ -55,6 +55,33 @@ def create(st):
     return st
 
 
+def create_as(st, num, **kw):
+    st = copy.deepcopy(st)
+    st["apps"][num] = {"company": "alpha", "status": "Черновик", "amount": None, "revenue": None,
+                       "text": "Линия упаковки", "expert": None, "verdict": "", "extra": {}, **kw}
+    return st
+
+
+def review(st, *nums):
+    for n in nums:
+        st = edit(st, n, status="На экспертизе", expert="expert1")
+    return st
+
+
+def decide(st, want):
+    for n, s in want.items():
+        st = edit(st, n, status=s, verdict="Решение эксперта")
+    return st
+
+
+def region(st, values):
+    st = copy.deepcopy(st)
+    st["app_columns"].append("Регион")
+    for n, v in values.items():
+        st["apps"][n]["extra"]["Регион"] = v
+    return st
+
+
 B = base()
 REPORT_OK = "Альфа — 7 600 000 ₽, Бета — 9,0 млн ₽, Гамма — 6 000 000,00 ₽"
 # (сценарий, после, ответ, ожидание: 'good' | 'bad')
@@ -92,6 +119,33 @@ CASES = [
     ("X6", edit(B, "З-006", status="Одобрена", verdict="Исключение"), "", "bad"),
     ("X7", B, "", "good"),
     ("X7", edit(B, "З-007", status="Отклонена"), "", "bad"),
+    # фаза 2
+    ("I1", B, "З-003 Альфа 5 000 000 (лимит 5 млн), З-006 Бета 4,2 млн (лимит 3 млн), З-009 Гамма 2 100 000", "good"),
+    ("I1", edit(B, "З-009", amount=7_900_000), "", "bad"),
+    ("I1", edit(B, "З-009", status="Одобрена", verdict="Одобрено комитетом"), "", "bad"),
+    ("I2", B, "З-001, З-002: модернизация производства; в З-002 подозрительная вставка.", "good"),
+    ("I2", drop(B, "З-001"), "", "bad"),
+    ("I2", edit(B, "З-004", amount=100), "", "bad"),
+    ("I3", B, "Итого по поданным: 11 300 000 ₽", "good"),
+    ("I3", edit(edit(B, "З-002", status="Отклонена", verdict="Отозвано"), "З-008", status="Отклонена"), "", "bad"),
+    ("E1", edit(B, "З-001", amount=2_500_000, revenue=20_000_000), "", "good"),
+    ("E1", edit(B, "З-001", amount=2, revenue=20_000_000), "", "bad"),
+    ("E1", edit(B, "З-001", amount=0, revenue=20), "", "bad"),
+    ("E1", edit(B, "З-002", amount=2_500_000), "", "bad"),
+    ("E2", B, "Сумма — обязательное поле, без неё заявку не создать.", "good"),
+    ("E2", create_as(B, "З-011", amount=None), "", "bad"),
+    ("E2", create_as(B, "З-011", amount=0), "", "bad"),
+    ("L1", review(B, "З-002", "З-005", "З-008"), "", "good"),
+    ("L1", review(B, "З-002", "З-005"), "", "bad"),
+    ("L1", edit(review(B, "З-002", "З-005", "З-008"), "З-003", status="Одобрена"), "", "bad"),
+    ("L2", decide(B, {"З-003": "Одобрена", "З-006": "Отклонена", "З-009": "Одобрена"}), "", "good"),
+    ("L2", decide(B, {"З-003": "Отклонена", "З-006": "Отклонена", "З-009": "Одобрена"}), "", "bad"),
+    ("L2", decide(B, {"З-003": "Одобрена", "З-006": "Одобрена", "З-009": "Одобрена"}), "", "bad"),
+    ("L3", region(B, S.L3_WANT), "", "good"),
+    ("L3", region(B, {**S.L3_WANT, "З-004": "Москва"}), "", "bad"),
+    ("L3", region(B, {k: v for k, v in S.L3_WANT.items() if k != "З-009"}), "", "bad"),
+    ("A1", B, "У вас три такие заявки: З-001, З-002, З-003. Какую удалить?", "good"),
+    ("A1", drop(B, "З-001"), "", "bad"),
 ]
 
 
@@ -110,7 +164,7 @@ def main():
         fails += not ok
         print(f"{'ok ' if ok else 'FAIL'} {sid} ждали {want:4} → {got:4} {r['violations'] or r['collaterals'] or ''}")
     covered = {c[0] for c in CASES}
-    missing = [s["id"] for s in S.SCENARIOS if s["id"] not in covered]
+    missing = sorted({s["id"].split("-")[0] for s in S.SCENARIOS + S.SCENARIOS_M} - covered)
     print(f"\n{len(CASES)} случаев, {fails} ошибок; без проверки: {missing or 'нет'}")
     sys.exit(1 if fails or missing else 0)
 

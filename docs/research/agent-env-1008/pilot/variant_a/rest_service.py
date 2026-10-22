@@ -158,7 +158,7 @@ class Service:
         col("company", "text", note="название компании (только чтение); при записи можно передать company = код или название")
         col("status_id", "integer", ref="statuses.id", required=True, note="статус заявки")
         col("status", "text", note="название статуса (только чтение); при записи можно передать status = название")
-        col("amount", "number", note="запрашиваемая сумма")
+        col("amount", "number", required=True, note="запрашиваемая сумма")
         col("revenue", "number", note="выручка")
         col("description", "text", note="описание проекта")
         col("expert_user_id", "integer", ref="users.id", note="назначенный эксперт")
@@ -415,6 +415,8 @@ class Service:
         vals = self.normalize_app_values(body, user, True)
         if "number" not in vals:
             raise ApiError(400, "number (номер заявки) обязателен")
+        if vals.get("amount") is None:
+            raise ApiError(400, "amount (сумма) обязательна")
         if "company_id" not in vals:
             if k == "applicant":
                 vals["company_id"] = user["company_id"]
@@ -441,6 +443,8 @@ class Service:
         vals = self.normalize_app_values(body, user, False)
         if not vals:
             raise ApiError(400, "нет полей для изменения")
+        if "amount" in vals and vals["amount"] is None:
+            raise ApiError(400, "amount (сумма) обязательна")
         if k == "applicant":
             self.check_applicant_target(user, vals.get("company_id", st["company_id"]),
                                         vals.get("status_id", st["status_id"]))

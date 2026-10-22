@@ -45,6 +45,8 @@ AC_SRC = Path(os.getenv("R1008_AC_SRC", "/root/agent-chat/app"))
 AC_VENV_PY = os.getenv("R1008_AC_PY", "/root/agent-chat/venv/bin/python")
 MCP_SRC = Path(os.getenv("R1008_MCP_SRC", "/root/ideav-mcp"))
 MCP_PORT = int(os.getenv("R1008_MCP_PORT", "18768"))
+MCP_ALLOW = os.getenv("R1008_MCP_ALLOW", "")       # ?allow= для ideav-mcp: "" (пилот 21.10) | "schema" | "schema,delete"
+AC_PIN = os.getenv("R1008_AC_PIN", "agent-chat-app")  # каталог закреплённой копии agent-chat в PILOT_DATA
 HOST_PORT = int(os.getenv("R1008_HOST_PORT", "18767"))
 AGENT_TIMEOUT = int(os.getenv("R1008_AGENT_TIMEOUT", "600"))
 USAGE_KEYS = ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens", "output_tokens")
@@ -55,9 +57,10 @@ COMPANY_KEY = {name: key for name, key, _ in F.COMPANIES}
 # --- база прогона ----------------------------------------------------------------------------
 
 def db_name(run_id: str) -> str:
-    name = "rb_" + re.sub(r"[^A-Za-z0-9_]", "_", str(run_id))
-    if len(name) > 64:
-        raise ValueError(f"имя базы длиннее 64: {name}")
+    """Имя базы ядра: DB_MASK index.php — буква и не длиннее 15 символов, поэтому «_bare» сокращается до «z»."""
+    name = "rb_" + re.sub(r"[^A-Za-z0-9_]", "_", str(run_id)).replace("_bare", "z")
+    if not re.fullmatch(r"[a-z][a-z0-9_]{0,14}", name, re.I):
+        raise ValueError(f"имя базы не проходит DB_MASK ядра: {name}")
     return name
 
 
@@ -255,7 +258,7 @@ def _spawn(name: str, port: int, health: str, argv: list, env: dict, cwd: str) -
 
 def _pin_agent_chat() -> Path:
     """Копия кода agent-chat (agent_chat.py, plan.py, core_tasks.py, bin/ig): версия не плывёт между прогонами."""
-    dst = DATA / "agent-chat-app"
+    dst = DATA / AC_PIN
     if not (dst / "agent_chat.py").exists():
         tmp = Path(tempfile.mkdtemp(dir=DATA))
         for f in ("agent_chat.py", "plan.py", "core_tasks.py"):
@@ -359,7 +362,8 @@ def _run_b0(ctx, login, instructions, task, model, max_turns, log_dir: Path) -> 
         # Токен — через окружение процесса (${IDEAV_TOKEN} в конфиге): в файлах и логах его нет.
         cfg = work / "mcp.json"
         cfg.write_text(json.dumps({"mcpServers": {"ideav": {
-            "type": "http", "url": f"http://127.0.0.1:{MCP_PORT}/mcp/{ctx['db']}",
+            "type": "http", "url": f"http://127.0.0.1:{MCP_PORT}/mcp/{ctx['db']}"
+                                   + (f"?allow={MCP_ALLOW}" if MCP_ALLOW else ""),
             "headers": {"Authorization": "Bearer ${IDEAV_TOKEN}"}}}}))
         # Чистый дом: ни CLAUDE.md, ни навыков, ни памяти хозяина песочницы.
         (work / "home").mkdir()

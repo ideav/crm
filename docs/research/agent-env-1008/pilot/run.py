@@ -1,6 +1,6 @@
 """Раннер пилота python2node#1008: сценарии × варианты × повторы, вердикт по состоянию до/после.
 
-  python3 pilot/run.py --out results/pilot-<дата> [--variants A,B0,B1] [--only N1,X3] [--reps 5]
+  python3 pilot/run.py --out results/pilot-<дата> [--set pilot|m] [--variants A,B0,B1] [--only N1,X3] [--reps 5]
                        [--model sonnet] [--parallel 3] [--max-turns 30]
 
 Каждый прогон — своя среда (provision → snapshot → агент → snapshot → оракул → teardown).
@@ -22,7 +22,9 @@ HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE), str(HERE.parent / "app"), str(HERE.parent / "probes")]
 import scenarios as S  # noqa: E402
 
-MODULES = {"A": ("variant_a", None), "B0": ("variant_b", "B0"), "B1": ("variant_b", "B1")}
+MODULES = {"A": ("variant_a", None), "B0": ("variant_b", "B0"), "B1": ("variant_b", "B1"),
+           "B1a": ("variant_b1a", "B1a")}
+SETS = {"pilot": S.SCENARIOS, "m": S.SCENARIOS_M}  # m — фаза 2, PROTOCOL-M.md
 lock = threading.Lock()
 
 
@@ -38,12 +40,13 @@ def one(job, args, out: Path):
     log_dir = (out / "runs" / run_id).resolve()  # хост agent-chat пишет plan_apply.json по этому пути
     log_dir.mkdir(parents=True, exist_ok=True)
     v, ctx, rec = variant(vname), None, {"variant": vname, "scenario": sc["id"], "kind": sc["kind"],
-                                          "rep": rep, "model": args.model, "run_id": run_id}
+                                          "prompt": sc.get("prompt", "full"), "rep": rep,
+                                          "model": args.model, "run_id": run_id}
     t0 = time.time()
     try:
         ctx = v.provision(run_id, sc.get("overrides"))
         before = v.snapshot(ctx)
-        res = v.run_agent(ctx, sc["user"], S.instructions(sc["user"]), sc["task"],
+        res = v.run_agent(ctx, sc["user"], S.instructions(sc["user"], sc.get("prompt", "full")), sc["task"],
                           model=args.model, max_turns=args.max_turns, log_dir=str(log_dir))
         after = v.snapshot(ctx)
         verdict = sc["check"](before, after, res.get("answer", ""))
@@ -81,6 +84,7 @@ def label(r):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True)
+    ap.add_argument("--set", default="pilot", choices=sorted(SETS))
     ap.add_argument("--variants", default="A,B0,B1")
     ap.add_argument("--only", default="")
     ap.add_argument("--reps", type=int, default=5)
@@ -100,7 +104,7 @@ def main():
             if "error" not in r:
                 done.add((r["variant"], r["scenario"], r["rep"]))
     only = set(filter(None, args.only.split(",")))
-    jobs = [(vn, sc, rep) for rep in range(1, args.reps + 1) for sc in S.SCENARIOS
+    jobs = [(vn, sc, rep) for rep in range(1, args.reps + 1) for sc in SETS[args.set]
             for vn in args.variants.split(",") if (not only or sc["id"] in only)]
     random.Random(args.seed).shuffle(jobs)
     todo = [j for j in jobs if (j[0], j[1]["id"], j[2]) not in done]
