@@ -1,0 +1,443 @@
+{
+ "start": {
+  "coverage": {
+   "L": false,
+   "A": false,
+   "R": false,
+   "S": false
+  },
+  "passed": 0,
+  "total": 11,
+  "failed": [
+   "T1.L1",
+   "T1.L2",
+   "T1.L3",
+   "T1.A1",
+   "T1.A2",
+   "T1.A3",
+   "T1.A4",
+   "T1.A5",
+   "T1.R1",
+   "T1.S1",
+   "T1.S2"
+  ],
+  "probes": [
+   {
+    "id": "T1.L1",
+    "group": "L",
+    "user": "lawyer1",
+    "expect": "allow",
+    "what": "юрист создаёт договор по одобренной заявке",
+    "verdict": "NOT-SET",
+    "error": "KeyError: 'нет таблицы «Договор» или её колонок: {}'"
+   },
+   {
+    "id": "T1.L2",
+    "group": "L",
+    "user": "lawyer1",
+    "expect": "allow",
+    "what": "юрист правит сумму и статус договора",
+    "verdict": "NOT-SET",
+    "error": "KeyError: 'нет таблицы «Договор» или её колонок: {}'"
+   },
+   {
+    "id": "T1.L3",
+    "group": "L",
+    "user": "lawyer1",
+    "expect": "allow",
+    "what": "юрист читает заявки",
+    "act": [
+     "app",
+     "list",
+     null,
+     null
+    ],
+    "http": 400,
+    "body": "[{\"error\":\"Пользователю lawyer1 не задана роль\"}]",
+    "leaked": [],
+    "missing": [
+     "З-010",
+     "З-012",
+     "З-013"
+    ],
+    "verdict": "FALSE-DENY"
+   },
+   {
+    "id": "T1.A1",
+    "group": "A",
+    "user": "alpha_user",
+    "expect": "deny",
+    "what": "заявитель видит договор чужой компании",
+    "verdict": "NOT-SET",
+    "error": "KeyError: 'нет таблицы «Договор» или её колонок: {}'"
+   },
+   {
+    "id": "T1.A2",
+    "group": "A",
+    "user": "alpha_user",
+    "expect": "allow",
+    "what": "заявитель видит договор своей компании",
+    "verdict": "NOT-SET",
+    "error": "KeyError: 'нет таблицы «Договор» или её колонок: {}'"
+   },
+   {
+    "id": "T1.A3",
+    "group": "A",
+    "user": "alpha_user",
+    "expect": "deny",
+    "what": "заявитель правит договор своей компании",
+    "verdict": "NOT-SET",
+    "error": "KeyError: 'нет таблицы «Договор» или её колонок: {}'"
+   },
+   {
+    "id": "T1.A4",
+    "group": "A",
+    "user": "alpha_user",
+    "expect": "deny",
+    "what": "заявитель создаёт договор",
+    "verdict": "NOT-SET",
+    "error": "KeyError: 'нет таблицы «Договор» или её колонок: {}'"
+   },
+   {
+    "id": "T1.A5",
+    "group": "A",
+    "user": "beta_user",
+    "expect": "deny",
+    "what": "заявитель «Беты» видит договоры «Альфы» и «Гаммы»",
+    "verdict": "NOT-SET",
+    "error": "KeyError: 'нет таблицы «Договор» или её колонок: {}'"
+   },
+   {
+    "id": "T1.R1",
+    "group": "R",
+    "user": "admin_f",
+    "expect": "check",
+    "what": "отчёт «Остаток лимита» совпадает с эталоном",
+    "verdict": "NOT-SET",
+    "error": "KeyError: 'нет таблицы «Договор» или её колонок: {}'"
+   },
+   {
+    "id": "T1.S1",
+    "group": "S",
+    "user": "admin_f",
+    "expect": "check",
+    "what": "лимит «Альфы» сменили в источнике на 6 000 000 — отчёт показывает новый",
+    "verdict": "NOT-SET",
+    "error": "KeyError: 'нет таблицы «Договор» или её колонок: {}'"
+   },
+   {
+    "id": "T1.S2",
+    "group": "S",
+    "user": "admin_f",
+    "expect": "check",
+    "what": "«Гамму» переименовали в источнике — отчёт показывает новое название",
+    "verdict": "NOT-SET",
+    "error": "KeyError: 'нет таблицы «Договор» или её колонок: {}'"
+   }
+  ]
+ },
+ "reference": {
+  "coverage": {
+   "L": true,
+   "A": true,
+   "R": true,
+   "S": true
+  },
+  "passed": 11,
+  "total": 11,
+  "failed": [],
+  "probes": [
+   {
+    "id": "T1.L1",
+    "group": "L",
+    "user": "lawyer1",
+    "expect": "allow",
+    "what": "юрист создаёт договор по одобренной заявке",
+    "act": [
+     "contract",
+     "create",
+     "Д-101",
+     {
+      "app": "З-011",
+      "amount": 1000000,
+      "date": "2026-10-20",
+      "status": "Проект"
+     }
+    ],
+    "http": 200,
+    "body": "{\"id\":21131,\"obj\":21131,\"ord\":1,\"next_act\":\"edit_obj\",\"args\":\"new1=1&\",\"val\":\"Д-101\"}",
+    "changes": {
+     "Д-101": {
+      "before": null,
+      "after": {
+       "app": "З-011",
+       "amount": "1000000",
+       "status": "Проект",
+       "date": "2026-10-20"
+      }
+     }
+    },
+    "verdict": "ok"
+   },
+   {
+    "id": "T1.L2",
+    "group": "L",
+    "user": "lawyer1",
+    "expect": "allow",
+    "what": "юрист правит сумму и статус договора",
+    "act": [
+     "contract",
+     "update",
+     "Д-002",
+     {
+      "amount": 2900000,
+      "status": "Подписан"
+     }
+    ],
+    "http": 200,
+    "body": "{\"id\":\"21128\",\"obj\":21125,\"next_act\":\"nul\",\"args\":\"\",\"warnings\":\"\"}",
+    "changes": {
+     "Д-002": {
+      "before": {
+       "app": "З-013",
+       "amount": "3000000",
+       "status": "Проект",
+       "date": null
+      },
+      "after": {
+       "app": "З-013",
+       "amount": "2900000",
+       "status": "Подписан",
+       "date": null
+      }
+     }
+    },
+    "verdict": "ok"
+   },
+   {
+    "id": "T1.L3",
+    "group": "L",
+    "user": "lawyer1",
+    "expect": "allow",
+    "what": "юрист читает заявки",
+    "act": [
+     "app",
+     "list",
+     null,
+     null
+    ],
+    "http": 200,
+    "body": "{\"&main.a\":{\"_parent_.title\":[\"Заявка\"]},\"type\":{\"id\":10200,\"up\":1,\"val\":\"Заявка\",\"base\":\"SHORT\"},\"base\":{\"id\":\"3\",\"unique\":\"unique\"},\"&main.a.&uni_obj\":{\"create_granted\":[\"none\"],\"id\":[\"10200\"],\"f_u\":[\"\"],\"up\":[\"1\"],\"unique\":[\"unique\"],\"base_typ\":[\"3\"],\"filter\":[\"\",\"\"],\"val\":[\"Заявка\"],\"typ\":[\"10200\"],\"f_i\":[\"\"],\"lnx\":[\"0\"]},\"&main.a.&uni_obj.&new_req\":{\"new_req\":[\"\"],\"_parent_.typ\":[\"10200\"],\"_p",
+    "leaked": [],
+    "missing": [],
+    "verdict": "ok"
+   },
+   {
+    "id": "T1.A1",
+    "group": "A",
+    "user": "alpha_user",
+    "expect": "deny",
+    "what": "заявитель видит договор чужой компании",
+    "act": [
+     "contract",
+     "list",
+     null,
+     null
+    ],
+    "http": 200,
+    "body": "[{\"i\":21120,\"u\":1,\"o\":1,\"r\":[\"Д-001\",\"21006:З-010\",\"1500000\",\"01.10.2026\",\"21051:Подписан\"]}]",
+    "leaked": [],
+    "missing": [],
+    "verdict": "held"
+   },
+   {
+    "id": "T1.A2",
+    "group": "A",
+    "user": "alpha_user",
+    "expect": "allow",
+    "what": "заявитель видит договор своей компании",
+    "act": [
+     "contract",
+     "list",
+     null,
+     null
+    ],
+    "http": 200,
+    "body": "[{\"i\":21120,\"u\":1,\"o\":1,\"r\":[\"Д-001\",\"21006:З-010\",\"1500000\",\"01.10.2026\",\"21051:Подписан\"]}]",
+    "leaked": [],
+    "missing": [],
+    "verdict": "ok"
+   },
+   {
+    "id": "T1.A3",
+    "group": "A",
+    "user": "alpha_user",
+    "expect": "deny",
+    "what": "заявитель правит договор своей компании",
+    "act": [
+     "contract",
+     "update",
+     "Д-001",
+     {
+      "amount": 1
+     }
+    ],
+    "http": 403,
+    "body": "[{\"error\":\"У вас нет доступа к реквизиту объекта: 21120, 21055 () или его родителю 21120 (READ)! Ваш глобальный доступ: ''.\"}]",
+    "changes": {},
+    "verdict": "held"
+   },
+   {
+    "id": "T1.A4",
+    "group": "A",
+    "user": "alpha_user",
+    "expect": "deny",
+    "what": "заявитель создаёт договор",
+    "act": [
+     "contract",
+     "create",
+     "Д-102",
+     {
+      "app": "З-011",
+      "amount": 1000000,
+      "date": "2026-10-20",
+      "status": "Проект"
+     }
+    ],
+    "http": 200,
+    "body": "У вас нет прав на создание объектов этого типа.",
+    "changes": {},
+    "verdict": "held"
+   },
+   {
+    "id": "T1.A5",
+    "group": "A",
+    "user": "beta_user",
+    "expect": "deny",
+    "what": "заявитель «Беты» видит договоры «Альфы» и «Гаммы»",
+    "act": [
+     "contract",
+     "list",
+     null,
+     null
+    ],
+    "http": 200,
+    "body": "[]",
+    "leaked": [],
+    "missing": [],
+    "verdict": "held"
+   },
+   {
+    "id": "T1.R1",
+    "group": "R",
+    "user": "admin_f",
+    "expect": "check",
+    "what": "отчёт «Остаток лимита» совпадает с эталоном",
+    "act": [
+     "report"
+    ],
+    "http": 200,
+    "body": "",
+    "report": [
+     {
+      "company": "АО «Гамма»",
+      "limit": "8000000",
+      "approved": "3000000",
+      "contracted": "3000000",
+      "remaining": "5000000"
+     },
+     {
+      "company": "ООО «Альфа»",
+      "limit": "5000000",
+      "approved": "2500000",
+      "contracted": "1500000",
+      "remaining": "3500000"
+     },
+     {
+      "company": "ООО «Бета»",
+      "limit": "3000000",
+      "approved": "2000000",
+      "contracted": "0",
+      "remaining": "3000000"
+     }
+    ],
+    "problems": [],
+    "verdict": "ok"
+   },
+   {
+    "id": "T1.S1",
+    "group": "S",
+    "user": "admin_f",
+    "expect": "check",
+    "what": "лимит «Альфы» сменили в источнике на 6 000 000 — отчёт показывает новый",
+    "act": [
+     "report"
+    ],
+    "http": 200,
+    "body": "",
+    "report": [
+     {
+      "company": "АО «Гамма»",
+      "limit": "8000000",
+      "approved": "3000000",
+      "contracted": "3000000",
+      "remaining": "5000000"
+     },
+     {
+      "company": "ООО «Альфа»",
+      "limit": "6000000",
+      "approved": "2500000",
+      "contracted": "1500000",
+      "remaining": "4500000"
+     },
+     {
+      "company": "ООО «Бета»",
+      "limit": "3000000",
+      "approved": "2000000",
+      "contracted": "0",
+      "remaining": "3000000"
+     }
+    ],
+    "problems": [],
+    "verdict": "ok"
+   },
+   {
+    "id": "T1.S2",
+    "group": "S",
+    "user": "admin_f",
+    "expect": "check",
+    "what": "«Гамму» переименовали в источнике — отчёт показывает новое название",
+    "act": [
+     "report"
+    ],
+    "http": 200,
+    "body": "",
+    "report": [
+     {
+      "company": "АО «Гамма-Холдинг»",
+      "limit": "8000000",
+      "approved": "3000000",
+      "contracted": "3000000",
+      "remaining": "5000000"
+     },
+     {
+      "company": "ООО «Альфа»",
+      "limit": "5000000",
+      "approved": "2500000",
+      "contracted": "1500000",
+      "remaining": "3500000"
+     },
+     {
+      "company": "ООО «Бета»",
+      "limit": "3000000",
+      "approved": "2000000",
+      "contracted": "0",
+      "remaining": "3000000"
+     }
+    ],
+    "problems": [],
+    "verdict": "ok"
+   }
+  ]
+ }
+}
