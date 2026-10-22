@@ -410,6 +410,80 @@ class MainAppController {
         };
 
         menuContainer.appendChild(renderItems(topLevel, 0));
+        this.buildTopMenu(topLevel, children);
+    }
+
+    /**
+     * Issue #5221: верхнее меню в шапке (раскладка menu-layout-top, см. js/app-view.js).
+     * Разделы — пункты верхнего уровня, подпункты — выпадающим списком. Строится всегда
+     * (контейнер может отсутствовать в своём main.html), видимость решает CSS.
+     */
+    buildTopMenu(topLevel, children) {
+        const nav = document.getElementById('app-topmenu');
+        if (!nav) return;
+        nav.innerHTML = '';
+        const dbName = typeof db !== 'undefined' ? db : '';
+
+        const makeLink = (item, className) => {
+            const href = item.href || '';
+            const el = document.createElement(href ? 'a' : 'button');
+            el.className = className;
+            el.setAttribute('data-menu-id', item.menu_id);
+            if (href) {
+                el.href = '/' + dbName + '/' + href;
+            } else {
+                el.type = 'button';
+            }
+            const icon = this.decodeHtmlEntities(item.icon || '');
+            if (icon && icon.trim() !== '') {
+                const iconSpan = document.createElement('span');
+                iconSpan.className = 'menu-icon';
+                iconSpan.innerHTML = icon;
+                el.appendChild(iconSpan);
+            }
+            const text = document.createElement('span');
+            text.className = 'menu-text';
+            text.textContent = item.name || '';
+            el.appendChild(text);
+            return el;
+        };
+
+        topLevel.forEach(item => {
+            const subs = children[item.menu_id] || [];
+            if (!subs.length) {
+                nav.appendChild(makeLink(item, 'app-topmenu-item'));
+                return;
+            }
+            const group = document.createElement('div');
+            group.className = 'app-topmenu-group';
+            group.setAttribute('data-menu-id', item.menu_id);
+            const head = makeLink(item, 'app-topmenu-item app-topmenu-parent');
+            const arrow = document.createElement('i');
+            arrow.className = 'pi pi-chevron-down app-topmenu-arrow';
+            head.appendChild(arrow);
+            if (!item.href) {
+                // Раздел без ссылки: на сенсорном экране список раскрывается нажатием
+                head.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const open = group.classList.contains('open');
+                    nav.querySelectorAll('.app-topmenu-group.open').forEach(g => g.classList.remove('open'));
+                    group.classList.toggle('open', !open);
+                });
+            }
+            const dropdown = document.createElement('div');
+            dropdown.className = 'app-topmenu-dropdown';
+            subs.forEach(sub => dropdown.appendChild(makeLink(sub, 'app-topmenu-subitem')));
+            group.appendChild(head);
+            group.appendChild(dropdown);
+            nav.appendChild(group);
+        });
+
+        if (!this.topMenuOutsideClick) {
+            this.topMenuOutsideClick = () => {
+                document.querySelectorAll('.app-topmenu-group.open').forEach(g => g.classList.remove('open'));
+            };
+            document.addEventListener('click', this.topMenuOutsideClick);
+        }
     }
 
     createMenuItem(item, level, hasChildren) {
@@ -1870,6 +1944,17 @@ class MainAppController {
                     const textSpan = item.querySelector('.menu-text');
                     activeMenuName = textSpan ? textSpan.textContent.trim() : '';
                 }
+            }
+        });
+
+        // Issue #5221: тот же активный пункт — в верхнем меню (и его раздел)
+        document.querySelectorAll('.app-menu-item.active').forEach(item => {
+            const menuId = item.getAttribute('data-menu-id');
+            document.querySelectorAll(`#app-topmenu [data-menu-id="${menuId}"]`).forEach(el => el.classList.add('active'));
+            const parentId = item.getAttribute('data-menu-up');
+            if (parentId) {
+                const group = document.querySelector(`#app-topmenu .app-topmenu-group[data-menu-id="${parentId}"]`);
+                if (group) group.classList.add('active');
             }
         });
 
