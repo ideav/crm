@@ -12,7 +12,9 @@
 #   4) история переживает хранилище задач (TTL 24 ч во временном каталоге);
 #   5) чужие диалоги не видны и не удаляются; удаление своего;
 #   6) запрос без диалога (старый клиент) — как раньше: без conversation_id и без истории;
-#   7) мусорный id диалога — 400, агент не вызывается.
+#   7) мусорный id диалога — 400, агент не вызывается;
+#   8) диалога нет (новый чат без вопросов, удалённый, чужой; latest без диалогов) — 200 и
+#      conversation: null, а не 404: это штатное состояние, ошибки нет (python2node#1059).
 
 $failures = 0;
 function expect($cond, $name){
@@ -113,7 +115,7 @@ function ask($conversation, $message){
 }
 function turns($conversation){
     $r = run("GET", array("conversation"=>$conversation));
-    if(!$r["ok"]) return null;
+    if(!$r["ok"] || !is_array($r["data"]["conversation"])) return null;
     $out = array();
     foreach($r["data"]["conversation"]["turns"] as $t)
         $out[] = $t["message"]." => ".($t["status"] === "done" ? $t["result"]["assistant"]["content"] : $t["status"]);
@@ -163,14 +165,14 @@ as_user("sidorov", "tok-sidorov");
 $r = run("GET", array("conversations"=>"1"));
 expect($r["ok"] && $r["data"]["conversations"] === array(), "#5203: у другого пользователя список пуст");
 $r = run("GET", array("conversation"=>$c1));
-expect(!$r["ok"] && $r["code"] === 404, "#5203: чужой диалог по id — 404");
+expect($r["ok"] && $r["data"]["conversation"] === null, "#5203: чужой диалог по id не виден — пустой диалог");
 run("POST", array(), array("action"=>"delete_conversation", "conversation"=>$c1));
 as_user("petrov", "tok-petrov");
 expect(turns($c1) !== null, "#5203: удаление чужим пользователем диалог не трогает");
 $r = run("POST", array(), array("action"=>"delete_conversation", "conversation"=>$c1));
 expect($r["ok"] && $r["data"]["deleted"] === true && $GLOBALS["__capture"] === null, "#5203: свой диалог удаляется, агент не вызывается");
 $r = run("GET", array("conversation"=>$c1));
-expect(!$r["ok"] && $r["code"] === 404, "#5203: удалённый диалог — 404");
+expect($r["ok"] && $r["data"]["conversation"] === null, "#5203: удалённый диалог — пустой диалог");
 $r = run("GET", array("conversations"=>"1"));
 expect($r["ok"] && count($r["data"]["conversations"]) === 1 && $r["data"]["conversations"][0]["id"] === $c2, "#5203: в списке остался второй диалог");
 
@@ -189,9 +191,21 @@ foreach(array("../../etc", "ZZZZ", "abc", str_repeat("a", 65)) as $bad){
     expect(!$r["ok"] && $r["code"] === 400 && $GLOBALS["__capture"] === null, "#5203: 400 без вызова агента на id ".json_encode($bad));
 }
 
+# 8) python2node#1059: панель открывает новый чат (id выдал клиент, вопросов не было) —
+# сервер отвечает пустым диалогом, а не 404 «Диалог не найден».
+as_user("ivanov", "tok-ivanov");
+$r = run("GET", array("conversation"=>"4d4ff184f0cca5efdeeca6bd8bbd1216"));
+expect($r["ok"] && $r["code"] === 200 && array_key_exists("conversation", $r["data"]) && $r["data"]["conversation"] === null,
+    "#1059: новый чат без вопросов — 200 и conversation: null");
+$r = run("GET", array("conversation"=>"latest"));
+expect($r["ok"] && $r["data"]["conversation"] === null, "#1059: latest без диалогов — 200 и conversation: null");
+$r = run("GET", array("conversation"=>"ZZZZ"));
+expect($r["ok"] && $r["data"]["conversation"] === null, "#1059: мусорный id в GET — пустой диалог, без ошибки");
+
 @unlink(aiAgentJobsFile($db));
 @unlink(aiAgentChatsFile($db, "petrov"));
 @unlink(aiAgentChatsFile($db, "sidorov"));
+@unlink(aiAgentChatsFile($db, "ivanov"));
 @rmdir(dirname(aiAgentChatsFile($db, "petrov")));
 
 echo "\n";

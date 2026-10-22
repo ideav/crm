@@ -11500,9 +11500,9 @@ function aiAgentStatusRequest($com){
             $list = aiAgentChatsList($chats);
             $conversation = count($list) ? $list[0]["id"] : "";
         }
+        # Диалога нет — новый чат без вопросов (id выдаёт клиент), удалённый или чужой: это
+        # пустая лента, а не ошибка (python2node#1059) — conversation: null.
         $chat = aiAgentChatIdValid($conversation) ? aiAgentChatsFind($chats, $conversation) : null;
-        if(!$chat)
-            aiAgentError(t9n("[RU]Диалог не найден[EN]Conversation not found"), 404);
         api_dump(json_encode(array("conversation" => $chat), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "ai-agent.json");
         return;
     }
