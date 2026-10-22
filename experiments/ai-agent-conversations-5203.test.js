@@ -276,3 +276,19 @@ test('F: удаление чата в два нажатия; удалён отк
     assert.deepStrictEqual(feed(env), ['Здравствуйте!'], 'лента пуста');
     assert.ok(env.ls[KEY] !== C1 && /^[a-f0-9]{32}$/.test(env.ls[KEY]), 'открыт новый диалог');
 });
+
+// python2node#1059: новый чат без вопросов сервер отдаёт пустым диалогом (conversation: null,
+// 200) — лента пуста, запомненный id остаётся, следующий вопрос уходит в этот же диалог.
+test('G: пустой диалог с сервера — id сохранён, лента пуста', async function(){
+    var env = load(C1);
+    env.agent.openPanel();
+    var get = last(env);
+    assert.ok(get.url.indexOf('conversation=' + C1) >= 0, 'при заходе запрошен диалог ' + C1);
+    reply(get, { conversation: null });
+    await flush();
+    assert.deepStrictEqual(feed(env), ['Здравствуйте!'], 'в ленте только приветствие');
+    assert.strictEqual(env.ls[KEY], C1, 'id нового чата сохранён');
+    env.els['ai-agent-input'].value = 'Сколько сделок?';
+    env.agent.send();
+    assert.strictEqual(last(env).body.get('conversation'), C1, 'вопрос уходит в тот же диалог');
+});
