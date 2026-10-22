@@ -1163,3 +1163,116 @@
     color: var(--text-secondary);
     font-size: 0.85rem;
 }
+
+/* ============================================================
+   Issue #5221: вид приложения и раскладка меню (js/app-view.js)
+   html.menu-layout-top — верхнее меню в шапке (на узком экране — выдвижная панель)
+   html.app-view-guest  — посетитель без входа
+   ============================================================ */
+.app-topmenu,
+.guest-login-btn {
+    display: none;
+}
+
+html.menu-layout-top .app-topmenu {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+html.menu-layout-top .navbar-center {
+    display: none;
+}
+
+.app-topmenu-item,
+.app-topmenu-subitem {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.45rem 0.75rem;
+    border: none;
+    border-radius: 6px;
+    background: none;
+    color: var(--text-primary);
+    font: inherit;
+    font-size: 0.95rem;
+    text-decoration: none;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.app-topmenu-item:hover,
+.app-topmenu-subitem:hover,
+.app-topmenu-item.active,
+.app-topmenu-subitem.active,
+.app-topmenu-group.active > .app-topmenu-item {
+    background-color: rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="dark"] .app-topmenu-item:hover,
+[data-theme="dark"] .app-topmenu-subitem:hover,
+[data-theme="dark"] .app-topmenu-item.active,
+[data-theme="dark"] .app-topmenu-subitem.active,
+[data-theme="dark"] .app-topmenu-group.active > .app-topmenu-item {
+    background-color: rgba(255, 255, 255, 0.12);
+}
+
+.app-topmenu-arrow {
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+}
+
+.app-topmenu-group {
+    position: relative;
+}
+
+.app-topmenu-dropdown {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    min-width: 200px;
+    padding: 0.25rem;
+    background-color: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+    z-index: 160;
+}
+
+.app-topmenu-group:hover > .app-topmenu-dropdown,
+.app-topmenu-group:focus-within > .app-topmenu-dropdown,
+.app-topmenu-group.open > .app-topmenu-dropdown {
+    display: block;
+}
+
+@media (min-width: 901px) {
+    html.menu-layout-top .app-sidebar {
+        display: none;
+    }
+}
+
+@media (max-width: 900px) {
+    html.menu-layout-top .app-topmenu {
+        display: none;
+    }
+}
+
+/* Гость: без меню пользователя, ИИ-агента и правки меню — кнопка «Войти» */
+html.app-view-guest .user-menu-wrapper,
+html.app-view-guest .ai-chat-toggle,
+html.app-view-guest .sidebar-settings {
+    display: none !important;
+}
+
+html.app-view-guest .guest-login-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.4rem 0.9rem;
+    border-radius: 6px;
+    background-color: var(--button-primary, #3b82f6);
+    color: #fff;
+    text-decoration: none;
+    white-space: nowrap;
+}

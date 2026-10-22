@@ -9,7 +9,7 @@
     <title>{_global_.action} - {_global_.z}</title>
     <link rel="stylesheet" href="/css/styles.css">
     <link rel="stylesheet" href="/assets/vendor/primeicons/primeicons.css">
-    <link rel="stylesheet" href="/css/main-app.css">
+    <link rel="stylesheet" href="/css/main-app.css?v=5221">
     <link rel="stylesheet" href="/css/ai-chat.css?v=5203">
     <style>
         html { font-size: .82rem; }
@@ -160,6 +160,17 @@
             roleId = '{_global_.role_id}',
             grants=JSON.parse(atob('{_global_.grants}')),
             action = '{_global_.action}';
+        var menuData = [
+        <!-- Begin: MyRoleMenu -->
+        {menu_id:'{menu_id}',menu_up:'{menu_up}',name:'{name}',href:'{href}',icon:'{icon}'},
+        <!-- End: MyRoleMenu -->
+        ];
+    </script>
+    <!-- Issue #5221: вид (гость/пользователь/админ) и раскладка меню (верхнее/левое) — до отрисовки.
+         Раскладку можно задать явно: <html data-menu-layout="top|left">. -->
+    <script src="/js/app-view.js?v=5221"></script>
+    <script>
+        AppView.apply(document.documentElement, { db: db, user: user, role: role, roleId: roleId, grants: grants }, menuData);
     </script>
     <script>
         (function() {
@@ -197,11 +208,14 @@
                 <img src="/images/logo.png" alt="Logo" class="logo">
                 <span class="brand-name">{_global_.z}</span>
             </a>
+            <!-- Верхнее меню (раскладка menu-layout-top) — строится из menuData в main-app.js -->
+            <nav id="app-topmenu" class="app-topmenu" aria-label="Меню"></nav>
         </div>
         <div class="navbar-center">
             <div class="navbar-workspace">{_global_.action}</div>
         </div>
         <div class="navbar-right">
+            <a id="guest-login" class="guest-login-btn" href="/start.html?db={_global_.z}"><i class="pi pi-sign-in"></i><span>Войти</span></a>
             <button id="ai-chat-toggle" class="ai-chat-toggle" type="button" title="ИИ-агент" aria-label="Открыть ИИ-агент" aria-controls="ai-agent-panel" aria-expanded="false">
                 <i class="pi pi-comments"></i>
             </button>
@@ -341,16 +355,9 @@
         </main>
     </div>
 
-    <script>
-        var menuData = [
-        <!-- Begin: MyRoleMenu -->
-        {menu_id:'{menu_id}',menu_up:'{menu_up}',name:'{name}',href:'{href}',icon:'{icon}'},
-        <!-- End: MyRoleMenu -->
-        ];
-    </script>
     <script src="/js/app.js"></script>
     <script src="/js/ai-agent-chat.js?v=1027"></script>
-    <script src="/js/main-app.js"></script>
+    <script src="/js/main-app.js?v=5221"></script>
     <script src="/js/form-submit.js" defer></script>
     <script>
     function getChangePasswordFields(){
