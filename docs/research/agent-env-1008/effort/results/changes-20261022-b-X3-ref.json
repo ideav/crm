@@ -1,0 +1,87 @@
+{
+ "issue": "ideav/python2node#1055",
+ "env": "b",
+ "src": "e1055bx",
+ "deploy": "reference",
+ "change": "X3",
+ "ts": "2026-10-22T17:37:09+00:00",
+ "coverage": {
+  "X3": true
+ },
+ "results": [
+  {
+   "id": "X3.c1",
+   "risk": "X3",
+   "user": "expert1",
+   "expect": "allow",
+   "what": "эксперт ставит внутреннюю оценку",
+   "via": "human",
+   "act": {
+    "op": "update",
+    "number": "З-003",
+    "fields": {
+     "score": 7
+    }
+   },
+   "http": 200,
+   "body": "{\"id\":20147,\"obj\":20092,\"next_act\":\"nul\",\"args\":\"\",\"warnings\":\"\"}",
+   "changes": {},
+   "verdict": "ok"
+  },
+  {
+   "id": "X3.r1",
+   "risk": "X3",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "заявитель видит внутреннюю оценку",
+   "via": "human",
+   "act": {
+    "op": "get",
+    "number": "З-001",
+    "fields": null
+   },
+   "http": 200,
+   "body": "{\"obj\":{\"id\":\"20080\",\"val\":\"З-001\",\"parent\":\"1\",\"typ\":\"10200\",\"typ_name\":\"Заявка\",\"base_typ\":\"3\"},\"&main.a.&object\":{\"typ\":[\"10200\",\"10200\"],\"up\":[\"1\"],\"typ_name\":[\"Заявка\",\"Заявка\"],\"val\":[\"З-001\",\"З-001\"],\"id\":[\"20080\"],\"disabled\":[\"\"]},\"&main.a.&object.&edit_req\":{\"type\":[\"text\"],\"typ\":[\"10200\"],\"_parent_.val\":[\"З-001\"],\"_parent_.disabled\":[\"\"]},\"reqs\":{\"10211\":{\"type\":\"Компания\",\"order\":\"1\",\"v",
+   "leaked": [],
+   "missing": [],
+   "verdict": "held"
+  },
+  {
+   "id": "X3.w1",
+   "risk": "X3",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "заявитель пишет внутреннюю оценку",
+   "via": "human",
+   "act": {
+    "op": "update",
+    "number": "З-001",
+    "fields": {
+     "score": 1
+    }
+   },
+   "http": 403,
+   "body": "[{\"error\":\"У вас нет доступа к реквизиту объекта 20080, 20138 (BARRED) или его родителю 20080 (). Ваш глобальный доступ: ''\"}]",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "X3.c2",
+   "risk": "X3",
+   "user": "alpha_user",
+   "expect": "allow",
+   "what": "заявитель по-прежнему читает свой черновик",
+   "via": "human",
+   "act": {
+    "op": "get",
+    "number": "З-001",
+    "fields": null
+   },
+   "http": 200,
+   "body": "{\"obj\":{\"id\":\"20080\",\"val\":\"З-001\",\"parent\":\"1\",\"typ\":\"10200\",\"typ_name\":\"Заявка\",\"base_typ\":\"3\"},\"&main.a.&object\":{\"typ\":[\"10200\",\"10200\"],\"up\":[\"1\"],\"typ_name\":[\"Заявка\",\"Заявка\"],\"val\":[\"З-001\",\"З-001\"],\"id\":[\"20080\"],\"disabled\":[\"\"]},\"&main.a.&object.&edit_req\":{\"type\":[\"text\"],\"typ\":[\"10200\"],\"_parent_.val\":[\"З-001\"],\"_parent_.disabled\":[\"\"]},\"reqs\":{\"10211\":{\"type\":\"Компания\",\"order\":\"1\",\"v",
+   "leaked": [],
+   "missing": [],
+   "verdict": "ok"
+  }
+ ]
+}

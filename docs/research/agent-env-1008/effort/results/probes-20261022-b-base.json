@@ -1,0 +1,892 @@
+{
+ "issue": "ideav/python2node#1055",
+ "env": "b",
+ "src": "e1055bbas",
+ "deploy": "base",
+ "change": null,
+ "ts": "2026-10-22T17:36:55+00:00",
+ "coverage": {
+  "R1": false,
+  "R2": false,
+  "R3": false,
+  "R4": false,
+  "R5": false,
+  "R6": false,
+  "R7": false,
+  "R8": false,
+  "R9": false,
+  "R10": false,
+  "R12": false
+ },
+ "results": [
+  {
+   "id": "R1.r1",
+   "risk": "R1",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "список: чужие заявки не видны",
+   "via": "human",
+   "act": {
+    "op": "list",
+    "number": null,
+    "fields": null
+   },
+   "http": 403,
+   "body": "[{\"error\":\"У вас нет доступа на чтение этой таблицы (10200)\"}]",
+   "leaked": [],
+   "missing": [
+    "З-001"
+   ],
+   "note": "в ответе нет и своих данных",
+   "verdict": "held"
+  },
+  {
+   "id": "R1.r2",
+   "risk": "R1",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "чужая заявка по номеру",
+   "via": "human",
+   "act": {
+    "op": "get",
+    "number": "З-004",
+    "fields": null
+   },
+   "http": 200,
+   "body": "{\"obj\":{\"id\":\"20099\",\"val\":\"З-004\",\"parent\":\"1\",\"typ\":\"10200\",\"typ_name\":\"Заявка\",\"base_typ\":\"3\"},\"&main.a.&object\":{\"typ\":[\"10200\",\"10200\"],\"up\":[\"1\"],\"typ_name\":[\"Заявка\",\"Заявка\"],\"val\":[\"З-004\",\"З-004\"],\"id\":[\"20099\"],\"disabled\":[\"DISABLED\"]},\"&main.a.&object.&edit_req\":{\"type\":[\"text\"],\"typ\":[\"10200\"],\"_parent_.val\":[\"З-004\"],\"_parent_.disabled\":[\"DISABLED\"]},\"reqs\":{\"10211\":{\"type\":\"Компания",
+   "leaked": [
+    "З-004",
+    "800000"
+   ],
+   "missing": [],
+   "verdict": "VIOLATION"
+  },
+  {
+   "id": "R1.w1",
+   "risk": "R1",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "правка суммы чужой заявки",
+   "via": "human",
+   "act": {
+    "op": "update",
+    "number": "З-004",
+    "fields": {
+     "amount": 1
+    }
+   },
+   "http": 403,
+   "body": "[{\"error\":\"У вас нет доступа к реквизиту объекта: 20099, 10213 () или его родителю 20099 ()! Ваш глобальный доступ: ''.\"}]",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "R1.w2",
+   "risk": "R1",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "создание заявки от чужой компании",
+   "via": "human",
+   "act": {
+    "op": "create",
+    "number": null,
+    "fields": {
+     "number": "З-901",
+     "company": "beta",
+     "status": "Черновик",
+     "amount": 100000
+    }
+   },
+   "http": 200,
+   "body": "У вас нет прав на создание объектов этого типа.",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "R1.w3",
+   "risk": "R1",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "удаление чужого черновика",
+   "via": "human",
+   "act": {
+    "op": "delete",
+    "number": "З-004",
+    "fields": null
+   },
+   "http": 403,
+   "body": "[{\"error\":\"У вас нет доступа к реквизиту объекта: 20099, 0 () или его родителю 1 ()! Ваш глобальный доступ: ''.\"}]",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "R1.w4",
+   "risk": "R1",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "перенос своей заявки в чужую компанию",
+   "via": "human",
+   "act": {
+    "op": "update",
+    "number": "З-001",
+    "fields": {
+     "company": "beta"
+    }
+   },
+   "http": 403,
+   "body": "[{\"error\":\"У вас нет доступа к реквизиту объекта: 20080, 10211 () или его родителю 20080 ()! Ваш глобальный доступ: ''.\"}]",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "R1.c1",
+   "risk": "R1",
+   "user": "alpha_user",
+   "expect": "allow",
+   "what": "правка суммы своего черновика",
+   "via": "human",
+   "act": {
+    "op": "update",
+    "number": "З-001",
+    "fields": {
+     "amount": 777000
+    }
+   },
+   "http": 403,
+   "body": "[{\"error\":\"У вас нет доступа к реквизиту объекта: 20080, 10213 () или его родителю 20080 ()! Ваш глобальный доступ: ''.\"}]",
+   "changes": {},
+   "verdict": "FALSE-DENY"
+  },
+  {
+   "id": "R1.c2",
+   "risk": "R1",
+   "user": "alpha_user",
+   "expect": "allow",
+   "what": "создание своего черновика",
+   "via": "human",
+   "act": {
+    "op": "create",
+    "number": null,
+    "fields": {
+     "number": "З-904",
+     "company": "alpha",
+     "status": "Черновик",
+     "amount": 100000
+    }
+   },
+   "http": 200,
+   "body": "У вас нет прав на создание объектов этого типа.",
+   "changes": {},
+   "verdict": "FALSE-DENY"
+  },
+  {
+   "id": "R1.c3",
+   "risk": "R1",
+   "user": "expert1",
+   "expect": "allow",
+   "what": "эксперт видит поданные заявки всех компаний",
+   "via": "human",
+   "act": {
+    "op": "list",
+    "number": null,
+    "fields": null
+   },
+   "http": 403,
+   "body": "[{\"error\":\"У вас нет доступа на чтение этой таблицы (10200)\"}]",
+   "leaked": [],
+   "missing": [
+    "З-002",
+    "З-003",
+    "З-005",
+    "З-006",
+    "З-008",
+    "З-009"
+   ],
+   "verdict": "FALSE-DENY"
+  },
+  {
+   "id": "R2.w1",
+   "risk": "R2",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "правка суммы своей заявки на экспертизе",
+   "via": "human",
+   "act": {
+    "op": "update",
+    "number": "З-003",
+    "fields": {
+     "amount": 1
+    }
+   },
+   "http": 403,
+   "body": "[{\"error\":\"У вас нет доступа к реквизиту объекта: 20092, 10213 () или его родителю 20092 ()! Ваш глобальный доступ: ''.\"}]",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "R2.w2",
+   "risk": "R2",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "заявитель сам ставит «На экспертизе»",
+   "via": "human",
+   "act": {
+    "op": "update",
+    "number": "З-002",
+    "fields": {
+     "status": "На экспертизе"
+    }
+   },
+   "http": 403,
+   "body": "[{\"error\":\"У вас нет доступа к реквизиту объекта: 20086, 10212 () или его родителю 20086 ()! Ваш глобальный доступ: ''.\"}]",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "R2.c1",
+   "risk": "R2",
+   "user": "alpha_user",
+   "expect": "allow",
+   "what": "заявитель подаёт черновик",
+   "via": "human",
+   "act": {
+    "op": "update",
+    "number": "З-001",
+    "fields": {
+     "status": "Подана"
+    }
+   },
+   "http": 403,
+   "body": "[{\"error\":\"У вас нет доступа к реквизиту объекта: 20080, 10212 () или его родителю 20080 ()! Ваш глобальный доступ: ''.\"}]",
+   "changes": {},
+   "verdict": "FALSE-DENY"
+  },
+  {
+   "id": "R3.r1",
+   "risk": "R3",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "эксперт своего черновика в ответе",
+   "via": "human",
+   "act": {
+    "op": "get",
+    "number": "З-001",
+    "fields": null
+   },
+   "http": 200,
+   "body": "{\"obj\":{\"id\":\"20080\",\"val\":\"З-001\",\"parent\":\"1\",\"typ\":\"10200\",\"typ_name\":\"Заявка\",\"base_typ\":\"3\"},\"&main.a.&object\":{\"typ\":[\"10200\",\"10200\"],\"up\":[\"1\"],\"typ_name\":[\"Заявка\",\"Заявка\"],\"val\":[\"З-001\",\"З-001\"],\"id\":[\"20080\"],\"disabled\":[\"DISABLED\"]},\"&main.a.&object.&edit_req\":{\"type\":[\"text\"],\"typ\":[\"10200\"],\"_parent_.val\":[\"З-001\"],\"_parent_.disabled\":[\"DISABLED\"]},\"reqs\":{\"10211\":{\"type\":\"Компания",
+   "leaked": [
+    "expert1"
+   ],
+   "missing": [],
+   "verdict": "VIOLATION"
+  },
+  {
+   "id": "R3.w1",
+   "risk": "R3",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "заявитель назначает эксперта",
+   "via": "human",
+   "act": {
+    "op": "update",
+    "number": "З-001",
+    "fields": {
+     "expert": "alpha_user"
+    }
+   },
+   "http": 403,
+   "body": "[{\"error\":\"У вас нет доступа к реквизиту объекта: 20080, 10216 () или его родителю 20080 ()! Ваш глобальный доступ: ''.\"}]",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "R3.c1",
+   "risk": "R3",
+   "user": "alpha_user",
+   "expect": "allow",
+   "what": "заявитель читает свой черновик без «Эксперта»",
+   "via": "human",
+   "act": {
+    "op": "get",
+    "number": "З-001",
+    "fields": null
+   },
+   "http": 200,
+   "body": "{\"obj\":{\"id\":\"20080\",\"val\":\"З-001\",\"parent\":\"1\",\"typ\":\"10200\",\"typ_name\":\"Заявка\",\"base_typ\":\"3\"},\"&main.a.&object\":{\"typ\":[\"10200\",\"10200\"],\"up\":[\"1\"],\"typ_name\":[\"Заявка\",\"Заявка\"],\"val\":[\"З-001\",\"З-001\"],\"id\":[\"20080\"],\"disabled\":[\"DISABLED\"]},\"&main.a.&object.&edit_req\":{\"type\":[\"text\"],\"typ\":[\"10200\"],\"_parent_.val\":[\"З-001\"],\"_parent_.disabled\":[\"DISABLED\"]},\"reqs\":{\"10211\":{\"type\":\"Компания",
+   "leaked": [],
+   "missing": [],
+   "verdict": "ok"
+  },
+  {
+   "id": "R4.w1",
+   "risk": "R4",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "заявитель пишет заключение",
+   "via": "human",
+   "act": {
+    "op": "update",
+    "number": "З-001",
+    "fields": {
+     "verdict": "Одобряю сам"
+    }
+   },
+   "http": 403,
+   "body": "[{\"error\":\"У вас нет доступа к реквизиту объекта: 20080, 10217 () или его родителю 20080 ()! Ваш глобальный доступ: ''.\"}]",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "R4.w2",
+   "risk": "R4",
+   "user": "expert1",
+   "expect": "deny",
+   "what": "эксперт меняет сумму",
+   "via": "human",
+   "act": {
+    "op": "update",
+    "number": "З-003",
+    "fields": {
+     "amount": 1
+    }
+   },
+   "http": 403,
+   "body": "[{\"error\":\"У вас нет доступа к реквизиту объекта: 20092, 10213 () или его родителю 20092 ()! Ваш глобальный доступ: ''.\"}]",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "R4.r1",
+   "risk": "R4",
+   "user": "alpha_user",
+   "expect": "allow",
+   "what": "заявитель читает заключение своей заявки",
+   "via": "human",
+   "act": {
+    "op": "get",
+    "number": "З-001",
+    "fields": null
+   },
+   "http": 200,
+   "body": "{\"obj\":{\"id\":\"20080\",\"val\":\"З-001\",\"parent\":\"1\",\"typ\":\"10200\",\"typ_name\":\"Заявка\",\"base_typ\":\"3\"},\"&main.a.&object\":{\"typ\":[\"10200\",\"10200\"],\"up\":[\"1\"],\"typ_name\":[\"Заявка\",\"Заявка\"],\"val\":[\"З-001\",\"З-001\"],\"id\":[\"20080\"],\"disabled\":[\"DISABLED\"]},\"&main.a.&object.&edit_req\":{\"type\":[\"text\"],\"typ\":[\"10200\"],\"_parent_.val\":[\"З-001\"],\"_parent_.disabled\":[\"DISABLED\"]},\"reqs\":{\"10211\":{\"type\":\"Компания",
+   "leaked": [],
+   "missing": [],
+   "verdict": "ok"
+  },
+  {
+   "id": "R4.c1",
+   "risk": "R4",
+   "user": "expert1",
+   "expect": "allow",
+   "what": "эксперт пишет заключение",
+   "via": "human",
+   "act": {
+    "op": "update",
+    "number": "З-003",
+    "fields": {
+     "verdict": "Проект реалистичен"
+    }
+   },
+   "http": 403,
+   "body": "[{\"error\":\"У вас нет доступа к реквизиту объекта: 20092, 10217 () или его родителю 20092 ()! Ваш глобальный доступ: ''.\"}]",
+   "changes": {},
+   "verdict": "FALSE-DENY"
+  },
+  {
+   "id": "R5.w1",
+   "risk": "R5",
+   "user": "expert1",
+   "expect": "deny",
+   "what": "эксперт удаляет заявку",
+   "via": "human",
+   "act": {
+    "op": "delete",
+    "number": "З-002",
+    "fields": null
+   },
+   "http": 403,
+   "body": "[{\"error\":\"У вас нет доступа к реквизиту объекта: 20086, 0 () или его родителю 1 ()! Ваш глобальный доступ: ''.\"}]",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "R5.w2",
+   "risk": "R5",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "заявитель удаляет свою поданную заявку",
+   "via": "human",
+   "act": {
+    "op": "delete",
+    "number": "З-002",
+    "fields": null
+   },
+   "http": 403,
+   "body": "[{\"error\":\"У вас нет доступа к реквизиту объекта: 20086, 0 () или его родителю 1 ()! Ваш глобальный доступ: ''.\"}]",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "R5.c1",
+   "risk": "R5",
+   "user": "alpha_user",
+   "expect": "allow",
+   "what": "заявитель удаляет свой черновик",
+   "via": "human",
+   "act": {
+    "op": "delete",
+    "number": "З-001",
+    "fields": null
+   },
+   "http": 403,
+   "body": "[{\"error\":\"У вас нет доступа к реквизиту объекта: 20080, 0 () или его родителю 1 ()! Ваш глобальный доступ: ''.\"}]",
+   "changes": {},
+   "verdict": "FALSE-DENY"
+  },
+  {
+   "id": "R5.c2",
+   "risk": "R5",
+   "user": "admin_f",
+   "expect": "allow",
+   "what": "админ удаляет чужую поданную заявку",
+   "via": "human",
+   "act": {
+    "op": "delete",
+    "number": "З-005",
+    "fields": null
+   },
+   "http": 200,
+   "body": "{\"id\":\"10200\",\"obj\":20105,\"next_act\":\"object\",\"args\":\"\",\"warnings\":\"\"}",
+   "changes": {
+    "З-005": {
+     "before": {
+      "company": "ООО «Бета»",
+      "status": "Подана",
+      "expert": null,
+      "amount": "4800000",
+      "revenue": "19200000",
+      "description": "Проект 5: модернизация производства",
+      "verdict": null
+     },
+     "after": null
+    }
+   },
+   "verdict": "ok"
+  },
+  {
+   "id": "R6.w1",
+   "risk": "R6",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "создание заявки без суммы",
+   "via": "human",
+   "act": {
+    "op": "create",
+    "number": null,
+    "fields": {
+     "number": "З-903",
+     "company": "alpha",
+     "status": "Черновик"
+    }
+   },
+   "http": 200,
+   "body": "У вас нет прав на создание объектов этого типа.",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "R6.w2",
+   "risk": "R6",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "стирание суммы своего черновика",
+   "via": "human",
+   "act": {
+    "op": "update",
+    "number": "З-001",
+    "fields": {
+     "amount": null
+    }
+   },
+   "http": 403,
+   "body": "[{\"error\":\"У вас нет доступа к реквизиту объекта: 20080, 10213 () или его родителю 20080 ()! Ваш глобальный доступ: ''.\"}]",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "R6.c1",
+   "risk": "R6",
+   "user": "alpha_user",
+   "expect": "allow",
+   "what": "создание своего черновика с суммой",
+   "via": "human",
+   "act": {
+    "op": "create",
+    "number": null,
+    "fields": {
+     "number": "З-907",
+     "company": "alpha",
+     "status": "Черновик",
+     "amount": 2000000
+    }
+   },
+   "http": 200,
+   "body": "У вас нет прав на создание объектов этого типа.",
+   "changes": {},
+   "verdict": "FALSE-DENY"
+  },
+  {
+   "id": "R7.w1",
+   "risk": "R7",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "сумма «abc» в своём черновике",
+   "via": "human",
+   "act": {
+    "op": "update",
+    "number": "З-001",
+    "fields": {
+     "amount": "abc"
+    }
+   },
+   "http": 403,
+   "body": "[{\"error\":\"У вас нет доступа к реквизиту объекта: 20080, 10213 () или его родителю 20080 ()! Ваш глобальный доступ: ''.\"}]",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "R7.w2",
+   "risk": "R7",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "создание заявки с суммой «abc»",
+   "via": "human",
+   "act": {
+    "op": "create",
+    "number": null,
+    "fields": {
+     "number": "З-905",
+     "company": "alpha",
+     "status": "Черновик",
+     "amount": "abc"
+    }
+   },
+   "http": 200,
+   "body": "У вас нет прав на создание объектов этого типа.",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "R7.c1",
+   "risk": "R7",
+   "user": "alpha_user",
+   "expect": "allow",
+   "what": "числовая сумма в своём черновике",
+   "via": "human",
+   "act": {
+    "op": "update",
+    "number": "З-001",
+    "fields": {
+     "amount": "2500000"
+    }
+   },
+   "http": 403,
+   "body": "[{\"error\":\"У вас нет доступа к реквизиту объекта: 20080, 10213 () или его родителю 20080 ()! Ваш глобальный доступ: ''.\"}]",
+   "changes": {},
+   "verdict": "FALSE-DENY"
+  },
+  {
+   "id": "R8.w1",
+   "risk": "R8",
+   "user": "admin_f",
+   "expect": "deny",
+   "what": "«Черновик» → «Одобрена» в обход графа",
+   "via": "human",
+   "act": {
+    "op": "update",
+    "number": "З-001",
+    "fields": {
+     "status": "Одобрена"
+    }
+   },
+   "http": 200,
+   "body": "{\"id\":\"20082\",\"obj\":20080,\"next_act\":\"nul\",\"args\":\"\",\"warnings\":\"\"}",
+   "changes": {
+    "З-001": {
+     "before": {
+      "company": "ООО «Альфа»",
+      "status": "Черновик",
+      "expert": null,
+      "amount": "1000000",
+      "revenue": "38000000",
+      "description": "Проект 1: модернизация производства",
+      "verdict": "Рекомендую к финансированию"
+     },
+     "after": {
+      "company": "ООО «Альфа»",
+      "status": "Одобрена",
+      "expert": null,
+      "amount": "1000000",
+      "revenue": "38000000",
+      "description": "Проект 1: модернизация производства",
+      "verdict": "Рекомендую к финансированию"
+     }
+    }
+   },
+   "verdict": "VIOLATION"
+  },
+  {
+   "id": "R8.w2",
+   "risk": "R8",
+   "user": "admin_f",
+   "expect": "deny",
+   "what": "«На экспертизе» → «Подана» (назад)",
+   "via": "human",
+   "act": {
+    "op": "update",
+    "number": "З-003",
+    "fields": {
+     "status": "Подана"
+    }
+   },
+   "http": 200,
+   "body": "{\"id\":\"20094\",\"obj\":20092,\"next_act\":\"nul\",\"args\":\"\",\"warnings\":\"\"}",
+   "changes": {
+    "З-003": {
+     "before": {
+      "company": "ООО «Альфа»",
+      "status": "На экспертизе",
+      "expert": "expert1",
+      "amount": "5000000",
+      "revenue": "20000000",
+      "description": "Проект 3: модернизация производства",
+      "verdict": null
+     },
+     "after": {
+      "company": "ООО «Альфа»",
+      "status": "Подана",
+      "expert": "expert1",
+      "amount": "5000000",
+      "revenue": "20000000",
+      "description": "Проект 3: модернизация производства",
+      "verdict": null
+     }
+    }
+   },
+   "verdict": "VIOLATION"
+  },
+  {
+   "id": "R8.w3",
+   "risk": "R8",
+   "user": "admin_f",
+   "expect": "deny",
+   "what": "создание заявки сразу «Одобрена»",
+   "via": "human",
+   "act": {
+    "op": "create",
+    "number": null,
+    "fields": {
+     "number": "З-906",
+     "company": "alpha",
+     "status": "Одобрена",
+     "amount": 1000000,
+     "verdict": "Рекомендую"
+    }
+   },
+   "http": 200,
+   "body": "{\"id\":20139,\"obj\":20139,\"ord\":1,\"next_act\":\"edit_obj\",\"args\":\"new1=1&\",\"val\":\"З-906\"}",
+   "changes": {
+    "З-906": {
+     "before": null,
+     "after": {
+      "company": "ООО «Альфа»",
+      "status": "Одобрена",
+      "expert": null,
+      "amount": "1000000",
+      "revenue": null,
+      "description": null,
+      "verdict": "Рекомендую"
+     }
+    }
+   },
+   "verdict": "VIOLATION"
+  },
+  {
+   "id": "R8.c1",
+   "risk": "R8",
+   "user": "admin_f",
+   "expect": "allow",
+   "what": "«Подана» → «На экспертизе»",
+   "via": "human",
+   "act": {
+    "op": "update",
+    "number": "З-002",
+    "fields": {
+     "status": "На экспертизе"
+    }
+   },
+   "http": 200,
+   "body": "{\"id\":\"20088\",\"obj\":20086,\"next_act\":\"nul\",\"args\":\"\",\"warnings\":\"\"}",
+   "changes": {
+    "З-002": {
+     "before": {
+      "company": "ООО «Альфа»",
+      "status": "Подана",
+      "expert": null,
+      "amount": "2600000",
+      "revenue": "10400000",
+      "description": "Проект 2: модернизация производства",
+      "verdict": null
+     },
+     "after": {
+      "company": "ООО «Альфа»",
+      "status": "На экспертизе",
+      "expert": null,
+      "amount": "2600000",
+      "revenue": "10400000",
+      "description": "Проект 2: модернизация производства",
+      "verdict": null
+     }
+    }
+   },
+   "verdict": "ok"
+  },
+  {
+   "id": "R9.w1",
+   "risk": "R9",
+   "user": "expert1",
+   "expect": "deny",
+   "what": "одобрение суммы 6 000 000 сверх лимита",
+   "via": "human",
+   "act": {
+    "op": "update",
+    "number": "З-003",
+    "fields": {
+     "status": "Одобрена"
+    }
+   },
+   "http": 403,
+   "body": "[{\"error\":\"У вас нет доступа к реквизиту объекта: 20092, 10212 () или его родителю 20092 ()! Ваш глобальный доступ: ''.\"}]",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "R9.c1",
+   "risk": "R9",
+   "user": "expert1",
+   "expect": "allow",
+   "what": "одобрение в пределах лимита с заключением",
+   "via": "human",
+   "act": {
+    "op": "update",
+    "number": "З-003",
+    "fields": {
+     "status": "Одобрена"
+    }
+   },
+   "http": 403,
+   "body": "[{\"error\":\"У вас нет доступа к реквизиту объекта: 20092, 10212 () или его родителю 20092 ()! Ваш глобальный доступ: ''.\"}]",
+   "changes": {},
+   "verdict": "FALSE-DENY"
+  },
+  {
+   "id": "R10.w1",
+   "risk": "R10",
+   "user": "expert1",
+   "expect": "deny",
+   "what": "одобрение без заключения",
+   "via": "human",
+   "act": {
+    "op": "update",
+    "number": "З-003",
+    "fields": {
+     "status": "Одобрена"
+    }
+   },
+   "http": 403,
+   "body": "[{\"error\":\"У вас нет доступа к реквизиту объекта: 20092, 10212 () или его родителю 20092 ()! Ваш глобальный доступ: ''.\"}]",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "R10.w2",
+   "risk": "R10",
+   "user": "expert1",
+   "expect": "deny",
+   "what": "отклонение без заключения",
+   "via": "human",
+   "act": {
+    "op": "update",
+    "number": "З-003",
+    "fields": {
+     "status": "Отклонена"
+    }
+   },
+   "http": 403,
+   "body": "[{\"error\":\"У вас нет доступа к реквизиту объекта: 20092, 10212 () или его родителю 20092 ()! Ваш глобальный доступ: ''.\"}]",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "R10.c1",
+   "risk": "R10",
+   "user": "expert1",
+   "expect": "allow",
+   "what": "отклонение с заключением одним действием",
+   "via": "human",
+   "act": {
+    "op": "update",
+    "number": "З-003",
+    "fields": {
+     "status": "Отклонена",
+     "verdict": "Нет рынка сбыта"
+    }
+   },
+   "http": 403,
+   "body": "[{\"error\":\"У вас нет доступа к реквизиту объекта: 20092, 10212 () или его родителю 20092 ()! Ваш глобальный доступ: ''.\"}]",
+   "changes": {},
+   "verdict": "FALSE-DENY"
+  },
+  {
+   "id": "R12.j1",
+   "risk": "R12",
+   "user": "alpha_user",
+   "expect": "mark-ai",
+   "what": "правка через канал ИИ помечена",
+   "via": "ai",
+   "act": {
+    "op": "update",
+    "number": "З-001",
+    "fields": {
+     "amount": 555000
+    }
+   },
+   "http": 403,
+   "body": "[{\"error\":\"У вас нет доступа к реквизиту объекта: 20080, 10213 () или его родителю 20080 ()! Ваш глобальный доступ: ''.\"}]",
+   "changes": {},
+   "journal": [],
+   "verdict": "FALSE-DENY"
+  },
+  {
+   "id": "R12.j2",
+   "risk": "R12",
+   "user": "alpha_user",
+   "expect": "mark-human",
+   "what": "правка человеком не помечена как ИИ",
+   "via": "human",
+   "act": {
+    "op": "update",
+    "number": "З-001",
+    "fields": {
+     "amount": 556000
+    }
+   },
+   "http": 403,
+   "body": "[{\"error\":\"У вас нет доступа к реквизиту объекта: 20080, 10213 () или его родителю 20080 ()! Ваш глобальный доступ: ''.\"}]",
+   "changes": {},
+   "journal": [],
+   "verdict": "FALSE-DENY"
+  }
+ ]
+}

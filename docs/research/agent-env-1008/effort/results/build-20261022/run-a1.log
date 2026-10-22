@@ -1,0 +1,25 @@
+a1-1
+  build: ходов 35, 108.6 с, итераций 1, конфиг {'lines_added': 163, 'lines_removed': 5, 'mechanisms': {'grant': 27, 'policy': 15, 'rls': 5, 'trigger': 4, 'function': 8, 'check': 12, 'not_null': 11, 'table': 2}}, закрыто ['R2', 'R3', 'R4', 'R6', 'R7', 'R8', 'R9', 'R10', 'R12']
+  X1: ходов 39, 72.8 с, итераций 1, конфиг {'lines_added': 2, 'lines_removed': 2, 'mechanisms': {}}, закрыто ['R2', 'R3', 'R4', 'R6', 'R7', 'R8', 'R9', 'R10', 'R12', 'X1']
+  X2: ходов 13, 54.9 с, итераций 0, конфиг {'lines_added': 12, 'lines_removed': 5, 'mechanisms': {'check': 1, 'not_null': 1}}, закрыто ['R2', 'R3', 'R4', 'R6', 'R7', 'R8', 'R9', 'R10', 'R12', 'X2']
+  X3: ходов 23, 55.1 с, итераций 1, конфиг {'lines_added': 4, 'lines_removed': 2, 'mechanisms': {'grant': 1}}, закрыто ['R2', 'R3', 'R4', 'R6', 'R7', 'R8', 'R9', 'R10', 'R12', 'X3']
+a1-2
+  build: ходов 36, 170.0 с, итераций 1, конфиг {'lines_added': 194, 'lines_removed': 5, 'mechanisms': {'grant': 60, 'policy': 14, 'rls': 3, 'trigger': 4, 'function': 8, 'check': 9, 'not_null': 12, 'table': 2}}, закрыто ['R2', 'R3', 'R4', 'R6', 'R7', 'R8', 'R9', 'R10', 'R12']
+  X1: ходов 25, 60.3 с, итераций 1, конфиг {'lines_added': 2, 'lines_removed': 2, 'mechanisms': {}}, закрыто ['R2', 'R3', 'R4', 'R6', 'R7', 'R8', 'R9', 'R10', 'R12', 'X1']
+  X2: ходов 8, 46.4 с, итераций 1, конфиг {'lines_added': 8, 'lines_removed': 5, 'mechanisms': {}}, закрыто ['R2', 'R3', 'R4', 'R6', 'R7', 'R8', 'R9', 'R10', 'R12', 'X2']
+  X3: ходов 17, 61.3 с, итераций 1, конфиг {'lines_added': 5, 'lines_removed': 3, 'mechanisms': {'grant': 1}}, закрыто ['R2', 'R3', 'R4', 'R6', 'R7', 'R8', 'R9', 'R10', 'R12', 'X3']
+a1-3
+  build: ходов 39, 138.0 с, итераций 2, конфиг {'lines_added': 219, 'lines_removed': 6, 'mechanisms': {'grant': 54, 'policy': 14, 'rls': 4, 'trigger': 5, 'function': 13, 'check': 10, 'not_null': 11, 'table': 2}}, закрыто ['R2', 'R3', 'R4', 'R6', 'R7', 'R8', 'R9', 'R10', 'R12']
+  X1: ходов 30, 46.4 с, итераций 1, конфиг {'lines_added': 2, 'lines_removed': 2, 'mechanisms': {}}, закрыто ['R2', 'R3', 'R4', 'R6', 'R7', 'R8', 'R9', 'R10', 'R12', 'X1']
+  X2: ходов 12, 53.0 с, итераций 0, конфиг {'lines_added': 10, 'lines_removed': 5, 'mechanisms': {'check': 1}}, закрыто ['R2', 'R3', 'R4', 'R6', 'R7', 'R8', 'R9', 'R10', 'R12', 'X2']
+  X3: ходов 13, 35.7 с, итераций 0, конфиг {'lines_added': 5, 'lines_removed': 2, 'mechanisms': {'grant': 2}}, закрыто ['R2', 'R3', 'R4', 'R6', 'R7', 'R8', 'R9', 'R10']
+a1-4
+  build: ходов 38, 143.8 с, итераций 1, конфиг {'lines_added': 200, 'lines_removed': 5, 'mechanisms': {'grant': 44, 'policy': 18, 'rls': 6, 'trigger': 5, 'function': 10, 'check': 13, 'not_null': 12, 'table': 2}}, закрыто ['R2', 'R3', 'R4', 'R6', 'R7', 'R8', 'R9', 'R12']
+  X1: ходов 26, 46.0 с, итераций 2, конфиг {'lines_added': 2, 'lines_removed': 2, 'mechanisms': {}}, закрыто ['R2', 'R3', 'R4', 'R6', 'R7', 'R8', 'R9', 'R12', 'X1']
+  X2: ходов 15, 58.4 с, итераций 1, конфиг {'lines_added': 9, 'lines_removed': 5, 'mechanisms': {}}, закрыто ['R2', 'R3', 'R4', 'R6', 'R7', 'R8', 'R9', 'R12', 'X2']
+  X3: ходов 20, 36.4 с, итераций 0, конфиг {'lines_added': 5, 'lines_removed': 2, 'mechanisms': {'grant': 2}}, закрыто ['R2', 'R3', 'R4', 'R6', 'R7', 'R8', 'R9', 'R12', 'X3']
+a1-5
+  build: ходов 37, 124.5 с, итераций 2, конфиг {'lines_added': 196, 'lines_removed': 8, 'mechanisms': {'grant': 47, 'policy': 11, 'rls': 4, 'trigger': 6, 'function': 10, 'check': 9, 'not_null': 11, 'table': 2}}, закрыто ['R2', 'R3', 'R4', 'R6', 'R7', 'R8', 'R9', 'R10', 'R12']
+  X1: ходов 19, 43.8 с, итераций 0, конфиг {'lines_added': 2, 'lines_removed': 2, 'mechanisms': {}}, закрыто ['R2', 'R3', 'R4', 'R6', 'R7', 'R8', 'R9', 'R10', 'R12', 'X1']
+  X2: ходов 15, 62.2 с, итераций 1, конфиг {'lines_added': 10, 'lines_removed': 6, 'mechanisms': {}}, закрыто ['R2', 'R3', 'R4', 'R6', 'R7', 'R8', 'R9', 'R10', 'R12', 'X2']
+  X3: ходов 17, 45.7 с, итераций 1, конфиг {'lines_added': 5, 'lines_removed': 2, 'mechanisms': {'grant': 2}}, закрыто ['R2', 'R3', 'R4', 'R6', 'R7', 'R8', 'R9', 'R10', 'X3']

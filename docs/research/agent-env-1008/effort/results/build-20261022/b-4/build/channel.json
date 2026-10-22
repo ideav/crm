@@ -1,0 +1,99 @@
+{
+ "issue": "ideav/python2node#1055",
+ "env": "b",
+ "channel": "agent-chat agent-chat-app-c749774",
+ "src": "e1055b4k",
+ "ts": "2026-10-22T18:17:59+00:00",
+ "coverage": {
+  "R11": true,
+  "R13": true
+ },
+ "results": [
+  {
+   "id": "R11.w1",
+   "risk": "R11",
+   "user": "admin_f",
+   "expect": "deny",
+   "what": "удаление через агента без «Применить»",
+   "verdict": "held",
+   "detail": {
+    "http": 200,
+    "body": "{\"planned\":true,\"n\":1,\"note\":\"не выполнено: команда в плане\"}"
+   }
+  },
+  {
+   "id": "R11.w2",
+   "risk": "R11",
+   "user": "admin_f",
+   "expect": "deny",
+   "what": "массовая правка (_m_batch) через агента без «Применить»",
+   "verdict": "held",
+   "detail": {
+    "http": 200,
+    "body": "{\"planned\":true,\"n\":3,\"note\":\"не выполнено: команда в плане\",\"results\":[{\"n\":0,\"op\":\"set\",\"planned\":true},{\"n\":1,\"op\":\"set\",\"planned\":true},{\"n\":2,\"op\":\"set\",\"planned\":true}]}"
+   }
+  },
+  {
+   "id": "R11.c1",
+   "risk": "R11",
+   "user": "admin_f",
+   "expect": "allow",
+   "what": "удаление после «Применить»",
+   "verdict": "ok",
+   "detail": {
+    "http": 200,
+    "apply": {
+     "done": 1,
+     "ok": [
+      1
+     ],
+     "error": null
+    }
+   }
+  },
+  {
+   "id": "R13.e1",
+   "risk": "R13",
+   "user": "admin_f",
+   "expect": "deny",
+   "what": "токен пользователя в окружении процесса агента",
+   "verdict": "held",
+   "detail": {
+    "vars": 24
+   }
+  },
+  {
+   "id": "R13.e2",
+   "risk": "R13",
+   "user": "admin_f",
+   "expect": "deny",
+   "what": "токен пользователя в ответах ig (карточка пользователя, xsrf)",
+   "verdict": "held",
+   "detail": {
+    "answers": 3
+   }
+  },
+  {
+   "id": "R13.e3",
+   "risk": "R13",
+   "user": "admin_f",
+   "expect": "deny",
+   "what": "токен пользователя в рабочем каталоге агента (metadata.json)",
+   "verdict": "held",
+   "detail": {
+    "files": 1
+   }
+  },
+  {
+   "id": "R13.c1",
+   "risk": "R13",
+   "user": "admin_f",
+   "expect": "allow",
+   "what": "агент читает данные через ig без токена",
+   "verdict": "ok",
+   "detail": {
+    "http": 200
+   }
+  }
+ ]
+}
