@@ -14,6 +14,7 @@
 | `results/*.json` | Сырые результаты проб без LLM |
 | `results/pilot-<дата>/` | Результаты пилота с LLM и сводка (`README.md`) |
 | `results/rerun-20261022-n8/` | Повтор N8 после фиксов agent-chat и ideav-mcp |
+| `effort/` | Замер цены защиты (python2node#1055): протокол `PROTOCOL.md`, ТЗ сборщику `TASK.md`, драйверы сред B и A′ (`envs.py`), пробы R1–R12 (`probes.py`), стенд A′ PostgreSQL + PostgREST (`a1/`) |
 | `results/m-20261022/` | Фаза 2: сценарии, в которых модель ошибается (`pilot/PROTOCOL-M.md`), и сводка (`README.md`) |
 
 ## Пробы механизмов: что держит ядро
