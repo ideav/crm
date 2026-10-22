@@ -1,0 +1,1 @@
+{"out": "results/rerun-20261022-n8", "variants": "B0,B1a", "only": "N8", "reps": 5, "model": "sonnet", "parallel": 3, "max_turns": 30, "seed": 1008}

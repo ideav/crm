@@ -1,0 +1,1 @@
+{"out": "results/pilot-20261021-b1a", "variants": "B1a", "only": "", "reps": 5, "model": "sonnet", "parallel": 2, "max_turns": 30, "seed": 1008}
