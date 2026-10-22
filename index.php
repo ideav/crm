@@ -6581,12 +6581,12 @@ function Listing_filter_column($col, $id)
 {
     if(($col === "U") || ($col === "I") || ((string)$col === (string)$id))
         return $col;
-    $names = isset($GLOBALS["REQNAMES"]) && is_array($GLOBALS["REQNAMES"]) ? $GLOBALS["REQNAMES"] : array();
-    if(strlen($col) && (($tmp = array_search($col, $names)) !== FALSE))
+    $reqs = isset($GLOBALS["REQNAMES"]) && is_array($GLOBALS["REQNAMES"]);
+    if($reqs && strlen($col) && (($tmp = array_search($col, $GLOBALS["REQNAMES"])) !== FALSE)) // Reqs names
         return (string)$tmp;
-    if(isset($GLOBALS["GLOBAL_VARS"]["api"]["type"]["val"]) && ($col === $GLOBALS["GLOBAL_VARS"]["api"]["type"]["val"]))
+    if(isset($GLOBALS["GLOBAL_VARS"]["api"]["type"]["val"]) && ($col === $GLOBALS["GLOBAL_VARS"]["api"]["type"]["val"])) // Object name
         return $id;
-    if(ctype_digit((string)$col) && isset($names[$col]))
+    if($reqs && ctype_digit((string)$col) && isset($GLOBALS["REQNAMES"][$col])) // Reqs IDs
         return $col;
     return FALSE;
 }
