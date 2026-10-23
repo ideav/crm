@@ -19,7 +19,7 @@
 | **Построение запроса: типовые приёмы** | [report-building.md](report-building.md) | построить отчёт, колонка запроса, t28, t100, t101, псевдоним, вычисляемая колонка, формула, SUM, abn_ID, группировка, фильтр t102, [USER_ID], подзапрос, [Имя запроса], сумма по связанным записям, остаток, права на запрос, Unknown column |
 | Старт: авторизация, модель данных | [00-start.md](00-start.md) | token, X-Authorization, idb_{db}, _xsrf, БД, таблица, реквизит, ссылка, подчинённая, TIME, предел времени |
 | Схема (DDL) `_d_*` | [schema.md](schema.md) | _d_new, _d_req, _d_ref, _d_alias, _d_save, _d_del, _d_del_req, типы колонок, подчинённая таблица, referenced, метаданные |
-| Данные (DML) `_m_*` | [crud.md](crud.md) | _m_new, _m_set, _m_del, _m_batch, t{tableId}, up=, object/, JSON_OBJ, JSON_KV, F_U, F_I, LIMIT, импорт |
+| Данные (DML) `_m_*` | [crud.md](crud.md) | _m_new, _m_set, _m_del, _m_batch, strict, обязательные поля (400), t{tableId}, up=, object/, JSON_OBJ, JSON_KV, F_U, F_I, LIMIT, импорт |
 | Запросы/отчёты: вызов `report/` | [queries.md](queries.md) | report, JSON_KV, FR_, TO_, SET-запрос, права как у хранимой процедуры |
 | Роли, права, меню | [roles.md](roles.md) | роль 42, юзер 18, меню 151, гранты 116/136, маска, объект FILE |
 | Файлы сервера `dir_admin` | [files.md](files.md) | dir_admin, del[], mkdir, touch, upload, gf, ?JSON=1, безопасность, задачи cron |

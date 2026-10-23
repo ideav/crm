@@ -13664,6 +13664,66 @@ function ApplyMDel($id)
 # rec — запись (новую или уже существующую при нарушении уникальности), id — значение $id
 # для дальнейшей отрисовки, json — ответ API одиночного вызова ("" — ответа нет) и warning,
 # если запись уже существовала.
+# Issue #5219: строгая проверка обязательных реквизитов — по флагу strict в адресе, теле
+# запроса или в полях операции пакета (?strict, strict=1; strict=0/false/no/off — выключен).
+# Без флага форма и integram-table работают как раньше: запись создаётся, а незаполненные
+# поля дозаполняются в редакторе (строка таблицы создаётся по первой колонке, #807).
+function Required_strict($req)
+{
+	foreach(array($req, $_GET, $_POST) as $src)
+		if(is_array($src) && isset($src["strict"]) && is_scalar($src["strict"])
+				&& !in_array(strtolower(trim((string)$src["strict"])), array("0", "false", "no", "off"), TRUE))
+			return TRUE;
+	return FALSE;
+}
+# Обязательные реквизиты таблицы $typ, которые запрос оставляет пустыми. Для новой записи
+# ($isNew) реквизит должен прийти непустым (t{id}, NEW_{id} или файлом); при сохранении
+# проверяются только присланные поля — не присланное остаётся как было. Подчинённые таблицы
+# и кнопки не проверяются: их не заполнить в том же запросе. Реквизит, на который у
+# пользователя нет права записи, тоже: заполнить его он не может.
+function Required_missing($typ, $req, $files, $isNew)
+{
+	global $z;
+	$filled = function($v){
+		if(is_array($v))
+			return count(array_filter($v, function($x){ return is_scalar($x) && strlen((string)$x); })) > 0;
+		return strlen((string)$v) > 0;
+	};
+	$missing = array();
+	$data_set = Exec_sql("SELECT a.id, a.val attrs, CASE WHEN a.t=1 THEN 1 ELSE refs.id END ref_id"
+			.", CASE WHEN refs.id IS NULL THEN typs.t ELSE refs.t END base_typ"
+			.", CASE WHEN a.t=1 THEN a.val WHEN refs.id IS NULL THEN typs.val ELSE refs.val END val"
+			.", arrs.id arr_id"
+		." FROM $z a LEFT JOIN $z typs ON typs.id=a.t AND a.t!=1"
+		." LEFT JOIN $z refs ON refs.id=typs.t AND refs.t!=refs.id"
+		." LEFT JOIN $z arrs ON refs.id IS NULL AND arrs.up=typs.id AND arrs.ord=1"
+		." WHERE a.up=".(int)$typ." AND NOT (a.t=a.up AND a.ord=0) ORDER BY a.ord", "Required reqs (#5219)");
+	while($row = mysqli_fetch_array($data_set)){
+		$key = $row["id"];
+		if(!FieldAttrsHasRequired($row["attrs"]) || $row["arr_id"]
+				|| (isset($GLOBALS["REV_BT"][$row["base_typ"]]) && ($GLOBALS["REV_BT"][$row["base_typ"]] === "BUTTON"))
+				|| !Check_Grant($typ, $key, "WRITE", FALSE))
+			continue;
+		$sent = isset($req["t$key"]) || isset($req["NEW_$key"]);
+		if(!$isNew && !$sent)
+			continue;
+		if((isset($req["t$key"]) && $filled($req["t$key"])) || (isset($req["NEW_$key"]) && $filled($req["NEW_$key"]))
+				|| (isset($files["t$key"]["name"]) && $filled($files["t$key"]["name"])))
+			continue;
+		$missing[] = ($row["ref_id"] ? FetchAlias($row["attrs"], $row["val"]) : $row["val"])." (t$key)";
+	}
+	return $missing;
+}
+# Отказ строгого режима: 400 с перечнем полей, запись не создаётся и не меняется (в пакете —
+# ошибка этой операции).
+function Required_check($typ, $req, $files, $isNew)
+{
+	if(!Required_strict($req))
+		return;
+	$missing = Required_missing($typ, $req, $files, $isNew);
+	if(count($missing))
+		my_die(t9n("[RU]Не заполнены обязательные поля[EN]Mandatory fields are empty").": ".implode(", ", $missing), "400 Bad Request");
+}
 function ApplyMNew($id, $up, $files)
 {
 	global $z, $a, $arg, $obj, $t, $blocks;
@@ -13797,6 +13857,7 @@ function ApplyMNew($id, $up, $files)
 			}
 			else
 				OpFail(t9n("[RU]Проверка типа неуспешна[EN]Type check failed"));
+			Required_check($id, $_REQUEST, $files, TRUE);	# #5219: до вставки — отказ не оставляет записи
 			$i = Insert($up, $ord, $id, $val, "Add Object");
 #print_r($GLOBALS); die();
 # Now insert all the reqs, that might be submitted
@@ -13942,6 +14003,8 @@ function ApplyMSave($id, $req, $files)
 			$base_typ = $GLOBALS["basics"][$row["t"]];
 			$unique = (int)$row["uniq"];
 			Check_Rec_masks($id, $req);	# python2node#1008: маски строк — и на запись
+			if(!isset($req["copybtn"]))
+				Required_check($typ, $req, $files, FALSE);	# #5219: до первой записи
 			$up = $row["up"];
 			if($up > 1)
 				$arg = "F_U=$up";  # Retain this for Array elements only
