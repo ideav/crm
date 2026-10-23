@@ -1,0 +1,2 @@
+{"ts": 1792705511.623, "ms": 104, "tool": "sql", "args": {"query": "select * from api.company;"}, "error": false, "out": "20005|ООО «Альфа»|7700001009|5000000\n20008|ООО «Бета»|7700002018|3000000\n20011|АО «Гамма»|7700003027|8000000\n"}
+{"ts": 1792705513.579, "ms": 148, "tool": "api", "args": {"method": "PATCH", "path": "company?id=eq.20008", "body": {"funding_limit": 4000000}, "headers": {"Prefer": "return=representation"}}, "error": false, "out": "HTTP 200\n[{\"id\":20008,\"name\":\"ООО «Бета»\",\"inn\":\"7700002018\",\"funding_limit\":4000000}]"}

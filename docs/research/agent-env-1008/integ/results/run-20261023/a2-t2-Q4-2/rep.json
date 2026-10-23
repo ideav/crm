@@ -1,0 +1,32 @@
+{
+ "answer": "Всего законтрактовано **4 500 000** по компаниям с лимитом больше 4 млн.\n\n- ООО «Альфа» (лимит 5 млн): 1 500 000.\n- АО «Гамма» (лимит 8 млн): 3 000 000.\n\nООО «Бета» не входит в расчёт: её лимит 3 млн.\n\nЦифры взяты из отчёта `limit_balance`. Лимиты он читает из реестра контрагентов (S2) через внешнюю таблицу. В сумму входят все договоры, статус договора отчёт не учитывает.\n\nГОТОВО",
+ "done": true,
+ "is_error": false,
+ "timeout": false,
+ "duration_s": 7.3,
+ "turns": 2,
+ "usage": {
+  "input_tokens": 4,
+  "cache_read_input_tokens": 5755,
+  "cache_creation_input_tokens": 941,
+  "output_tokens": 376
+ },
+ "cost_usd": 0.0081075,
+ "env_calls": 1,
+ "webfetch": 0,
+ "iterations": 0,
+ "success": true,
+ "missing": [],
+ "expected": [
+  [
+   "num",
+   "4500000"
+  ]
+ ],
+ "env": "a2",
+ "rep": 2,
+ "stage": "t2",
+ "task": "Q4",
+ "model": "sonnet",
+ "snapshot": null
+}

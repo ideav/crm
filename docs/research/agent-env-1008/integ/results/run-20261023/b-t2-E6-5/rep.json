@@ -1,0 +1,102 @@
+{
+ "answer": "ГОТОВО. Я исправил ИНН компании «АО «Гамма»» (запись 20011) с 7700003027 на 7700099999. Перечитал таблицу «Компания»: ИНН обновился, лимит остался 8 000 000. Записи «ООО «Альфа»» и «ООО «Бета»» не менялись. Роли, права и отчёт «Остаток лимита» я не трогал и после правки не запускал.",
+ "done": true,
+ "is_error": false,
+ "timeout": false,
+ "duration_s": 16.2,
+ "turns": 7,
+ "usage": {
+  "input_tokens": 12,
+  "cache_read_input_tokens": 78511,
+  "cache_creation_input_tokens": 18506,
+  "output_tokens": 725
+ },
+ "cost_usd": 0.0891491,
+ "env_calls": 6,
+ "webfetch": 0,
+ "iterations": 0,
+ "success": true,
+ "probes": [
+  {
+   "id": "E6.s",
+   "group": "E6",
+   "user": "admin_f",
+   "expect": "check",
+   "what": "ИНН «Гаммы» исправлен, её заявки и договоры на месте и в отчёте",
+   "act": [
+    "report"
+   ],
+   "http": 200,
+   "body": "",
+   "report": [
+    {
+     "company": "АО «Гамма»",
+     "limit": "8000000",
+     "approved": "3000000",
+     "contracted": "3000000",
+     "remaining": "5000000"
+    },
+    {
+     "company": "ООО «Альфа»",
+     "limit": "5000000",
+     "approved": "2500000",
+     "contracted": "1500000",
+     "remaining": "3500000"
+    },
+    {
+     "company": "ООО «Бета»",
+     "limit": "3000000",
+     "approved": "2000000",
+     "contracted": "0",
+     "remaining": "3000000"
+    }
+   ],
+   "problems": [],
+   "verdict": "ok"
+  },
+  {
+   "id": "E6.rep",
+   "group": "E6",
+   "user": "admin_f",
+   "expect": "check",
+   "what": "отчёт по-прежнему совпадает с эталоном",
+   "act": [
+    "report"
+   ],
+   "http": 200,
+   "body": "",
+   "report": [
+    {
+     "company": "АО «Гамма»",
+     "limit": "8000000",
+     "approved": "3000000",
+     "contracted": "3000000",
+     "remaining": "5000000"
+    },
+    {
+     "company": "ООО «Альфа»",
+     "limit": "5000000",
+     "approved": "2500000",
+     "contracted": "1500000",
+     "remaining": "3500000"
+    },
+    {
+     "company": "ООО «Бета»",
+     "limit": "3000000",
+     "approved": "2000000",
+     "contracted": "0",
+     "remaining": "3000000"
+    }
+   ],
+   "problems": [],
+   "verdict": "ok"
+  }
+ ],
+ "failed": [],
+ "env": "b",
+ "rep": 5,
+ "stage": "t2",
+ "task": "E6",
+ "model": "sonnet",
+ "snapshot": "i60b_e6_5"
+}

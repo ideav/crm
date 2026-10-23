@@ -1,0 +1,36 @@
+{
+ "answer": "Названия в S1 совпадают с S2.\n\nОдобренные заявки без договора:\n- **З-011**: ООО «Альфа», 1 000 000.\n- **З-012**: ООО «Бета», 2 000 000.\n\nУ остальных одобренных заявок договор есть:\n- **З-010** (ООО «Альфа»): договор Д-001 подписан.\n- **З-013** (АО «Гамма»): договор Д-002 в статусе «Проект». Если «без договора» значит «без подписанного договора», добавьте и её.\n\nГОТОВО",
+ "done": true,
+ "is_error": false,
+ "timeout": false,
+ "duration_s": 10.7,
+ "turns": 6,
+ "usage": {
+  "input_tokens": 8,
+  "cache_read_input_tokens": 15631,
+  "cache_creation_input_tokens": 1649,
+  "output_tokens": 636
+ },
+ "cost_usd": 0.014535100000000002,
+ "env_calls": 5,
+ "webfetch": 0,
+ "iterations": 0,
+ "success": true,
+ "missing": [],
+ "expected": [
+  [
+   "text",
+   "З-011"
+  ],
+  [
+   "text",
+   "З-012"
+  ]
+ ],
+ "env": "a3",
+ "rep": 2,
+ "stage": "t2",
+ "task": "Q2",
+ "model": "sonnet",
+ "snapshot": null
+}

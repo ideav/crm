@@ -1,0 +1,32 @@
+{
+ "answer": "Остаток лимита у ООО «Альфа» сейчас 3 500 000. Лимит компании 5 000 000, а сумма её договоров 1 500 000. Там один договор, Д-001, он подписан. Отчёт `api.limit_balance` показывает то же значение. Я только читал данные и ничего не менял.\n\nОтдельно: одобренных заявок у «Альфы» на 2 500 000. Если считать остаток и от них, он будет меньше, но вы просили вычитать только договоры.\n\nГОТОВО",
+ "done": true,
+ "is_error": false,
+ "timeout": false,
+ "duration_s": 10.1,
+ "turns": 3,
+ "usage": {
+  "input_tokens": 6,
+  "cache_read_input_tokens": 7700,
+  "cache_creation_input_tokens": 833,
+  "output_tokens": 469
+ },
+ "cost_usd": 0.008804000000000001,
+ "env_calls": 2,
+ "webfetch": 0,
+ "iterations": 0,
+ "success": true,
+ "missing": [],
+ "expected": [
+  [
+   "num",
+   "3500000"
+  ]
+ ],
+ "env": "a1",
+ "rep": 2,
+ "stage": "t2",
+ "task": "Q1",
+ "model": "sonnet",
+ "snapshot": null
+}

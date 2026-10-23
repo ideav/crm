@@ -1,0 +1,32 @@
+{
+ "answer": "ГОТОВО. У «ООО «Альфа»» остаток лимита сейчас 3 500 000.\n\n- **Лимит:** 5 000 000. В реестре S2 и в копии S1 он совпадает.\n- **Договоры:** один, Д-001 на 1 500 000, статус «Подписан».\n\nОстаток: 5 000 000 − 1 500 000 = 3 500 000. Это же значение показывает отчёт `limit_balance`. Ничего не менял.\n\nВ этом отчёте у Альфы также одобрено 2 500 000 по заявкам. Остаток по вашему определению (лимит минус договоры) я считал без этой суммы.",
+ "done": true,
+ "is_error": false,
+ "timeout": false,
+ "duration_s": 8.7,
+ "turns": 4,
+ "usage": {
+  "input_tokens": 6,
+  "cache_read_input_tokens": 11931,
+  "cache_creation_input_tokens": 1495,
+  "output_tokens": 533
+ },
+ "cost_usd": 0.012515100000000001,
+ "env_calls": 3,
+ "webfetch": 0,
+ "iterations": 0,
+ "success": true,
+ "missing": [],
+ "expected": [
+  [
+   "num",
+   "3500000"
+  ]
+ ],
+ "env": "a3",
+ "rep": 4,
+ "stage": "t2",
+ "task": "Q1",
+ "model": "sonnet",
+ "snapshot": null
+}

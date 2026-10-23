@@ -1,0 +1,32 @@
+{
+ "answer": "Остаток лимита у ООО «Альфа» сейчас составляет **3 500 000**. Лимит равен 5 000 000, а договоров на 1 500 000: договор Д-001 со статусом «Подписан».\n\nЛимит взят из реестра контрагентов (ИНН 7700001009). Он совпадает с данными в отчёте `limit_balance`. Данные я только читал, ничего не менял.\n\nГОТОВО",
+ "done": true,
+ "is_error": false,
+ "timeout": false,
+ "duration_s": 10.8,
+ "turns": 4,
+ "usage": {
+  "input_tokens": 6,
+  "cache_read_input_tokens": 9720,
+  "cache_creation_input_tokens": 1391,
+  "output_tokens": 436
+ },
+ "cost_usd": 0.010908,
+ "env_calls": 3,
+ "webfetch": 0,
+ "iterations": 0,
+ "success": true,
+ "missing": [],
+ "expected": [
+  [
+   "num",
+   "3500000"
+  ]
+ ],
+ "env": "a2",
+ "rep": 5,
+ "stage": "t2",
+ "task": "Q1",
+ "model": "sonnet",
+ "snapshot": null
+}

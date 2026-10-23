@@ -1,0 +1,32 @@
+{
+ "answer": "У ООО «Альфа» остаток лимита 3 500 000.\n\n- Лимит: 5 000 000. В S1 и в реестре S2 он одинаковый, так что синхронизация не понадобилась.\n- Договоры: один, Д-001 на 1 500 000, подписан.\n- Остаток: 5 000 000 − 1 500 000 = 3 500 000. Столько же показывает представление `api.limit_balance`.\n\nОдобренные заявки на 2 500 000 в расчёт не входят, потому что вы определили остаток как лимит минус сумма договоров.\n\nГОТОВО",
+ "done": true,
+ "is_error": false,
+ "timeout": false,
+ "duration_s": 9.3,
+ "turns": 4,
+ "usage": {
+  "input_tokens": 6,
+  "cache_read_input_tokens": 10395,
+  "cache_creation_input_tokens": 3035,
+  "output_tokens": 519
+ },
+ "cost_usd": 0.018381500000000002,
+ "env_calls": 3,
+ "webfetch": 0,
+ "iterations": 0,
+ "success": true,
+ "missing": [],
+ "expected": [
+  [
+   "num",
+   "3500000"
+  ]
+ ],
+ "env": "a3",
+ "rep": 1,
+ "stage": "t2",
+ "task": "Q1",
+ "model": "sonnet",
+ "snapshot": null
+}

@@ -4,8 +4,11 @@ stdio, JSON-RPC, MCP 2024-11-05, как variant_a/mcp_server.py пилота #10
 сервер, агенту они не видны. Каждый вызов пишется в журнал R1055_CALLS (jsonl): по нему считаются
 ходы и итерации «проверка → правка».
 
-Окружение: R1055_ENV (b | a1), R1055_DB (база ядра в B), R1055_CALLS (журнал вызовов),
-R1055_KB (каталог docs/kb для B).
+Окружение: R1055_ENV (b | a1 | a2 | a3), R1055_DB (база ядра в B), R1055_CALLS (журнал вызовов),
+R1055_KB (каталог docs/kb для B), R1060_REG_* (реестр контрагентов A″, python2node#1060).
+  A″-fdw (a2) — как A′ (S1 «Заявки») плюс crm_api: PostgREST реестра контрагентов (S2) от имени его админа.
+  A″ (a3) — как A′ (S1) плюс reg_api: OData-API реестра контрагентов (S2, integ/a3/registry_odata.py),
+       reg_doc: его справочник; sync_write / sync_run: программа синхронизации sync.py (integ/a3/a3lib.py).
   B  — api: HTTP API ядра от имени админа фонда или любого пользователя базы; kb_list/kb_read/kb_search.
   A′ — sql: SQL суперпользователем в базу app; api: PostgREST от имени любого пользователя.
        Документация — WebFetch по docs.postgrest.org и www.postgresql.org (встроенный инструмент Claude).
@@ -26,6 +29,15 @@ KIND = os.environ["R1055_ENV"]
 CALLS = Path(os.environ["R1055_CALLS"]).resolve()
 KB = Path(os.getenv("R1055_KB", "/nonexistent"))
 ENV = E.CoreEnv(os.environ["R1055_DB"]) if KIND == "b" else E.PgrstEnv()
+# A″ (python2node#1060): вторая система — реестр контрагентов, свой PostgreSQL + PostgREST.
+REG = E.PgrstEnv(os.getenv("R1060_REG_DB", "registry"), stand=Path(os.getenv("R1060_REG_STAND", "/root/crm1055c")),
+                 base_url=os.getenv("R1060_REG_URL", "http://127.0.0.1:18691"),
+                 container=os.getenv("R1060_REG_CONTAINER", "crm1055c-db")) if KIND == "a2" else None
+REG_ROLE = os.getenv("R1060_REG_ROLE", "registry_admin")
+A3 = None
+if KIND == "a3":
+    sys.path.insert(0, str(HERE.parent / "integ" / "a3"))
+    import a3lib as A3  # noqa: E402
 LIMIT = 20000  # символов ответа: длиннее — обрезается с пометкой
 
 AS = {"type": "string", "description": "Логин пользователя, от имени которого запрос (по умолчанию admin_f). "
@@ -59,6 +71,36 @@ else:
              "body": {}, "headers": {"type": "object"}, "as_user": AS,
              "ai": {"type": "boolean", "description": "запрос от ИИ (заголовок X-Client: ai), по умолчанию да"}}}},
     ]
+if KIND == "a2":
+    TOOLS.append(
+        {"name": "crm_api", "description": "HTTP-запрос к PostgREST реестра контрагентов (вторая система, схема api) "
+         "от имени администратора реестра. path — например «counterparty?select=inn,legal_name». body — JSON для "
+         "POST/PATCH. headers — дополнительные заголовки (Prefer и т.п.).",
+         "inputSchema": {"type": "object", "required": ["method", "path"], "properties": {
+             "method": {"type": "string", "enum": ["GET", "POST", "PATCH", "DELETE"]}, "path": {"type": "string"},
+             "body": {}, "headers": {"type": "object"}}}})
+if KIND == "a3":
+    TOOLS += [
+        {"name": "reg_api", "description": "HTTP-запрос к API реестра контрагентов S2 (OData в стиле 1С) от имени "
+         "его администратора, Basic-аутентификация подставляется сама. path — путь от корня "
+         "/odata/standard.odata, например «Catalog_Контрагенты?$format=json&$select=Ref_Key,Description». "
+         "body — JSON для POST/PATCH. Справочник API — инструмент reg_doc.",
+         "inputSchema": {"type": "object", "required": ["method", "path"], "properties": {
+             "method": {"type": "string", "enum": ["GET", "POST", "PATCH", "DELETE"]}, "path": {"type": "string"},
+             "body": {}}}},
+        {"name": "reg_doc", "description": "Справочник API реестра контрагентов S2 (REGISTRY_API.md).",
+         "inputSchema": {"type": "object", "properties": {}}},
+        {"name": "sync_write", "description": "Записать программу синхронизации sync.py (Python 3.12: стандартная "
+         "библиотека и psycopg2). Файл заменяется целиком. Её запускает sync_run и раннер перед проверкой "
+         "приложения. Переменные окружения: S1_DSN (строка подключения libpq к базе app S1 от суперпользователя), "
+         "REG_URL (корень OData S2), REG_USER, REG_PASSWORD.",
+         "inputSchema": {"type": "object", "required": ["code"], "properties": {"code": {"type": "string"}}}},
+        {"name": "sync_read", "description": "Текст текущей программы синхронизации sync.py.",
+         "inputSchema": {"type": "object", "properties": {}}},
+        {"name": "sync_run", "description": f"Запустить sync.py (лимит {A3.SYNC_TIMEOUT} с). Возвращает код "
+         "возврата, stdout и stderr.",
+         "inputSchema": {"type": "object", "properties": {}}},
+    ]
 
 
 def _cut(text: str) -> str:
@@ -85,6 +127,31 @@ def call(name: str, a: dict) -> tuple:
                                      headers=headers)
         st, body = E.http(req)
         return f"HTTP {st}\n{body}", st >= 400
+    if name == "crm_api" and REG is not None:
+        tok = E.jwt(REG.secret, {"role": REG_ROLE, "exp": int(time.time()) + 3600})
+        headers = {"Authorization": f"Bearer {tok}", "Content-Type": "application/json", **(a.get("headers") or {})}
+        data = json.dumps(a["body"], ensure_ascii=False).encode() if a.get("body") is not None else None
+        req = urllib.request.Request(f"{REG.base_url}/{a['path'].lstrip('/')}", data=data, method=a["method"],
+                                     headers=headers)
+        st, body = E.http(req)
+        return f"HTTP {st}\n{body}", st >= 400
+    if name == "reg_api" and A3 is not None:
+        st, body = A3.reg_call(a["method"], a["path"], a.get("body"))
+        return f"HTTP {st}\n{body}", st >= 400
+    if name == "reg_doc" and A3 is not None:
+        return A3.DOC.read_text("utf-8"), False
+    if name == "sync_write" and A3 is not None:
+        p = A3.write_sync(ENV.db, a["code"])
+        return f"записано {p.name}: {len(a['code'].splitlines())} строк", False
+    if name == "sync_read" and A3 is not None:
+        p = A3.sync_dir(ENV.db) / "sync.py"
+        return (p.read_text("utf-8"), False) if p.exists() else ("sync.py не написан", True)
+    if name == "sync_run" and A3 is not None:
+        r = A3.run_sync(ENV.db, ENV.db)
+        if r.get("missing"):
+            return "sync.py не написан: сначала sync_write", True
+        head = "превышен лимит времени" if r["timeout"] else f"код возврата {r['rc']}"
+        return f"{head}\n--- stdout\n{r['stdout']}\n--- stderr\n{r['stderr']}", bool(r["timeout"] or r["rc"])
     if name == "sql":
         try:
             return ENV.psql(a["query"]) or "(пусто)", False

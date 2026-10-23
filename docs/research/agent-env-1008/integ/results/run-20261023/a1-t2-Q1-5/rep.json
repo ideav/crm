@@ -1,0 +1,32 @@
+{
+ "answer": "У ООО «Альфа» остаток лимита 3 500 000. Лимит составляет 5 000 000, а единственный договор Д-001 (подписан) на 1 500 000. Это же значение показывает отчёт `api.limit_balance`.\n\nГОТОВО",
+ "done": true,
+ "is_error": false,
+ "timeout": false,
+ "duration_s": 10.0,
+ "turns": 3,
+ "usage": {
+  "input_tokens": 6,
+  "cache_read_input_tokens": 7694,
+  "cache_creation_input_tokens": 830,
+  "output_tokens": 382
+ },
+ "cost_usd": 0.0079214,
+ "env_calls": 2,
+ "webfetch": 0,
+ "iterations": 0,
+ "success": true,
+ "missing": [],
+ "expected": [
+  [
+   "num",
+   "3500000"
+  ]
+ ],
+ "env": "a1",
+ "rep": 5,
+ "stage": "t2",
+ "task": "Q1",
+ "model": "sonnet",
+ "snapshot": null
+}

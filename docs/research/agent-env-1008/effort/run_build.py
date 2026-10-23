@@ -61,7 +61,10 @@ def change_text(x: str) -> str:
     return re.search(rf"## {x} — .*?(?=\n## |\Z)", t, re.S).group(0)
 
 
-def run_agent(kind: str, db: str, prompt: str, log: Path, model: str, max_turns: int, timeout: int) -> dict:
+def run_agent(kind: str, db: str, prompt: str, log: Path, model: str, max_turns: int, timeout: int,
+              system: str = SYSTEM, mcp_env: dict = None) -> dict:
+    """kind: b — ядро; a1, a2, a3 — PostgreSQL + PostgREST (a2, a3 — две системы #1060: у MCP a2 есть crm_api,
+    у a3 — reg_api, reg_doc, sync_write, sync_run)."""
     log = log.resolve()  # MCP-сервер работает в своём временном каталоге
     log.mkdir(parents=True, exist_ok=True)
     calls = log / "calls.jsonl"
@@ -71,13 +74,13 @@ def run_agent(kind: str, db: str, prompt: str, log: Path, model: str, max_turns:
     cfg.write_text(json.dumps({"mcpServers": {"env": {
         "command": sys.executable, "args": [str(HERE / "build_mcp.py")],
         "env": {"R1055_ENV": kind, "R1055_DB": db, "R1055_CALLS": str(calls), "R1055_KB": str(KB),
-                "R1008_STAND": os.getenv("R1008_STAND", "/root/crm1008-stand")}}}}))
+                "R1008_STAND": os.getenv("R1008_STAND", "/root/crm1008-stand"), **(mcp_env or {})}}}}))
     tools = "" if kind == "b" else "WebFetch"
-    allowed = ["mcp__env__*"] + ([f"WebFetch(domain:{d})" for d in DOCS_DOMAINS] if kind == "a1" else [])
+    allowed = ["mcp__env__*"] + ([f"WebFetch(domain:{d})" for d in DOCS_DOMAINS] if kind != "b" else [])
     cmd = [CLAUDE, "-p", "--model", model, "--output-format", "stream-json", "--verbose", "--max-turns", str(max_turns),
            "--tools", tools, "--strict-mcp-config", "--mcp-config", str(cfg), "--allowedTools", ",".join(allowed),
            "--no-session-persistence", "--disable-slash-commands", "--setting-sources", "project",
-           "--system-prompt", SYSTEM]
+           "--system-prompt", system]
     (log / "prompt.md").write_text(prompt, "utf-8")
     t0, out, err, timed_out = time.time(), "", "", False
     try:
@@ -124,6 +127,10 @@ def is_config(kind: str, c: dict) -> bool:
     a = c.get("args") or {}
     if kind == "b":
         return c["tool"] == "api" and a.get("method") == "POST" and (a.get("as_user") or "admin_f") == "admin_f"
+    if c["tool"] in ("crm_api", "reg_api"):  # реестр A″ (#1060): правка — любой запрос, кроме чтения
+        return a.get("method", "GET") != "GET"
+    if c["tool"] == "sync_write":  # A″ (a3): программа синхронизации — тоже конфигурация
+        return True
     return c["tool"] == "sql" and re.search(r"\b(create|alter|grant|revoke|drop|insert|update|delete)\b",
                                             a.get("query", ""), re.I) is not None
 
@@ -171,7 +178,7 @@ def config_state(kind: str, db: str):
 
 
 def config_size(kind: str, before, after) -> dict:
-    if kind == "a1":
+    if kind != "b":
         diff = [d for d in difflib.ndiff(before, after) if d[:2] in ("+ ", "- ")]
         added = [d[2:] for d in diff if d.startswith("+ ")]
         mech = {k: sum(1 for x in added if re.search(rx, x, re.I)) for k, rx in {

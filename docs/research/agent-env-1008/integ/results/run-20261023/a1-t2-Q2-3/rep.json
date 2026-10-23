@@ -1,0 +1,36 @@
+{
+ "answer": "Договоры со статусом «Проект» тоже считаются, поэтому я проверил, нет ли среди них расторгнутых или отменённых. Таких нет: есть только «Подписан» и «Проект».\n\nГОТОВО. Одобренные заявки без договора:\n- З-011 — ООО «Альфа» (1 000 000)\n- З-012 — ООО «Бета» (2 000 000)",
+ "done": true,
+ "is_error": false,
+ "timeout": false,
+ "duration_s": 13.2,
+ "turns": 3,
+ "usage": {
+  "input_tokens": 6,
+  "cache_read_input_tokens": 7601,
+  "cache_creation_input_tokens": 801,
+  "output_tokens": 386
+ },
+ "cost_usd": 0.007836100000000002,
+ "env_calls": 2,
+ "webfetch": 0,
+ "iterations": 0,
+ "success": true,
+ "missing": [],
+ "expected": [
+  [
+   "text",
+   "З-011"
+  ],
+  [
+   "text",
+   "З-012"
+  ]
+ ],
+ "env": "a1",
+ "rep": 3,
+ "stage": "t2",
+ "task": "Q2",
+ "model": "sonnet",
+ "snapshot": null
+}

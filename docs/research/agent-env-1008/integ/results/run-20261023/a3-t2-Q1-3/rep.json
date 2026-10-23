@@ -1,0 +1,32 @@
+{
+ "answer": "Остаток лимита у «ООО «Альфа»» сейчас **3 500 000**.\n\nЛимит компании — 5 000 000. Он совпадает в S1 и в S2, так что синхронизация не нужна. У компании один договор, Д-001 на 1 500 000 (подписан). Итого 5 000 000 − 1 500 000 = 3 500 000. Это же значение показывает отчёт `limit_balance`.\n\nЯ ничего не менял.\n\nГОТОВО",
+ "done": true,
+ "is_error": false,
+ "timeout": false,
+ "duration_s": 8.7,
+ "turns": 4,
+ "usage": {
+  "input_tokens": 6,
+  "cache_read_input_tokens": 11929,
+  "cache_creation_input_tokens": 1496,
+  "output_tokens": 490
+ },
+ "cost_usd": 0.0120889,
+ "env_calls": 3,
+ "webfetch": 0,
+ "iterations": 0,
+ "success": true,
+ "missing": [],
+ "expected": [
+  [
+   "num",
+   "3500000"
+  ]
+ ],
+ "env": "a3",
+ "rep": 3,
+ "stage": "t2",
+ "task": "Q1",
+ "model": "sonnet",
+ "snapshot": null
+}

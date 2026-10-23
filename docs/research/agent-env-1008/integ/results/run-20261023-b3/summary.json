@@ -1,0 +1,160 @@
+{
+ "t1": [
+  {
+   "env": "b",
+   "rep": 1,
+   "coverage": {
+    "L": true,
+    "A": true,
+    "R": true,
+    "S": true
+   },
+   "passed": 11,
+   "total": 11,
+   "failed": [],
+   "config": {
+    "rows": 105,
+    "by_kind": {
+     "schema": 8,
+     "role": 1,
+     "other": 70,
+     "grant": 24,
+     "mask": 2
+    }
+   },
+   "turns": 53,
+   "tokens": 81329,
+   "duration_s": 105.4,
+   "cost_usd": 0.4771091999999999,
+   "env_calls": 52,
+   "iterations": 1,
+   "done": true,
+   "timeout": false
+  },
+  {
+   "env": "b",
+   "rep": 2,
+   "coverage": {
+    "L": true,
+    "A": true,
+    "R": true,
+    "S": true
+   },
+   "passed": 11,
+   "total": 11,
+   "failed": [],
+   "config": {
+    "rows": 99,
+    "by_kind": {
+     "schema": 8,
+     "other": 64,
+     "role": 1,
+     "grant": 24,
+     "mask": 2
+    }
+   },
+   "turns": 53,
+   "tokens": 80112,
+   "duration_s": 122.2,
+   "cost_usd": 0.4755836,
+   "env_calls": 52,
+   "iterations": 1,
+   "done": true,
+   "timeout": false
+  },
+  {
+   "env": "b",
+   "rep": 3,
+   "coverage": {
+    "L": true,
+    "A": true,
+    "R": true,
+    "S": true
+   },
+   "passed": 11,
+   "total": 11,
+   "failed": [],
+   "config": {
+    "rows": 97,
+    "by_kind": {
+     "schema": 8,
+     "other": 62,
+     "role": 1,
+     "grant": 24,
+     "mask": 2
+    }
+   },
+   "turns": 63,
+   "tokens": 69437,
+   "duration_s": 137.7,
+   "cost_usd": 0.43817690000000004,
+   "env_calls": 62,
+   "iterations": 1,
+   "done": true,
+   "timeout": false
+  },
+  {
+   "env": "b",
+   "rep": 4,
+   "coverage": {
+    "L": true,
+    "A": true,
+    "R": true,
+    "S": true
+   },
+   "passed": 11,
+   "total": 11,
+   "failed": [],
+   "config": {
+    "rows": 101,
+    "by_kind": {
+     "schema": 8,
+     "other": 66,
+     "role": 1,
+     "grant": 24,
+     "mask": 2
+    }
+   },
+   "turns": 57,
+   "tokens": 81368,
+   "duration_s": 92.6,
+   "cost_usd": 0.47668570000000005,
+   "env_calls": 56,
+   "iterations": 1,
+   "done": true,
+   "timeout": false
+  },
+  {
+   "env": "b",
+   "rep": 5,
+   "coverage": {
+    "L": true,
+    "A": true,
+    "R": true,
+    "S": true
+   },
+   "passed": 11,
+   "total": 11,
+   "failed": [],
+   "config": {
+    "rows": 104,
+    "by_kind": {
+     "schema": 8,
+     "other": 69,
+     "role": 1,
+     "grant": 24,
+     "mask": 2
+    }
+   },
+   "turns": 56,
+   "tokens": 79741,
+   "duration_s": 97.5,
+   "cost_usd": 0.46709639999999997,
+   "env_calls": 55,
+   "iterations": 1,
+   "done": true,
+   "timeout": false
+  }
+ ],
+ "t2": []
+}
