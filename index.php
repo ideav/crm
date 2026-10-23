@@ -683,6 +683,7 @@ require_once __DIR__ . "/include/button_triggers.php";
 require_once __DIR__ . "/include/delimiters.php";
 require_once __DIR__ . "/include/json_archive.php";
 require_once __DIR__ . "/include/import_reconcile.php";
+require_once __DIR__ . "/include/schema_json.php";	# #5242: схема одним JSON, поля по именам
 # Default LIMIT parameter for queries with no filter
 define("DEFAULT_LIMIT", isset($_COOKIE["default_limit"])&&(int)$_COOKIE["default_limit"]>4&&(int)$_COOKIE["default_limit"]<1001?(int)$_COOKIE["default_limit"]:20);
 define("UPLOAD_DIR", "download/$z/");  # Uploaded files folder
@@ -13366,7 +13367,7 @@ function BatchRefs($op, $created, $last)
 # каждой операции возвращается в ответе.
 function ApplyMBatch($payload)
 {
-	$ops = json_decode($payload, TRUE);
+	$ops = is_array($payload) ? $payload : json_decode((string)$payload, TRUE);	# #5242: тело JSON разбирается ядром в массив
 	if(!is_array($ops) || !count($ops))
 		my_die(t9n("[RU]Пустой или неразобранный пакет: ожидается ops=<массив JSON>[EN]Empty or unparsable batch: expected ops=<JSON array>"));
 	if(count($ops) > BATCH_OPS_LIMIT)
@@ -13391,6 +13392,13 @@ function ApplyMBatch($payload)
 			if(!in_array($kind, array("save", "set", "new", "del"), TRUE))
 				throw new IntegramOpError(t9n("[RU]Неизвестная операция '$kind': допустимы save, set, new и del[EN]Unknown op '$kind': expected save, set, new or del"));
 			$op = BatchRefs($op, $created, $prev);
+			# #5242: таблицу операции new можно назвать именем
+			if(($kind === "new") && isset($op["id"]) && is_string($op["id"]) && !ctype_digit(trim($op["id"])) && function_exists("Sj_find_table")){
+				$tbl = Sj_find_table(trim($op["id"]));
+				if(!$tbl)
+					throw new IntegramOpError(t9n("[RU]Таблица «".$op["id"]."» не найдена[EN]Table '".$op["id"]."' not found"));
+				$op["id"] = $tbl["id"];
+			}
 			$rec = isset($op["id"]) ? (int)$op["id"] : 0;
 			$up = isset($op["up"]) ? (int)$op["up"] : 0;
 			$fields = (isset($op["fields"]) && is_array($op["fields"])) ? $op["fields"] : array();
@@ -13402,6 +13410,11 @@ function ApplyMBatch($payload)
 				throw new IntegramOpError(t9n("[RU]Пустой набор полей[EN]Empty set of fields"));
 			if(isset($fields["copybtn"]))
 				throw new IntegramOpError(t9n("[RU]Копия записи в пакете не поддерживается[EN]Copying a record is not supported in a batch"));
+			# #5242: ключи fields — и t{id}, и имена полей. Имя, которого в таблице нет, остаётся
+			# ключом как есть (обработчик его пропускает, как и раньше) и называется в warnings.
+			$unknownNames = array();
+			if(($kind !== "del") && function_exists("Named_fields_needed") && Named_fields_needed($fields))
+				$fields = Named_fields($kind === "new" ? $rec : Sj_record_type($rec), $fields, FALSE, $unknownNames);
 			$newRec = NULL;
 			# python2node#866: триггеры кнопок — по каждой операции, работа — после ответа на пакет.
 			# function_exists: тесты пакета (m-batch-*.test.php) берут ApplyMBatch из ядра без движка.
@@ -13416,6 +13429,8 @@ function ApplyMBatch($payload)
 				$res["id"] = $newRec;
 			}
 			$res["ok"] = TRUE;
+			if(count($unknownNames))
+				$warnings .= ($warnings === "" ? "" : " ").t9n("[RU]Нет полей[EN]No fields").": ".implode(", ", $unknownNames);
 			if($warnings !== "")
 				$res["warnings"] = $warnings;
 			$done++;
@@ -14721,8 +14736,8 @@ if(isset($com[3]))
     }
     elseif($row = mysqli_fetch_array(Exec_sql("SELECT id FROM $z WHERE up=0 AND val='".addslashes(urldecode($com[3]))."'", "Get object by name"))){
 	    $id = $row["id"];
-        if(isset($com[4]))
-        	if($row = mysqli_fetch_array(Exec_sql("SELECT id FROM $z WHERE t=$id AND val='".addslashes(urldecode($com[4]))."'", "Get record by name")))
+        if(isset($com[4]) && ($com[4] !== ""))	# #5242: «object/Таблица/» — пустой сегмент не имя записи (иначе находился ref-тип up=0, val='')
+        	if($row = mysqli_fetch_array(Exec_sql("SELECT id FROM $z WHERE t=$id AND up!=0 AND val='".addslashes(urldecode($com[4]))."'", "Get record by name")))
         	    $id = $row["id"];
 	}
 if(!isset($id))
@@ -15142,6 +15157,8 @@ if(Validate_Token())
 		header("HTTP/1.0 403 Forbidden");
 		api_dump(json_encode(array("error" => "insufficient_scope", "scope" => Token_scope_names($GLOBALS["TOKEN_SCOPE"]))), "scope.json");
 	}
+	if(Json_body_merge())	# #5242: тело application/json — те же параметры, что и форма; ответ — JSON
+		$GLOBALS["dumpAPI"] = 1;
     $_REQUEST = array_merge($_POST, $_GET);
     $up = isset($_REQUEST["up"]) ? (int)$_REQUEST["up"] : 0;
     $t = isset($_REQUEST["t"]) ? (int)$_REQUEST["t"] : 0;
@@ -15254,6 +15271,8 @@ if(Validate_Token())
 			break;
 
 		case "_m_set":
+			if(isset($_REQUEST["fields"]))	# #5242: поля по именам — fields={"Имя поля": значение}
+				Named_fields_to_request(Sj_record_type($id));
 			$btHook = BtHookBefore("set", $id);	# python2node#866: триггеры колонок-кнопок
 			$id = ApplyMSet($id, $_REQUEST, $_FILES);
 			BtHookAfterWarn($btHook);
@@ -15441,6 +15460,8 @@ if(Validate_Token())
 			break;
 
 		case "_m_new":
+			if(isset($_REQUEST["fields"]))	# #5242: поля по именам — fields={"Имя поля": значение}
+				Named_fields_to_request($id);
 			$btHook = BtHookBefore("new", $id);
 			$res = ApplyMNew($id, $up, $_FILES);
 			$btWarn = BtHookAfterWarn($btHook, ($res["json"] !== "" && !isset($res["warning"])) ? $res["rec"] : null);
@@ -15553,6 +15574,12 @@ if(Validate_Token())
 			else
 				Insert($id, 0, $id, FieldAttrsSetAlias("", $val), "Create table self-descriptor");
 			$obj = $id;
+			break;
+
+		# #5242: схема одним JSON — таблицы, поля, ссылки, подчинённые таблицы, роли с правами и
+		# отчёты по именам; существующее находится по имени. Формат — docs/kb/schema-json.md.
+		case "_d_schema":
+			api_dump(json_encode(Schema_apply(Schema_json_input()), JSON_UNESCAPED_UNICODE), "schema.json");
 			break;
 
 		case "_d_new":
@@ -16412,7 +16439,9 @@ if(Validate_Token())
 			    if(isset($_REQUEST["JSON_DATA"]))
     				die("[".implode(",", $GLOBALS["GLOBAL_VARS"]["newapi"])."]");
 			    elseif(isset($_REQUEST["JSON_OBJ"]))
-    				api_dump(json_encode($GLOBALS["GLOBAL_VARS"]["newapi"], JSON_UNESCAPED_UNICODE), "object_$id.json");
+    				api_dump(json_encode(isset($_REQUEST["NAMED"]) && ($a === "object")	# #5242: записи с ключами-именами полей
+    						? Named_rows($id, $GLOBALS["GLOBAL_VARS"]["newapi"], $GLOBALS["GLOBAL_VARS"]["api"])
+    						: $GLOBALS["GLOBAL_VARS"]["newapi"], JSON_UNESCAPED_UNICODE), "object_$id.json");
 				else
     				die(json_encode($GLOBALS["GLOBAL_VARS"]["api"], JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE));
         	if(($z == $GLOBALS["GLOBAL_VARS"]["user"]) || ($GLOBALS["GLOBAL_VARS"]["user"] == "admin"))
