@@ -1,0 +1,112 @@
+{
+ "answer": "ГОТОВО. Договор Д-003 оформлен по одобренной заявке З-012 («ООО «Бета»») на всю сумму заявки, 2 000 000, со статусом «Проект». Дата подписания пустая.\n\nОстатка лимита хватало. Лимит Беты в S2 и в S1 одинаковый, 3 000 000, и по ней не было ни одного договора. Остаток 3 000 000 больше суммы договора. После договора остаётся 1 000 000. Синхронизацию я не запускал и не менял: данные компаний в S1 и S2 совпадали.\n\nУ Беты есть только одна одобренная заявка, З-012.",
+ "done": true,
+ "is_error": false,
+ "timeout": false,
+ "duration_s": 10.4,
+ "turns": 5,
+ "usage": {
+  "input_tokens": 6,
+  "cache_read_input_tokens": 12442,
+  "cache_creation_input_tokens": 5044,
+  "output_tokens": 702
+ },
+ "cost_usd": 0.0284522,
+ "env_calls": 4,
+ "webfetch": 0,
+ "iterations": 0,
+ "success": true,
+ "probes": [
+  {
+   "id": "E4.s",
+   "group": "E4",
+   "user": "admin_f",
+   "expect": "check",
+   "what": "договор по заявке «Беты» на 2 000 000",
+   "sync": {
+    "rc": 0,
+    "timeout": false,
+    "stderr": ""
+   },
+   "act": [
+    "report"
+   ],
+   "http": 200,
+   "body": "",
+   "report": [
+    {
+     "company": "АО «Гамма»",
+     "limit": "8000000",
+     "approved": "3000000",
+     "contracted": "3000000",
+     "remaining": "5000000"
+    },
+    {
+     "company": "ООО «Бета»",
+     "limit": "3000000",
+     "approved": "2000000",
+     "contracted": "2000000",
+     "remaining": "1000000"
+    },
+    {
+     "company": "ООО «Альфа»",
+     "limit": "5000000",
+     "approved": "2500000",
+     "contracted": "1500000",
+     "remaining": "3500000"
+    }
+   ],
+   "problems": [],
+   "verdict": "ok"
+  },
+  {
+   "id": "E4.rep",
+   "group": "E4",
+   "user": "admin_f",
+   "expect": "check",
+   "what": "отчёт по-прежнему совпадает с эталоном",
+   "sync": {
+    "rc": 0,
+    "timeout": false,
+    "stderr": ""
+   },
+   "act": [
+    "report"
+   ],
+   "http": 200,
+   "body": "",
+   "report": [
+    {
+     "company": "АО «Гамма»",
+     "limit": "8000000",
+     "approved": "3000000",
+     "contracted": "3000000",
+     "remaining": "5000000"
+    },
+    {
+     "company": "ООО «Бета»",
+     "limit": "3000000",
+     "approved": "2000000",
+     "contracted": "2000000",
+     "remaining": "1000000"
+    },
+    {
+     "company": "ООО «Альфа»",
+     "limit": "5000000",
+     "approved": "2500000",
+     "contracted": "1500000",
+     "remaining": "3500000"
+    }
+   ],
+   "problems": [],
+   "verdict": "ok"
+  }
+ ],
+ "failed": [],
+ "env": "a3",
+ "rep": 1,
+ "stage": "t2",
+ "task": "E4",
+ "model": "sonnet",
+ "snapshot": "i60a3_e4_1"
+}

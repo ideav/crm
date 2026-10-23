@@ -1,0 +1,36 @@
+{
+ "answer": "Одобренные заявки без договора:\n- **З-011** — ООО «Альфа» (ИНН 7700001009)\n- **З-012** — ООО «Бета» (ИНН 7700002018)\n\nОстальные одобренные заявки договор имеют. У З-010 (ООО «Альфа») он подписан. У З-013 (АО «Гамма») есть договор в статусе «Проект». Если «без договора» значит «без подписанного договора», к списку добавится З-013.\n\nГОТОВО",
+ "done": true,
+ "is_error": false,
+ "timeout": false,
+ "duration_s": 11.6,
+ "turns": 4,
+ "usage": {
+  "input_tokens": 6,
+  "cache_read_input_tokens": 9194,
+  "cache_creation_input_tokens": 1257,
+  "output_tokens": 545
+ },
+ "cost_usd": 0.0114094,
+ "env_calls": 3,
+ "webfetch": 0,
+ "iterations": 0,
+ "success": true,
+ "missing": [],
+ "expected": [
+  [
+   "text",
+   "З-011"
+  ],
+  [
+   "text",
+   "З-012"
+  ]
+ ],
+ "env": "a2",
+ "rep": 5,
+ "stage": "t2",
+ "task": "Q2",
+ "model": "sonnet",
+ "snapshot": null
+}

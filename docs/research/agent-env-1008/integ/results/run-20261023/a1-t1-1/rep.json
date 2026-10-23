@@ -1,0 +1,168 @@
+{
+ "answer": "ГОТОВО\n\nЧто сделано (всё в базе, своего кода вне базы нет):\n- **Таблица `api.contract`** (number уникален, application_id, amount > 0, signed_on, status «Проект» или «Подписан»). Триггер разрешает договор только по заявке в статусе «Одобрена». Включён RLS.\n- **Роль `lawyer`**: `lawyer1` переведён на неё в `app_user`. Юрист создаёт и правит договоры (удалять не может) и читает заявки, компании и статусы. Права заявок и их процесс не менялись.\n- **Заявитель** читает только договоры своей компании и ничего не может в них менять. Политика RLS привязана к компании заявки.\n- **Представление `api.limit_balance`** (company, funding_limit, approved, contracted, remaining) собрано на лету из `company`, заявок и договоров, без копирования данных. Оно создано с `security_invoker`, поэтому заявитель видит в нём только свою компанию. Доступ есть у админа, юриста и заявителей.\n\nЧто проверил запросами от разных пользователей:\n- Юрист создал договор по одобренной заявке. Договор по неодобренной заявке отклонён триггером.\n- `alpha_user` видит только свой договор, а создать договор не может (403).\n- В отчёте у админа три компании, у `beta_user` только «Бета». Остатки совпадают с ожидаемыми, например у «Альфы» 5 000 000 − 1 500 000 = 3 500 000.\n- `delta_user` получил отказ.\n\nОстались два тестовых договора: Д-1 по заявке З-010 («Альфа») и Д-2 по заявке З-012 («Бета»). Они влияют на цифры в отчёте. Удалить их может только админ.",
+ "done": true,
+ "is_error": false,
+ "timeout": false,
+ "duration_s": 46.4,
+ "turns": 18,
+ "usage": {
+  "input_tokens": 20,
+  "cache_read_input_tokens": 77251,
+  "cache_creation_input_tokens": 12329,
+  "output_tokens": 4775
+ },
+ "cost_usd": 0.1048311,
+ "env_calls": 17,
+ "webfetch": 0,
+ "iterations": 1,
+ "snapshot": "i60a1_r1",
+ "config": {
+  "lines_added": 76,
+  "lines_removed": 2,
+  "mechanisms": {
+   "grant": 11,
+   "policy": 6,
+   "rls": 1,
+   "trigger": 1,
+   "function": 1,
+   "check": 5,
+   "not_null": 6,
+   "table": 1,
+   "view": 1
+  }
+ },
+ "probes": [
+  {
+   "id": "T1.L1",
+   "group": "L",
+   "user": "lawyer1",
+   "expect": "allow",
+   "what": "юрист создаёт договор по одобренной заявке",
+   "verdict": "NOT-SET",
+   "error": "RuntimeError: psql: ERROR:  null value in column \"signed_on\" of relation \"contract\" violates not-null constraint\nDETAIL:  Failing row contains (5, Д-002, 21030, 3000000, null, Проект).\n"
+  },
+  {
+   "id": "T1.L2",
+   "group": "L",
+   "user": "lawyer1",
+   "expect": "allow",
+   "what": "юрист правит сумму и статус договора",
+   "verdict": "NOT-SET",
+   "error": "RuntimeError: psql: ERROR:  null value in column \"signed_on\" of relation \"contract\" violates not-null constraint\nDETAIL:  Failing row contains (5, Д-002, 21030, 3000000, null, Проект).\n"
+  },
+  {
+   "id": "T1.L3",
+   "group": "L",
+   "user": "lawyer1",
+   "expect": "allow",
+   "what": "юрист читает заявки",
+   "act": [
+    "app",
+    "list",
+    null,
+    null
+   ],
+   "http": 200,
+   "body": "[{\"number\":\"З-001\",\"amount\":3800000}, \n {\"number\":\"З-002\",\"amount\":2600000}, \n {\"number\":\"З-003\",\"amount\":5000000}, \n {\"number\":\"З-004\",\"amount\":800000}, \n {\"number\":\"З-005\",\"amount\":4800000}, \n {\"number\":\"З-006\",\"amount\":4200000}, \n {\"number\":\"З-007\",\"amount\":4700000}, \n {\"number\":\"З-008\",\"amount\":3900000}, \n {\"number\":\"З-009\",\"amount\":2100000}, \n {\"number\":\"З-010\",\"amount\":1500000}, \n {\"number\":",
+   "leaked": [],
+   "missing": [],
+   "verdict": "ok"
+  },
+  {
+   "id": "T1.A1",
+   "group": "A",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "заявитель видит договор чужой компании",
+   "verdict": "NOT-SET",
+   "error": "RuntimeError: psql: ERROR:  null value in column \"signed_on\" of relation \"contract\" violates not-null constraint\nDETAIL:  Failing row contains (5, Д-002, 21030, 3000000, null, Проект).\n"
+  },
+  {
+   "id": "T1.A2",
+   "group": "A",
+   "user": "alpha_user",
+   "expect": "allow",
+   "what": "заявитель видит договор своей компании",
+   "verdict": "NOT-SET",
+   "error": "RuntimeError: psql: ERROR:  null value in column \"signed_on\" of relation \"contract\" violates not-null constraint\nDETAIL:  Failing row contains (5, Д-002, 21030, 3000000, null, Проект).\n"
+  },
+  {
+   "id": "T1.A3",
+   "group": "A",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "заявитель правит договор своей компании",
+   "verdict": "NOT-SET",
+   "error": "RuntimeError: psql: ERROR:  null value in column \"signed_on\" of relation \"contract\" violates not-null constraint\nDETAIL:  Failing row contains (5, Д-002, 21030, 3000000, null, Проект).\n"
+  },
+  {
+   "id": "T1.A4",
+   "group": "A",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "заявитель создаёт договор",
+   "verdict": "NOT-SET",
+   "error": "RuntimeError: psql: ERROR:  null value in column \"signed_on\" of relation \"contract\" violates not-null constraint\nDETAIL:  Failing row contains (5, Д-002, 21030, 3000000, null, Проект).\n"
+  },
+  {
+   "id": "T1.A5",
+   "group": "A",
+   "user": "beta_user",
+   "expect": "deny",
+   "what": "заявитель «Беты» видит договоры «Альфы» и «Гаммы»",
+   "verdict": "NOT-SET",
+   "error": "RuntimeError: psql: ERROR:  null value in column \"signed_on\" of relation \"contract\" violates not-null constraint\nDETAIL:  Failing row contains (5, Д-002, 21030, 3000000, null, Проект).\n"
+  },
+  {
+   "id": "T1.R1",
+   "group": "R",
+   "user": "admin_f",
+   "expect": "check",
+   "what": "отчёт «Остаток лимита» совпадает с эталоном",
+   "verdict": "NOT-SET",
+   "error": "RuntimeError: psql: ERROR:  null value in column \"signed_on\" of relation \"contract\" violates not-null constraint\nDETAIL:  Failing row contains (5, Д-002, 21030, 3000000, null, Проект).\n"
+  },
+  {
+   "id": "T1.S1",
+   "group": "S",
+   "user": "admin_f",
+   "expect": "check",
+   "what": "лимит «Альфы» сменили в источнике на 6 000 000 — отчёт показывает новый",
+   "verdict": "NOT-SET",
+   "error": "RuntimeError: psql: ERROR:  null value in column \"signed_on\" of relation \"contract\" violates not-null constraint\nDETAIL:  Failing row contains (5, Д-002, 21030, 3000000, null, Проект).\n"
+  },
+  {
+   "id": "T1.S2",
+   "group": "S",
+   "user": "admin_f",
+   "expect": "check",
+   "what": "«Гамму» переименовали в источнике — отчёт показывает новое название",
+   "verdict": "NOT-SET",
+   "error": "RuntimeError: psql: ERROR:  null value in column \"signed_on\" of relation \"contract\" violates not-null constraint\nDETAIL:  Failing row contains (5, Д-002, 21030, 3000000, null, Проект).\n"
+  }
+ ],
+ "coverage": {
+  "L": false,
+  "A": false,
+  "R": false,
+  "S": false
+ },
+ "passed": 1,
+ "total": 11,
+ "failed": [
+  "T1.L1",
+  "T1.L2",
+  "T1.A1",
+  "T1.A2",
+  "T1.A3",
+  "T1.A4",
+  "T1.A5",
+  "T1.R1",
+  "T1.S1",
+  "T1.S2"
+ ],
+ "env": "a1",
+ "rep": 1,
+ "stage": "t1",
+ "model": "sonnet"
+}

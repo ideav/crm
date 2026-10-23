@@ -1,0 +1,32 @@
+{
+ "answer": "Компании с лимитом больше 4 млн — Альфа (контрактовано 1,5 млн) и Гамма (3 млн). Итого 4,5 млн.\n\nГОТОВО: по компаниям с лимитом больше 4 млн (ООО «Альфа» — 5 млн, АО «Гамма» — 8 млн) законтрактовано всего **4 500 000**. Это 1 500 000 по Альфе и 3 000 000 по Гамме. Данные взяты из представления `limit_balance`. В сумму входят все договоры, без фильтра по статусу договора.",
+ "done": true,
+ "is_error": false,
+ "timeout": false,
+ "duration_s": 6.4,
+ "turns": 2,
+ "usage": {
+  "input_tokens": 4,
+  "cache_read_input_tokens": 3858,
+  "cache_creation_input_tokens": 1867,
+  "output_tokens": 301
+ },
+ "cost_usd": 0.010871800000000001,
+ "env_calls": 1,
+ "webfetch": 0,
+ "iterations": 0,
+ "success": true,
+ "missing": [],
+ "expected": [
+  [
+   "num",
+   "4500000"
+  ]
+ ],
+ "env": "a1",
+ "rep": 1,
+ "stage": "t2",
+ "task": "Q4",
+ "model": "sonnet",
+ "snapshot": null
+}

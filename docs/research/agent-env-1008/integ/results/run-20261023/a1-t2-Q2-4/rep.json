@@ -1,0 +1,36 @@
+{
+ "answer": "Одобренные заявки без договора:\n- **З-011**: ООО «Альфа».\n- **З-012**: ООО «Бета».\n\nОдобрено четыре заявки. По З-010 есть подписанный договор Д-001. По З-013 есть договор Д-002, но он пока в статусе «Проект» и не подписан. Если считать только подписанные договоры, к списку добавится З-013.\n\nГОТОВО",
+ "done": true,
+ "is_error": false,
+ "timeout": false,
+ "duration_s": 9.1,
+ "turns": 4,
+ "usage": {
+  "input_tokens": 6,
+  "cache_read_input_tokens": 8347,
+  "cache_creation_input_tokens": 1560,
+  "output_tokens": 461
+ },
+ "cost_usd": 0.0116967,
+ "env_calls": 3,
+ "webfetch": 0,
+ "iterations": 0,
+ "success": true,
+ "missing": [],
+ "expected": [
+  [
+   "text",
+   "З-011"
+  ],
+  [
+   "text",
+   "З-012"
+  ]
+ ],
+ "env": "a1",
+ "rep": 4,
+ "stage": "t2",
+ "task": "Q2",
+ "model": "sonnet",
+ "snapshot": null
+}

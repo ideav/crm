@@ -1,0 +1,32 @@
+{
+ "answer": "Законтрактовано 4 500 000 по компаниям с лимитом больше 4 млн. Таких компаний две:\n- ООО «Альфа» (лимит 5 млн): договор Д-001 на 1 500 000, статус «Подписан».\n- АО «Гамма» (лимит 8 млн): договор Д-002 на 3 000 000, статус «Проект».\n\nОтчёт `limit_balance` считает все договоры, в том числе проекты. Если считать только подписанные, получится 1 500 000.\n\nООО «Бета» с лимитом 3 млн в расчёт не входит.\n\nГОТОВО",
+ "done": true,
+ "is_error": false,
+ "timeout": false,
+ "duration_s": 10.7,
+ "turns": 3,
+ "usage": {
+  "input_tokens": 6,
+  "cache_read_input_tokens": 7953,
+  "cache_creation_input_tokens": 1182,
+  "output_tokens": 491
+ },
+ "cost_usd": 0.010445300000000001,
+ "env_calls": 2,
+ "webfetch": 0,
+ "iterations": 0,
+ "success": true,
+ "missing": [],
+ "expected": [
+  [
+   "num",
+   "4500000"
+  ]
+ ],
+ "env": "a1",
+ "rep": 2,
+ "stage": "t2",
+ "task": "Q4",
+ "model": "sonnet",
+ "snapshot": null
+}

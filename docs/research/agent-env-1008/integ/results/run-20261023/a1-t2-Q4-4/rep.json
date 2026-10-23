@@ -1,0 +1,32 @@
+{
+ "answer": "Лимит больше 4 млн у Альфы и Гаммы: 1 500 000 + 3 000 000 = 4 500 000.\n\nГОТОВО. По компаниям с лимитом больше 4 млн законтрактовано 4 500 000. Из них 1 500 000 приходится на ООО «Альфа» (лимит 5 млн), 3 000 000 — на АО «Гамма» (лимит 8 млн). ООО «Бета» не учтена: её лимит 3 млн.\n\nЯ посчитал по договорам, связанным с заявками этих компаний (то же значение, что в представлении `limit_balance`). Данные я не менял.",
+ "done": true,
+ "is_error": false,
+ "timeout": false,
+ "duration_s": 7.5,
+ "turns": 2,
+ "usage": {
+  "input_tokens": 4,
+  "cache_read_input_tokens": 4797,
+  "cache_creation_input_tokens": 999,
+  "output_tokens": 382
+ },
+ "cost_usd": 0.0083037,
+ "env_calls": 1,
+ "webfetch": 0,
+ "iterations": 0,
+ "success": true,
+ "missing": [],
+ "expected": [
+  [
+   "num",
+   "4500000"
+  ]
+ ],
+ "env": "a1",
+ "rep": 4,
+ "stage": "t2",
+ "task": "Q4",
+ "model": "sonnet",
+ "snapshot": null
+}

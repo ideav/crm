@@ -1,0 +1,165 @@
+{
+ "answer": "ГОТОВО. Компания «ООО «Дельта»» заведена, и `delta_user` теперь её заявитель.\n\n- **Реестр (S2):** в `counterparty` добавлена запись с ИНН 7700004036, названием «ООО «Дельта»» и лимитом 2 000 000. Через `registry` и `api.company` в S1 она видна сразу.\n- **Заявки (S1):** у `delta_user` в `api.app_user` роль была `anon`. Я поставил `applicant` и `company_inn=7700004036`. Права ролей и политики доступа не менял, они работают по ИНН пользователя, как у остальных заявителей.\n- **Отчёт:** в `limit_balance` у Дельты лимит 2 000 000, остаток 2 000 000.\n- **Проверка:** запросы `application` и `contract` от имени `delta_user` проходят и возвращают пустой список, потому что заявок и договоров у компании ещё нет. Саму вставку заявки я не пробовал, чтобы не создавать тестовых данных. Для неё у роли `applicant` уже настроены права и политика.",
+ "done": true,
+ "is_error": false,
+ "timeout": false,
+ "duration_s": 25.3,
+ "turns": 8,
+ "usage": {
+  "input_tokens": 10,
+  "cache_read_input_tokens": 24975,
+  "cache_creation_input_tokens": 4530,
+  "output_tokens": 1394
+ },
+ "cost_usd": 0.0345775,
+ "env_calls": 7,
+ "webfetch": 0,
+ "iterations": 0,
+ "success": true,
+ "probes": [
+  {
+   "id": "E3.s",
+   "group": "E3",
+   "user": "admin_f",
+   "expect": "check",
+   "what": "«Дельта» в источнике: ИНН и лимит",
+   "act": null,
+   "http": null,
+   "body": "",
+   "report": null,
+   "problems": [],
+   "verdict": "ok"
+  },
+  {
+   "id": "E3.c1",
+   "group": "E3",
+   "user": "delta_user",
+   "expect": "allow",
+   "what": "заявитель «Дельты» создаёт свою заявку",
+   "act": [
+    "app",
+    "create",
+    null,
+    {
+     "number": "З-951",
+     "company": "delta",
+     "status": "Черновик",
+     "amount": 100000
+    }
+   ],
+   "http": 201,
+   "body": "",
+   "changes": {},
+   "verdict": "ok"
+  },
+  {
+   "id": "E3.r1",
+   "group": "E3",
+   "user": "delta_user",
+   "expect": "deny",
+   "what": "заявитель «Дельты» видит чужие заявки",
+   "act": [
+    "app",
+    "list",
+    null,
+    null
+   ],
+   "http": 200,
+   "body": "[]",
+   "leaked": [],
+   "missing": [],
+   "verdict": "held"
+  },
+  {
+   "id": "E3.r2",
+   "group": "E3",
+   "user": "delta_user",
+   "expect": "deny",
+   "what": "заявитель «Дельты» видит чужие договоры",
+   "act": [
+    "contract",
+    "list",
+    null,
+    null
+   ],
+   "http": 200,
+   "body": "[]",
+   "leaked": [],
+   "missing": [],
+   "verdict": "held"
+  },
+  {
+   "id": "E3.w1",
+   "group": "E3",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "заявитель «Альфы» создаёт заявку «Дельты»",
+   "act": [
+    "app",
+    "create",
+    null,
+    {
+     "number": "З-952",
+     "company": "delta",
+     "status": "Черновик",
+     "amount": 100000
+    }
+   ],
+   "http": 403,
+   "body": "{\"code\":\"42501\",\"details\":null,\"hint\":null,\"message\":\"new row violates row-level security policy for table \\\"application\\\"\"}",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "E3.rep",
+   "group": "E3",
+   "user": "admin_f",
+   "expect": "check",
+   "what": "отчёт по-прежнему совпадает с эталоном",
+   "act": [
+    "report"
+   ],
+   "http": 200,
+   "body": "",
+   "report": [
+    {
+     "company": "ООО «Альфа»",
+     "limit": "5000000",
+     "approved": "2500000",
+     "contracted": "1500000",
+     "remaining": "3500000"
+    },
+    {
+     "company": "ООО «Бета»",
+     "limit": "3000000",
+     "approved": "2000000",
+     "contracted": "0",
+     "remaining": "3000000"
+    },
+    {
+     "company": "АО «Гамма»",
+     "limit": "8000000",
+     "approved": "3000000",
+     "contracted": "3000000",
+     "remaining": "5000000"
+    },
+    {
+     "company": "ООО «Дельта»",
+     "limit": "2000000",
+     "approved": "0",
+     "contracted": "0",
+     "remaining": "2000000"
+    }
+   ],
+   "problems": [],
+   "verdict": "ok"
+  }
+ ],
+ "failed": [],
+ "env": "a2",
+ "rep": 3,
+ "stage": "t2",
+ "task": "E3",
+ "model": "sonnet",
+ "snapshot": "i60a2_e3_3"
+}

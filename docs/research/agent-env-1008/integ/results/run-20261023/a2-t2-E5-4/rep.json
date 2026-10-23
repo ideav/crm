@@ -1,0 +1,102 @@
+{
+ "answer": "ГОТОВО. Договор Д-001 теперь привязан к заявке З-011 (id 21014, ООО «Альфа», статус «Одобрена»). Раньше он был на З-010 той же компании. Сумма договора теперь 1 000 000, а была 1 500 000. Подпись от 01.10.2026 и статус «Подписан» не менялись.\n\nЯ проверил отчёт `limit_balance` для «Альфы». Заключено 1 000 000 (было 1 500 000), остаток лимита 4 000 000 (был 3 500 000). Отчёты по другим компаниям не изменились.\n\nМенял через API от имени `admin_f`, проверка триггера договора прошла.",
+ "done": true,
+ "is_error": false,
+ "timeout": false,
+ "duration_s": 17.3,
+ "turns": 7,
+ "usage": {
+  "input_tokens": 12,
+  "cache_read_input_tokens": 25703,
+  "cache_creation_input_tokens": 2840,
+  "output_tokens": 1048
+ },
+ "cost_usd": 0.0244343,
+ "env_calls": 6,
+ "webfetch": 0,
+ "iterations": 0,
+ "success": true,
+ "probes": [
+  {
+   "id": "E5.s",
+   "group": "E5",
+   "user": "admin_f",
+   "expect": "check",
+   "what": "договор Д-001 перенесён на З-011, сумма 1 000 000",
+   "act": [
+    "report"
+   ],
+   "http": 200,
+   "body": "",
+   "report": [
+    {
+     "company": "ООО «Альфа»",
+     "limit": "5000000",
+     "approved": "2500000",
+     "contracted": "1000000",
+     "remaining": "4000000"
+    },
+    {
+     "company": "ООО «Бета»",
+     "limit": "3000000",
+     "approved": "2000000",
+     "contracted": "0",
+     "remaining": "3000000"
+    },
+    {
+     "company": "АО «Гамма»",
+     "limit": "8000000",
+     "approved": "3000000",
+     "contracted": "3000000",
+     "remaining": "5000000"
+    }
+   ],
+   "problems": [],
+   "verdict": "ok"
+  },
+  {
+   "id": "E5.rep",
+   "group": "E5",
+   "user": "admin_f",
+   "expect": "check",
+   "what": "отчёт по-прежнему совпадает с эталоном",
+   "act": [
+    "report"
+   ],
+   "http": 200,
+   "body": "",
+   "report": [
+    {
+     "company": "ООО «Альфа»",
+     "limit": "5000000",
+     "approved": "2500000",
+     "contracted": "1000000",
+     "remaining": "4000000"
+    },
+    {
+     "company": "ООО «Бета»",
+     "limit": "3000000",
+     "approved": "2000000",
+     "contracted": "0",
+     "remaining": "3000000"
+    },
+    {
+     "company": "АО «Гамма»",
+     "limit": "8000000",
+     "approved": "3000000",
+     "contracted": "3000000",
+     "remaining": "5000000"
+    }
+   ],
+   "problems": [],
+   "verdict": "ok"
+  }
+ ],
+ "failed": [],
+ "env": "a2",
+ "rep": 4,
+ "stage": "t2",
+ "task": "E5",
+ "model": "sonnet",
+ "snapshot": "i60a2_e5_4"
+}

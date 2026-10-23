@@ -1,0 +1,165 @@
+{
+ "answer": "ГОТОВО. Компания и заявитель заведены.\n\n- **Компания:** «ООО «Дельта»» (ИНН 7700004036, лимит 2 000 000) добавлена в реестр S2 (`counterparty`), потому что S2 — источник данных о компаниях. В S1 она появилась сама через `api.company` и `limit_balance`. Там она показана с лимитом 2 000 000 и остатком 2 000 000.\n- **Пользователь:** у `delta_user` в `api.app_user` теперь роль `applicant` и `company_inn` = 7700004036. Раньше роль была `anon`, а ИНН пустой. Новых прав и политик я не добавлял. Он работает по тем же правилам, что `alpha_user` и `beta_user`.\n- **Проверка от имени `delta_user`:** тестовую заявку своей компании (статус «Черновик») он создал и удалил. Список заявок и договоров у него сейчас пустой, чужих данных он не видит.\n\nОдин запрос с `Prefer: return=representation` дал 403. Тот же запрос без этого заголовка прошёл. Причина в том, что у заявителей нет права читать столбец `expert`, а в таком ответе возвращаются все столбцы. Это поведение настроено и у других заявителей, я его не менял.",
+ "done": true,
+ "is_error": false,
+ "timeout": false,
+ "duration_s": 30.2,
+ "turns": 16,
+ "usage": {
+  "input_tokens": 18,
+  "cache_read_input_tokens": 52258,
+  "cache_creation_input_tokens": 7171,
+  "output_tokens": 2648
+ },
+ "cost_usd": 0.0604258,
+ "env_calls": 15,
+ "webfetch": 0,
+ "iterations": 0,
+ "success": true,
+ "probes": [
+  {
+   "id": "E3.s",
+   "group": "E3",
+   "user": "admin_f",
+   "expect": "check",
+   "what": "«Дельта» в источнике: ИНН и лимит",
+   "act": null,
+   "http": null,
+   "body": "",
+   "report": null,
+   "problems": [],
+   "verdict": "ok"
+  },
+  {
+   "id": "E3.c1",
+   "group": "E3",
+   "user": "delta_user",
+   "expect": "allow",
+   "what": "заявитель «Дельты» создаёт свою заявку",
+   "act": [
+    "app",
+    "create",
+    null,
+    {
+     "number": "З-951",
+     "company": "delta",
+     "status": "Черновик",
+     "amount": 100000
+    }
+   ],
+   "http": 201,
+   "body": "",
+   "changes": {},
+   "verdict": "ok"
+  },
+  {
+   "id": "E3.r1",
+   "group": "E3",
+   "user": "delta_user",
+   "expect": "deny",
+   "what": "заявитель «Дельты» видит чужие заявки",
+   "act": [
+    "app",
+    "list",
+    null,
+    null
+   ],
+   "http": 200,
+   "body": "[]",
+   "leaked": [],
+   "missing": [],
+   "verdict": "held"
+  },
+  {
+   "id": "E3.r2",
+   "group": "E3",
+   "user": "delta_user",
+   "expect": "deny",
+   "what": "заявитель «Дельты» видит чужие договоры",
+   "act": [
+    "contract",
+    "list",
+    null,
+    null
+   ],
+   "http": 200,
+   "body": "[]",
+   "leaked": [],
+   "missing": [],
+   "verdict": "held"
+  },
+  {
+   "id": "E3.w1",
+   "group": "E3",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "заявитель «Альфы» создаёт заявку «Дельты»",
+   "act": [
+    "app",
+    "create",
+    null,
+    {
+     "number": "З-952",
+     "company": "delta",
+     "status": "Черновик",
+     "amount": 100000
+    }
+   ],
+   "http": 403,
+   "body": "{\"code\":\"42501\",\"details\":null,\"hint\":null,\"message\":\"new row violates row-level security policy for table \\\"application\\\"\"}",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "E3.rep",
+   "group": "E3",
+   "user": "admin_f",
+   "expect": "check",
+   "what": "отчёт по-прежнему совпадает с эталоном",
+   "act": [
+    "report"
+   ],
+   "http": 200,
+   "body": "",
+   "report": [
+    {
+     "company": "ООО «Альфа»",
+     "limit": "5000000",
+     "approved": "2500000",
+     "contracted": "1500000",
+     "remaining": "3500000"
+    },
+    {
+     "company": "ООО «Бета»",
+     "limit": "3000000",
+     "approved": "2000000",
+     "contracted": "0",
+     "remaining": "3000000"
+    },
+    {
+     "company": "АО «Гамма»",
+     "limit": "8000000",
+     "approved": "3000000",
+     "contracted": "3000000",
+     "remaining": "5000000"
+    },
+    {
+     "company": "ООО «Дельта»",
+     "limit": "2000000",
+     "approved": "0",
+     "contracted": "0",
+     "remaining": "2000000"
+    }
+   ],
+   "problems": [],
+   "verdict": "ok"
+  }
+ ],
+ "failed": [],
+ "env": "a2",
+ "rep": 1,
+ "stage": "t2",
+ "task": "E3",
+ "model": "sonnet",
+ "snapshot": "i60a2_e3_1"
+}

@@ -1,0 +1,112 @@
+{
+ "answer": "ГОТОВО. Лимит финансирования «ООО «Бета»» теперь 4 000 000 в обеих системах.\n\nСначала я изменил лимит в S2, потому что S2 — источник истины. Затем запустил `sync.py`, и он обновил одну запись в S1. Я проверил таблицу `api.company` в S1: у Беты там 4 000 000. Лимиты Альфы и Гаммы не менялись. Код `sync.py` я не правил.\n\nОтчёт `api.limit_balance` я не проверял.",
+ "done": true,
+ "is_error": false,
+ "timeout": false,
+ "duration_s": 11.8,
+ "turns": 6,
+ "usage": {
+  "input_tokens": 8,
+  "cache_read_input_tokens": 18462,
+  "cache_creation_input_tokens": 2786,
+  "output_tokens": 602
+ },
+ "cost_usd": 0.0190262,
+ "env_calls": 5,
+ "webfetch": 0,
+ "iterations": 0,
+ "success": true,
+ "probes": [
+  {
+   "id": "E1.s",
+   "group": "E1",
+   "user": "admin_f",
+   "expect": "check",
+   "what": "лимит «Беты» 4 000 000 и в отчёте",
+   "sync": {
+    "rc": 0,
+    "timeout": false,
+    "stderr": ""
+   },
+   "act": [
+    "report"
+   ],
+   "http": 200,
+   "body": "",
+   "report": [
+    {
+     "company": "АО «Гамма»",
+     "limit": "8000000",
+     "approved": "3000000",
+     "contracted": "3000000",
+     "remaining": "5000000"
+    },
+    {
+     "company": "ООО «Альфа»",
+     "limit": "5000000",
+     "approved": "2500000",
+     "contracted": "1500000",
+     "remaining": "3500000"
+    },
+    {
+     "company": "ООО «Бета»",
+     "limit": "4000000",
+     "approved": "2000000",
+     "contracted": "0",
+     "remaining": "4000000"
+    }
+   ],
+   "problems": [],
+   "verdict": "ok"
+  },
+  {
+   "id": "E1.rep",
+   "group": "E1",
+   "user": "admin_f",
+   "expect": "check",
+   "what": "отчёт по-прежнему совпадает с эталоном",
+   "sync": {
+    "rc": 0,
+    "timeout": false,
+    "stderr": ""
+   },
+   "act": [
+    "report"
+   ],
+   "http": 200,
+   "body": "",
+   "report": [
+    {
+     "company": "АО «Гамма»",
+     "limit": "8000000",
+     "approved": "3000000",
+     "contracted": "3000000",
+     "remaining": "5000000"
+    },
+    {
+     "company": "ООО «Альфа»",
+     "limit": "5000000",
+     "approved": "2500000",
+     "contracted": "1500000",
+     "remaining": "3500000"
+    },
+    {
+     "company": "ООО «Бета»",
+     "limit": "4000000",
+     "approved": "2000000",
+     "contracted": "0",
+     "remaining": "4000000"
+    }
+   ],
+   "problems": [],
+   "verdict": "ok"
+  }
+ ],
+ "failed": [],
+ "env": "a3",
+ "rep": 2,
+ "stage": "t2",
+ "task": "E1",
+ "model": "sonnet",
+ "snapshot": "i60a3_e1_2"
+}

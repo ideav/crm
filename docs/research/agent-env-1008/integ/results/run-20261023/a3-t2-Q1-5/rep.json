@@ -1,0 +1,32 @@
+{
+ "answer": "ГОТОВО. У «ООО «Альфа»» остаток лимита 3 500 000.\n\nЛимит компании — 5 000 000, в S1 и в S2 он одинаков. У Альфы один договор, Д-001 на 1 500 000, со статусом «Подписан». Расчёт: 5 000 000 − 1 500 000 = 3 500 000. Это совпадает с представлением `api.limit_balance`.\n\nВ отчёте у Альфы есть ещё столбец «одобрено» — 2 500 000. В остаток он не входит, потому что вы определили остаток как лимит минус договоры.",
+ "done": true,
+ "is_error": false,
+ "timeout": false,
+ "duration_s": 8.4,
+ "turns": 4,
+ "usage": {
+  "input_tokens": 6,
+  "cache_read_input_tokens": 11929,
+  "cache_creation_input_tokens": 1490,
+  "output_tokens": 512
+ },
+ "cost_usd": 0.012284900000000001,
+ "env_calls": 3,
+ "webfetch": 0,
+ "iterations": 0,
+ "success": true,
+ "missing": [],
+ "expected": [
+  [
+   "num",
+   "3500000"
+  ]
+ ],
+ "env": "a3",
+ "rep": 5,
+ "stage": "t2",
+ "task": "Q1",
+ "model": "sonnet",
+ "snapshot": null
+}

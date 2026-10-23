@@ -1,0 +1,165 @@
+{
+ "answer": "ГОТОВО. Компания «ООО «Дельта»» заведена, `delta_user` работает как заявитель.\n\nЧто изменено:\n- **S2 (реестр):** в `api.counterparty` добавлена запись: ИНН 7700004036, «ООО «Дельта»», лимит 2 000 000. S1 читает компании из S2, поэтому Дельта сразу появилась в `api.company` и в `limit_balance`. Там у неё лимит 2 000 000, одобрено 0, по договорам 0, остаток 2 000 000.\n- **S1:** у `delta_user` в `api.app_user` роль `anon` заменена на `applicant`, `company_inn` задан 7700004036. Права ролей, политики доступа и триггеры не менял.\n\nПроверил от имени `delta_user`:\n- Заявку своей компании он создал. Чужие заявки он не видит: запрос списка вернул пусто, пока своих заявок не было.\n- Тестовую заявку З-D01 я после проверки удалил. В журнале аудита от неё остались записи.\n- Договоры отдельно не проверял. Для заявителя они ограничены политикой по компании так же, как у остальных заявителей.",
+ "done": true,
+ "is_error": false,
+ "timeout": false,
+ "duration_s": 37.2,
+ "turns": 15,
+ "usage": {
+  "input_tokens": 20,
+  "cache_read_input_tokens": 70341,
+  "cache_creation_input_tokens": 7234,
+  "output_tokens": 2557
+ },
+ "cost_usd": 0.06158010000000001,
+ "env_calls": 14,
+ "webfetch": 0,
+ "iterations": 0,
+ "success": true,
+ "probes": [
+  {
+   "id": "E3.s",
+   "group": "E3",
+   "user": "admin_f",
+   "expect": "check",
+   "what": "«Дельта» в источнике: ИНН и лимит",
+   "act": null,
+   "http": null,
+   "body": "",
+   "report": null,
+   "problems": [],
+   "verdict": "ok"
+  },
+  {
+   "id": "E3.c1",
+   "group": "E3",
+   "user": "delta_user",
+   "expect": "allow",
+   "what": "заявитель «Дельты» создаёт свою заявку",
+   "act": [
+    "app",
+    "create",
+    null,
+    {
+     "number": "З-951",
+     "company": "delta",
+     "status": "Черновик",
+     "amount": 100000
+    }
+   ],
+   "http": 201,
+   "body": "",
+   "changes": {},
+   "verdict": "ok"
+  },
+  {
+   "id": "E3.r1",
+   "group": "E3",
+   "user": "delta_user",
+   "expect": "deny",
+   "what": "заявитель «Дельты» видит чужие заявки",
+   "act": [
+    "app",
+    "list",
+    null,
+    null
+   ],
+   "http": 200,
+   "body": "[]",
+   "leaked": [],
+   "missing": [],
+   "verdict": "held"
+  },
+  {
+   "id": "E3.r2",
+   "group": "E3",
+   "user": "delta_user",
+   "expect": "deny",
+   "what": "заявитель «Дельты» видит чужие договоры",
+   "act": [
+    "contract",
+    "list",
+    null,
+    null
+   ],
+   "http": 200,
+   "body": "[]",
+   "leaked": [],
+   "missing": [],
+   "verdict": "held"
+  },
+  {
+   "id": "E3.w1",
+   "group": "E3",
+   "user": "alpha_user",
+   "expect": "deny",
+   "what": "заявитель «Альфы» создаёт заявку «Дельты»",
+   "act": [
+    "app",
+    "create",
+    null,
+    {
+     "number": "З-952",
+     "company": "delta",
+     "status": "Черновик",
+     "amount": 100000
+    }
+   ],
+   "http": 403,
+   "body": "{\"code\":\"42501\",\"details\":null,\"hint\":null,\"message\":\"new row violates row-level security policy for table \\\"application\\\"\"}",
+   "changes": {},
+   "verdict": "held"
+  },
+  {
+   "id": "E3.rep",
+   "group": "E3",
+   "user": "admin_f",
+   "expect": "check",
+   "what": "отчёт по-прежнему совпадает с эталоном",
+   "act": [
+    "report"
+   ],
+   "http": 200,
+   "body": "",
+   "report": [
+    {
+     "company": "ООО «Альфа»",
+     "limit": "5000000",
+     "approved": "2500000",
+     "contracted": "1500000",
+     "remaining": "3500000"
+    },
+    {
+     "company": "ООО «Бета»",
+     "limit": "3000000",
+     "approved": "2000000",
+     "contracted": "0",
+     "remaining": "3000000"
+    },
+    {
+     "company": "АО «Гамма»",
+     "limit": "8000000",
+     "approved": "3000000",
+     "contracted": "3000000",
+     "remaining": "5000000"
+    },
+    {
+     "company": "ООО «Дельта»",
+     "limit": "2000000",
+     "approved": "0",
+     "contracted": "0",
+     "remaining": "2000000"
+    }
+   ],
+   "problems": [],
+   "verdict": "ok"
+  }
+ ],
+ "failed": [],
+ "env": "a2",
+ "rep": 5,
+ "stage": "t2",
+ "task": "E3",
+ "model": "sonnet",
+ "snapshot": "i60a2_e3_5"
+}
