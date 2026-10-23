@@ -234,7 +234,7 @@ function Import_ref_set($up, $t, $key, $incoming, $existing, $message)
     if($existing)
     {
         # Ссылки записи могут ждать в батче (та же запись раньше в файле) - сначала в базу
-        Insert_batch("", "", "", "", "$message: flush before refs check");
+        Import_flush_batch("$message: flush before refs check");
         # Строка-ссылка: t = id цели, val = id колонки. У обычного реквизита t - колонка
         # типа записи (up = $t), поэтому значение, совпавшее с id колонки, сюда не попадает
         $data = Exec_sql("SELECT r.id, r.t FROM $z r JOIN $z o ON o.id=r.t AND o.up NOT IN (0, $t)"
@@ -248,4 +248,93 @@ function Import_ref_set($up, $t, $key, $incoming, $existing, $message)
     $ord = 1;
     foreach($plan["insert"] as $target)
         Insert_batch($up, $ord++, $target, $key, $message);
+}
+
+# --------------------------------------------------------------------------------------------
+# Скалярные реквизиты существующей записи (issue #5236)
+#
+# Фаза данных BKI сверяет скаляр записи со значением из файла - по правилу табличного
+# импорта (#4140):
+#   - значение совпало - строка не трогается;
+#   - отличается - обновляется имеющаяся строка, новая не вставляется;
+#   - пустое поле не доходит до сверки - значение записи не меняется;
+#   - пробел " " (у BOOLEAN ещё false/-1) - значение удаляется;
+#   - несколько строк одного реквизита (дубли прошлых импортов): остаётся первая со
+#     значением из файла, прочие удаляются.
+# У записи, которой до этой строки файла в базе не было, значение вставляется как есть.
+# --------------------------------------------------------------------------------------------
+
+# План сверки. $have - строки реквизита у записи: id строки => значение, по возрастанию id.
+# $clear - значение из файла означает очистку. Возвращает строки к удалению, обновление
+# array(id строки, значение) и значение к вставке (NULL - нечего).
+function Import_req_set_plan($have, $value, $clear)
+{
+    $plan = array("delete" => array(), "update" => NULL, "insert" => NULL);
+    if($clear)
+    {
+        $plan["delete"] = array_keys($have);
+        return $plan;
+    }
+    if(!count($have))
+    {
+        $plan["insert"] = $value;
+        return $plan;
+    }
+    $first = TRUE;
+    foreach($have as $rowId => $val)
+        if($first)
+        {
+            $first = FALSE;
+            if((string)$val !== (string)$value)
+                $plan["update"] = array($rowId, $value);
+        }
+        else
+            $plan["delete"][] = $rowId;
+    return $plan;
+}
+
+# Скаляры записи $up в базе: id реквизита => array(id строки => значение). Отложенные в
+# батче строки (та же запись раньше в файле) сначала уходят в базу. Читается вся запись:
+# ссылки и подчинённые записи ключуются id цели/типа и с id реквизита не совпадают.
+function Import_req_load($up, $message)
+{
+    global $z;
+    Import_flush_batch("$message: flush before reqs check");
+    $reqs = array();
+    $data = Exec_sql("SELECT id, t, val FROM $z WHERE up=$up ORDER BY id", "$message: load reqs");
+    while($row = mysqli_fetch_array($data))
+        $reqs[$row["t"]][$row["id"]] = $row["val"];
+    return $reqs;
+}
+
+# Применить значение $value реквизита $key к записи $up. $have - строки этого реквизита
+# у записи (из Import_req_load) или NULL у новой записи: тогда вставка, как прежде.
+function Import_req_set($up, $key, $value, $clear, &$have, $message)
+{
+    if($have === NULL)
+    {
+        Insert_batch($up, 1, $key, $value, $message);
+        return;
+    }
+    $plan = Import_req_set_plan($have, $value, $clear);
+    foreach($plan["delete"] as $rowId)
+    {
+        Delete($rowId);
+        unset($have[$rowId]);
+    }
+    if($plan["update"] !== NULL)
+    {
+        Update_Val($plan["update"][0], $plan["update"][1]);
+        $have[$plan["update"][0]] = $plan["update"][1];
+    }
+    if($plan["insert"] !== NULL)
+        Insert_batch($up, 1, $key, $plan["insert"], $message);
+}
+
+# Отправить в базу строки, ждущие в батче. Пустой батч не трогается: Insert_batch ядра
+# integram.io на закрытии пустого батча сам вставляет строку "(,,,'')" - ошибка SQL.
+function Import_flush_batch($message)
+{
+    if(isset($GLOBALS["SQLbatch"]))
+        Insert_batch("", "", "", "", $message);
 }
