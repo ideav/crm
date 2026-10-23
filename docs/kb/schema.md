@@ -146,7 +146,21 @@ GET /{db}/metadata/{typeId}?JSON=1 # одна таблица
 таблицу»; только в метаданных всей базы),
 `reqs[]`(колонки). Реквизит `reqs[i]`: `id`(ключ `t{id}` в данных/фильтрах),
 `val`(имя типа), `type`(базовый код), `orig`(id типа — для `_d_save`),
-`ref`+`ref_id`(ссылка), `arr_id`(подчинённая таблица), `attrs`(алиас/дефолт/флаги).
+`ref`+`ref_id`(ссылка), `arr_id`(подчинённая таблица), `attrs`(модификатор строкой,
+только если задан), `field_attrs`(тот же модификатор разобранным объектом, всегда).
+
+Модификатор хранится в одном из двух форматов: JSON (`{"required":true,"default":"[TODAY]"}`,
+так пишут `_d_*` и `_d_schema`) или строкой `:!NULL::MULTI::KEY::ALIAS=Имя:` + значение по
+умолчанию вне двоеточий. `attrs` отдаёт его как хранится; `field_attrs` приводит оба к одному виду
+(`FieldAttrsPublic`, `include/field_attrs.php`):
+```json
+"field_attrs": {"required": true, "multi": false, "key": false, "alias": null, "default": "[TODAY]"}
+```
+Прочие ключи модификатора (`action` колонки-кнопки) идут в `field_attrs` как есть. У объекта
+таблицы `attrs`+`field_attrs` (модификатор первой колонки) есть, только если он задан.
+`edit_obj` отдаёт тот же объект в `reqs[{id}].field_attrs`, `object` — в `req_field_attrs[{id}]`.
+Ключи `_d_schema` (`required`, `multi`, `key`, `default`) совпадают с ключами `field_attrs`.
+
 Определение связи: есть `ref`+`ref_id` → ссылка; есть `arr_id` без `ref` →
 подчинённая таблица; `orig==="1"` без `ref` → «ссылка на любую запись»; иначе
 обычная колонка. Под ограниченной ролью BARRED-объекты в metadata не приходят.
