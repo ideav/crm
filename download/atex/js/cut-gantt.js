@@ -2091,6 +2091,14 @@
         });
     };
 
+    // #5248: метаданные одни на всю загрузку (collect) — один GET на всех потребителей
+    // («Отпуск», «Вид сырья», «Фактическая ширина резки», право WRITE). Промис сбрасывает
+    // collect(), так что «Обновить» перечитывает их, но тоже один раз.
+    AtexCutGantt.prototype.loadMetadata = function() {
+        if (!this._metadataPromise) this._metadataPromise = this.getJson('metadata');
+        return this._metadataPromise;
+    };
+
     AtexCutGantt.prototype.nowMs = function() { return Date.now(); };
 
     AtexCutGantt.prototype.loadSlitters = function() {
@@ -2231,7 +2239,7 @@
         this.downtimesBySlitter = {};
         var slitters = this.slitters || [];
         if (!slitters.length) return Promise.resolve();
-        return this.getJson('metadata').then(function(all) {
+        return this.loadMetadata().then(function(all) {
             var meta = ganttTableByName(Array.isArray(all) ? all : [all], 'Отпуск');
             if (!meta) return;   // таблицы нет (старое окружение) → фича выключена
             var endIdx = ganttColumnIndex(meta, 'Окончание');
@@ -2264,7 +2272,7 @@
     // отсутствии доступа.
     AtexCutGantt.prototype.loadCutWriteGrant = function() {
         var self = this;
-        return this.getJson('metadata').then(function(all) {
+        return this.loadMetadata().then(function(all) {
             self.cutTableWrite = hasTableWrite(all, 'Задание в производство');
         }).catch(function() { /* метаданные не читаются — ссылки остаются */ });
     };
@@ -2275,7 +2283,7 @@
     AtexCutGantt.prototype.loadNominalWidths = function() {
         var self = this;
         this.nominalWidthByMaterial = {};
-        return this.getJson('metadata').then(function(all) {
+        return this.loadMetadata().then(function(all) {
             var meta = ganttTableByName(Array.isArray(all) ? all : [all], 'Вид сырья');
             if (!meta) return;
             var widthIdx = ganttColumnIndex(meta, 'Ширина, мм');
@@ -2298,7 +2306,7 @@
     AtexCutGantt.prototype.loadActualWidths = function() {
         var self = this;
         this.actualWidthIndex = {};
-        return this.getJson('metadata').then(function(all) {
+        return this.loadMetadata().then(function(all) {
             var meta = ganttTableByName(Array.isArray(all) ? all : [all], 'Фактическая ширина резки');
             if (!meta) return;
             var orderIdx = ganttColumnIndex(meta, 'Ширина в заказе');
@@ -2327,6 +2335,7 @@
 
     AtexCutGantt.prototype.collect = function() {
         var self = this;
+        this._metadataPromise = null;   // #5248: метаданные свежие на каждую загрузку, но один запрос
         return Promise.all([
             this.getJson('report/cut_planning?JSON_KV&LIMIT=0,5000'),
             this.loadSlitters(),
