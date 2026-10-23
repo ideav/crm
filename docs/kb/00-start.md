@@ -60,6 +60,8 @@ curl -s -H "X-Authorization: <token>" "https://ideav.ru/{db}/xsrf?JSON"
   sha512 принимается и при входе перехешируется.
 
 ### Семейства команд
+- **Приложение одним вызовом:** `_d_schema` (таблицы, поля, ссылки, роли, права, отчёты по именам),
+  записи по именам полей (`fields=`), чтение `JSON_OBJ&NAMED` → [schema-json.md](schema-json.md). Начинать с этого.
 - **Схема (DDL):** `_d_*` — таблицы/реквизиты/связи/удаление → [schema.md](schema.md).
 - **Данные (DML):** `_m_new`/`_m_set`/`_m_del`, чтение `object/{tbl}/?JSON_*` → [crud.md](crud.md).
 - **Отчёты:** `report/{id|имя}?JSON_KV` → [queries.md](queries.md).
