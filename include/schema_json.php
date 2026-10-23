@@ -80,31 +80,37 @@ function Sj_rows($sql, $msg)
 	return $rows;
 }
 
-# ── Таблицы и реквизиты ────────────────────────────────────────────────────────────────────
-# Таблица по имени: тип верхнего уровня (up=0) с базовым типом первой колонки. Ссылочные
-# типы (val='') и сами базовые типы не в счёт. Из нескольких одноимённых предпочитается
-# тип с реквизитами, затем — с заданным базовым типом.
-function Sj_find_table($name, $base = NULL)
+# ── Термины ────────────────────────────────────────────────────────────────────────────────
+# В ядре всё — термины: строка верхнего уровня (up=0) с именем и базовым типом. Один и тот же
+# термин бывает таблицей, полем другой таблицы (её реквизитом) и целью ссылки. Имя термина
+# уникально: существующий термин переиспользуется в любой роли, а второй термин с тем же
+# именем и другим базовым типом не создаётся. Ссылочные термины (val='') и сами базовые типы
+# в поиск по имени не входят.
+function Sj_terms($name)
 {
 	global $z;
-	$rows = Sj_rows("SELECT t.id, t.t, t.ord, (SELECT COUNT(1) FROM $z r WHERE r.up=t.id AND r.t!=r.up) nreq"
+	return Sj_rows("SELECT t.id, t.t, t.ord, (SELECT COUNT(1) FROM $z r WHERE r.up=t.id AND r.t!=r.up) nreq"
 					." FROM $z t WHERE t.up=0 AND t.val='".Sj_q($name)."' AND t.id!=t.t"
 					." AND t.t IN (".implode(",", array_keys($GLOBALS["basics"])).") ORDER BY t.id"
-				, "Schema: find table by name");
+				, "Schema: find the term by name");
+}
+# Термин по имени (и базовому типу, если задан). Из нескольких одноимённых — с собственными
+# реквизитами, затем первый. NULL — термина с таким именем (и таким типом) нет.
+function Sj_term($name, $base = NULL)
+{
 	$best = NULL;
-	foreach($rows as $row){
-		$score = ((int)$row["nreq"] > 0 ? 2 : 0) + (($base !== NULL && (int)$row["t"] === (int)$base) ? 1 : 0);
+	foreach(Sj_terms($name) as $row){
+		if($base !== NULL && (int)$row["t"] !== (int)$base)
+			continue;
+		$score = (int)$row["nreq"] > 0 ? 1 : 0;
 		if($best === NULL || $score > $best["score"])
 			$best = $row + array("score" => $score);
 	}
 	return $best;
 }
-# Используется ли тип как обычный реквизит какой-нибудь таблицы (а не как таблица)
-function Sj_type_used_as_field($typeId)
+function Sj_find_table($name, $base = NULL)
 {
-	global $z;
-	return (bool)mysqli_fetch_array(Exec_sql("SELECT 1 FROM $z r JOIN $z p ON p.id=r.up AND p.up=0 WHERE r.t=".(int)$typeId." AND r.up!=r.t LIMIT 1"
-								, "Schema: is the type a field"));
+	return Sj_term($name, $base);
 }
 # Реквизиты типа: id, ord, имя (псевдоним, иначе имя типа или целевой таблицы ссылки),
 # вид (field / ref / child / link), базовый тип, цель ссылки, атрибуты.
@@ -361,15 +367,12 @@ function Schema_validate($spec)
 			$err[] = t9n("[RU]Неизвестный раздел «".$k."» (допустимы tables, roles, reports)[EN]Unknown section '".$k."' (expected tables, roles, reports)");
 	$tables = Schema_flat_tables(isset($spec["tables"]) ? $spec["tables"] : array(), NULL, $err);
 	$names = array();
+	$want = array();	# Имя термина в нижнем регистре => имя и базовые типы, которыми его описали
 	foreach($tables as $t){
 		if(isset($names[mb_strtolower($t["name"])]))
 			$err[] = "«".$t["name"]."»: ".t9n("[RU]таблица описана дважды[EN]the table is described twice");
 		$names[mb_strtolower($t["name"])] = TRUE;
-		# Типы в базе общие для всех таблиц: имя обычного поля другой таблицы таблицей не станет
-		$row = Sj_find_table($t["name"], Sj_base_id(isset($t["type"]) ? $t["type"] : "SHORT"));
-		if($row && ((int)$row["nreq"] === 0) && Sj_type_used_as_field($row["id"]))
-			$err[] = "«".$t["name"]."»: ".t9n("[RU]имя занято типом поля другой таблицы — назовите таблицу иначе"
-				."[EN]the name is taken by a field type of another table — rename the table");
+		Sj_term_want($t["name"], isset($t["type"]) ? Sj_base_id($t["type"]) : NULL, "«".$t["name"]."»", $want);
 	}
 	foreach($tables as $t){
 		$seen = array();
@@ -396,8 +399,11 @@ function Schema_validate($spec)
 			elseif(isset($f["type"]) && Sj_base_id($f["type"]) === FALSE)
 				$err[] = "$where: ".t9n("[RU]неизвестный тип «".$f["type"]."»[EN]unknown type '".$f["type"]."'")
 					." (".implode(", ", array_values($GLOBALS["basics"])).")";
+			else
+				Sj_term_want(trim($f["name"]), isset($f["type"]) ? Sj_base_id($f["type"]) : NULL, "«".$t["name"]."».«".trim($f["name"])."»", $want);
 		}
 	}
+	$err = array_merge($err, Sj_term_bases($want));
 	foreach(isset($spec["roles"]) && is_array($spec["roles"]) ? $spec["roles"] : array() as $i => $r){
 		if(!is_array($r) || !isset($r["name"]) || trim((string)$r["name"]) === ""){
 			$err[] = "roles[$i]: ".t9n("[RU]нужно имя роли (name)[EN]role name is required");
@@ -435,6 +441,51 @@ function Schema_validate($spec)
 	}
 	return $err;
 }
+# Запомнить, каким базовым типом описание задаёт термин (NULL — тип не задан)
+function Sj_term_want($name, $base, $where, &$want)
+{
+	$k = mb_strtolower($name);
+	if(!isset($want[$k]))
+		$want[$k] = array("name" => $name, "bases" => array());
+	if($base !== NULL && $base !== FALSE && !isset($want[$k]["bases"][$base]))
+		$want[$k]["bases"][$base] = $where;
+}
+# Базовый тип каждого термина описания: заданный в описании, иначе существующего термина,
+# иначе SHORT. Ошибка — два разных типа в описании или тип, отличный от существующего термина.
+function Sj_term_bases($want)
+{
+	$err = array();
+	$GLOBALS["SJ_BASE"] = array();
+	foreach($want as $k => $w){
+		if(count($w["bases"]) > 1){
+			$list = array();
+			foreach($w["bases"] as $b => $where)
+				$list[] = "$where: ".Sj_base_name($b);
+			$list = implode(", ", $list);
+			$err[] = t9n("[RU]Термин «".$w["name"]."» описан с разными типами (".$list.") — у термина одно имя и один тип"
+				."[EN]Term '".$w["name"]."' is described with different types (".$list.") — a term has one name and one type");
+			continue;
+		}
+		$asked = count($w["bases"]) ? (int)key($w["bases"]) : NULL;
+		$terms = Sj_terms($w["name"]);
+		if($asked !== NULL && count($terms) && !Sj_term($w["name"], $asked)){
+			$have = Sj_base_name((int)$terms[0]["t"]);
+			$err[] = reset($w["bases"]).": ".t9n("[RU]термин «".$w["name"]."» уже есть с типом ".$have." (id ".$terms[0]["id"]."), запрошен ".Sj_base_name($asked)
+				." — второй термин с тем же именем не создаётся: уберите type, задайте ".$have." или выберите другое имя"
+				."[EN]term '".$w["name"]."' exists with type ".$have." (id ".$terms[0]["id"]."), requested ".Sj_base_name($asked)
+				." — a second term with the same name is not created: drop type, use ".$have." or pick another name");
+			continue;
+		}
+		$GLOBALS["SJ_BASE"][$k] = $asked !== NULL ? $asked : (count($terms) ? (int)Sj_term($w["name"])["t"] : (int)$GLOBALS["BT"]["SHORT"]);
+	}
+	return $err;
+}
+function Sj_want_base($name)
+{
+	$k = mb_strtolower($name);
+	return isset($GLOBALS["SJ_BASE"][$k]) ? $GLOBALS["SJ_BASE"][$k] : (int)$GLOBALS["BT"]["SHORT"];
+}
+
 # Таблицы описания вместе с подчинёнными (children) — плоским списком; у подчинённой
 # в "parent" имя родителя.
 function Schema_flat_tables($list, $parent, &$err)
@@ -520,23 +571,20 @@ function Sj_count($what)
 function Schema_table($t, &$out)
 {
 	global $z;
-	$base = Sj_base_id(isset($t["type"]) ? $t["type"] : "SHORT");
+	$base = Sj_want_base($t["name"]);
 	$unique = isset($t["unique"]) ? (FieldAttrsBool($t["unique"]) ? 1 : 0) : NULL;
-	$row = Sj_find_table($t["name"], $base);
+	$row = Sj_term($t["name"], $base);
 	if($row){
 		$id = (int)$row["id"];
 		$created = FALSE;
 		Sj_count("existing");
-		if((int)$row["t"] !== $base && isset($t["type"]))
-			$GLOBALS["SJ"]["warnings"][] = t9n("[RU]Таблица «".$t["name"]."» уже есть с первой колонкой ".Sj_base_name((int)$row["t"]).", тип не меняется"
-				."[EN]Table '".$t["name"]."' exists with first column ".Sj_base_name((int)$row["t"]).", type is kept");
 		if($unique !== NULL && (int)$row["ord"] !== $unique){
 			Exec_sql("UPDATE $z SET ord=$unique WHERE id=$id", "Schema: set the type unique flag");
 			Sj_count("updated");
 		}
 	}
 	else{
-		$id = Insert(0, (int)$unique, $base, $t["name"], "Schema: create table");
+		$id = Insert(0, (int)$unique, $base, $t["name"], "Schema: create term");
 		$created = TRUE;
 		Sj_count("created");
 	}
@@ -587,19 +635,21 @@ function Schema_field($tableId, $tableName, $f, &$out)
 		}
 	}
 	else{
-		$base = Sj_base_id(isset($f["type"]) ? $f["type"] : "SHORT");
-		if($existing && !($existing["kind"] === "field" && $GLOBALS["BT"][$existing["base"]] == $base))
+		$base = Sj_want_base($name);
+		$term = Sj_term($name, $base);
+		$type = $term ? (int)$term["id"] : NULL;
+		if($existing && $existing["type"] !== $type)	# Под этим именем в таблице другой термин (например ссылка)
 			return Sj_field_conflict($tableName, $name, $existing, Sj_base_name($base));
-		if(!$existing){
-			$type = Sj_field_type($name, $base);
-			if($type === FALSE){
-				$GLOBALS["SJ"]["errors"][] = t9n("[RU]«".$tableName."».«".$name."»: имя совпадает с таблицей того же типа — дайте полю другое имя или сделайте его ссылкой (ref)"
-					."[EN]'".$tableName."'.'".$name."': the name is a table of the same type — rename the field or make it a ref");
-				return;
-			}
+		if(!$existing && $type !== NULL)
 			foreach($reqs as $r)
-				if($r["type"] === $type)
-					return Sj_field_conflict($tableName, $name, $r, Sj_base_name($base));
+				if($r["type"] === $type)	# Тот же термин под псевдонимом — это то же поле
+					$existing = $r;
+		if(!$existing){
+			if($type === NULL)
+				$type = Insert(0, 0, $base, $name, "Schema: create term");
+			elseif((int)$term["nreq"] > 0)
+				$GLOBALS["SJ"]["warnings"][] = t9n("[RU]«".$tableName."».«".$name."»: термин «".$name."» — таблица со своими полями, в «".$tableName."» он стал подчинённой таблицей; для ссылки на её записи задайте ref"
+					."[EN]'".$tableName."'.'".$name."': term '".$name."' is a table with fields, in '".$tableName."' it became a child table; for a reference use ref");
 			$id = Insert($tableId, Get_Ord($tableId), $type, Sj_attrs("", $f, NULL), "Schema: add field");
 			Sj_count("created");
 			$out["tables"][$tableName]["fields"][$name] = $id;
@@ -622,21 +672,6 @@ function Sj_field_conflict($tableName, $name, $r, $want)
 			: ($r["kind"] === "child" ? t9n("[RU]подчинённая таблица[EN]child table") : $r["base"]);
 	$GLOBALS["SJ"]["errors"][] = t9n("[RU]«".$tableName."».«".$name."»: уже есть поле «".$r["name"]."» (".$have.", id ".$r["id"]."), а описано ".$want." — не меняю"
 		."[EN]'".$tableName."'.'".$name."': field '".$r["name"]."' exists (".$have.", id ".$r["id"]."), described as ".$want." — not changed");
-}
-# Тип поля: существующий тип с тем же именем и базовым типом, не являющийся таблицей, или новый.
-# FALSE — имя занято таблицей того же базового типа.
-function Sj_field_type($name, $base)
-{
-	global $z;
-	$rows = Sj_rows("SELECT t.id, (SELECT COUNT(1) FROM $z r WHERE r.up=t.id AND r.t!=r.up) nreq FROM $z t"
-					." WHERE t.up=0 AND t.t=".(int)$base." AND t.val='".Sj_q($name)."' AND t.id!=t.t ORDER BY t.id"
-				, "Schema: find the field type");
-	foreach($rows as $row)
-		if((int)$row["nreq"] === 0)
-			return (int)$row["id"];
-	if(count($rows))
-		return FALSE;
-	return Insert(0, 0, $base, $name, "Schema: create field type");
 }
 # Атрибуты реквизита: заданные в описании флаги поверх прежних
 function Sj_attrs($previous, $f, $alias)

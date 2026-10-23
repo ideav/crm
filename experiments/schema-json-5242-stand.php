@@ -60,6 +60,17 @@ list($c, $raw, $m) = call("GET", "metadata/".$r["tables"]["Договор"]["id"
 $ref = array_values(array_filter($m["reqs"], function($q){ return isset($q["ref"]); }));
 ok(count($ref) === 1 && (int)$ref[0]["ref"] === $r["tables"]["Заявка"]["id"], "metadata: Договор.Заявка — ссылка на Заявку", $raw);
 
+echo "── термин с именем один ──\n";
+list($c, $raw, $t1) = call("POST", "_d_schema?JSON", array("tables" => array(array("name" => "Договор", "fields" => array(array("name" => "Сумма заявки"))))));
+list($c2, $raw2, $m1) = call("GET", "metadata/".$r["tables"]["Заявка"]["id"]."?JSON=1");
+list($c3, $raw3, $m2) = call("GET", "metadata/".$r["tables"]["Договор"]["id"]."?JSON=1");
+$orig = function($m, $name){ foreach($m["reqs"] as $q) if($q["val"] === $name) return $q["orig"]; return NULL; };
+ok($c === 200 && $t1["ok"] === TRUE && $orig($m1, "Сумма заявки") !== NULL && $orig($m1, "Сумма заявки") === $orig($m2, "Сумма заявки")
+	, "поле «Сумма заявки» Договора — тот же термин, что у Заявки (SIGNED, type не задан)", $raw);
+list($c, $raw, $t2) = call("POST", "_d_schema?JSON", array("tables" => array(array("name" => "Сумма заявки", "type" => "DATE"))));
+ok($c === 400 && strpos($t2["errors"][0], "уже есть с типом SIGNED") !== FALSE && strpos($t2["errors"][0], "запрошен DATE") !== FALSE
+	, "тот же термин с другим типом — 400", $raw);
+
 echo "── записи по именам ──\n";
 list($c, $raw, $a) = call("POST", "_m_new/Заявка?JSON", array("up" => 1, "fields" => array("Заявка" => "З-1", "Сумма заявки" => 500)));
 ok($c === 200 && $a["id"] > 0, "_m_new по именам (тело JSON)", $raw);

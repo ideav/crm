@@ -15,8 +15,11 @@
 #   1) создание таблиц, полей, ссылки, подчинённой таблицы, роли с правами и отчёта по именам;
 #   2) повторный вызов того же описания ничего не создаёт (created=0);
 #   3) смена уровня права и маски — правка существующей записи права, а не новая запись;
-#   4) ошибки описания (тип, цель ссылки, вторая ссылка на ту же таблицу, уровень) — до записи;
-#   5) конфликт с существующим полем другого типа — ошибка, поле не меняется;
+#   4) ошибки описания (тип, цель ссылки, вторая ссылка на ту же таблицу, уровень,
+#      один термин с двумя типами) — до записи;
+#   4а) имя термина одно: существующий термин переиспользуется и таблицей, и полем; тот же
+#      термин с другим базовым типом — 400 с именем, существующим и запрошенным типом;
+#   5) поле с типом, отличным от существующего термина, — ошибка, поле не меняется;
 #   6) поля по именам: имя колонки, имя таблицы (главное значение), ссылка по значению, t{id};
 #   7) неизвестное имя: строго — ошибка, в пакете — ключ как есть и имя в списке;
 #   8) чтение: строки JSON_OBJ — объекты с именами, ссылка {id,val}, подчинённая {table,count}.
@@ -96,7 +99,7 @@ function Exec_sql($sql, $msg){
 	$DB = &$GLOBALS["DB"];
 	$GLOBALS["SQL_LOG"][] = $msg;
 	switch($msg){
-		case "Schema: find table by name":
+		case "Schema: find the term by name":
 			$v = stripslashes(m("/t\.val='((?:[^'\\\\]|\\\\.)*)'/u", $sql)[1]);
 			return new Res(array_map(function($r){ return array("id" => $r["id"], "t" => $r["t"], "ord" => $r["ord"], "nreq" => nreq($r["id"])); }
 				, rows_where(function($r) use ($v){ return $r["up"] == 0 && $r["val"] === $v && $r["id"] != $r["t"] && isset($GLOBALS["basics"][$r["t"]]); })));
@@ -294,12 +297,33 @@ $bad = schema(array("tables" => array(array("name" => "Т", "fields" => array(
 	"roles" => array(array("name" => "R", "grants" => array(array("table" => "Договор", "level" => "ADMIN")))), "лишнее" => 1));
 ok($bad["ok"] === FALSE && count($bad["errors"]) === 5, "пять ошибок", shown($bad));
 ok(count($GLOBALS["DB"]) === $before, "при ошибках описания ничего не записано");
-$bad = schema(array("tables" => array(array("name" => "Лимит"))));
-ok($bad["ok"] === FALSE && strpos($bad["errors"][0], "занято типом поля") !== FALSE, "таблица с именем типа поля — ошибка", shown($bad));
+$bad = schema(array("tables" => array(array("name" => "Х", "fields" => array(array("name" => "Срок", "type" => "DATE"))),
+	array("name" => "У", "fields" => array(array("name" => "Срок", "type" => "NUMBER"))))));
+ok($bad["ok"] === FALSE && count($bad["errors"]) === 1 && strpos($bad["errors"][0], "разными типами") !== FALSE, "один термин с двумя типами в описании — ошибка", shown($bad));
+ok(count($GLOBALS["DB"]) === $before, "и ничего не записано");
+
+echo "── 4а. термин с именем один ──
+";
+$limTerm = $lim["t"];
+$r = schema(array("tables" => array(array("name" => "Лимит"))));
+ok($r["ok"] === TRUE && $r["tables"]["Лимит"]["id"] === $limTerm && $r["tables"]["Лимит"]["created"] === FALSE, "таблица «Лимит» без type — тот же термин, что поле Компании (NUMBER)", shown($r));
+$before = count($GLOBALS["DB"]);
+$bad = schema(array("tables" => array(array("name" => "Лимит", "type" => "SHORT"))));
+ok($bad["ok"] === FALSE && strpos($bad["errors"][0], "«Лимит» уже есть с типом NUMBER") !== FALSE && strpos($bad["errors"][0], "запрошен SHORT") !== FALSE, "тот же термин с другим типом — 400 с именем, есть и запрошено", shown($bad));
+ok(count($GLOBALS["DB"]) === $before, "второй термин «Лимит» не создан");
+$r = schema(array("tables" => array(array("name" => "Договор", "fields" => array(array("name" => "Лимит", "type" => "NUMBER"))))));
+ok($r["ok"] === TRUE && $GLOBALS["DB"][$r["tables"]["Договор"]["fields"]["Лимит"]]["t"] === $limTerm, "поле «Лимит» Договора — тот же термин", shown($r));
+ok(count(array_filter($GLOBALS["DB"], function($x){ return $x["up"] == 0 && $x["val"] === "Лимит"; })) === 1, "термин «Лимит» в базе один");
+$r = schema(array("tables" => array(array("name" => "Договор", "fields" => array(array("name" => "Позиция заявки"))))));
+$k = array_values(array_filter(Sj_type_reqs($con), function($x) use ($pos){ return $x["type"] === $pos; }));
+ok($r["ok"] === TRUE && count($k) === 1 && $k[0]["kind"] === "child" && isset($r["warnings"]) && strpos($r["warnings"][0], "подчинённой таблицей") !== FALSE
+	, "термин-таблица полем другой таблицы — подчинённая таблица и предупреждение", shown($r));
+$r2 = schema(array("tables" => array(array("name" => "Договор", "fields" => array(array("name" => "Позиция заявки"))))));
+ok($r2["created"] === 0, "повтор — без новых реквизитов", shown($r2));
 
 echo "── 5. конфликт с существующим полем ──\n";
 $res5 = schema(array("tables" => array(array("name" => "Договор", "fields" => array(array("name" => "Сумма договора", "type" => "DATE"))))));
-ok($res5["ok"] === FALSE && strpos($res5["errors"][0], "уже есть поле") !== FALSE, "поле другого типа — ошибка", shown($res5));
+ok($res5["ok"] === FALSE && strpos($res5["errors"][0], "«Сумма договора» уже есть с типом SIGNED") !== FALSE, "поле с другим типом — 400 до записи", shown($res5));
 ok($GLOBALS["DB"][$GLOBALS["DB"][$res["tables"]["Договор"]["fields"]["Сумма договора"]]["t"]]["t"] == 14, "поле не изменено");
 
 echo "── 6. поля по именам ──\n";
