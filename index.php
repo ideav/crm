@@ -7275,6 +7275,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
     				}
     				if(strlen($row["attrs"]))
         				$GLOBALS["GLOBAL_VARS"]["api"]["reqs"][$key]["attrs"] = $row["attrs"];
+    				$GLOBALS["GLOBAL_VARS"]["api"]["reqs"][$key]["field_attrs"] = FieldAttrsPublic($row["attrs"]); # #5250
     				if(isset($row["multiselect"]["id"]))
 						if((count($row["multiselect"]["id"]) > 1) || isset($GLOBALS["MULTI"][$key]))
 							$GLOBALS["GLOBAL_VARS"]["api"]["reqs"][$key]["multiselect"] = $row["multiselect"];
@@ -8600,6 +8601,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 			        $GLOBALS["GLOBAL_VARS"]["api"]["req_base"][$row["t"]] = $row["base_typ"]==="0" ? "TAB_DELIMITER" : $GLOBALS["REV_BT"][$row["base_typ"]];
 			        $GLOBALS["GLOBAL_VARS"]["api"]["req_base_id"][$row["t"]] = $row["base_typ"];
 			        $GLOBALS["GLOBAL_VARS"]["api"]["req_attrs"][$row["t"]] = $row["attrs"];
+			        $GLOBALS["GLOBAL_VARS"]["api"]["req_field_attrs"][$row["t"]] = FieldAttrsPublic($row["attrs"]); # #5250
 			        $GLOBALS["GLOBAL_VARS"]["api"]["req_type"][$row["t"]] = $val;
     				if($row["ref_id"] != 0)
 	    		        $GLOBALS["GLOBAL_VARS"]["api"]["ref_type"][$row["t"]] = $row["ref_id"];
@@ -15903,7 +15905,7 @@ if(Validate_Token())
 					$tblAlias = strlen($tblAttrs) ? FieldAttrsAlias($tblAttrs, "") : "";
 					$meta[$row["id"]] = "\"id\":\"".$row["id"]."\",\"up\":\"".$row["up"]."\",\"type\":\"".$row["t"]."\",\"val\":\"".addcslashes($row["val"], "\\\'")."\",\"unique\":\"".$row["uniq"]."\""
 									.$granted . (isset($refs[$row["id"]]) ? ",\"referenced\":\"".$refs[$row["id"]]."\"" : "")
-									.(strlen($tblAttrs) ? FieldAttrsJsonProperty($tblAttrs) : "")
+									.(strlen($tblAttrs) ? FieldAttrsMetaProperties($tblAttrs) : "") // #5250: + parsed field_attrs
 									.($tblAlias !== "" ? ",\"alias\":\"".addcslashes($tblAlias, "\\\'")."\"" : "")
 									.(isset($GLOBALS["GRANTS"]["EXPORT"][$row["id"]]) || isset($GLOBALS["GRANTS"]["EXPORT"][1]) ? ",\"export\":\"1\"" : "")
 									.(isset($GLOBALS["GRANTS"]["DELETE"][$row["id"]]) || isset($GLOBALS["GRANTS"]["DELETE"][1]) ? ",\"delete\":\"1\"" : "");
@@ -15918,7 +15920,7 @@ if(Validate_Token())
                                 .",\"type\":\"".($row["base_typ"]??"1")."\""
                                 .($row["arr_id"]?",\"arr_id\":\"".$row["arr_id"]."\"":"")
                                 .($row["ref"]?",\"ref\":\"".$row["ref"]."\",\"ref_id\":\"".$row["ref_id"]."\"":"")
-                                .FieldAttrsJsonProperty($row["attrs"])
+                                .FieldAttrsMetaProperties($row["attrs"]) // #5250: attrs as is + parsed field_attrs
 								.(isset($GLOBALS["GRANTS"][$row["req_t"]]) ? ",\"granted\":\"".$GLOBALS["GRANTS"][$row["req_t"]]."\"" : "")."}";
         	}
 	        foreach($meta as $k => $m)

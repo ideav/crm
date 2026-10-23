@@ -287,6 +287,25 @@ function FieldAttrsJsonProperty($attrs)
 		: "";
 }
 
+// Issue #5250: attrs for API clients — parsed, one shape for both storage formats
+// (JSON and the ":!NULL::MULTI::KEY::ALIAS=…:default" string). Keys outside the
+// five standard ones (e.g. a button column's "action") are passed through.
+function FieldAttrsPublic($attrs)
+{
+	$parsed = FieldAttrsParse($attrs);
+	if($parsed["alias"] === "")
+		$parsed["alias"] = null;
+	return $parsed;
+}
+
+// The metadata properties of a column: the raw "attrs" (as before, only when set)
+// and the parsed "field_attrs" (always).
+function FieldAttrsMetaProperties($attrs)
+{
+	return FieldAttrsJsonProperty($attrs)
+		.",\"field_attrs\":".json_encode(FieldAttrsPublic($attrs), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+}
+
 function FieldAttrsJsString($value)
 {
 	return str_replace(
