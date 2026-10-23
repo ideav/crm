@@ -10,13 +10,17 @@
 
 ## Каталог
 
+**Строишь запрос (отчёт)** — начни с [report-building.md](report-building.md): поля колонки,
+девять типовых приёмов и рецепт «Остаток лимита». Внутренние имена ядра (`a123.val`) не нужны.
+
 | Тема | Файл | Ключи |
 |---|---|---|
 | **Приложение одним вызовом: схема JSON, поля по именам** — начинать с этого | [schema-json.md](schema-json.md) | _d_schema, json=, таблицы, поля, ref, children, роли, права по именам, READ/WRITE/BARRED, маска, отчёт, колонки, идемпотентно, fields=, имена полей, _m_new, _m_set, _m_batch, JSON_OBJ&NAMED, тело application/json |
+| **Построение запроса: типовые приёмы** | [report-building.md](report-building.md) | построить отчёт, колонка запроса, t28, t100, t101, псевдоним, вычисляемая колонка, формула, SUM, abn_ID, группировка, фильтр t102, [USER_ID], подзапрос, [Имя запроса], сумма по связанным записям, остаток, права на запрос, Unknown column |
 | Старт: авторизация, модель данных | [00-start.md](00-start.md) | token, X-Authorization, idb_{db}, _xsrf, БД, таблица, реквизит, ссылка, подчинённая, TIME, предел времени |
 | Схема (DDL) `_d_*` | [schema.md](schema.md) | _d_new, _d_req, _d_ref, _d_alias, _d_save, _d_del, _d_del_req, типы колонок, подчинённая таблица, referenced, метаданные |
 | Данные (DML) `_m_*` | [crud.md](crud.md) | _m_new, _m_set, _m_del, _m_batch, t{tableId}, up=, object/, JSON_OBJ, JSON_KV, F_U, F_I, LIMIT, импорт |
-| Запросы/отчёты `report/` | [queries.md](queries.md) | report, JSON_KV, FR_, TO_, колонка t28/t100/t104, SET-запрос, формула-фильтр |
+| Запросы/отчёты: вызов `report/` | [queries.md](queries.md) | report, JSON_KV, FR_, TO_, SET-запрос, права как у хранимой процедуры |
 | Роли, права, меню | [roles.md](roles.md) | роль 42, юзер 18, меню 151, гранты 116/136, маска, объект FILE |
 | Файлы сервера `dir_admin` | [files.md](files.md) | dir_admin, del[], mkdir, touch, upload, gf, ?JSON=1, безопасность, задачи cron |
 | Деплой: update.php, PR, worktree | [deploy.md](deploy.md) | update.php, update.conf, форк unidel2035, git worktree, ветки, шаблон базы, TEMPLATES, newDb |
@@ -30,7 +34,7 @@
 | Иерархический OLTP (разрезы) | [hierarchical-oltp.md](hierarchical-oltp.md) | разрез, частотность групп, накопитель меры, агрегаты, up-уровни |
 
 **Соседние справочники (не дублируем — ссылаемся):**
-[integram-reports.md](../integram-reports.md) (полный справочник отчётов) ·
+[integram-reports.md](../integram-reports.md) (отчёты рабочих мест atex) ·
 [StructureRules.md](../StructureRules.md) (правила проектирования таблиц) ·
 [MCP.md](../MCP.md) / [INTEGRAM_MCP_GUIDE.md](../INTEGRAM_MCP_GUIDE.md) ·
 [WORKSPACE_DEVELOPMENT_GUIDE.md](../WORKSPACE_DEVELOPMENT_GUIDE.md) ·
@@ -67,6 +71,10 @@
 | после перевода набора на `_m_batch` на старом ядре снова падает всё действие из-за одной пропавшей записи | запасной путь отчитывался не как пакет: обрывался первым отказом и не называл запись | [crud.md](crud.md) |
 | запасной путь шлёт `"10"` там, где раньше слал `10` | поля пакета приводятся к строке для JSON-тела, и поштучная отправка брала уже приведённые | [crud.md](crud.md) |
 | локальная установка: `_m_del` любой записи верхнего уровня — «Нельзя удалить метаданные» | корень в сиде с `up=0`; корень обязан быть `(1, up=1, t=1, 'ROOT')` | [crud.md](crud.md) |
+| `Unknown column 'Лимит' in 'SELECT'` в формуле колонки запроса | в формуле имя в отчёте (`t100`), а нужен псевдоним — `t101` колонки-источника; `a123.val` из текста ошибки не копировать | [report-building.md](report-building.md) |
+| сумма в отчёте больше настоящей (удвоилась) | в одном запросе строки цепочки A ← B ← C перемножаются — сумму по среднему уровню считать подзапросом `[Имя запроса]` | [report-building.md](report-building.md) |
+| «нельзя использовать служебные слова SQL. Найдено: SELECT» | в формуле нельзя `SELECT`/`FROM`/`TABLE` — выборка из другой таблицы отдельным запросом `[Имя запроса]` | [report-building.md](report-building.md) |
+| `Невозможно связать колонки отчета` | лишние записи FROM/JOIN (тип 44) или `ALIAS` `t58` — удалить; путь задать скрытой ссылочной колонкой | [report-building.md](report-building.md) |
 | `FR_` даёт 0 строк по дате/числу | нужен оператор `>`/`<` (открытый интервал) | [queries.md](queries.md) |
 | одно устройство стабильно видит чужой срез отчёта с другой датой | внешний `FR_{колонка}` от клиента ПЕРЕКРЫВАЕТ внутреннюю границу «>= [TODAY]»; полночь считалась по часам устройства со сбитой датой — не слать внешний фильтр, контролировать часы по заголовку `Date` | [queries.md](queries.md) |
 | конструктор запросов пуст, а отчёт отдаёт данные | у «Запроса» потерян req `t=28` — явный F_U игнорился без parent_obj; фикс ядра + `POST /{db}/_d_req/22?JSON&t=28` | [queries.md](queries.md) |
