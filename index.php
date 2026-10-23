@@ -8428,6 +8428,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 					array_pop($object);	# Cut off the empty item after the last semi-colon
 					$new_id = $order = 0;
 					$rec_existing = FALSE;	# issue #5226: запись уже есть в базе - её ссылки сверяются с файлом
+					$rec_reqs = NULL;	# issue #5236: скаляры существующей записи (id реквизита => строки) - сверяются с файлом
 					foreach($object as $value)
 					{
 					    trace(" Parse $value, t:$t, orig:$orig");
@@ -8448,7 +8449,15 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 												, isset($GLOBALS["obj_subst"]) ? $GLOBALS["obj_subst"] : Array()
 												, function($id) use ($z){ return (bool)mysqli_fetch_array(Exec_sql("SELECT 1 FROM $z WHERE id=$id", "Check literal value")); }
 												, $count, $GLOBALS["warning"]);
-										Insert_batch($new_id, 1, $key, $value, "Import req");
+										if($rec_reqs === NULL)
+											Insert_batch($new_id, 1, $key, $value, "Import req");
+										else{	# issue #5236: совпало - не трогать, отличается - обновить, пробел (BOOLEAN false) - удалить
+											if(!isset($rec_reqs[$key]))
+												$rec_reqs[$key] = array();
+											$clear = ($value === " ") || (isset($GLOBALS["base"][$key]) && ((string)$GLOBALS["base"][$key] === "11" /* BOOLEAN */)
+													&& ((strtolower($value) === "false") || ($value === "-1")));
+											Import_req_set($new_id, $key, $value, $clear, $rec_reqs[$key], "Import req");
+										}
 									}
 								elseif($value === " ") # issue #5226: пробел - очистить ссылки записи по реквизиту
 									Import_ref_set($new_id, $t, $key, NULL, $rec_existing, "Import refs clear");
@@ -8540,6 +8549,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 								if($row = mysqli_fetch_array(Exec_sql("SELECT id FROM $z WHERE t=$t AND val='".addslashes($typ[2])."'", "Check Obj presence"))){
 									$new_id = $GLOBALS["obj_subst"][$new_id] = $row["id"];
 									$rec_existing = TRUE;
+									$rec_reqs = Import_req_load($new_id, "Import req");
 								}
 								elseif($row = mysqli_fetch_array(Exec_sql("SELECT t, val FROM $z WHERE id=$new_id", "Check ID presence")))
 								{
