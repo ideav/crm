@@ -3,6 +3,8 @@
 //
 // Шаг 1 (SQL, на сервере MySQL нового Интеграма, после копирования таблицы базы):
 //   node tools/old-integram-migration/migrate.js sql --db r7ohr > merge-tails.sql
+// Повторный перенос в уже переведённую базу (#5253), источник — таблица r7ohr_src рядом с ней:
+//   node tools/old-integram-migration/migrate.js transfer --db r7ohr [--src r7ohr_src] [--apply] > transfer.sql
 // Шаг 2 (HTTP, по токенам обеих баз):
 //   node tools/old-integram-migration/migrate.js files --old https://integram.io/r7ohr --old-token T1 \
 //        --new https://ideav.ru/r7ohr --new-token T2 [--apply] [--keep-overrides]
@@ -77,10 +79,20 @@ SET a.val = calculated.new_val`,
 SELECT 391, 151, MAX(ord) + 1, 8, 'Иконка' FROM {T} WHERE up = 151 HAVING COUNT(*) > 0`,
 ];
 
-// Оператор как строка для PREPARE: CONCAT('…`', @tbl, '`…').
+// Оператор как строка для PREPARE: CONCAT('…`', @tbl, '`…'). {T} — таблица базы (@tbl),
+// {S} — таблица-источник переноса (@src), {B} — копия базы до переноса (@bak).
+const TABLE_VARS = { T: '@tbl', S: '@src', B: '@bak' };
 function prepared(stmt) {
-    const parts = stmt.split('{T}').map((p) => "'" + p.replace(/\\/g, '\\\\').replace(/'/g, "''") + "'");
-    return `SET @q = CONCAT(${parts.join(", '`', @tbl, '`', ")});\nPREPARE q FROM @q; EXECUTE q; DEALLOCATE PREPARE q;`;
+    const lit = (p) => "'" + p.replace(/\\/g, '\\\\').replace(/'/g, "''") + "'";
+    const parts = stmt.split(/\{([TSB])\}/).map((p, i) => (i % 2 ? `'\`', ${TABLE_VARS[p]}, '\`'` : lit(p)));
+    return `SET @q = CONCAT(${parts.join(', ')});\nPREPARE q FROM @q; EXECUTE q; DEALLOCATE PREPARE q;`;
+}
+
+// Остановка скрипта, если условие ложно: mysql прерывает прогон на первой ошибке, а ошибку
+// даёт обращение к несуществующей таблице с текстом причины в имени.
+function guard(cond, from, reason) {
+    return prepared(`SELECT IF(${cond}, 'DO 0', 'SELECT 1 FROM \`СТОП: ${reason}\`') INTO @g FROM ${from}`) +
+        '\nPREPARE g FROM @g; EXECUTE g; DEALLOCATE PREPARE g;';
 }
 
 // SQL шага 1: та же склейка, что joinTails, для всей таблицы базы.
@@ -98,6 +110,92 @@ ${MERGE_STATEMENTS.map(prepared).join('\n\n')}
 -- (необязательно) переименовать таблицу, как в новой схеме:
 -- RENAME TABLE \`${db}\` TO \`r1\`;
 `;
+}
+
+// ---------------------------------------------------------------- Повторный перенос (#5253)
+//
+// Таблица базы {T} на новом сервере заменяется содержимым таблицы-источника {S} — копии базы
+// со старого сервера, уже прогнанной через склейку хвостов (buildMergeSql). Остаются только
+// совпадающие типы: строка типа (up=0, кроме корня 1) с тем же id, базовым типом и именем в обеих
+// таблицах и её реквизиты с тем же id, типом и значением. Всё остальное в {T} — данные, прочие
+// типы и реквизиты — удаляется, недостающее переносится из {S} с прежними id: на id ссылаются
+// запросы, шаблоны и меню. Пароли (реквизит 20) пользователей с тем же id и логином остаются
+// из {T}: хеш старого сервера здесь не проверяется. Корень (id 1) не трогается.
+const USER_T = 18;
+const PASSWORD_T = 20;
+const TRANSFER_PREP = [
+    `CREATE TEMPORARY TABLE _keep_type (id int UNSIGNED PRIMARY KEY)
+SELECT a.id FROM {T} a JOIN {S} b ON b.id = a.id AND b.up = 0 AND b.t = a.t AND BINARY b.val = BINARY a.val
+WHERE a.up = 0 AND a.id <> 1`,
+    `CREATE TEMPORARY TABLE _keep (id int UNSIGNED PRIMARY KEY)
+SELECT a.id FROM {T} a JOIN _keep_type k ON k.id = a.up
+JOIN {S} b ON b.id = a.id AND b.up = a.up AND b.t = a.t AND BINARY b.val = BINARY a.val`,
+    `INSERT INTO _keep SELECT id FROM _keep_type`,
+    `INSERT IGNORE INTO _keep VALUES (1)`,
+    `CREATE TEMPORARY TABLE _pwd (KEY (up))
+SELECT a.up, a.ord, a.val FROM {T} a
+JOIN {T} u ON u.id = a.up AND u.t = ${USER_T}
+JOIN {S} su ON su.id = u.id AND su.t = ${USER_T} AND BINARY su.val = BINARY u.val
+WHERE a.t = ${PASSWORD_T}`,
+];
+// Временную таблицу MySQL нельзя открыть дважды в одном запросе — счётчики по одному.
+const TRANSFER_REPORT = [
+    `SELECT COUNT(*) INTO @n_type FROM _keep_type`,
+    `SELECT COUNT(*) INTO @n_keep FROM {T} a JOIN _keep k ON k.id = a.id`,
+    `SELECT COUNT(*) INTO @n_tbl FROM {T}`,
+    `SELECT COUNT(*) INTO @n_src FROM {S}`,
+    `SELECT COUNT(DISTINCT up) INTO @n_pwd FROM _pwd`,
+    `SELECT @n_type AS \`совпало типов\`, @n_keep AS \`остаётся строк\`, @n_tbl - @n_keep AS \`удаляется строк\`,
+       @n_src AS \`строк в источнике\`, @n_pwd AS \`паролей остаётся\``,
+    `SELECT 'удаляется' AS \`тип\`, a.id, a.t, a.val FROM {T} a LEFT JOIN _keep_type k ON k.id = a.id
+WHERE a.up = 0 AND a.id <> 1 AND k.id IS NULL ORDER BY a.id`,
+    `SELECT 'переносится' AS \`тип\`, b.id, b.t, b.val FROM {S} b LEFT JOIN _keep_type k ON k.id = b.id
+WHERE b.up = 0 AND b.id <> 1 AND k.id IS NULL ORDER BY b.id`,
+];
+const TRANSFER_APPLY = [
+    `CREATE TABLE {B} LIKE {T}`,
+    `INSERT INTO {B} SELECT * FROM {T}`,
+    `DELETE a FROM {T} a LEFT JOIN _keep k ON k.id = a.id WHERE k.id IS NULL`,
+    `UPDATE {T} a JOIN {S} b ON b.id = a.id SET a.ord = b.ord WHERE a.id <> 1`,
+    `INSERT INTO {T} (id, up, ord, t, val)
+SELECT b.id, b.up, b.ord, b.t, b.val FROM {S} b
+LEFT JOIN {T} a ON a.id = b.id
+LEFT JOIN (SELECT DISTINCT up FROM _pwd) p ON b.t = ${PASSWORD_T} AND p.up = b.up
+WHERE a.id IS NULL AND p.up IS NULL`,
+    `INSERT INTO {T} (up, ord, t, val) SELECT up, ord, ${PASSWORD_T}, val FROM _pwd`,
+    // Проверка: каждая строка источника, кроме оставленных паролей, есть в базе как есть.
+    `SELECT COUNT(*) AS \`расхождений с источником (должно быть 0)\` FROM {S} b
+LEFT JOIN {T} a ON a.id = b.id AND a.up = b.up AND a.ord = b.ord AND a.t = b.t AND BINARY a.val = BINARY b.val
+LEFT JOIN (SELECT DISTINCT up FROM _pwd) p ON b.t = ${PASSWORD_T} AND p.up = b.up
+WHERE a.id IS NULL AND p.up IS NULL AND b.id <> 1`,
+];
+
+const TABLE_NAME = /^[A-Za-z0-9_]+$/;
+function buildTransferSql({ db, src, backup, apply = false }) {
+    src = src || db + '_src';
+    backup = backup || db + '_before_transfer';
+    [db, src, backup].forEach((n) => { if (!TABLE_NAME.test(String(n || ''))) throw new Error('Недопустимое имя таблицы: ' + n); });
+    if (new Set([db, src, backup]).size < 3) throw new Error('База, источник и копия должны быть разными таблицами');
+    const head = `SET @tbl = '${db}';  -- таблица базы, которая заменяется
+SET @src = '${src}';  -- источник: копия базы со старого сервера после склейки хвостов (migrate.js sql)
+SET @bak = '${backup}';  -- сюда сохраняется база до переноса; существующая таблица останавливает скрипт
+
+-- #5253: перенос базы из источника. Остаются совпадающие типы и их реквизиты, пароли пользователей
+-- с тем же id и логином; остальное удаляется и переносится из источника с прежними id.
+${apply ? '' : '-- Пробный прогон: только отчёт, база не меняется. Запись — migrate.js transfer … --apply.\n'}`;
+    const checks = [
+        guard('COUNT(*) > 0', '{S} WHERE t = ' + USER_T, 'в источнике нет пользователей'),
+        guard('COUNT(*) = 0', '{S} WHERE t = 0 AND up <> 0', 'в источнике есть хвосты, сначала migrate.js sql'),
+    ];
+    const body = [
+        ...checks,
+        'DROP TEMPORARY TABLE IF EXISTS _keep_type, _keep, _pwd;',
+        ...TRANSFER_PREP.map(prepared),
+        ...TRANSFER_REPORT.map(prepared),
+        ...(apply ? TRANSFER_APPLY.map(prepared) : []),
+    ];
+    return head + '\n' + body.join('\n\n') + '\n' +
+        (apply ? `\n-- Источник больше не нужен: DROP TABLE \`${src}\`;\n` : '');
 }
 
 // ---------------------------------------------------------------- HTTP-клиент базы
@@ -399,6 +497,10 @@ async function main(argv) {
             need('db');
             process.stdout.write(buildMergeSql(a.db));
             return;
+        case 'transfer':
+            need('db');
+            process.stdout.write(buildTransferSql({ db: a.db, src: a.src, backup: a.backup, apply: !!a.apply }));
+            return;
         case 'files': {
             need('old', 'old-token', 'new', 'new-token');
             const src = new Client({ base: a.old, token: a['old-token'] });
@@ -414,11 +516,11 @@ async function main(argv) {
             if (!a.apply) console.log('(пробный прогон, для записи — --apply)');
             return;
         default:
-            console.log('Команды: sql --db <база> | files --old <url> --old-token <t> --new <url> --new-token <t> [--apply] [--keep-overrides] | menu --new <url> --new-token <t> [--apply]');
+            console.log('Команды: sql --db <база> | transfer --db <база> [--src <источник>] [--backup <копия>] [--apply] |files --old <url> --old-token <t> --new <url> --new-token <t> [--apply] [--keep-overrides] | menu --new <url> --new-token <t> [--apply]');
     }
 }
 
-module.exports = { VAL_LIM, joinTails, buildMergeSql, Client, parseDirListing, copyFiles, planReportColumns, planMenuReport, fixMenu, MENU_REFERENCE, MENU_REPORTS };
+module.exports = { VAL_LIM, joinTails, buildMergeSql, buildTransferSql, Client, parseDirListing, copyFiles, planReportColumns, planMenuReport, fixMenu, MENU_REFERENCE, MENU_REPORTS };
 
 if (require.main === module) {
     main(process.argv.slice(2)).catch((e) => { console.error(e.message); process.exit(1); });
