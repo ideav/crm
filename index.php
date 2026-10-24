@@ -6300,6 +6300,11 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 function Report_tx_begin($id){
 	if(isset($GLOBALS["REPORT_TX"]) || !isset($GLOBALS["STORED_REPS"][$id]["rep_params"]["InTransaction"]))
 		return FALSE;
+	# #5265: галка действует только на запрос на изменение — есть «Присвоить» и вызов применяет изменения
+	# (то же условие, что у блока Execute UPDATEs); чистая выборка и превью без confirmed идут без транзакции
+	if(!isset($GLOBALS["STORED_REPS"][$id][REP_COL_SET])
+			|| !(isset($_REQUEST["confirmed"]) || isset($GLOBALS["STORED_REPS"][$id]["rep_params"]["EXECUTE"])))
+		return FALSE;
 	$flag = trim((string)$GLOBALS["STORED_REPS"][$id]["rep_params"]["InTransaction"]);
 	if(($flag === "") || ($flag === "0"))
 		return FALSE;

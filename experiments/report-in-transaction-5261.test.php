@@ -42,6 +42,7 @@ function api_dump($json){ throw new \Exception("api_dump: ".$json); }  # в яд
 function die_info($m){ throw new \Exception("die_info: ".$m); }
 class IntegramOpError extends \Exception {}
 
+define("REP_COL_SET", 132);
 $GLOBALS["connection"] = null;
 
 $source = file_get_contents(__DIR__."/../index.php");
@@ -61,8 +62,14 @@ function ok($cond, $msg){
 }
 function write_row($val){ $GLOBALS["PDO"]->exec("INSERT INTO z (up, ord, t, val) VALUES (1, 1, 3, '$val')"); }
 function count_rows($val){ return (int)$GLOBALS["PDO"]->query("SELECT COUNT(*) FROM z WHERE val='$val'")->fetchColumn(); }
-function report($id, $params){
+# По умолчанию — запрос на изменение: колонка «Присвоить» (t132) и подтверждённый вызов (#5265)
+function report($id, $params, $set = TRUE, $confirmed = TRUE){
     $GLOBALS["STORED_REPS"][$id] = array("rep_params" => $params);
+    if($set)
+        $GLOBALS["STORED_REPS"][$id][REP_COL_SET] = array(1 => "[THIS]+1");
+    unset($_REQUEST["confirmed"]);
+    if($confirmed)
+        $_REQUEST["confirmed"] = "1";
     unset($GLOBALS["REPORT_TX"]);
     $GLOBALS["TX_LOG"] = array();
 }
@@ -112,7 +119,7 @@ ok(Report_tx_rollback() === FALSE, "откат без открытой тран�
 
 # 5. Вложенный запрос: свою транзакцию не открывает и чужую не фиксирует
 report(105, array("InTransaction" => "1"));
-$GLOBALS["STORED_REPS"][106] = array("rep_params" => array("InTransaction" => "1"));
+$GLOBALS["STORED_REPS"][106] = array("rep_params" => array("InTransaction" => "1"), REP_COL_SET => array(1 => "1"));
 Report_tx_begin(105);
 ok(Report_tx_begin(106) === FALSE, "вложенный запрос: вторая транзакция не открывается");
 write_row("e1");
@@ -120,5 +127,19 @@ ok(Report_tx_commit(106) === FALSE && $GLOBALS["PDO"]->inTransaction(), "вло�
 ok(Report_tx_commit(105) === TRUE && count_rows("e1") === 1, "внешний запрос фиксирует всё");
 ok($GLOBALS["TX_LOG"] === array("BEGIN", "COMMIT"), "вложенность: один BEGIN и один COMMIT");
 
+# 6. #5265: галка действует только на запрос на изменение
+report(107, array("InTransaction" => "1"), FALSE);
+ok(Report_tx_begin(107) === FALSE && $GLOBALS["TX_LOG"] === array(), "чистая выборка (нет «Присвоить»): транзакции нет");
+report(108, array("InTransaction" => "1"), TRUE, FALSE);
+ok(Report_tx_begin(108) === FALSE && $GLOBALS["TX_LOG"] === array(), "превью SET-запроса без confirmed: транзакции нет");
+report(109, array("InTransaction" => "1", "EXECUTE" => "1"), TRUE, FALSE);
+ok(Report_tx_begin(109) === TRUE, "SET-запрос с EXECUTE без confirmed: транзакция открыта");
+Report_tx_commit(109);
+report(110, array("InTransaction" => "1", "EXECUTE" => "1"), FALSE, FALSE);
+ok(Report_tx_begin(110) === FALSE, "EXECUTE без «Присвоить» — запрос ничего не пишет: транзакции нет");
+report(111, array("InTransaction" => "1"));
+ok(Report_tx_begin(111) === TRUE, "SET-запрос с confirmed: транзакция открыта");
+Report_tx_commit(111);
+
 if($fails){ fwrite(STDERR, "$fails проверок упало\n"); exit(1); }
-echo "Все проверки #5261 прошли\n";
+echo "Все проверки #5261/#5265 прошли\n";
