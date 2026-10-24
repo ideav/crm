@@ -2953,7 +2953,8 @@ function IsOccupied($id)
 	return false;
 }
 function my_die($msg, $code=""){
-	Report_tx_rollback();  # #5261: изменения запроса с InTransaction не остаются наполовину
+	if(isset($GLOBALS["REPORT_TX"]))  # #5261: изменения запроса с InTransaction не остаются наполовину
+		Report_tx_rollback();
 	if(InBatchOp())	# Пакетная запись: ошибка относится к одной операции, а не ко всему запросу
 		throw new IntegramOpError($msg);
 	if(isset($GLOBALS["TRACE"])){
