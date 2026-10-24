@@ -210,15 +210,19 @@ class Client {
         this._xsrf = null;
     }
     url(p) { return this.base + '/' + p; }
-    // Старое ядро читает токен из куки <db>, новое — из idb_<db>; шлём обе.
-    headers() { return { Cookie: `${this.db}=${this.token}; idb_${this.db}=${this.token}` }; }
+    // Старое ядро читает токен из куки <db>. Новое принимает ключ API только заголовком
+    // X-Authorization (в запросах с параметром JSON); его кука idb_<db> — сессия устройства,
+    // ключ в ней даёт 401, поэтому её не шлём.
+    headers() { return { Cookie: `${this.db}=${this.token}`, 'X-Authorization': this.token }; }
     async request(p, opts = {}) {
         const res = await this.fetch(this.url(p), Object.assign({ headers: this.headers() }, opts));
         if (!res.ok) throw new Error(`${this.db}: HTTP ${res.status} на ${p}`);
         return res;
     }
     async getText(p) { return (await this.request(p)).text(); }
+    // Ключ API в заголовке новое ядро принимает только в запросах с параметром JSON.
     async getJson(p) {
+        if (!/[?&]JSON/.test(p)) p += (p.includes('?') ? '&' : '?') + 'JSON';
         const txt = await this.getText(p);
         try { return JSON.parse(txt); } catch (e) { throw new Error(`${this.db}: не JSON на ${p}: ${txt.slice(0, 200)}`); }
     }

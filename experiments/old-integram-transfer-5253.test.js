@@ -106,3 +106,22 @@ test('перенос на MySQL: база = источник, кроме кор�
     assert.throws(() => run(M.buildTransferSql({ db: 'r7ohr', apply: true })), /already exists/);
     run('DROP TABLE r7ohr, r7ohr_src, r7ohr_before_transfer');
 });
+
+test('клиент: ключ API — заголовком X-Authorization и кукой <db>; JSON-запросы с параметром JSON', async () => {
+    const seen = [];
+    const fetch = async (url, opts) => {
+        seen.push({ url, headers: opts.headers });
+        return { ok: true, text: async () => '{"ok":1}' };
+    };
+    const c = new M.Client({ base: 'https://example.test/r7ohr', token: 'KEY', fetch });
+    await c.getJson('metadata');
+    await c.getJson('object/22?JSON_OBJ&LIMIT=0,10');
+    assert.deepStrictEqual(seen.map((s) => s.url), [
+        'https://example.test/r7ohr/metadata?JSON',
+        'https://example.test/r7ohr/object/22?JSON_OBJ&LIMIT=0,10',
+    ]);
+    const h = seen[0].headers;
+    assert.strictEqual(h['X-Authorization'], 'KEY');
+    // Новое ядро: ключ в куке idb_<db> — чужая сессия устройства, ответ 401.
+    assert.strictEqual(h.Cookie, 'r7ohr=KEY');
+});
