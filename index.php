@@ -2953,6 +2953,8 @@ function IsOccupied($id)
 	return false;
 }
 function my_die($msg, $code=""){
+	if(isset($GLOBALS["REPORT_TX"]))  # #5261: изменения запроса с InTransaction не остаются наполовину
+		Report_tx_rollback();
 	if(InBatchOp())	# Пакетная запись: ошибка относится к одной операции, а не ко всему запросу
 		throw new IntegramOpError($msg);
 	if(isset($GLOBALS["TRACE"])){
@@ -5573,6 +5575,7 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
     	    else
     	        die($row[0]);
 	}
+	Report_tx_begin($id);
 	$data_set = Exec_sql($sql, "Request report data", TRUE, FALSE);
 	$rownum = 1;
 															 
@@ -6142,6 +6145,7 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 		}
 		unset($blocks["_update"]);
 	}
+	Report_tx_commit($id);
 # Format the Totals values according to their type
 	if(isset($blocks["col_totals"][$id]))
 		foreach($blocks["col_totals"][$id] as $key => $value)
@@ -6288,6 +6292,42 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 	$GLOBALS["STORED_REPS"][$id]["last_res"] = $blocks["_data_col"][$id];
 	if(isset($blocks["col_totals"][$id]))
     	$GLOBALS["STORED_REPS"][$id]["last_totals"] = $blocks["col_totals"][$id];
+}
+# Issue #5261: галка InTransaction (BOOLEAN) у Запроса — выборка и все её изменения (SET, создание,
+# удаление) идут одной транзакцией. Реквизит ищется по имени термина в rep_params, не по id: если в базе
+# такого термина или реквизита у Запроса нет, запрос работает как раньше. Вложенный запрос внутри уже
+# открытой транзакции свою не открывает и не фиксирует — фиксирует тот, кто открыл.
+function Report_tx_begin($id){
+	if(isset($GLOBALS["REPORT_TX"]) || !isset($GLOBALS["STORED_REPS"][$id]["rep_params"]["InTransaction"]))
+		return FALSE;
+	$flag = trim((string)$GLOBALS["STORED_REPS"][$id]["rep_params"]["InTransaction"]);
+	if(($flag === "") || ($flag === "0"))
+		return FALSE;
+	if(!mysqli_begin_transaction($GLOBALS["connection"]))
+		die_info("Couldn't start the transaction for report #$id ".mysqli_error($GLOBALS["connection"]));
+	$GLOBALS["REPORT_TX"] = $id;
+	trace("BEGIN transaction for report $id");
+	return TRUE;
+}
+function Report_tx_commit($id){
+	if(!isset($GLOBALS["REPORT_TX"]) || ($GLOBALS["REPORT_TX"] !== $id))
+		return FALSE;
+	unset($GLOBALS["REPORT_TX"]);
+	if(!mysqli_commit($GLOBALS["connection"]))
+		die_info("Couldn't commit the transaction for report #$id ".mysqli_error($GLOBALS["connection"]));
+	trace("COMMIT transaction for report $id");
+	return TRUE;
+}
+# Отказ посреди запроса: откатить всё, что запрос успел записать. Обычный выход (die) откатывает и сам —
+# незафиксированная транзакция пропадает с закрытием соединения; явный откат нужен, когда PHP
+# продолжает работу (ошибка операции пакета ловится и пакет идёт дальше).
+function Report_tx_rollback(){
+	if(!isset($GLOBALS["REPORT_TX"]))
+		return FALSE;
+	trace("ROLLBACK transaction for report ".$GLOBALS["REPORT_TX"]);
+	unset($GLOBALS["REPORT_TX"]);
+	@mysqli_rollback($GLOBALS["connection"]);
+	return TRUE;
 }
 function isArray($id, $i){
     foreach($GLOBALS["STORED_REPS"][$id]["arrays"] as $k => $arrs)
