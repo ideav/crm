@@ -7,10 +7,12 @@ RUN apt-get update \
         default-mysql-client \
         libonig-dev \
         libzip-dev \
+        nodejs \
         openssl \
         unzip \
     && docker-php-ext-install mysqli mbstring zip \
     && a2enmod rewrite ssl headers \
+    && cp "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini" \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /var/www/html

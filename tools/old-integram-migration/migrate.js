@@ -8,6 +8,8 @@
 // Шаг 2 (HTTP, по токенам обеих баз):
 //   node tools/old-integram-migration/migrate.js files --old https://integram.io/r7ohr --old-token T1 \
 //        --new https://ideav.ru/r7ohr --new-token T2 [--apply] [--keep-overrides]
+// Файлы из архива старого сервера (распакован в <каталог>) — в корень нового сайта:
+//   node tools/old-integram-migration/migrate.js files-dir --src <каталог> --dst /var/www/html --db r7ohr [--apply]
 //   node tools/old-integram-migration/migrate.js menu --new https://ideav.ru/r7ohr --new-token T2 [--apply]
 // Без --apply команды только печатают, что сделали бы. Подробно — README.md рядом.
 'use strict';
@@ -48,7 +50,13 @@ function joinTails(parentVal, tails) {
 
 // Операторы шага 1; {T} — имя таблицы базы. Каждый выполняется через PREPARE, чтобы имя
 // таблицы задавалось в скрипте один раз — переменной @tbl в первой строке.
-const pad = (x) => `CONCAT(${x}, REPEAT(' ', ${VAL_LIM} - CHAR_LENGTH(${x})))`;
+// ALTER TABLE @tbl <alter>, если число индексов с именем name удовлетворяет условию cmp.
+function byIndex(name, cmp, alter) {
+    return { raw: `SELECT IF(COUNT(*) ${cmp}, CONCAT('ALTER TABLE \`', @tbl, '\` ${alter}'), 'DO 0') INTO @d
+FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = @tbl AND index_name = '${name}';
+PREPARE d FROM @d; EXECUTE d; DEALLOCATE PREPARE d;` };
+}
+const pad = (x) =>`CONCAT(${x}, REPEAT(' ', ${VAL_LIM} - CHAR_LENGTH(${x})))`;
 const MERGE_STATEMENTS = [
     // 1. Структура как у нового ядра: val -> longtext utf8mb4, индекс t_val с префиксом 127
     `ALTER TABLE {T}
@@ -56,9 +64,12 @@ const MERGE_STATEMENTS = [
   MODIFY t   int UNSIGNED NOT NULL,
   MODIFY up  int UNSIGNED NOT NULL,
   MODIFY ord int UNSIGNED NOT NULL,
-  MODIFY val longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL,
-  DROP KEY t_val,
-  ADD KEY t_val (t, val(127))`,
+  MODIFY val longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL`,
+    // Индексов может не быть (таблица со старого сервера); DROP/ADD KEY IF [NOT] EXISTS нет в MySQL.
+    // up_t ядро называет в USE INDEX.
+    byIndex('t_val', '> 0', 'DROP KEY t_val'),
+    `ALTER TABLE {T} ADD KEY t_val (t, val(127))`,
+    byIndex('up_t', '= 0', 'ADD KEY up_t (up, t)'),
     // 2. Хвосты (t = 0) — в val родителя; каждый кусок, кроме последнего, добивается пробелами до 127
     `UPDATE {T} a
 JOIN (
@@ -105,7 +116,7 @@ function buildMergeSql(db) {
 -- склейка возвращает их, иначе слова на стыках кусков слипаются. Повторный прогон ничего не меняет.
 SET SESSION group_concat_max_len = 16777216;
 
-${MERGE_STATEMENTS.map(prepared).join('\n\n')}
+${MERGE_STATEMENTS.map((s) => (s.raw || prepared(s))).join('\n\n')}
 
 -- (необязательно) переименовать таблицу, как в новой схеме:
 -- RENAME TABLE \`${db}\` TO \`r1\`;
@@ -343,6 +354,52 @@ async function copyFiles({ src, dst, commonTemplates, keepOverrides = false, app
     return report;
 }
 
+// Те же файлы, но из каталога: src — распакованный архив корня старого сайта
+// (templates/custom/<db>, download/<db>), dst — корень нового сайта. Для локальной установки,
+// где старый сервер доступен только дампом и архивом. Существующие файлы перезаписываются.
+function copyDirFiles({ src, dst, db, commonTemplates, keepOverrides = false, apply = true, log = console.log }) {
+    const common = new Set(commonTemplates || repoTemplates());
+    const report = { copied: [], skipped: [], patched: [] };
+    const roots = [['templates', `templates/custom/${db}`], ['download', `download/${db}`]]
+        .filter(([, rel]) => fs.existsSync(path.join(src, rel)));
+    if (!roots.length) throw new Error(`В ${src} нет ни templates/custom/${db}, ни download/${db}`);
+    for (const [root, base] of roots) {
+        const walk = (rel) => {
+            for (const name of fs.readdirSync(path.join(src, base, rel)).sort()) {
+                const relName = rel ? rel + '/' + name : name;
+                const where = `${base}/${relName}`;
+                const from = path.join(src, base, relName);
+                if (fs.statSync(from).isDirectory()) {
+                    if (!rel && SERVICE_DIRS.includes(name)) { report.skipped.push({ path: where, why: 'служебный каталог' }); continue; }
+                    walk(relName);
+                    continue;
+                }
+                if (root === 'templates' && !rel && common.has(name) && !keepOverrides) {
+                    report.skipped.push({ path: where, why: 'перекрыл бы общий шаблон нового ядра' });
+                    log(`пропущен ${where}: перекрыл бы общий шаблон нового ядра`);
+                    continue;
+                }
+                let data = fs.readFileSync(from);
+                const patched = root === 'templates' ? withJquery(name, data) : null;
+                if (patched) {
+                    data = patched;
+                    report.patched.push({ path: where });
+                    log(`${where}: шаблон на jQuery — дописано подключение jQuery`);
+                }
+                if (apply) {
+                    const to = path.join(dst, base, relName);
+                    fs.mkdirSync(path.dirname(to), { recursive: true });
+                    fs.writeFileSync(to, data);
+                }
+                report.copied.push({ path: where });
+                log(`${apply ? 'скопирован' : 'будет скопирован'} ${where}`);
+            }
+        };
+        walk('');
+    }
+    return report;
+}
+
 // ---------------------------------------------------------------- меню
 
 // Эталонные запросы меню нового ядра (docs/integram-app-workflow.md §5.9.3; так же устроены в
@@ -514,17 +571,23 @@ async function main(argv) {
             console.log(`Файлов: ${r.copied.length}, пропущено: ${r.skipped.length}${a.apply ? '' : ' (пробный прогон, для записи — --apply)'}`);
             return;
         }
+        case 'files-dir': {
+            need('src', 'dst', 'db');
+            const r = copyDirFiles({ src: a.src, dst: a.dst, db: a.db, keepOverrides: !!a['keep-overrides'], apply: !!a.apply });
+            console.log(`Файлов: ${r.copied.length}, пропущено: ${r.skipped.length}${a.apply ? '' : ' (пробный прогон, для записи — --apply)'}`);
+            return;
+        }
         case 'menu':
             need('new', 'new-token');
             await fixMenu({ client: new Client({ base: a.new, token: a['new-token'] }), apply: !!a.apply });
             if (!a.apply) console.log('(пробный прогон, для записи — --apply)');
             return;
         default:
-            console.log('Команды: sql --db <база> | transfer --db <база> [--src <источник>] [--backup <копия>] [--apply] |files --old <url> --old-token <t> --new <url> --new-token <t> [--apply] [--keep-overrides] | menu --new <url> --new-token <t> [--apply]');
+            console.log('Команды: sql --db <база> | transfer --db <база> [--src <источник>] [--backup <копия>] [--apply] |files --old <url> --old-token <t> --new <url> --new-token <t> [--apply] [--keep-overrides] | files-dir --src <каталог> --dst <корень сайта> --db <база> [--apply] [--keep-overrides] | menu --new <url> --new-token <t> [--apply]');
     }
 }
 
-module.exports = { VAL_LIM, joinTails, buildMergeSql, buildTransferSql, Client, parseDirListing, copyFiles, planReportColumns, planMenuReport, fixMenu, MENU_REFERENCE, MENU_REPORTS };
+module.exports = { VAL_LIM, joinTails, buildMergeSql, buildTransferSql, Client, parseDirListing, copyFiles, copyDirFiles, planReportColumns, planMenuReport, fixMenu, MENU_REFERENCE, MENU_REPORTS };
 
 if (require.main === module) {
     main(process.argv.slice(2)).catch((e) => { console.error(e.message); process.exit(1); });
