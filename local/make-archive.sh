@@ -27,6 +27,8 @@ include=(
     Dockerfile compose.yaml .dockerignore .env.docker.example
     docker
     scripts/install-local-docker.sh
+    scripts/import-old-integram.sh
+    tools/old-integram-migration
     build.sh
     local
 )
@@ -39,6 +41,8 @@ exclude=(
     --exclude='*sportzania*'
     --exclude='*xcom*'
     --exclude=download/ball
+    --exclude='templates/db134175692*'
+    --exclude='download/db134175692*'
     --exclude=docker/certs
     --exclude=.env
     --exclude=.env.local
@@ -61,14 +65,14 @@ tar "${exclude[@]}" -cf - "${include[@]}" | tar -xf - -C "$stage"
 #    общие файлы репозитория (start.html, js/app.js) не трогаем.
 cp "$root/local/overrides/local-install.js" "$stage/js/local-install.js"
 if ! grep -q 'js/local-install.js' "$stage/start.html"; then
-    sed -i -E 's#(<script src="js/app\.js"[^>]*></script>)#\1\n    <script src="js/local-install.js"></script>#' "$stage/start.html"
+    sed -i -E 's#(<script src="js/app\.js(\?[^"]*)?"[^>]*></script>)#\1\n    <script src="js/local-install.js"></script>#' "$stage/start.html"
 fi
 grep -q 'js/local-install.js' "$stage/start.html" \
     || { echo "ОШИБКА: не удалось подключить local-install.js в start.html" >&2; exit 1; }
 
 # 3) Проверить staging на утечку данных другого заказчика.
 listing="$(cd "$stage" && find . -type f | sed 's#^\./##')"
-if leak="$(printf '%s\n' "$listing" | grep -Ei 'atex|sportzania|xcom|(^|/)ball(/|$)' || true)"; [ -n "$leak" ]; then
+if leak="$(printf '%s\n' "$listing" | grep -Ei 'atex|sportzania|xcom|db134175692|(^|/)ball(/|$)' || true)"; [ -n "$leak" ]; then
     echo "ОШИБКА: в архив попали данные другого заказчика:" >&2
     printf '%s\n' "$leak" >&2
     exit 1
@@ -91,7 +95,7 @@ echo "  файлов в архиве: $count"
 echo "  размер:          $size"
 echo
 echo "Проверка (данных других заказчиков быть не должно):"
-tar -tzf "$out" | grep -Ei 'atex|sportzania|xcom|(^|/)ball(/|$)' && echo "  ВНИМАНИЕ: найдено!" || echo "  чисто ✓"
+tar -tzf "$out" | grep -Ei 'atex|sportzania|xcom|db134175692|(^|/)ball(/|$)' && echo "  ВНИМАНИЕ: найдено!" || echo "  чисто ✓"
 echo
 echo "Отправляйте заказчику: $out"
 echo "Внутри — local/README.md, с него начинать установку."
