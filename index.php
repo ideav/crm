@@ -13833,6 +13833,8 @@ function ApplyMNew($id, $up, $files)
 				$base_typ = $row["t"];
 				$has_reqs = strlen($row["id"]);
 				$unique = $row["ord"];	# Ord=1 means the Obj must be unique
+				# #5220: число в NUMBER/SIGNED — до вставки и до подстановки значений по умолчанию
+				Number_check($id, isset($GLOBALS["basics"][$base_typ]) ? $GLOBALS["basics"][$base_typ] : "", $_REQUEST);
 			    do{
 			        $req_list[$row["id"]] = $row["reqt"];
 			        if(!isset($_REQUEST["t".$row["id"]]) && ($GLOBALS["basics"][$row["base"]] !== "BUTTON")){
