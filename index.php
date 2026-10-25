@@ -5519,14 +5519,30 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 			if((int)$limits[0] >= 0)
 				$rec_limit = "LIMIT ".(int)(isset($limits[1]) ? $limits[1] : $limits[0]);
 		}
+		# RECBOTH=1 — walk the edge in both directions (outgoing+incoming links,
+		# or down the tree AND up to parents). Without it the generated SQL is
+		# byte-identical to the one-way legacy query.
+		$recboth = isset($_REQUEST["RECBOTH"]);
+		$ref_sel = $recboth ? "CASE WHEN ref.t=c.id THEN ref.up ELSE ref.t END id" : "ref.up id";
+		$ref_join = "c.id=ref.t" . ($recboth ? " OR c.id=ref.up" : "");
+		# Сосед обязан быть объектом того же термина, иначе за связь принимается
+		# строка-значение, у которой val случайно совпал с номером реквизита
+		# (односторонний подъём этому классу коллизии не подвержен — там сосед
+		# всегда ref.up строки, у которой ref.t=c.id).
+		$ref_guard = $recboth ? " AND EXISTS(SELECT 1 FROM $z g WHERE g.id = (CASE WHEN ref.t=c.id THEN ref.up ELSE ref.t END) AND g.t=$typ)" : "";
+		$dep_sel = $recboth ? "CASE WHEN c.id=ref.up THEN ref.id ELSE ref.up END id" : "ref.id id";
+		$dep_join = "c.id=ref.up" . ($recboth ? " OR c.id=ref.id" : "");
+		# В дереве guard отсекает корневой сентинел (up=1, t=1≠$typ): без него подъём
+		# до верхнего уровня расползается по всему термину.
+		$dep_guard = $recboth ? " AND EXISTS(SELECT 1 FROM $z g WHERE g.id = (CASE WHEN c.id=ref.up THEN ref.id ELSE ref.up END) AND g.t=$typ)" : "";
 		if(isset($GLOBALS["STORED_REPS"][$id]["references"][$typ][$typ])) // This is a reference attribute
     		$GLOBALS["STORED_REPS"][$id]["sql"] = " WITH RECURSIVE c AS (SELECT id, 0 t FROM $z WHERE t=$typ AND up!=0 AND t!=up $cond"
-                    ."  UNION SELECT ref.up id, ref.t FROM $z ref INNER JOIN c ON c.id=ref.t WHERE ref.val='"
-                                .$GLOBALS["STORED_REPS"][$id]["references"][$typ][$typ]."' $rec_limit)"
+                    ."  UNION SELECT ".$ref_sel.", ref.t FROM $z ref INNER JOIN c ON ".$ref_join." WHERE ref.val='"
+                                .$GLOBALS["STORED_REPS"][$id]["references"][$typ][$typ]."'".$ref_guard." $rec_limit)"
                     ." SELECT DISTINCT id $name FROM c";
         else    // This is a dependent table items
     		$GLOBALS["STORED_REPS"][$id]["sql"] = " WITH RECURSIVE c AS (SELECT id, 0 t FROM $z WHERE t=$typ AND up!=0 AND t!=up AND val!='' $cond"
-                    ."  UNION SELECT ref.id id, ref.t FROM $z ref INNER JOIN c ON c.id=ref.up WHERE ref.t=$typ $rec_limit)"
+                    ."  UNION SELECT ".$dep_sel.", ref.t FROM $z ref INNER JOIN c ON ".$dep_join." WHERE ref.t=$typ".$dep_guard." $rec_limit)"
                     ." SELECT DISTINCT id $name FROM c";
         trace("RECURSIVE ".$GLOBALS["STORED_REPS"][$id]["sql"]);
         mywrite("\r\n".$GLOBALS["STORED_REPS"][$id]["sql"]);
