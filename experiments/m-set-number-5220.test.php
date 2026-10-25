@@ -161,6 +161,36 @@ foreach(array(NUM_TYPE => "NUMBER", SIGNED_TYPE => "SIGNED") as $typ => $name){
     ok($r["ok"] && $GLOBALS["CHANGES"] == array(array("insert", 20077, 10213, 15)), "число в пустое поле — вставлено", shown(array($r, $GLOBALS["CHANGES"])));
 }
 
+# Число так, как его отдают Excel, Word и сайты: другие пробелы, минусы, смешанные разделители.
+echo "варианты записи числа\n";
+$u = function($cp){ return mb_chr($cp, "UTF-8"); };
+$variants = array(
+    "узкий неразрывный U+202F"      => array("4".$u(0x202F)."200".$u(0x202F)."000", 4200000),
+    "тонкий пробел U+2009"          => array("4".$u(0x2009)."200".$u(0x2009)."000", 4200000),
+    "цифровой пробел U+2007"        => array("4".$u(0x2007)."200".$u(0x2007)."000", 4200000),
+    "таб и перевод строки по краям" => array("\t4200000\r\n", 4200000),
+    "BOM и нулевая ширина"          => array($u(0xFEFF)."42".$u(0x200B)."00000", 4200000),
+    "минус U+2212"                  => array($u(0x2212)."7", -7),
+    "тире U+2013 как минус"         => array($u(0x2013)."7", -7),
+    "апостроф 4'200'000"            => array("4'200'000", 4200000),
+    "европейский 4.200.000,00"      => array("4.200.000,00", 4200000),
+    "американский 4,200,000.00"     => array("4,200,000.00", 4200000),
+);
+foreach($variants as $name => $case){
+    $r = scene(NUM_TYPE, "3800000", $case[0]);
+    ok($r["ok"] && $GLOBALS["CHANGES"] == array(array("update_val", 20080, $case[1])), "NUMBER, $name → ".$case[1], shown(array($r, $GLOBALS["CHANGES"])));
+}
+$r = scene(SIGNED_TYPE, "1", "1.234,56");
+ok($r["ok"] && $GLOBALS["CHANGES"] == array(array("update_val", 20080, 1234.56)), "SIGNED «1.234,56» → 1234.56", shown(array($r, $GLOBALS["CHANGES"])));
+$r = scene(SIGNED_TYPE, "1", "1,234.56");
+ok($r["ok"] && $GLOBALS["CHANGES"] == array(array("update_val", 20080, 1234.56)), "SIGNED «1,234.56» → 1234.56", shown(array($r, $GLOBALS["CHANGES"])));
+$r = scene(SIGNED_TYPE, "1", "1,234");
+ok($r["ok"] && $GLOBALS["CHANGES"] == array(array("update_val", 20080, 1.234)), "SIGNED «1,234» — запятая десятичная, 1.234", shown(array($r, $GLOBALS["CHANGES"])));
+foreach(array("1,2.5", "1.23,4.5", "12'34", "15%", "(100)", "'123", $u(0xA0)) as $bad){
+    $r = scene(SIGNED_TYPE, "1", $bad);
+    ok(isNumberError($r) && $GLOBALS["CHANGES"] === array(), "SIGNED ".shown($bad)." — не число, 400", shown(array($r, $GLOBALS["CHANGES"])));
+}
+
 $r = scene(SIGNED_TYPE, "1", "2,5");
 ok($r["ok"] && $GLOBALS["CHANGES"] == array(array("update_val", 20080, 2.5)), "SIGNED: «2,5» — 2.5", shown(array($r, $GLOBALS["CHANGES"])));
 
