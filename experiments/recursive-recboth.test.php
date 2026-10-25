@@ -64,15 +64,17 @@ expect(
 $sql = run_fragment(true, true);
 expect(
     strpos($sql, "CASE WHEN ref.t=c.id THEN ref.up ELSE ref.t END id") !== false
-        && strpos($sql, "ON c.id=ref.t OR c.id=ref.up") !== false,
-    "RECBOTH самоссылка: CASE по обоим концам ребра + исходящие в join"
+        && strpos($sql, "ON c.id=ref.t OR c.id=ref.up") !== false
+        && strpos($sql, "AND EXISTS(SELECT 1 FROM rep g WHERE g.id = (CASE WHEN ref.t=c.id THEN ref.up ELSE ref.t END) AND g.t=7)") !== false,
+    "RECBOTH самоссылка: CASE + оба направления + guard на объект термина"
 );
 
 $sql = run_fragment(false, true);
 expect(
     strpos($sql, "CASE WHEN c.id=ref.up THEN ref.id ELSE ref.up END id") !== false
-        && strpos($sql, "ON c.id=ref.up OR c.id=ref.id") !== false,
-    "RECBOTH дерево: CASE вниз и вверх + оба направления в join"
+        && strpos($sql, "ON c.id=ref.up OR c.id=ref.id") !== false
+        && strpos($sql, "AND EXISTS(SELECT 1 FROM rep g WHERE g.id = (CASE WHEN c.id=ref.up THEN ref.id ELSE ref.up END) AND g.t=7)") !== false,
+    "RECBOTH дерево: CASE + оба направления + guard (корень и не-объекты мимо)"
 );
 
 exit($failures ? 1 : 0);
