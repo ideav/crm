@@ -35,6 +35,9 @@ curl -sS -H "X-Authorization: ${TOKEN}" -b "idb_${DB}=${TOKEN}" \
   "https://ideav.ru/${DB}/dir_admin/"
 # после: доступен по https://ideav.ru/download/${DB}/file.js
 # перезапись существующего: добавить -F rewrite=1
+# ГРАБЛЯ: add_path при записи учитывается только в QUERY STRING
+# (…/dir_admin/?download=1&add_path=/css); в теле POST ядро его игнорирует —
+# файл молча уедет в корень дерева. После загрузки проверяй чтением gf=.
 ```
 
 ### Создать папку / пустой файл
