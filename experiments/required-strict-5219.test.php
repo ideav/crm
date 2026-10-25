@@ -80,6 +80,7 @@ foreach(array("Required_strict", "Required_missing", "Required_check") as $name)
 	$code .= (string)core_function($coreSrc, $name);
 if(strpos($code, "function Required_check") === FALSE)
 	$code .= "function Required_check(){}\n";
+$code .= "function Number_check(){}\n";	# #5220: числовая проверка — своя мерка (m-save-number-5220)
 
 # ── Заглушки ядра ───────────────────────────────────────────────────────────────────────────
 class Died extends \Exception {

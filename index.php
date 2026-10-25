@@ -13521,6 +13521,24 @@ function RequireNumber($t, $val)
 		my_die(t9n("[RU]Значение должно быть числом[EN]Value must be a number").": t$t = ".(is_array($val) ? "array" : $val));
 	return $num;
 }
+# Issue #5220: то же правило для _m_save — проверка всех полей до первой записи, чтобы отказ
+# не оставил запись сохранённой наполовину. $base_typ — базовый тип главного значения записи.
+function Number_check($typ, $base_typ, $req)
+{
+	global $z;
+	$bases = array($typ => $base_typ);
+	$data = Exec_sql("SELECT req.id, def.t base FROM $z req JOIN $z def ON def.id=req.t WHERE req.up=$typ AND req.t!=req.up", "Get reqs' base types");
+	while($row = mysqli_fetch_array($data))
+		$bases[$row["id"]] = isset($GLOBALS["basics"][$row["base"]]) ? $GLOBALS["basics"][$row["base"]] : "";
+	foreach($bases as $t => $base)
+		if((($base === "NUMBER") || ($base === "SIGNED")) && isset($req["t$t"])){
+			$val = $req["t$t"];
+			if(!is_array($val) && !in_array($t, array(101, 102, 103, 132, 49)))
+				$val = BuiltIn($val);
+			if(is_array($val) || ($val !== ""))
+				RequireNumber($t, $val);
+		}
+}
 # Тело команды _m_set. Вынесено из switch, чтобы пакетная запись выполняла ровно этот код,
 # а не его копию: иначе набор проверок у одиночного вызова и у пакета разойдётся.
 function ApplyMSet($id, $req, $files)
@@ -14070,6 +14088,7 @@ function ApplyMSave($id, $req, $files)
 			Check_Rec_masks($id, $req);	# python2node#1008: маски строк — и на запись
 			if(!isset($req["copybtn"]))
 				Required_check($typ, $req, $files, FALSE);	# #5219: до первой записи
+			Number_check($typ, $base_typ, $req);	# #5220: число в NUMBER/SIGNED — тоже до первой записи
 			$up = $row["up"];
 			if($up > 1)
 				$arg = "F_U=$up";  # Retain this for Array elements only
