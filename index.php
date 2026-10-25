@@ -4138,9 +4138,10 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 		}
 # Get the Entities - those having others as requisites
 		if(!isset($GLOBALS["STORED_REPS"][$id]["sql"])){
+			#  AND reqs.t!=1 crucially important!
 			$sql = "SELECT distinct CASE WHEN col_def.up=0 THEN col_def.id ELSE col_def.up END typ, reqs.id req, req_refs.t refr, arr_vals.up arr, reqs.val attr
 					FROM $z rep LEFT JOIN $z col_def ON col_def.id=rep.val 
-						LEFT JOIN $z reqs ON reqs.up=CASE WHEN col_def.up=0 THEN col_def.id ELSE col_def.up END AND reqs.t!=reqs.up
+						LEFT JOIN $z reqs ON reqs.up=CASE WHEN col_def.up=0 THEN col_def.id ELSE col_def.up END AND reqs.t!=reqs.up AND reqs.t!=1
 						LEFT JOIN $z req_refs ON req_refs.id=reqs.t AND length(req_refs.val)=0
 						LEFT JOIN $z arr_vals ON arr_vals.up=reqs.t AND arr_vals.ord=1 AND reqs.t!=1
 					WHERE rep.up=$id AND rep.t=".REP_COLS." AND (req_refs.id IS NOT NULL OR arr_vals.id IS NOT NULL)
