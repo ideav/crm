@@ -13511,6 +13511,43 @@ function RequireRefId($t, $val)
 	if(is_array($val) || !preg_match('/^\s*\d*\s*$/', (string)$val))
 		OpFail(t9n("[RU]Ссылка должна быть id записи[EN]Reference must be a record id").": t$t = ".(is_array($val) ? "array" : $val));
 }
+# Issue #5220: в NUMBER/SIGNED _m_set пишет только число. Приведение (int)"abc" дало бы 0
+# поверх прежнего значения при ответе 200. Число принимается в том виде, в каком его отдают
+# Excel и текстовые редакторы: любые пробелы Unicode (неразрывный U+00A0, узкий U+202F, тонкий
+# и т.п.), табы, BOM и символы нулевой ширины выбрасываются; минус U+2212 и тире U+2013 —
+# обычный минус; апостроф между разрядами (1'000) — разделитель. Запятая — десятичный знак;
+# если есть и точка, и запятая, десятичный — последний из них, а другой — разделитель групп
+# по три цифры (1.234,56 и 1,234.56). Возвращает число строкой без разделителей.
+function RequireNumber($t, $val)
+{
+	$num = is_array($val) ? "" : (string)preg_replace('/[\s\p{Z}\x{200B}-\x{200D}\x{2060}\x{FEFF}]+/u', "", (string)$val);
+	$num = (string)preg_replace('/[\x{2212}\x{2013}]/u', "-", $num);
+	$num = (string)preg_replace("/(?<=\\d)['\x{2019}](?=\\d{3}(?!\\d))/u", "", $num);
+	if(preg_match('/^[+-]?\d{1,3}(?:([.,])\d{3})*(?!\1)[.,]\d*$/', $num, $m) && isset($m[1]) && ($m[1] !== ""))
+		$num = str_replace($m[1], "", $num);	# 1.234,56 / 1,234.56: разделитель групп — прочь
+	$num = str_replace(",", ".", $num);
+	if(!is_numeric($num))
+		my_die(t9n("[RU]Значение должно быть числом[EN]Value must be a number").": t$t = ".(is_array($val) ? "array" : $val));
+	return $num;
+}
+# Issue #5220: то же правило для _m_save — проверка всех полей до первой записи, чтобы отказ
+# не оставил запись сохранённой наполовину. $base_typ — базовый тип главного значения записи.
+function Number_check($typ, $base_typ, $req)
+{
+	global $z;
+	$bases = array($typ => $base_typ);
+	$data = Exec_sql("SELECT req.id, def.t base FROM $z req JOIN $z def ON def.id=req.t WHERE req.up=$typ AND req.t!=req.up", "Get reqs' base types");
+	while($row = mysqli_fetch_array($data))
+		$bases[$row["id"]] = isset($GLOBALS["basics"][$row["base"]]) ? $GLOBALS["basics"][$row["base"]] : "";
+	foreach($bases as $t => $base)
+		if((($base === "NUMBER") || ($base === "SIGNED")) && isset($req["t$t"])){
+			$val = $req["t$t"];
+			if(!is_array($val) && !in_array($t, array(101, 102, 103, 132, 49)))
+				$val = BuiltIn($val);
+			if(is_array($val) || ($val !== ""))
+				RequireNumber($t, $val);
+		}
+}
 # Тело команды _m_set. Вынесено из switch, чтобы пакетная запись выполняла ровно этот код,
 # а не его копию: иначе набор проверок у одиночного вызова и у пакета разойдётся.
 function ApplyMSet($id, $req, $files)
@@ -13596,9 +13633,9 @@ function ApplyMSet($id, $req, $files)
 							if($t == PASSWORD) // Encrypt the password
         						$val = Pwd_hash($val);
         					elseif(($GLOBALS["REV_BT"][$row["t"]] == "NUMBER") && ($val != 0))
-        						$val = $val === "" ? "" : (int)$val;
+        						$val = $val === "" ? "" : (int)RequireNumber($t, $val);
         					elseif(($GLOBALS["REV_BT"][$row["t"]] == "SIGNED") && ($val != 0))
-        						$val = $val === "" ? "" : (double)str_replace(",",".",$val);
+        						$val = $val === "" ? "" : (double)RequireNumber($t, $val);
         					else
         						$val = Format_Val($row["t"], $val);
         					if($cur_id){ # The Req exists
@@ -13805,6 +13842,8 @@ function ApplyMNew($id, $up, $files)
 				$base_typ = $row["t"];
 				$has_reqs = strlen($row["id"]);
 				$unique = $row["ord"];	# Ord=1 means the Obj must be unique
+				# #5220: число в NUMBER/SIGNED — до вставки и до подстановки значений по умолчанию
+				Number_check($id, isset($GLOBALS["basics"][$base_typ]) ? $GLOBALS["basics"][$base_typ] : "", $_REQUEST);
 			    do{
 			        $req_list[$row["id"]] = $row["reqt"];
 			        if(!isset($_REQUEST["t".$row["id"]]) && ($GLOBALS["basics"][$row["base"]] !== "BUTTON")){
@@ -14060,6 +14099,7 @@ function ApplyMSave($id, $req, $files)
 			Check_Rec_masks($id, $req);	# python2node#1008: маски строк — и на запись
 			if(!isset($req["copybtn"]))
 				Required_check($typ, $req, $files, FALSE);	# #5219: до первой записи
+			Number_check($typ, $base_typ, $req);	# #5220: число в NUMBER/SIGNED — тоже до первой записи
 			$up = $row["up"];
 			if($up > 1)
 				$arg = "F_U=$up";  # Retain this for Array elements only
