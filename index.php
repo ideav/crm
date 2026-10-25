@@ -13511,6 +13511,16 @@ function RequireRefId($t, $val)
 	if(is_array($val) || !preg_match('/^\s*\d*\s*$/', (string)$val))
 		OpFail(t9n("[RU]Ссылка должна быть id записи[EN]Reference must be a record id").": t$t = ".(is_array($val) ? "array" : $val));
 }
+# Issue #5220: в NUMBER/SIGNED _m_set пишет только число. Приведение (int)"abc" дало бы 0
+# поверх прежнего значения при ответе 200. Пробелы (и неразрывные) — разделители разрядов,
+# запятая — десятичный знак. Возвращает число строкой без разделителей.
+function RequireNumber($t, $val)
+{
+	$num = is_array($val) ? "" : str_replace(",", ".", str_replace(array(" ", chr(0xC2).chr(0xA0)), "", (string)$val));
+	if(!is_numeric($num))
+		my_die(t9n("[RU]Значение должно быть числом[EN]Value must be a number").": t$t = ".(is_array($val) ? "array" : $val));
+	return $num;
+}
 # Тело команды _m_set. Вынесено из switch, чтобы пакетная запись выполняла ровно этот код,
 # а не его копию: иначе набор проверок у одиночного вызова и у пакета разойдётся.
 function ApplyMSet($id, $req, $files)
@@ -13596,9 +13606,9 @@ function ApplyMSet($id, $req, $files)
 							if($t == PASSWORD) // Encrypt the password
         						$val = Pwd_hash($val);
         					elseif(($GLOBALS["REV_BT"][$row["t"]] == "NUMBER") && ($val != 0))
-        						$val = $val === "" ? "" : (int)$val;
+        						$val = $val === "" ? "" : (int)RequireNumber($t, $val);
         					elseif(($GLOBALS["REV_BT"][$row["t"]] == "SIGNED") && ($val != 0))
-        						$val = $val === "" ? "" : (double)str_replace(",",".",$val);
+        						$val = $val === "" ? "" : (double)RequireNumber($t, $val);
         					else
         						$val = Format_Val($row["t"], $val);
         					if($cur_id){ # The Req exists
