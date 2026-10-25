@@ -6,6 +6,8 @@
 потолок ожидания 30 с, «насыщение» = два подряд отказа соединений).
 
 Итоговые цифры: [results.md](results.md) (сводка) и [results.json](results.json) (сырые).
+Графики к статье — [load-charts.html](load-charts.html); калькулятор подбора конфигурации
+и расчёта параметров системы — [sizing.html](sizing.html) (issue #5283).
 Сводка выводов и разбор инцидента — в [issue #5267](https://github.com/ideav/crm/issues/5267).
 
 ## Повторение на своей базе
