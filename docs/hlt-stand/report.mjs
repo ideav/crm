@@ -1,4 +1,6 @@
 // results.json -> markdown tables for issue #5267
+// ВНИМАНИЕ: сданный results.md содержит ручные правки после генерации (шапка «Замер»,
+// раздел «Дочер 25.10») — полный перезапуск report.mjs их затрёт.
 import fs from 'fs';
 const R = JSON.parse(fs.readFileSync('results.json', 'utf8'));
 const get = (s, t, th) => R.find(r => r.scenario === s && r.table === t && r.threads === th);
@@ -14,28 +16,38 @@ lines.push(`Замер: 24–25.10.2026, база https://ideav.ru/hlt/. Жел�
 lines.push('Формат: `rps`/`p95,мс` при 5 · 25 · 50 потоках. ⚠️ — ≥20 % запросов ячейки с ошибками. «нас.» — точка насыщения (два подряд отказа соединений, выше не поднимали). Потолок ожидания — 30 с.');
 lines.push('');
 
-for (const [fam, scen] of [
-  ['Выборки (п.3): 10 полей из 1/3/5 таблиц', ['sel1', 'sel3', 'sel5']],
-  ['Агрегация (п.4): COUNT+SUM+AVG по ~100× объёму выборки', ['agg1', 'agg3', 'agg5']],
-]) {
+// Один сценарий — одна колонка: у строки данных столько же ячеек, сколько в шапке,
+// иначе GFM-рендер молча отбрасывает лишние (issue #5279 — раньше три сценария группы
+// склеивались в одну ячейку, escape '\|' в шаблонной строке съедался JS, и колонки
+// разъезжались).
+const FAMS = [
+  ['Выборки (п.3): 10 полей из 1/3/5 таблиц', { sel1: '1 таблица', sel3: '3 таблицы (JOIN)', sel5: '5 таблиц (JOIN)' }],
+  ['Агрегация (п.4): COUNT+SUM+AVG по ~100× объёму выборки', { agg1: '1 таблица', agg3: '3 таблицы (JOIN)', agg5: '5 таблиц (JOIN)' }],
+];
+for (const [fam, scen] of FAMS) {
   lines.push(`## ${fam}`);
   lines.push('');
-  lines.push('| таблица | 10 строк: 5·25·50 | 100: 5·25·50 | 500: 5·25·50 | 5000: 5·25 |');
-  lines.push('|---|---|---|---|---|');
-  for (const t of TABLES) {
-    const g5000 = scen.map(s => `${cell(get(`${s}_5000`, t, 5))} · ${cell(get(`${s}_5000`, t, 25))}`).join(' · ');
-    lines.push(`| ${t} | ${scen.map(s => trio(`${s}_10`, t)).join(' \| ')} | ${scen.map(s => trio(`${s}_100`, t)).join(' \| ')} | ${scen.map(s => trio(`${s}_500`, t)).join(' \| ')} | ${g5000} |`);
+  for (const [s, label] of Object.entries(scen)) {
+    lines.push(`### ${s} — ${label}`);
+    lines.push('');
+    lines.push('| таблица | 10 строк: 5·25·50 | 100: 5·25·50 | 500: 5·25·50 | 5000: 5·25 |');
+    lines.push('|---|---|---|---|---|');
+    for (const t of TABLES) {
+      lines.push(`| ${t} | ${trio(`${s}_10`, t)} | ${trio(`${s}_100`, t)} | ${trio(`${s}_500`, t)} | ${cell(get(`${s}_5000`, t, 5))} · ${cell(get(`${s}_5000`, t, 25))} |`);
+    }
+    lines.push('');
   }
-  lines.push('');
 }
 
 lines.push('## Срезы миллионных таблиц (×1 поток): агрегат за «день/неделю/месяц»');
+lines.push('');
+lines.push('«>30 с» — обе попытки вышли за потолок 30 с: фактическое время не измерено, известна нижняя граница.');
 lines.push('');
 lines.push('| таблица | вход | agg1 (1 табл) | agg3 (3 табл) | agg5 (5 табл) |');
 lines.push('|---|---|---|---|---|');
 for (const t of ['T_1M_W12', 'T_1M_W45']) {
   for (const sp of ['10k', '50k', '100k']) {
-    lines.push(`| ${t} | ${sp} строк | ${['agg1', 'agg3', 'agg5'].map(q => sec(get(`${q}_${sp}`, t, 1))).join(' \| ')} |`);
+    lines.push(`| ${t} | ${sp} строк | ${['agg1', 'agg3', 'agg5'].map(q => sec(get(`${q}_${sp}`, t, 1))).join(' | ')} |`);
   }
 }
 lines.push('');
