@@ -304,6 +304,7 @@ const p5 = Math.sqrt(p95(4) * p95(6));
 DATA.sel.mul = Object.fromEntries([1, 2, 4, 5, 10, 25, 50].map(t => [String(t), t === 5 ? 1 : +(p95(t) / p5).toFixed(2)]));
 DATA.sel.calm = calm.threads; DATA.sel.knee = k1; DATA.sel.plateau = Math.round(peak(R1));
 delete DATA.sel.x50;
+DATA.sel.ramp = { 100: R1.map(r => [r.threads, r.p95]), 500: R5.map(r => [r.threads, r.p95]) };  // sel1_100 и sel5_500
 // агрегат: срезы — МНК по партии E (a — с при нулевом срезе, b — с на тысячу строк среза), вся таблица — часть B
 const fit = pts => {
   const n = pts.length, sx = pts.reduce((s, p) => s + p[0], 0), sy = pts.reduce((s, p) => s + p[1], 0);

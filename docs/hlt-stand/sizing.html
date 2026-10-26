@@ -86,8 +86,8 @@
     <select id="width"><option value="W12">12 реквизитов</option><option value="W45">45 реквизитов</option></select>
   </label>
   <label id="lw3" title="Полное чтение строки кода">Строк в таблице
-    <select id="nrows"><option>1000</option><option>10000</option><option>100000</option>
-    <option value="1000000">1 000 000</option><option>10000000</option></select>
+    <select id="nrows"><option value="1000">1 000</option><option value="10000">10 000</option><option value="100000">100 000</option>
+    <option value="1000000">1 000 000</option><option value="10000000">10 000 000</option></select>
   </label>
   <label id="lw4">Строк в срезе
     <select id="slice"></select>
@@ -565,7 +565,93 @@ var DATA = /*DATA-START*/
   },
   "calm": 4,
   "knee": 8,
-  "plateau": 11
+  "plateau": 11,
+  "ramp": {
+   "100": [
+    [
+     1,
+     324
+    ],
+    [
+     2,
+     368
+    ],
+    [
+     3,
+     418
+    ],
+    [
+     4,
+     466
+    ],
+    [
+     6,
+     751
+    ],
+    [
+     8,
+     916
+    ],
+    [
+     10,
+     1216
+    ],
+    [
+     15,
+     2005
+    ],
+    [
+     25,
+     3623
+    ],
+    [
+     50,
+     6958
+    ]
+   ],
+   "500": [
+    [
+     1,
+     480
+    ],
+    [
+     2,
+     544
+    ],
+    [
+     3,
+     698
+    ],
+    [
+     4,
+     681
+    ],
+    [
+     6,
+     910
+    ],
+    [
+     8,
+     1234
+    ],
+    [
+     10,
+     1546
+    ],
+    [
+     15,
+     2537
+    ],
+    [
+     25,
+     6821
+    ],
+    [
+     50,
+     9583
+    ]
+   ]
+  }
  },
  "write": {
   "add1": {
@@ -683,14 +769,14 @@ function nearestSel(S, th, e) {
     fmtMs(st[i]) + ' · модель ' + fmtMs(e.t) + ' · расхождение ' +
     Math.abs(Math.round((e.t / st[i] - 1) * 100)) + ' %';
 }
-function nearestAgg(Sk, ae) {
-  var pts = ae.fam.pts, best = pts[0], bd = 1e9;
-  pts.forEach(function (p) { var d = Math.abs(p[0] - Sk / 1000); if (d < bd) { bd = d; best = p; } });
-  return 'Ближайший замер (' + width.value + ', agg' + join.value + ', срез ' + best[0] + ' тыс.): ' +
-    best[1] + ' с · модель ' + (ae.t1 / 1000).toFixed(1) + ' с · расхождение ' +
-    Math.abs(Math.round((ae.t1 / 1000 / best[1] - 1) * 100)) + ' %';
+function nearestAgg(N, Sk, ae) {
+  var W = DATA.agg[width.value], p = null;
+  if (Sk >= N) W.whole[join.value].forEach(function (q) { if (q[0] === N) p = [q[1], 'вся таблица ' + N.toLocaleString('ru') + ' строк']; });
+  else if (N === W.refRows) W.j[join.value].pts.forEach(function (q) { if (q[0] * 1000 === Sk) p = [q[1], 'срез ' + Sk.toLocaleString('ru') + ' из ' + N.toLocaleString('ru')]; });
+  if (!p) return 'Замера ровно для этой точки нет — оценка по модели; замеры — на графике ниже.';
+  return 'Замер (' + width.value + ', agg' + join.value + ', ' + p[1] + ', ×1): ' + p[0].toFixed(1) + ' с · модель ' +
+    (ae.t1 / 1000).toFixed(1) + ' с · расхождение ' + Math.abs(Math.round((ae.t1 / 1000 / p[0] - 1) * 100)) + ' %';
 }
-
 function run() {
   var o = op.value, th = threads.value, form = '', flagTxt = '', near = '', items;
   var N = +nrows.value, cpu = Math.max(2, Math.min(CORES_LINEAR_MAX, +cores.value || 2));
@@ -715,7 +801,7 @@ function run() {
     var over = ae.t > CAP_S * 1000;
     items = [stat('один отчёт', fmtMs(ae.tc), N.toLocaleString('ru') + ' строк, ' + (Sk >= N ? 'вся таблица' : 'срез ' + Sk.toLocaleString('ru')) +
         (cpu > 2 ? ', ' + cpu + ' vCPU' : '')),
-      stat('при ×' + th + ' потоков', fmtMs(ae.t),
+      stat('при ×' + th, fmtMs(ae.t),
         ae.share > 1 ? th + ' отчётов делят ' + cpu + ' ядра — каждый ×' + ae.share.toFixed(1) : 'ядер хватает на всех'),
       stat('вердикт', over ? badge('sat', '⛔ дольше ' + CAP_S + ' с') : ae.t > 10000 ? badge('warn', '⚠ долго') : badge('ok', '✓ обслуживается'),
         over ? 'не обслуживается — уменьшите таблицу, потоки или добавьте ядер' : ae.t > 10000 ? 'для интерактива медленно; фон, отчёт по расписанию' : 'укладывается в порог ' + CAP_S + ' с')];
@@ -728,7 +814,7 @@ function run() {
     if (Sk > AGG_OK_MAX_SLICE) flagTxt = 'срез больше 100 тыс. — вне измеренного диапазона, допускайте ×1.5–2';
     if (N > DATA.agg[width.value].refRows) flagTxt = (flagTxt ? flagTxt + '; ' : '') +
       'таблица больше измеренной — экстраполяция по строкам, линейность по ядрам проверена до 700 млн (habr 900308)';
-    near = nearestAgg(Sk, ae);
+    near = nearestAgg(N, Sk, ae);
     drawModel('agg', Sk, th);
   } else {
     var w = DATA.write[o === 'batch' ? 'batch' : 'add1'];
@@ -755,116 +841,113 @@ function run() {
   $('nearest').innerHTML = near;
 }
 
-// ——— динамический график «модель и замеры» ———
-var M = { l: 62, r: 28, t: 24, b: 46 }, MW = 720, MH = 330;
-function niceTicks(max) {
-  var p = Math.pow(10, Math.floor(Math.log(max / 4) / Math.LN10));
-  var c = [1, 2, 5, 10].map(function (m) { return m * p; });
-  for (var i = 0; i < c.length; i++) if (c[i] >= max / 4) return c[i];
-  return c[3];
+// ——— динамический график «где вы на кривой» ———
+// Выборка: время ответа от числа потоков; отчёт: время от размера таблицы. Обе оси числовые,
+// X логарифмическая; точки — замеры, линия — модель, кольцо — текущий выбор.
+var M = { l: 78, r: 24, t: 18, b: 56 }, MW = 720, MH = 340;
+function fmtRows(n) { return n >= 1e6 ? (n / 1e6) + ' млн' : n >= 1000 ? (n / 1000) + ' тыс.' : String(n); }
+function niceTop(max) {
+  var p = Math.pow(10, Math.floor(Math.log(max) / Math.LN10));
+  var c = [1, 2, 2.5, 5, 10];
+  for (var i = 0; i < c.length; i++) if (c[i] * p >= max) return c[i] * p;
+  return 10 * p;
 }
-function fmtAxis(v) { return v >= 1000 ? (v / 1000) + ' с' : Math.round(v) + ' мс'; }
 function drawModel(kind, curS, th) {
-  var plot = $('mplot');
-  var pts, modelFn, xs, col, note;
+  var xs, model, model1 = null, pts, xLabel, cur, title, note, col = '#3987e5';
   if (kind === 'sel') {
-    pts = DATA.sel.pts; xs = SEL_SLICES; col = '#3987e5';
-    modelFn = function (S) { return (SEL_FIX_S + SEL_PER_ROW_S * S) * selMul(th) * 1000; };
-    note = 'точки — замеры ×5 (медианы чистых ячеек), линия — модель при ×' + th +
-      (th !== '5' ? ', пунктир — модель ×5' : '');
-    $('mtitle').textContent = 'Выборка (sel' + join.value + '): модель и замеры, p95';
+    xs = SEL_THREADS.map(Number);
+    model = function (t) { return (SEL_FIX_S + SEL_PER_ROW_S * curS) * selMul(String(t)) * 1000; };
+    var r = DATA.sel.ramp[String(curS)];
+    pts = r && ((curS === 100 && join.value === '1') || (curS === 500 && join.value === '5')) ? r : [];
+    cur = +th; xLabel = 'Параллельных потоков (клиентов)';
+    title = 'Выборка ' + curS + ' строк: время ответа p95 от числа потоков';
+    note = 'линия — модель для выбранного среза, точки — лесенка 26.10' + (pts.length ? '' : ' (для этого среза и JOIN лесенки нет)') +
+      ', кольцо — ваш выбор';
   } else {
-    var fam = DATA.agg[width.value].j[join.value];
-    pts = fam.pts; xs = AGG_SLICES; col = '#d95926';
-    var aRow = fam.a / DATA.agg[width.value].refRows;
-    modelFn = function (S) { return aggEstimate(+nrows.value, S, '1', 2).t1; };  // мс, ×1 поток, 2 vCPU
-    note = 'точки — замер 26.10 на таблице ' + DATA.agg[width.value].refRows.toLocaleString('ru') + ' строк (медианы), линия — модель для выбранного размера таблицы';
-    $('mtitle').textContent = 'Отчёт-агрегат (agg' + join.value + ', ' + width.value + '): модель и замеры ×1';
+    var W = DATA.agg[width.value], raw = +slice.value;
+    xs = [1000, 10000, 100000, 1000000, 10000000];
+    var sl = function (n) { return raw < 0 ? n : Math.min(raw, n); };
+    model1 = function (n) { return aggEstimate(n, sl(n), '1', +cores.value || 2).tc; };
+    model = function (n) { return aggEstimate(n, sl(n), th, +cores.value || 2).t; };
+    pts = raw < 0 ? W.whole[join.value].map(function (p) { return [p[0], p[1] * 1000]; }) : [];
+    cur = +nrows.value; xLabel = 'Строк в таблице'; col = '#d95926';
+    title = 'Отчёт agg' + join.value + ' (' + width.value + ', ' + (raw < 0 ? 'вся таблица' : 'срез ' + fmtRows(raw)) + '): время от размера таблицы';
+    note = 'сплошная — один отчёт, пунктир — при ×' + th + ' потоков; точки — замеры 26.10 (×1)' +
+      (raw < 0 ? '' : ' есть только для всей таблицы') + '; кольцо — ваш выбор';
   }
-  var vals = [];
-  xs.forEach(function (S) { vals.push(modelFn(S)); });
-  pts.forEach(function (p) { vals.push(p[1]); });
-  var vmax = niceTicks(Math.max.apply(null, vals) * 1.06);
-  var X = function (i) { return M.l + i * (MW - M.l - M.r) / (xs.length - 1); };
-  var Y = function (v) { return MH - M.b - v / vmax * (MH - M.t - M.b); };
-  var g = '';
-  for (var v = 0; v <= vmax + 1e-9; v += vmax / 4) {
-    var yy = Y(v);
-    g += '<line x1="' + M.l + '" y1="' + yy.toFixed(1) + '" x2="' + (MW - M.r) + '" y2="' + yy.toFixed(1) +
-      '" stroke="#1e293b" stroke-width="1"/><text x="' + (M.l - 8) + '" y="' + (yy + 4).toFixed(1) +
-      '" text-anchor="end" font-size="12" fill="#64748b">' + fmtAxis(v) + '</text>';
+  var vals = xs.map(model).concat(pts.map(function (p) { return p[1]; }));
+  if (model1) vals = vals.concat(xs.map(model1));
+  var x0 = xs[0], x1 = xs[xs.length - 1], L = function (v) { return Math.log(v) / Math.LN10; };
+  var X = function (v) { return M.l + (L(v) - L(x0)) / (L(x1) - L(x0)) * (MW - M.l - M.r); };
+  // у отчёта время растёт на порядки — ось Y логарифмическая, по декадам
+  var yLog = kind === 'agg', ticks = [], yTop, yBot, i;
+  if (yLog) {
+    yBot = Math.pow(10, Math.floor(L(Math.min.apply(null, vals))));
+    yTop = Math.pow(10, Math.ceil(L(Math.max.apply(null, vals))));
+    for (var d = yBot; d <= yTop * 1.0001; d *= 10) ticks.push(d);
+  } else {
+    yBot = 0; yTop = niceTop(Math.max.apply(null, vals) * 1.05);
+    for (i = 0; i <= 4; i++) ticks.push(yTop * i / 4);
   }
-  xs.forEach(function (S, i) {
-    g += '<text x="' + X(i).toFixed(1) + '" y="' + (MH - M.b + 20) + '" text-anchor="middle" font-size="12" fill="#64748b">' +
-      (S >= 1000 ? (S / 1000) + ' тыс.' : S) + '</text>';
-  });
-  g += '<text x="' + (MW / 2) + '" y="' + (MH - 8) + '" text-anchor="middle" font-size="12" fill="#94a3b8">Строк в срезе</text>';
-  if (kind === 'sel' && th !== '5') {
-    var m5 = xs.map(function (S, i) {
-      return X(i).toFixed(1) + ',' + Y((SEL_FIX_S + SEL_PER_ROW_S * S) * 1000).toFixed(1);
-    });
-    g += '<path d="M' + m5.join('L') + '" fill="none" stroke="' + col + '" stroke-width="1.5" stroke-dasharray="4 4" opacity=".6"/>';
-  }
-  var mp = xs.map(function (S, i) { return X(i).toFixed(1) + ',' + Y(modelFn(S)).toFixed(1); });
-  g += '<path d="M' + mp.join('L') + '" fill="none" stroke="' + col + '" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
-  pts.forEach(function (p) {
-    var i = xs.indexOf(p[0]);
-    if (i < 0) return;
-    g += '<circle data-pt="' + p[0] + '" cx="' + X(i).toFixed(1) + '" cy="' + Y(p[1]).toFixed(1) +
-      '" r="4.5" fill="' + col + '" stroke="#0f172a" stroke-width="2"/>';
-  });
-  var si = xs.indexOf(curS);
-  if (si >= 0) g += '<line x1="' + X(si) + '" y1="' + M.t + '" x2="' + X(si) + '" y2="' + (MH - M.b) +
-    '" stroke="#c98500" stroke-width="1" stroke-dasharray="3 3"/>';
-  plot.innerHTML = '<svg viewBox="0 0 ' + MW + ' ' + MH + '" role="img">' + g + '</svg><div class="tip" hidden></div>';
-  attachHover(plot, xs, function (i) {
-    var rows = [['модель', fmtMs(modelFn(xs[i])), col]];
-    pts.forEach(function (p) { if (p[0] === xs[i]) rows.push(['замер ×' + (kind === 'agg' ? '1' : '5'), fmtMs(p[1])]); });
-    return rows;
-  });
-  var tbl = '<summary>Таблица значений</summary><table><thead><tr><th>срез</th>';
-  xs.forEach(function (S) { tbl += '<th>' + (S >= 1000 ? (S / 1000) + ' тыс.' : S) + '</th>'; });
-  tbl += '</tr></thead><tbody><tr><td>модель</td>';
-  xs.forEach(function (S) { tbl += '<td>' + fmtMs(modelFn(S)) + '</td>'; });
-  tbl += '</tr><tr><td>замер' + (kind === 'agg' ? ' ×1 (перезамер)' : ' ×5') + '</td>';
-  xs.forEach(function (S) {
-    var p = null; pts.forEach(function (q) { if (q[0] === S) p = q; });
-    tbl += '<td>' + (p ? fmtMs(p[1]) : '—') + '</td>';
-  });
-  tbl += '</tr></tbody></table>';
-  $('mtable').innerHTML = tbl;
-}
-
-// ——— hover, как в load-charts.html ———
-function attachHover(plot, xs, rowsFn) {
-  var svg = plot.querySelector('svg'), tip = plot.querySelector('.tip');
-  var W = svg.viewBox.baseVal.width, H = svg.viewBox.baseVal.height;
-  var X = function (i) { return M.l + i * (W - M.l - M.r) / (xs.length - 1); };
-  var cross = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-  cross.setAttribute('stroke', '#475569'); cross.setAttribute('stroke-width', '1');
-  cross.setAttribute('y1', M.t); cross.setAttribute('y2', H - M.b); cross.style.display = 'none';
-  svg.appendChild(cross);
-  var idx = null;
-  function show(i) {
-    idx = i; var r = plot.getBoundingClientRect(), sx = r.width / W;
-    cross.setAttribute('x1', X(i)); cross.setAttribute('x2', X(i)); cross.style.display = '';
-    tip.hidden = false;
-    tip.innerHTML = '<div class="t">' + (xs[i] >= 1000 ? (xs[i] / 1000) + ' тыс.' : xs[i]) + ' строк</div>' +
-      rowsFn(i).map(function (rw) {
-        return '<div class="r">' + (rw[2] ? '<span class="sw" style="background:' + rw[2] + '"></span>' : '') +
-          rw[0] + '<span class="v">' + rw[1] + '</span></div>';
-      }).join('');
-    tip.style.left = Math.min(X(i) * sx + 12, r.width - tip.offsetWidth - 4) + 'px';
-    tip.style.top = '8px';
-  }
-  function hide() { idx = null; cross.style.display = 'none'; tip.hidden = true; }
-  plot.onmousemove = function (e) {
-    var r = plot.getBoundingClientRect(), x = (e.clientX - r.left) / r.width * W;
-    var best = 0, bd = 1e9;
-    xs.forEach(function (_, i) { var d = Math.abs(X(i) - x); if (d < bd) { bd = d; best = i; } });
-    if (best !== idx || tip.hidden) show(best);
+  var Y = function (v) {
+    var f = yLog ? (L(v) - L(yBot)) / (L(yTop) - L(yBot)) : v / yTop;
+    return MH - M.b - f * (MH - M.t - M.b);
   };
-  plot.onmouseleave = hide;
+  var g = '';
+  for (i = 0; i < ticks.length; i++) {
+    var v = ticks[i], yy = Y(v).toFixed(1);
+    g += '<line x1="' + M.l + '" y1="' + yy + '" x2="' + (MW - M.r) + '" y2="' + yy + '" stroke="#1e293b"/>' +
+      '<text x="' + (M.l - 8) + '" y="' + (+yy + 4) + '" text-anchor="end" font-size="12" fill="#64748b">' + (v < 1000 ? Math.round(v) + ' мс' : +(v / 1000).toFixed(1) + ' с') + '</text>';
+  }
+  xs.forEach(function (x) {
+    g += '<text x="' + X(x).toFixed(1) + '" y="' + (MH - M.b + 20) + '" text-anchor="middle" font-size="12" fill="#64748b">' +
+      (kind === 'sel' ? x : fmtRows(x)) + '</text>';
+  });
+  g += '<line x1="' + M.l + '" y1="' + (MH - M.b) + '" x2="' + (MW - M.r) + '" y2="' + (MH - M.b) + '" stroke="#475569"/>' +
+    '<text x="' + ((M.l + MW - M.r) / 2) + '" y="' + (MH - 10) + '" text-anchor="middle" font-size="12.5" fill="#94a3b8">' + xLabel + '</text>' +
+    '<text transform="translate(16 ' + ((M.t + MH - M.b) / 2) + ') rotate(-90)" text-anchor="middle" font-size="12.5" fill="#94a3b8">' +
+    (yLog ? 'Время (логарифмическая шкала)' : 'Время ответа p95') + '</text>';
+  if (CAP_S * 1000 < yTop) {
+    var yc = Y(CAP_S * 1000).toFixed(1);
+    g += '<rect x="' + M.l + '" y="' + M.t + '" width="' + (MW - M.l - M.r) + '" height="' + (yc - M.t).toFixed(1) + '" fill="#d95926" opacity=".07"/>' +
+      '<line x1="' + M.l + '" y1="' + yc + '" x2="' + (MW - M.r) + '" y2="' + yc + '" stroke="#e5794e" stroke-width="1.3"/>' +
+      '<text x="' + (M.l + 6) + '" y="' + (yc - 6) + '" font-size="11.5" fill="#e5794e">порог ' + CAP_S + ' с — выше не обслуживается</text>';
+  }
+  var path = function (fn, dash, w) {
+    var d = [], n = 40;
+    for (i = 0; i <= n; i++) {
+      var xv = Math.pow(10, L(x0) + (L(x1) - L(x0)) * i / n);
+      if (kind === 'sel') xv = Math.max(x0, Math.min(x1, xv));
+      d.push((i ? 'L' : 'M') + X(xv).toFixed(1) + ',' + Y(Math.min(fn(xv), yTop)).toFixed(1));
+    }
+    return '<path d="' + d.join('') + '" fill="none" stroke="' + col + '" stroke-width="' + w + '"' + (dash ? ' stroke-dasharray="7 5"' : '') + '/>';
+  };
+  // у выборки множитель задан на ступенях — линия по ступеням, у отчёта — гладкая модель
+  if (kind === 'sel') {
+    g += '<path d="' + xs.map(function (x, k) { return (k ? 'L' : 'M') + X(x).toFixed(1) + ',' + Y(model(x)).toFixed(1); }).join('') +
+      '" fill="none" stroke="' + col + '" stroke-width="2.2"/>';
+  } else {
+    g += path(model1, false, 2.2);
+    if (+th > 1) g += path(model, true, 2);
+  }
+  pts.forEach(function (p) {
+    g += '<circle cx="' + X(p[0]).toFixed(1) + '" cy="' + Y(Math.min(p[1], yTop)).toFixed(1) + '" r="4.5" fill="' + col + '" stroke="#0f172a" stroke-width="2">' +
+      '<title>замер: ' + (kind === 'sel' ? p[0] + ' потоков' : fmtRows(p[0]) + ' строк') + ' — ' + fmtMs(p[1]) + '</title></circle>';
+  });
+  var cy = Math.min(model(cur), yTop);
+  g += '<circle cx="' + X(cur).toFixed(1) + '" cy="' + Y(cy).toFixed(1) + '" r="8" fill="none" stroke="#c98500" stroke-width="2.5">' +
+    '<title>ваш выбор: ' + fmtMs(model(cur)) + '</title></circle>';
+  $('mtitle').textContent = title;
+  $('mnote').textContent = note;
+  $('mplot').innerHTML = '<svg viewBox="0 0 ' + MW + ' ' + MH + '" role="img" aria-label="' + title + '">' + g + '</svg>';
+  var tbl = '<summary>Таблица значений</summary><table><thead><tr><th>' + (kind === 'sel' ? 'потоков' : 'строк') + '</th><th>модель</th>' +
+    (model1 && +th > 1 ? '<th>модель ×' + th + '</th>' : '') + '<th>замер</th></tr></thead><tbody>';
+  xs.forEach(function (x) {
+    var p = null; pts.forEach(function (q) { if (q[0] === x) p = q; });
+    tbl += '<tr><td>' + (kind === 'sel' ? x : fmtRows(x)) + '</td><td>' + fmtMs(model1 ? model1(x) : model(x)) + '</td>' +
+      (model1 && +th > 1 ? '<td>' + fmtMs(model(x)) + '</td>' : '') + '<td>' + (p ? fmtMs(p[1]) : '—') + '</td></tr>';
+  });
+  $('mtable').innerHTML = tbl + '</tbody></table>';
 }
 
 [op, join, width, nrows, slice, threads].forEach(function (el) { el.addEventListener('change', rebuildOptions); });
