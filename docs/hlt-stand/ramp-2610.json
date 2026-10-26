@@ -1,0 +1,1490 @@
+[
+ {
+  "part": "A",
+  "scenario": "sel1_100",
+  "table": "T_100K_W12",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:04:20.008Z",
+  "rps": 2.95,
+  "n": 60,
+  "ok": 60,
+  "fail": 0,
+  "p50": 282,
+  "p95": 324,
+  "max": 350
+ },
+ {
+  "part": "A",
+  "scenario": "sel1_100",
+  "table": "T_100K_W12",
+  "threads": 2,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:04:45.724Z",
+  "rps": 5.08,
+  "n": 102,
+  "ok": 102,
+  "fail": 0,
+  "p50": 328,
+  "p95": 368,
+  "max": 421
+ },
+ {
+  "part": "A",
+  "scenario": "sel1_100",
+  "table": "T_100K_W12",
+  "threads": 3,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:05:11.610Z",
+  "rps": 6.54,
+  "n": 133,
+  "ok": 133,
+  "fail": 0,
+  "p50": 330,
+  "p95": 418,
+  "max": 3510
+ },
+ {
+  "part": "A",
+  "scenario": "sel1_100",
+  "table": "T_100K_W12",
+  "threads": 4,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:05:37.770Z",
+  "rps": 9.46,
+  "n": 192,
+  "ok": 192,
+  "fail": 0,
+  "p50": 349,
+  "p95": 466,
+  "max": 569
+ },
+ {
+  "part": "A",
+  "scenario": "sel1_100",
+  "table": "T_100K_W12",
+  "threads": 6,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:06:04.080Z",
+  "rps": 8.59,
+  "n": 176,
+  "ok": 176,
+  "fail": 0,
+  "p50": 530,
+  "p95": 751,
+  "max": 3668
+ },
+ {
+  "part": "A",
+  "scenario": "sel1_100",
+  "table": "T_100K_W12",
+  "threads": 8,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:06:30.594Z",
+  "rps": 10.7,
+  "n": 219,
+  "ok": 219,
+  "fail": 0,
+  "p50": 692,
+  "p95": 916,
+  "max": 993
+ },
+ {
+  "part": "A",
+  "scenario": "sel1_100",
+  "table": "T_100K_W12",
+  "threads": 10,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:06:57.559Z",
+  "rps": 10.69,
+  "n": 222,
+  "ok": 222,
+  "fail": 0,
+  "p50": 864,
+  "p95": 1216,
+  "max": 1355
+ },
+ {
+  "part": "A",
+  "scenario": "sel1_100",
+  "table": "T_100K_W12",
+  "threads": 15,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:07:25.272Z",
+  "rps": 10.07,
+  "n": 211,
+  "ok": 211,
+  "fail": 0,
+  "p50": 1462,
+  "p95": 2005,
+  "max": 2325
+ },
+ {
+  "part": "A",
+  "scenario": "sel1_100",
+  "table": "T_100K_W12",
+  "threads": 25,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:07:54.781Z",
+  "rps": 10.59,
+  "n": 225,
+  "ok": 225,
+  "fail": 0,
+  "p50": 2176,
+  "p95": 3623,
+  "max": 4604
+ },
+ {
+  "part": "A",
+  "scenario": "sel1_100",
+  "table": "T_100K_W12",
+  "threads": 50,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:08:27.434Z",
+  "rps": 10.34,
+  "n": 234,
+  "ok": 234,
+  "fail": 0,
+  "p50": 4403,
+  "p95": 6958,
+  "max": 8459
+ },
+ {
+  "part": "A",
+  "scenario": "sel5_500",
+  "table": "T_100K_W12",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:08:54.218Z",
+  "rps": 2.15,
+  "n": 44,
+  "ok": 44,
+  "fail": 0,
+  "p50": 396,
+  "p95": 480,
+  "max": 670
+ },
+ {
+  "part": "A",
+  "scenario": "sel5_500",
+  "table": "T_100K_W12",
+  "threads": 2,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:09:19.903Z",
+  "rps": 3.69,
+  "n": 74,
+  "ok": 74,
+  "fail": 0,
+  "p50": 472,
+  "p95": 544,
+  "max": 602
+ },
+ {
+  "part": "A",
+  "scenario": "sel5_500",
+  "table": "T_100K_W12",
+  "threads": 3,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:09:47.124Z",
+  "rps": 5.07,
+  "n": 109,
+  "ok": 109,
+  "fail": 0,
+  "p50": 491,
+  "p95": 698,
+  "max": 1484
+ },
+ {
+  "part": "A",
+  "scenario": "sel5_500",
+  "table": "T_100K_W12",
+  "threads": 4,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:10:14.538Z",
+  "rps": 6.56,
+  "n": 133,
+  "ok": 133,
+  "fail": 0,
+  "p50": 518,
+  "p95": 681,
+  "max": 824
+ },
+ {
+  "part": "A",
+  "scenario": "sel5_500",
+  "table": "T_100K_W12",
+  "threads": 6,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:10:41.293Z",
+  "rps": 7.6,
+  "n": 156,
+  "ok": 156,
+  "fail": 0,
+  "p50": 742,
+  "p95": 910,
+  "max": 945
+ },
+ {
+  "part": "A",
+  "scenario": "sel5_500",
+  "table": "T_100K_W12",
+  "threads": 8,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:11:08.204Z",
+  "rps": 7.86,
+  "n": 162,
+  "ok": 162,
+  "fail": 0,
+  "p50": 951,
+  "p95": 1234,
+  "max": 1998
+ },
+ {
+  "part": "A",
+  "scenario": "sel5_500",
+  "table": "T_100K_W12",
+  "threads": 10,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:11:35.690Z",
+  "rps": 7.97,
+  "n": 165,
+  "ok": 165,
+  "fail": 0,
+  "p50": 1167,
+  "p95": 1546,
+  "max": 1702
+ },
+ {
+  "part": "A",
+  "scenario": "sel5_500",
+  "table": "T_100K_W12",
+  "threads": 15,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:12:03.974Z",
+  "rps": 7.83,
+  "n": 165,
+  "ok": 165,
+  "fail": 0,
+  "p50": 1756,
+  "p95": 2537,
+  "max": 2713
+ },
+ {
+  "part": "A",
+  "scenario": "sel5_500",
+  "table": "T_100K_W12",
+  "threads": 25,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:12:33.945Z",
+  "rps": 7.06,
+  "n": 152,
+  "ok": 152,
+  "fail": 0,
+  "p50": 3123,
+  "p95": 6821,
+  "max": 8339
+ },
+ {
+  "part": "A",
+  "scenario": "sel5_500",
+  "table": "T_100K_W12",
+  "threads": 50,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:13:09.061Z",
+  "rps": 7.13,
+  "n": 167,
+  "ok": 167,
+  "fail": 0,
+  "p50": 6323,
+  "p95": 9583,
+  "max": 12809
+ },
+ {
+  "part": "B",
+  "scenario": "agg1_all",
+  "table": "T_1K_W12",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:13:19.712Z",
+  "rounds": 3,
+  "ms": [
+   265,
+   285,
+   420
+  ],
+  "median": 285
+ },
+ {
+  "part": "B",
+  "scenario": "agg3_all",
+  "table": "T_1K_W12",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:13:25.584Z",
+  "rounds": 3,
+  "ms": [
+   376,
+   395,
+   422
+  ],
+  "median": 395
+ },
+ {
+  "part": "B",
+  "scenario": "agg5_all",
+  "table": "T_1K_W12",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:13:31.579Z",
+  "rounds": 3,
+  "ms": [
+   399,
+   460,
+   468
+  ],
+  "median": 460
+ },
+ {
+  "part": "B",
+  "scenario": "agg1_all",
+  "table": "T_10K_W12",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:13:40.202Z",
+  "rounds": 3,
+  "ms": [
+   334,
+   1096,
+   2501
+  ],
+  "median": 1096
+ },
+ {
+  "part": "B",
+  "scenario": "agg3_all",
+  "table": "T_10K_W12",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:13:46.858Z",
+  "rounds": 3,
+  "ms": [
+   655,
+   659,
+   667
+  ],
+  "median": 659
+ },
+ {
+  "part": "B",
+  "scenario": "agg5_all",
+  "table": "T_10K_W12",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:13:54.373Z",
+  "rounds": 3,
+  "ms": [
+   922,
+   929,
+   1014
+  ],
+  "median": 929
+ },
+ {
+  "part": "B",
+  "scenario": "agg1_all",
+  "table": "T_100K_W12",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:14:19.210Z",
+  "rounds": 3,
+  "ms": [
+   5747,
+   7161,
+   7221
+  ],
+  "median": 7161
+ },
+ {
+  "part": "B",
+  "scenario": "agg3_all",
+  "table": "T_100K_W12",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:14:44.876Z",
+  "rounds": 3,
+  "ms": [
+   6888,
+   7001,
+   7089
+  ],
+  "median": 7001
+ },
+ {
+  "part": "B",
+  "scenario": "agg5_all",
+  "table": "T_100K_W12",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:15:18.959Z",
+  "rounds": 3,
+  "ms": [
+   9417,
+   9686,
+   10292
+  ],
+  "median": 9686
+ },
+ {
+  "part": "B",
+  "scenario": "agg1_all",
+  "table": "T_1M_W12",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:19:42.390Z",
+  "rounds": 2,
+  "ms": [
+   126543,
+   133703
+  ],
+  "median": 126543
+ },
+ {
+  "part": "B",
+  "scenario": "agg3_all",
+  "table": "T_1M_W12",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:22:44.284Z",
+  "rounds": 2,
+  "ms": [
+   86221,
+   92484
+  ],
+  "median": 86221
+ },
+ {
+  "part": "B",
+  "scenario": "agg5_all",
+  "table": "T_1M_W12",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:26:36.854Z",
+  "rounds": 2,
+  "ms": [
+   114671,
+   114775
+  ],
+  "median": 114671
+ },
+ {
+  "part": "B",
+  "scenario": "agg1_all",
+  "table": "T_1K_W45",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:26:42.520Z",
+  "rounds": 3,
+  "ms": [
+   273,
+   285,
+   347
+  ],
+  "median": 285
+ },
+ {
+  "part": "B",
+  "scenario": "agg3_all",
+  "table": "T_1K_W45",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:26:48.901Z",
+  "rounds": 3,
+  "ms": [
+   538,
+   576,
+   611
+  ],
+  "median": 576
+ },
+ {
+  "part": "B",
+  "scenario": "agg5_all",
+  "table": "T_1K_W45",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:26:57.517Z",
+  "rounds": 3,
+  "ms": [
+   639,
+   680,
+   2644
+  ],
+  "median": 680
+ },
+ {
+  "part": "B",
+  "scenario": "agg1_all",
+  "table": "T_10K_W45",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:27:04.716Z",
+  "rounds": 3,
+  "ms": [
+   426,
+   538,
+   1552
+  ],
+  "median": 538
+ },
+ {
+  "part": "B",
+  "scenario": "agg3_all",
+  "table": "T_10K_W45",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:27:14.616Z",
+  "rounds": 3,
+  "ms": [
+   1724,
+   1741,
+   1759
+  ],
+  "median": 1741
+ },
+ {
+  "part": "B",
+  "scenario": "agg5_all",
+  "table": "T_10K_W45",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:27:27.052Z",
+  "rounds": 3,
+  "ms": [
+   2507,
+   2617,
+   2645
+  ],
+  "median": 2617
+ },
+ {
+  "part": "B",
+  "scenario": "agg1_all",
+  "table": "T_100K_W45",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:28:19.330Z",
+  "rounds": 3,
+  "ms": [
+   12636,
+   15686,
+   19213
+  ],
+  "median": 15686
+ },
+ {
+  "part": "B",
+  "scenario": "agg3_all",
+  "table": "T_100K_W45",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:29:41.196Z",
+  "rounds": 3,
+  "ms": [
+   25214,
+   25403,
+   26574
+  ],
+  "median": 25403
+ },
+ {
+  "part": "B",
+  "scenario": "agg5_all",
+  "table": "T_100K_W45",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:31:33.740Z",
+  "rounds": 3,
+  "ms": [
+   34492,
+   34514,
+   38867
+  ],
+  "median": 34514
+ },
+ {
+  "part": "B",
+  "scenario": "agg1_all",
+  "table": "T_1M_W45",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:33:56.425Z",
+  "rounds": 2,
+  "ms": [
+   67722,
+   71866
+  ],
+  "median": 67722
+ },
+ {
+  "part": "B",
+  "scenario": "agg3_all",
+  "table": "T_1M_W45",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:38:33.202Z",
+  "rounds": 2,
+  "ms": [
+   136311,
+   137342
+  ],
+  "median": 136311
+ },
+ {
+  "part": "B",
+  "scenario": "agg5_all",
+  "table": "T_1M_W45",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:41:13.498Z",
+  "rounds": 0,
+  "err": "Command failed: curl -s -m 160 -w "
+ },
+ {
+  "part": "C",
+  "scenario": "agg3_1k",
+  "table": "T_1M_W12",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:42:35.033Z",
+  "rounds": 2,
+  "ms": [
+   38865,
+   39539
+  ],
+  "median": 38865
+ },
+ {
+  "part": "C",
+  "scenario": "agg3_5k",
+  "table": "T_1M_W12",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:43:58.031Z",
+  "rounds": 2,
+  "ms": [
+   35468,
+   44377
+  ],
+  "median": 35468
+ },
+ {
+  "part": "C",
+  "scenario": "agg5_1k",
+  "table": "T_1M_W12",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:45:34.059Z",
+  "rounds": 2,
+  "ms": [
+   44300,
+   48607
+  ],
+  "median": 44300
+ },
+ {
+  "part": "C",
+  "scenario": "agg5_5k",
+  "table": "T_1M_W12",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:47:14.916Z",
+  "rounds": 2,
+  "ms": [
+   44564,
+   53174
+  ],
+  "median": 44564
+ },
+ {
+  "part": "C",
+  "scenario": "agg3_1k",
+  "table": "T_1M_W45",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:47:42.904Z",
+  "rounds": 2,
+  "ms": [
+   11835,
+   13025
+  ],
+  "median": 11835
+ },
+ {
+  "part": "C",
+  "scenario": "agg3_5k",
+  "table": "T_1M_W45",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:48:12.633Z",
+  "rounds": 2,
+  "ms": [
+   13228,
+   13379
+  ],
+  "median": 13228
+ },
+ {
+  "part": "C",
+  "scenario": "agg5_1k",
+  "table": "T_1M_W45",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:48:39.553Z",
+  "rounds": 2,
+  "ms": [
+   11888,
+   11927
+  ],
+  "median": 11888
+ },
+ {
+  "part": "C",
+  "scenario": "agg5_5k",
+  "table": "T_1M_W45",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:49:13.657Z",
+  "rounds": 2,
+  "ms": [
+   14630,
+   16358
+  ],
+  "median": 14630
+ },
+ {
+  "part": "D",
+  "scenario": "agg1_all",
+  "table": "T_10K_W12",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:50:30.592Z",
+  "rps": 1.93,
+  "n": 39,
+  "ok": 39,
+  "fail": 0,
+  "p50": 390,
+  "p95": 502,
+  "max": 3650
+ },
+ {
+  "part": "D",
+  "scenario": "agg1_all",
+  "table": "T_10K_W12",
+  "threads": 2,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:51:01.675Z",
+  "rps": 2.95,
+  "n": 60,
+  "ok": 60,
+  "fail": 0,
+  "p50": 753,
+  "p95": 816,
+  "max": 844
+ },
+ {
+  "part": "D",
+  "scenario": "agg1_all",
+  "table": "T_10K_W12",
+  "threads": 3,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:51:29.291Z",
+  "rps": 3.72,
+  "n": 75,
+  "ok": 75,
+  "fail": 0,
+  "p50": 651,
+  "p95": 1072,
+  "max": 1223
+ },
+ {
+  "part": "D",
+  "scenario": "agg1_all",
+  "table": "T_10K_W12",
+  "threads": 4,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:51:57.981Z",
+  "rps": 3.82,
+  "n": 80,
+  "ok": 80,
+  "fail": 0,
+  "p50": 999,
+  "p95": 1282,
+  "max": 1351
+ },
+ {
+  "part": "D",
+  "scenario": "agg1_all",
+  "table": "T_10K_W12",
+  "threads": 6,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:52:29.640Z",
+  "rps": 4.02,
+  "n": 81,
+  "ok": 81,
+  "fail": 0,
+  "p50": 1566,
+  "p95": 1715,
+  "max": 1831
+ },
+ {
+  "part": "D",
+  "scenario": "agg1_all",
+  "table": "T_10K_W12",
+  "threads": 8,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:52:58.759Z",
+  "rps": 3.96,
+  "n": 83,
+  "ok": 83,
+  "fail": 0,
+  "p50": 1680,
+  "p95": 4080,
+  "max": 4598
+ },
+ {
+  "part": "D",
+  "scenario": "agg1_all",
+  "table": "T_10K_W12",
+  "threads": 10,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:53:28.597Z",
+  "rps": 3.97,
+  "n": 82,
+  "ok": 82,
+  "fail": 0,
+  "p50": 2276,
+  "p95": 3908,
+  "max": 3949
+ },
+ {
+  "part": "D",
+  "scenario": "agg1_all",
+  "table": "T_10K_W12",
+  "threads": 15,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:54:00.587Z",
+  "rps": 3.79,
+  "n": 80,
+  "ok": 80,
+  "fail": 0,
+  "p50": 3635,
+  "p95": 6272,
+  "max": 6580
+ },
+ {
+  "part": "D",
+  "scenario": "agg1_all",
+  "table": "T_10K_W12",
+  "threads": 25,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:54:34.731Z",
+  "rps": 3.62,
+  "n": 76,
+  "ok": 76,
+  "fail": 0,
+  "p50": 6793,
+  "p95": 7495,
+  "max": 8362
+ },
+ {
+  "part": "D",
+  "scenario": "agg1_all",
+  "table": "T_10K_W12",
+  "threads": 50,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:55:32.056Z",
+  "rps": 2.91,
+  "n": 100,
+  "ok": 100,
+  "fail": 0,
+  "p50": 16335,
+  "p95": 22892,
+  "max": 28836
+ },
+ {
+  "part": "D",
+  "scenario": "agg1_all",
+  "table": "T_100K_W12",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:56:10.854Z",
+  "rps": 0.17,
+  "n": 4,
+  "ok": 4,
+  "fail": 0,
+  "p50": 5231,
+  "p95": 8183,
+  "max": 8183
+ },
+ {
+  "part": "D",
+  "scenario": "agg1_all",
+  "table": "T_100K_W12",
+  "threads": 2,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:56:43.283Z",
+  "rps": 0.37,
+  "n": 8,
+  "ok": 8,
+  "fail": 0,
+  "p50": 4963,
+  "p95": 6558,
+  "max": 6558
+ },
+ {
+  "part": "D",
+  "scenario": "agg1_all",
+  "table": "T_100K_W12",
+  "threads": 3,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:57:20.856Z",
+  "rps": 0.48,
+  "n": 12,
+  "ok": 12,
+  "fail": 0,
+  "p50": 6139,
+  "p95": 6734,
+  "max": 6734
+ },
+ {
+  "part": "D",
+  "scenario": "agg1_all",
+  "table": "T_100K_W12",
+  "threads": 4,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:57:58.099Z",
+  "rps": 0.53,
+  "n": 12,
+  "ok": 12,
+  "fail": 0,
+  "p50": 6883,
+  "p95": 8991,
+  "max": 8991
+ },
+ {
+  "part": "D",
+  "scenario": "agg1_all",
+  "table": "T_100K_W12",
+  "threads": 6,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:58:37.179Z",
+  "rps": 0.55,
+  "n": 12,
+  "ok": 12,
+  "fail": 0,
+  "p50": 11307,
+  "p95": 11357,
+  "max": 11357
+ },
+ {
+  "part": "D",
+  "scenario": "agg1_all",
+  "table": "T_100K_W12",
+  "threads": 8,
+  "batch": "rm2610",
+  "at": "2026-10-26T08:59:42.008Z",
+  "rps": 0.38,
+  "n": 16,
+  "ok": 16,
+  "fail": 0,
+  "p50": 25533,
+  "p95": 25729,
+  "max": 25729
+ },
+ {
+  "part": "D",
+  "scenario": "agg1_all",
+  "table": "T_100K_W12",
+  "threads": 10,
+  "batch": "rm2610",
+  "at": "2026-10-26T09:00:52.228Z",
+  "rps": 0.47,
+  "n": 20,
+  "ok": 20,
+  "fail": 0,
+  "p50": 21261,
+  "p95": 21352,
+  "max": 21352
+ },
+ {
+  "part": "D",
+  "scenario": "agg1_all",
+  "table": "T_100K_W12",
+  "threads": 15,
+  "batch": "rm2610",
+  "at": "2026-10-26T09:02:41.980Z",
+  "rps": 0.42,
+  "n": 30,
+  "ok": 30,
+  "fail": 0,
+  "p50": 35629,
+  "p95": 35767,
+  "max": 35833
+ },
+ {
+  "part": "D",
+  "scenario": "agg1_all",
+  "table": "T_100K_W12",
+  "threads": 25,
+  "batch": "rm2610",
+  "at": "2026-10-26T09:07:23.572Z",
+  "rps": 0,
+  "n": 50,
+  "ok": 0,
+  "fail": 50,
+  "p50": null,
+  "p95": null,
+  "max": null,
+  "errs": {
+   "timeout >60 s": 50
+  },
+  "killed": 75
+ },
+ {
+  "part": "D",
+  "scenario": "agg1_all",
+  "table": "T_100K_W12",
+  "threads": 50,
+  "batch": "rm2610",
+  "at": "2026-10-26T09:14:08.611Z",
+  "rps": 0,
+  "n": 100,
+  "ok": 0,
+  "fail": 100,
+  "p50": null,
+  "p95": null,
+  "max": null,
+  "errs": {
+   "timeout >60 s": 100
+  },
+  "killed": 150
+ },
+ {
+  "part": "E",
+  "scenario": "agg1_1k",
+  "table": "T_1M_W12",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T09:18:04.964Z",
+  "rounds": 2,
+  "ms": [
+   20599,
+   29666
+  ],
+  "median": 20599
+ },
+ {
+  "part": "E",
+  "scenario": "agg1_5k",
+  "table": "T_1M_W12",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T09:19:09.462Z",
+  "rounds": 2,
+  "ms": [
+   26072,
+   33698
+  ],
+  "median": 26072
+ },
+ {
+  "part": "E",
+  "scenario": "agg1_10k",
+  "table": "T_1M_W12",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T09:20:28.991Z",
+  "rounds": 2,
+  "ms": [
+   33797,
+   41135
+  ],
+  "median": 33797
+ },
+ {
+  "part": "E",
+  "scenario": "agg1_50k",
+  "table": "T_1M_W12",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T09:21:55.371Z",
+  "rounds": 2,
+  "ms": [
+   39713,
+   41849
+  ],
+  "median": 39713
+ },
+ {
+  "part": "E",
+  "scenario": "agg1_100k",
+  "table": "T_1M_W12",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T09:23:30.381Z",
+  "rounds": 2,
+  "ms": [
+   44279,
+   46065
+  ],
+  "median": 44279
+ },
+ {
+  "part": "E",
+  "scenario": "agg3_1k",
+  "table": "T_1M_W12",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T09:25:00.145Z",
+  "rounds": 2,
+  "ms": [
+   40889,
+   44106
+  ],
+  "median": 40889
+ },
+ {
+  "part": "E",
+  "scenario": "agg3_5k",
+  "table": "T_1M_W12",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T09:26:36.557Z",
+  "rounds": 2,
+  "ms": [
+   43800,
+   47790
+  ],
+  "median": 43800
+ },
+ {
+  "part": "E",
+  "scenario": "agg3_10k",
+  "table": "T_1M_W12",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T09:28:37.674Z",
+  "rounds": 2,
+  "ms": [
+   58021,
+   58475
+  ],
+  "median": 58021
+ },
+ {
+  "part": "E",
+  "scenario": "agg3_50k",
+  "table": "T_1M_W12",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T09:29:41.649Z",
+  "rounds": 1,
+  "ms": [
+   62440
+  ],
+  "median": 62440
+ },
+ {
+  "part": "E",
+  "scenario": "agg3_100k",
+  "table": "T_1M_W12",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T09:30:48.553Z",
+  "rounds": 1,
+  "ms": [
+   65007
+  ],
+  "median": 65007
+ },
+ {
+  "part": "E",
+  "scenario": "agg5_1k",
+  "table": "T_1M_W12",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T09:32:37.881Z",
+  "rounds": 2,
+  "ms": [
+   44479,
+   59560
+  ],
+  "median": 44479
+ },
+ {
+  "part": "E",
+  "scenario": "agg5_5k",
+  "table": "T_1M_W12",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T09:34:00.526Z",
+  "rounds": 2,
+  "ms": [
+   32487,
+   45570
+  ],
+  "median": 32487
+ },
+ {
+  "part": "E",
+  "scenario": "agg5_10k",
+  "table": "T_1M_W12",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T09:35:09.974Z",
+  "rounds": 2,
+  "ms": [
+   28311,
+   36249
+  ],
+  "median": 28311
+ },
+ {
+  "part": "E",
+  "scenario": "agg5_50k",
+  "table": "T_1M_W12",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T09:36:45.170Z",
+  "rounds": 2,
+  "ms": [
+   42815,
+   47785
+  ],
+  "median": 42815
+ },
+ {
+  "part": "E",
+  "scenario": "agg5_100k",
+  "table": "T_1M_W12",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T09:38:19.406Z",
+  "rounds": 2,
+  "ms": [
+   44567,
+   44951
+  ],
+  "median": 44567
+ },
+ {
+  "part": "E",
+  "scenario": "agg1_1k",
+  "table": "T_1M_W45",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T09:38:51.166Z",
+  "rounds": 2,
+  "ms": [
+   11649,
+   12734
+  ],
+  "median": 11649
+ },
+ {
+  "part": "E",
+  "scenario": "agg1_5k",
+  "table": "T_1M_W45",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T09:39:30.688Z",
+  "rounds": 2,
+  "ms": [
+   14402,
+   20266
+  ],
+  "median": 14402
+ },
+ {
+  "part": "E",
+  "scenario": "agg1_10k",
+  "table": "T_1M_W45",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T09:40:09.332Z",
+  "rounds": 2,
+  "ms": [
+   14618,
+   19533
+  ],
+  "median": 14618
+ },
+ {
+  "part": "E",
+  "scenario": "agg1_50k",
+  "table": "T_1M_W45",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T09:40:49.685Z",
+  "rounds": 2,
+  "ms": [
+   16071,
+   18909
+  ],
+  "median": 16071
+ },
+ {
+  "part": "E",
+  "scenario": "agg1_100k",
+  "table": "T_1M_W45",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T09:41:46.596Z",
+  "rounds": 2,
+  "ms": [
+   21222,
+   30203
+  ],
+  "median": 21222
+ },
+ {
+  "part": "E",
+  "scenario": "agg3_1k",
+  "table": "T_1M_W45",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T09:42:14.614Z",
+  "rounds": 2,
+  "ms": [
+   11542,
+   11552
+  ],
+  "median": 11542
+ },
+ {
+  "part": "E",
+  "scenario": "agg3_5k",
+  "table": "T_1M_W45",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T09:42:46.975Z",
+  "rounds": 2,
+  "ms": [
+   13649,
+   14194
+  ],
+  "median": 13649
+ },
+ {
+  "part": "E",
+  "scenario": "agg3_10k",
+  "table": "T_1M_W45",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T09:43:21.490Z",
+  "rounds": 2,
+  "ms": [
+   13787,
+   15949
+  ],
+  "median": 13787
+ },
+ {
+  "part": "E",
+  "scenario": "agg3_50k",
+  "table": "T_1M_W45",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T09:44:15.022Z",
+  "rounds": 2,
+  "ms": [
+   24092,
+   24628
+  ],
+  "median": 24092
+ },
+ {
+  "part": "E",
+  "scenario": "agg3_100k",
+  "table": "T_1M_W45",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T09:45:40.389Z",
+  "rounds": 2,
+  "ms": [
+   39496,
+   40958
+  ],
+  "median": 39496
+ },
+ {
+  "part": "E",
+  "scenario": "agg5_1k",
+  "table": "T_1M_W45",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T09:46:08.320Z",
+  "rounds": 2,
+  "ms": [
+   11531,
+   11689
+  ],
+  "median": 11531
+ },
+ {
+  "part": "E",
+  "scenario": "agg5_5k",
+  "table": "T_1M_W45",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T09:46:39.123Z",
+  "rounds": 2,
+  "ms": [
+   13090,
+   13250
+  ],
+  "median": 13090
+ },
+ {
+  "part": "E",
+  "scenario": "agg5_10k",
+  "table": "T_1M_W45",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T09:47:14.343Z",
+  "rounds": 2,
+  "ms": [
+   14913,
+   15246
+  ],
+  "median": 14913
+ },
+ {
+  "part": "E",
+  "scenario": "agg5_50k",
+  "table": "T_1M_W45",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T09:48:22.918Z",
+  "rounds": 2,
+  "ms": [
+   30923,
+   32452
+  ],
+  "median": 30923
+ },
+ {
+  "part": "E",
+  "scenario": "agg5_100k",
+  "table": "T_1M_W45",
+  "threads": 1,
+  "batch": "rm2610",
+  "at": "2026-10-26T09:50:10.019Z",
+  "rounds": 2,
+  "ms": [
+   44317,
+   54735
+  ],
+  "median": 44317
+ }
+]
