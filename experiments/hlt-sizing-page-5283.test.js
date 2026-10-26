@@ -1,11 +1,11 @@
 // Гейт-тест для docs/hlt-stand/sizing.html (issue #5283): страница «подбор конфигурации
 // и расчёт параметров» строит модель стоимости запроса из встроенного блока DATA.
 // Тест держит DATA в синхроне с сырыми замерами и проверяет саму модель:
-//   1) каждый медианный прогон remeasure-2510.json присутствует в DATA.agg;
+//   1) каждая ячейка срезов партии 26.10 (ramp-2610.json, часть E) присутствует в DATA.agg (#5286);
 //   2) sel-опорники DATA.sel.pts совпадают с медианами чистых ячеек results.json (±25 %);
 //   3) формулы страницы (исполняется реальный <script> с DOM-заглушкой) воспроизводят
-//      все ячейки перезамера и sel-опорники в пределах ±15 % — то, что заявлено на странице;
-//   4) справочные константы: ×10 = ×2.3, ×25 = ×5.4, batch100 = 240 строк/с.
+//      все ячейки срезов в пределах заявленного на странице допуска и sel-опорники в пределах ±15 %;
+//   4) множители потоков DATA.sel.mul совпадают с лесенкой sel1_100 (часть A), batch100 = 240 строк/с.
 //
 // До появления sizing.html тест красный (страницы нет — нечего сверять).
 //
@@ -41,8 +41,11 @@ if (page) {
 
     if (DATA) {
         // 1) DATA.agg покрывает все ячейки перезамера
-        const rm = JSON.parse(fs.readFileSync(
-            path.join(__dirname, '..', 'docs', 'hlt-stand', 'remeasure-2510.json'), 'utf8'));
+        const ramp = JSON.parse(fs.readFileSync(
+            path.join(__dirname, '..', 'docs', 'hlt-stand', 'ramp-2610.json'), 'utf8'));
+        const med = ms => { const m = ms.slice().sort((a, b) => a - b), h = m.length >> 1;
+            return m.length % 2 ? m[h] : (m[h - 1] + m[h]) / 2; };
+        const rm = ramp.filter(r => r.part === 'E').map(r => Object.assign({}, r, { median: med(r.ms) }));
         let missing = [], drifted = [];
         rm.forEach(r => {
             const w = r.table.slice(-3), j = r.scenario[3], S = parseFloat(r.scenario.split('_')[1]);
@@ -51,10 +54,13 @@ if (page) {
             if (!pt) missing.push(r.table + ' ' + r.scenario);
             else if (Math.abs(pt[1] - r.median / 1000) > 0.05) drifted.push(r.table + ' ' + r.scenario);
         });
-        assertTrue(missing.length === 0, 'DATA.agg покрывает все 22 ячейки перезамера',
-            'нет точек: ' + missing.join(', '));
-        assertTrue(drifted.length === 0, 'медианы в DATA совпадают с remeasure-2510.json',
+        assertTrue(rm.length === 30 && missing.length === 0, 'DATA.agg покрывает все 30 ячеек срезов 26.10',
+            'ячеек ' + rm.length + ', нет точек: ' + missing.join(', '));
+        assertTrue(drifted.length === 0, 'медианы в DATA совпадают с ramp-2610.json',
             'расхождение: ' + drifted.join(', '));
+        const claim = page.match(/модель срезов укладывается в <b>±(\d+) %<\/b>/);
+        assertTrue(!!claim, 'на странице заявлен допуск модели срезов', 'фраза «модель срезов укладывается в ±N %» не найдена');
+        const TOL = claim ? +claim[1] : 0;
 
         // 2) sel-опорники против чистых ячеек сетки (×5, W12, без ошибок)
         const res = JSON.parse(fs.readFileSync(
@@ -113,7 +119,7 @@ if (page) {
                 const d = pct(m, r.median);
                 if (d > worst[1]) worst = [r.table + ' ' + r.scenario, d];
             });
-            assertTrue(worst[1] <= 15, 'модель agg воспроизводит перезамер в пределах 15 %',
+            assertTrue(worst[1] <= TOL, 'модель agg воспроизводит срезы в пределах заявленных ' + TOL + ' %',
                 'худшая: ' + worst[0] + ' ' + worst[1].toFixed(1) + ' %');
             DATA.sel.pts.forEach(p => {
                 const se = vm.runInContext('selEstimate', sandbox)(p[0], '5');
@@ -123,11 +129,13 @@ if (page) {
             });
         }
 
-        // 4) справочные константы
-        assertTrue(DATA.sel.mul['10'] >= 2.0 && DATA.sel.mul['10'] <= 2.6,
-            'множитель ×10 в опорном коридоре 2.0–2.6', String(DATA.sel.mul['10']));
-        assertTrue(DATA.sel.mul['25'] >= 4.8 && DATA.sel.mul['25'] <= 6.0,
-            'множитель ×25 в опорном коридоре 4.8–6.0', String(DATA.sel.mul['25']));
+        // 4) множители потоков — из лесенки sel1_100 (p95 ступени / p95 ×5, ×5 — геометрически между 4 и 6)
+        const A = ramp.filter(r => r.part === 'A' && r.scenario === 'sel1_100');
+        const p95 = t => A.find(r => r.threads === t).p95, p5 = Math.sqrt(p95(4) * p95(6));
+        const badMul = Object.keys(DATA.sel.mul).filter(t => t !== '5' &&
+            Math.abs(DATA.sel.mul[t] - p95(+t) / p5) > 0.01);
+        assertTrue(badMul.length === 0 && DATA.sel.mul['5'] === 1, 'множители потоков совпадают с лесенкой sel1_100',
+            'расходятся: ' + badMul.map(t => t + ': ' + DATA.sel.mul[t] + ' vs ' + (p95(+t) / p5).toFixed(2)).join(', '));
         assertTrue(DATA.write.batch.rps['5'] * DATA.write.batch.perCall === 240,
             'batch100 = 240 строк/с', String(DATA.write.batch.rps['5'] * DATA.write.batch.perCall));
     }
