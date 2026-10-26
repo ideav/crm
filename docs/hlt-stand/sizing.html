@@ -1,0 +1,558 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Подбор конфигурации и расчёт параметров — по замерам стенда hlt</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin:0; background:#0f172a; color:#f1f5f9;
+    font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 960px; margin: 0 auto; padding: 32px 20px 64px; }
+  h1 { font-size: 28px; margin: 0 0 8px; }
+  h2 { font-size: 20px; margin: 40px 0 4px; }
+  .lead { color:#94a3b8; margin: 0 0 24px; }
+  a { color:#3987e5; }
+  code { background:#1e293b; border-radius:5px; padding:1px 6px; font-size: .92em; }
+  .fig { border: 1px solid rgba(255,255,255,.10); border-radius: 12px; padding: 18px 18px 8px; margin: 20px 0; }
+  .fighead h3 { font-size: 16px; margin: 0; }
+  .fighead .note { color:#64748b; font-size: 13px; margin: 2px 0 8px; }
+  .plot { position: relative; }
+  .plot svg { width: 100%; height: auto; display: block; }
+  .tip { position:absolute; pointer-events:none; background:#1e293b; border:1px solid rgba(255,255,255,.14);
+    border-radius:8px; padding:8px 10px; font-size:13px; min-width:150px; z-index:2; }
+  .tip .t { color:#94a3b8; margin-bottom:4px; }
+  .tip .r { display:flex; align-items:center; gap:6px; margin:2px 0; }
+  .tip .sw { width:9px; height:9px; border-radius:50%; flex:none; }
+  .tip .v { margin-left:auto; font-variant-numeric: tabular-nums; }
+  .legend { display:flex; flex-wrap:wrap; gap: 6px 18px; margin: 6px 2px 2px; font-size:13px; color:#94a3b8; }
+  .legend .sw { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:6px; vertical-align:-1px; }
+  details { margin: 6px 0 0; color:#94a3b8; font-size: 14px; }
+  details table { border-collapse: collapse; margin-top: 8px; width: 100%; font-size: 13px; }
+  details th, details td { border: 1px solid rgba(255,255,255,.12); padding: 4px 8px; text-align: right; font-variant-numeric: tabular-nums; }
+  details th:first-child, details td:first-child { text-align: left; }
+  .x50grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap:10px; margin:10px 0 14px; }
+  .x50cell { border:1px solid rgba(255,255,255,.10); border-radius:10px; padding:10px 12px; display:flex; flex-direction:column; gap:2px; }
+  .x50table { color:#94a3b8; font-size:12.5px; }
+  .x50val { font-size:19px; font-weight:600; }
+  .x50sub { color:#64748b; font-size:12px; }
+  ul.out { color:#94a3b8; }
+  ul.out b { color:#f1f5f9; }
+  /* калькулятор */
+  .calc { display:flex; flex-wrap:wrap; gap:10px 14px; align-items:end; margin:14px 0 4px;
+    border:1px solid rgba(255,255,255,.10); border-radius:12px; padding:14px 16px 16px; }
+  .calc label { display:flex; flex-direction:column; gap:4px; font-size:12.5px; color:#94a3b8; }
+  .calc select, .calc input { background:#1e293b; color:#f1f5f9; border:1px solid rgba(255,255,255,.14);
+    border-radius:8px; padding:7px 9px; font:inherit; font-size:14px; }
+  .calc input { width:90px; }
+  .stats { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:10px; margin:14px 0 6px; }
+  .stat { border:1px solid rgba(255,255,255,.10); border-radius:10px; padding:10px 12px; }
+  .stat .k { color:#64748b; font-size:12px; }
+  .stat .v { font-size:22px; font-weight:600; font-variant-numeric:tabular-nums; }
+  .stat .s { color:#94a3b8; font-size:12px; }
+  .badge { display:inline-block; border-radius:999px; padding:2px 11px 3px; font-size:13.5px; font-weight:600; white-space:nowrap; }
+  .badge.ok { background:rgba(25,158,112,.16); color:#4cc99a; }
+  .badge.warn { background:rgba(201,133,0,.16); color:#e0a52e; }
+  .badge.sat { background:rgba(217,89,38,.16); color:#e5794e; }
+  .formula { color:#94a3b8; font-size:13.5px; margin:8px 2px 2px; }
+  .formula b { color:#f1f5f9; font-weight:600; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit, minmax(285px, 1fr)); gap:12px; margin:14px 0; }
+  .card { border:1px solid rgba(255,255,255,.10); border-radius:12px; padding:13px 16px; color:#94a3b8; font-size:14px; }
+  .card h3 { margin:0 0 6px; font-size:15px; color:#f1f5f9; }
+  .card .n { color:#64748b; font-size:12px; margin-top:8px; }
+  .card b { color:#f1f5f9; font-weight:600; }
+  .flag { color:#c98500; font-size:13px; margin:6px 2px 0; }
+</style>
+</head>
+<body>
+<main>
+<h1>Подбор конфигурации и расчёт параметров системы</h1>
+<p class="lead">По замерам нагрузочного стенда hlt (24–25.10.2026, боевой сервер: 2 vCPU AMD EPYC,
+1.9 ГБ RAM, MySQL 8.0.46, PHP 8.3.6; сетка 516 ячеек + перезамер сомнительных на пустом сервере,
+медианы). Страница отвечает на два вопроса: <b>сколько будет стоить запрос</b> при заданной
+конфигурации и <b>какую конфигурацию брать</b> под заданную нагрузку. Сырые замеры и графики:
+<a href="load-charts.html">load-charts.html</a>, методика и скрипты — <a href="README.md">README.md</a>.</p>
+
+<h2>1. Калькулятор стоимости запроса</h2>
+<form class="calc" id="calc" onsubmit="return false">
+  <label>Операция
+    <select id="op">
+      <option value="sel">Выборка (sel)</option>
+      <option value="agg">Отчёт-агрегат (agg)</option>
+      <option value="add1">Запись по одной (add1)</option>
+      <option value="batch">Запись батчем (batch100)</option>
+    </select>
+  </label>
+  <label id="lw">Таблиц в JOIN
+    <select id="join"><option>1</option><option>3</option><option>5</option></select>
+  </label>
+  <label id="lw2">Ширина строки
+    <select id="width"><option value="W12">12 реквизитов</option><option value="W45">45 реквизитов</option></select>
+  </label>
+  <label id="lw3" title="Полное чтение строки кода">Строк в таблице
+    <select id="nrows"><option>1000</option><option>10000</option><option>100000</option>
+    <option value="1000000" selected>1 000 000</option><option>10000000</option></select>
+  </label>
+  <label id="lw4">Строк в срезе
+    <select id="slice"></select>
+  </label>
+  <label>Потоков
+    <select id="threads"></select>
+  </label>
+  <label id="lw5" title="Экстраполяция по ядрам: линейная, до 16 ядер / 700 млн строк">vCPU
+    <input id="cores" type="number" min="2" max="16" step="1" value="2">
+  </label>
+</form>
+<div class="stats" id="stats"></div>
+<p class="formula" id="formula"></p>
+<p class="flag" id="flag" hidden></p>
+<p class="formula" id="nearest"></p>
+<figure class="fig"><div class="fighead"><h3 id="mtitle">Модель и ближайшие замеры</h3>
+<p class="note" id="mnote"></p></div><div class="plot" id="mplot"></div></figure>
+<details id="mtable"></details>
+
+<h2>2. Ёмкость записи: построчно или батчем</h2>
+<figure class="fig"><div class="fighead"><h3>Скорость записи, строк/с (×5 потоков)</h3>
+<p class="note">add1 — построчные вызовы, batch100 — 100 записей одним вызовом _m_batch; замер T_100K_W12, у 1К/1М то же</p></div>
+<div class="plot"><svg viewBox="0 0 720 150" role="img" aria-label="Скорость записи: add1 против batch100">
+<rect x="150" y="30" width="18" height="26" rx="4" fill="#199e70"/>
+<text x="176" y="48" font-size="14" fill="#f1f5f9" font-weight="600">11 строк/с</text>
+<text x="140" y="47" text-anchor="end" font-size="13" fill="#94a3b8">add1</text>
+<rect x="150" y="86" width="372" height="26" rx="4" fill="#3987e5"/>
+<text x="530" y="104" font-size="14" fill="#f1f5f9" font-weight="600">240 строк/с (2.4 вызова/с × 100)</text>
+<text x="140" y="103" text-anchor="end" font-size="13" fill="#94a3b8">batch100</text>
+</svg></div></figure>
+<details><summary>Таблица значений</summary><table><thead><tr><th>сценарий</th><th>вызовов/с (×5)</th><th>строк/с</th><th>время на 1 млн строк</th></tr></thead><tbody>
+<tr><td>add1 (по одной)</td><td>11.4</td><td>11</td><td>~25 ч</td></tr>
+<tr><td>batch100 (батч по 100)</td><td>2.4</td><td>240</td><td>~1.2 ч</td></tr>
+</tbody></table></details>
+<ul class="out">
+<li>батч даёт <b>×21 к скорости</b> записи; загрузка миллиона построчно — сутки, батчами — час с небольшим;</li>
+<li>ещё быстрее BKI-импорт (<code>import.mjs</code>), но чанки больше 4 тыс. wide / 15 тыс. narrow строк молча теряются;</li>
+<li>точечные обновления: <code>upd5</code> и <code>one</code> — насыщение на любых потоках; <code>upd10–upd500</code> работают до ×25, на ×50 — насыщение.</li>
+</ul>
+
+<h2>3. Замеры: масштабирование по потокам</h2>
+<figure class="fig"><div class="fighead"><h3>Латентность p95 при росте параллелизма (T_100K_W12)</h3><p class="note">лог-шкала</p></div><div class="plot" data-plot="Латентность p95 при росте параллелизма (T_100K_W12)" data-series='[{&quot;name&quot;:&quot;sel1_100 (1 табл.)&quot;,&quot;color&quot;:&quot;#3987e5&quot;,&quot;data&quot;:[552,1395,6601],&quot;fmt&quot;:&quot;ms&quot;,&quot;censored&quot;:[]},{&quot;name&quot;:&quot;sel3_100 (3 табл.)&quot;,&quot;color&quot;:&quot;#d95926&quot;,&quot;data&quot;:[607,1365,3030],&quot;fmt&quot;:&quot;ms&quot;,&quot;censored&quot;:[]},{&quot;name&quot;:&quot;sel5_100 (5 табл.)&quot;,&quot;color&quot;:&quot;#199e70&quot;,&quot;data&quot;:[617,1392,3465],&quot;fmt&quot;:&quot;ms&quot;,&quot;censored&quot;:[]},{&quot;name&quot;:&quot;sel5_500 (5 табл.)&quot;,&quot;color&quot;:&quot;#c98500&quot;,&quot;data&quot;:[834,1822,3964],&quot;fmt&quot;:&quot;ms&quot;,&quot;censored&quot;:[]}]' data-x='[&quot;5 потоков&quot;,&quot;10 потоков&quot;,&quot;25 потоков&quot;]'><svg viewBox="0 0 720 330" role="img" aria-label="Латентность p95 при росте параллелизма (T_100K_W12)"><line x1="62" y1="265.4" x2="692" y2="265.4" stroke="#1e293b" stroke-width="1"/><text x="54" y="269.4" text-anchor="end" font-size="12" fill="#64748b">500 мс</text><line x1="62" y1="207.5" x2="692" y2="207.5" stroke="#1e293b" stroke-width="1"/><text x="54" y="211.5" text-anchor="end" font-size="12" fill="#64748b">1 с</text><line x1="62" y1="149.6" x2="692" y2="149.6" stroke="#1e293b" stroke-width="1"/><text x="54" y="153.6" text-anchor="end" font-size="12" fill="#64748b">2 с</text><line x1="62" y1="91.7" x2="692" y2="91.7" stroke="#1e293b" stroke-width="1"/><text x="54" y="95.7" text-anchor="end" font-size="12" fill="#64748b">4 с</text><line x1="62" y1="33.8" x2="692" y2="33.8" stroke="#1e293b" stroke-width="1"/><text x="54" y="37.8" text-anchor="end" font-size="12" fill="#64748b">8 с</text><line x1="62" y1="284" x2="692" y2="284" stroke="#475569" stroke-width="1"/><text x="62" y="304" text-anchor="middle" font-size="12" fill="#64748b">5 потоков</text><text x="377" y="304" text-anchor="middle" font-size="12" fill="#64748b">10 потоков</text><text x="692" y="304" text-anchor="middle" font-size="12" fill="#64748b">25 потоков</text><text x="377" y="322" text-anchor="middle" font-size="12" fill="#94a3b8">Параллелизм (×10 — медиана 3 перезамеров в тихом окне)</text><path d="M62.0,257.1L377.0,179.7L692.0,49.9" fill="none" stroke="#3987e5" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="62.0" cy="257.1" r="4.5" fill="#3987e5" stroke="#0f172a" stroke-width="2"/><circle cx="377.0" cy="179.7" r="4.5" fill="#3987e5" stroke="#0f172a" stroke-width="2"/><circle cx="692.0" cy="49.9" r="4.5" fill="#3987e5" stroke="#0f172a" stroke-width="2"/><circle data-pt="Латентность p95 при росте параллелизма (T_100K_W12):sel1_100:2" cx="692.0" cy="49.9" r="4" fill="transparent" stroke="transparent" tabindex="0" role="img" aria-label="sel1_100 (1 табл.): 6.6 с"/><path d="M62.0,249.2L377.0,181.5L692.0,114.9" fill="none" stroke="#d95926" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="62.0" cy="249.2" r="4.5" fill="#d95926" stroke="#0f172a" stroke-width="2"/><circle cx="377.0" cy="181.5" r="4.5" fill="#d95926" stroke="#0f172a" stroke-width="2"/><circle cx="692.0" cy="114.9" r="4.5" fill="#d95926" stroke="#0f172a" stroke-width="2"/><circle data-pt="Латентность p95 при росте параллелизма (T_100K_W12):sel3_100:2" cx="692.0" cy="114.9" r="4" fill="transparent" stroke="transparent" tabindex="0" role="img" aria-label="sel3_100 (3 табл.): 3.0 с"/><path d="M62.0,247.8L377.0,179.9L692.0,103.7" fill="none" stroke="#199e70" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="62.0" cy="247.8" r="4.5" fill="#199e70" stroke="#0f172a" stroke-width="2"/><circle cx="377.0" cy="179.9" r="4.5" fill="#199e70" stroke="#0f172a" stroke-width="2"/><circle cx="692.0" cy="103.7" r="4.5" fill="#199e70" stroke="#0f172a" stroke-width="2"/><circle data-pt="Латентность p95 при росте параллелизма (T_100K_W12):sel5_100:2" cx="692.0" cy="103.7" r="4" fill="transparent" stroke="transparent" tabindex="0" role="img" aria-label="sel5_100 (5 табл.): 3.5 с"/><path d="M62.0,222.6L377.0,157.4L692.0,92.5" fill="none" stroke="#c98500" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="62.0" cy="222.6" r="4.5" fill="#c98500" stroke="#0f172a" stroke-width="2"/><circle cx="377.0" cy="157.4" r="4.5" fill="#c98500" stroke="#0f172a" stroke-width="2"/><circle cx="692.0" cy="92.5" r="4.5" fill="#c98500" stroke="#0f172a" stroke-width="2"/><circle data-pt="Латентность p95 при росте параллелизма (T_100K_W12):sel5_500:2" cx="692.0" cy="92.5" r="4" fill="transparent" stroke="transparent" tabindex="0" role="img" aria-label="sel5_500 (5 табл.): 4.0 с"/></svg><div class="tip" hidden></div></div></figure>
+<div class="legend"><span><span class="sw" style="background:#3987e5"></span>sel1_100 (1 табл.)</span><span><span class="sw" style="background:#d95926"></span>sel3_100 (3 табл.)</span><span><span class="sw" style="background:#199e70"></span>sel5_100 (5 табл.)</span><span><span class="sw" style="background:#c98500"></span>sel5_500 (5 табл.)</span></div>
+<figure class="fig"><div class="fighead"><h3>Пропускная способность (rps)</h3></div><div class="plot" data-plot="Пропускная способность (rps)" data-series='[{&quot;name&quot;:&quot;sel1_100 (1 табл.)&quot;,&quot;color&quot;:&quot;#3987e5&quot;,&quot;data&quot;:[11.3,9.8,6.4],&quot;fmt&quot;:&quot;rps&quot;,&quot;censored&quot;:[]},{&quot;name&quot;:&quot;sel3_100 (3 табл.)&quot;,&quot;color&quot;:&quot;#d95926&quot;,&quot;data&quot;:[10.7,5.4,11.2],&quot;fmt&quot;:&quot;rps&quot;,&quot;censored&quot;:[]},{&quot;name&quot;:&quot;sel5_100 (5 табл.)&quot;,&quot;color&quot;:&quot;#199e70&quot;,&quot;data&quot;:[10.6,10.3,10.8],&quot;fmt&quot;:&quot;rps&quot;,&quot;censored&quot;:[]},{&quot;name&quot;:&quot;sel5_500 (5 табл.)&quot;,&quot;color&quot;:&quot;#c98500&quot;,&quot;data&quot;:[7.6,6.4,8.1],&quot;fmt&quot;:&quot;rps&quot;,&quot;censored&quot;:[]}]' data-x='[&quot;5 потоков&quot;,&quot;10 потоков&quot;,&quot;25 потоков&quot;]'><svg viewBox="0 0 720 330" role="img" aria-label="Пропускная способность (rps)"><line x1="62" y1="284.0" x2="692" y2="284.0" stroke="#1e293b" stroke-width="1"/><text x="54" y="288" text-anchor="end" font-size="12" fill="#64748b">0</text><line x1="62" y1="209.7" x2="692" y2="209.7" stroke="#1e293b" stroke-width="1"/><text x="54" y="213.7" text-anchor="end" font-size="12" fill="#64748b">4</text><line x1="62" y1="135.4" x2="692" y2="135.4" stroke="#1e293b" stroke-width="1"/><text x="54" y="139.4" text-anchor="end" font-size="12" fill="#64748b">8</text><line x1="62" y1="61.1" x2="692" y2="61.1" stroke="#1e293b" stroke-width="1"/><text x="54" y="65.1" text-anchor="end" font-size="12" fill="#64748b">12</text><line x1="62" y1="284" x2="692" y2="284" stroke="#475569" stroke-width="1"/><text x="62" y="304" text-anchor="middle" font-size="12" fill="#64748b">5 потоков</text><text x="377" y="304" text-anchor="middle" font-size="12" fill="#64748b">10 потоков</text><text x="692" y="304" text-anchor="middle" font-size="12" fill="#64748b">25 потоков</text><text x="377" y="322" text-anchor="middle" font-size="12" fill="#94a3b8">Параллелизм</text><path d="M62.0,74.1L377.0,102.0L692.0,165.1" fill="none" stroke="#3987e5" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="62.0" cy="74.1" r="4.5" fill="#3987e5" stroke="#0f172a" stroke-width="2"/><circle cx="377.0" cy="102.0" r="4.5" fill="#3987e5" stroke="#0f172a" stroke-width="2"/><circle cx="692.0" cy="165.1" r="4.5" fill="#3987e5" stroke="#0f172a" stroke-width="2"/><circle data-pt="Пропускная способность (rps):sel1_100:2" cx="692.0" cy="165.1" r="4" fill="transparent" stroke="transparent" tabindex="0" role="img" aria-label="sel1_100 (1 табл.): 6.4"/><path d="M62.0,85.3L377.0,183.7L692.0,76.0" fill="none" stroke="#d95926" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="62.0" cy="85.3" r="4.5" fill="#d95926" stroke="#0f172a" stroke-width="2"/><circle cx="377.0" cy="183.7" r="4.5" fill="#d95926" stroke="#0f172a" stroke-width="2"/><circle cx="692.0" cy="76.0" r="4.5" fill="#d95926" stroke="#0f172a" stroke-width="2"/><circle data-pt="Пропускная способность (rps):sel3_100:2" cx="692.0" cy="76.0" r="4" fill="transparent" stroke="transparent" tabindex="0" role="img" aria-label="sel3_100 (3 табл.): 11.2"/><path d="M62.0,87.1L377.0,92.7L692.0,83.4" fill="none" stroke="#199e70" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="62.0" cy="87.1" r="4.5" fill="#199e70" stroke="#0f172a" stroke-width="2"/><circle cx="377.0" cy="92.7" r="4.5" fill="#199e70" stroke="#0f172a" stroke-width="2"/><circle cx="692.0" cy="83.4" r="4.5" fill="#199e70" stroke="#0f172a" stroke-width="2"/><circle data-pt="Пропускная способность (rps):sel5_100:2" cx="692.0" cy="83.4" r="4" fill="transparent" stroke="transparent" tabindex="0" role="img" aria-label="sel5_100 (5 табл.): 10.8"/><path d="M62.0,142.9L377.0,165.1L692.0,133.6" fill="none" stroke="#c98500" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="62.0" cy="142.9" r="4.5" fill="#c98500" stroke="#0f172a" stroke-width="2"/><circle cx="377.0" cy="165.1" r="4.5" fill="#c98500" stroke="#0f172a" stroke-width="2"/><circle cx="692.0" cy="133.6" r="4.5" fill="#c98500" stroke="#0f172a" stroke-width="2"/><circle data-pt="Пропускная способность (rps):sel5_500:2" cx="692.0" cy="133.6" r="4" fill="transparent" stroke="transparent" tabindex="0" role="img" aria-label="sel5_500 (5 табл.): 8.1"/></svg><div class="tip" hidden></div></div></figure>
+<details><summary>Таблица значений</summary><table><thead><tr><th>сценарий</th><th>×5 p95</th><th>×10 p95 (медиана)</th><th>×25 p95</th><th>×5 rps</th><th>×10 rps</th><th>×25 rps</th></tr></thead><tbody>
+<tr><td>sel1_100 (1 табл.)</td><td>552 мс</td><td>1.4 с</td><td>6.6 с</td><td>11.3</td><td>9.8</td><td>6.4</td></tr><tr><td>sel3_100 (3 табл.)</td><td>607 мс</td><td>1.4 с</td><td>3.0 с</td><td>10.7</td><td>5.4</td><td>11.2</td></tr><tr><td>sel5_100 (5 табл.)</td><td>617 мс</td><td>1.4 с</td><td>3.5 с</td><td>10.6</td><td>10.3</td><td>10.8</td></tr><tr><td>sel5_500 (5 табл.)</td><td>834 мс</td><td>1.8 с</td><td>4.0 с</td><td>7.6</td><td>6.4</td><td>8.1</td></tr>
+</tbody></table></details>
+<ul class="out">
+<li>до ×25 деградация плавная: латентность растёт, rps держится;</li>
+<li>провал ×10 в первом замере (4.9 rps у sel3_100) не воспроизвёлся — это был фон, кривая монотонна;</li>
+<li>×50 для отчётов — насыщение (очередь воркеров Apache), см. блок 3.</li>
+</ul>
+
+<h2>4. Замеры: срезы миллионных таблиц (×1 поток)</h2>
+<p class="lead">Основа модели агрегатов: 22 ячейки перезамера 25.10 на пустом сервере, потолок 120 с, медиана 3 прогонов.</p>
+<figure class="fig"><div class="fighead"><h3>Агрегация по срезам, T_1M_W12 (×1 поток)</h3><p class="note">полый маркер «≥120 с» — обе попытки за потолком, время не измерено</p></div><div class="plot" data-plot="Агрегация по срезам, T_1M_W12 (×1 поток)" data-series='[{&quot;name&quot;:&quot;agg1 (1 табл.)&quot;,&quot;color&quot;:&quot;#3987e5&quot;,&quot;data&quot;:[35.918,39.95,43.99,46.916,60.738],&quot;fmt&quot;:&quot;s&quot;,&quot;censored&quot;:[]},{&quot;name&quot;:&quot;agg3 (3 табл.)&quot;,&quot;color&quot;:&quot;#d95926&quot;,&quot;data&quot;:[null,null,60.265,65.085,74.499],&quot;fmt&quot;:&quot;s&quot;,&quot;censored&quot;:[]},{&quot;name&quot;:&quot;agg5 (5 табл.)&quot;,&quot;color&quot;:&quot;#199e70&quot;,&quot;data&quot;:[null,null,64.943,73.122,75.23],&quot;fmt&quot;:&quot;s&quot;,&quot;censored&quot;:[]}]' data-x='[&quot;1 тыс.&quot;,&quot;5 тыс.&quot;,&quot;10 тыс.&quot;,&quot;50 тыс.&quot;,&quot;100 тыс.&quot;]'><svg viewBox="0 0 720 330" role="img" aria-label="Агрегация по срезам, T_1M_W12 (×1 поток)"><line x1="62" y1="284.0" x2="692" y2="284.0" stroke="#1e293b" stroke-width="1"/><text x="54" y="288" text-anchor="end" font-size="12" fill="#64748b">0</text><line x1="62" y1="224.0" x2="692" y2="224.0" stroke="#1e293b" stroke-width="1"/><text x="54" y="228" text-anchor="end" font-size="12" fill="#64748b">30</text><line x1="62" y1="164.0" x2="692" y2="164.0" stroke="#1e293b" stroke-width="1"/><text x="54" y="168" text-anchor="end" font-size="12" fill="#64748b">60</text><line x1="62" y1="104.0" x2="692" y2="104.0" stroke="#1e293b" stroke-width="1"/><text x="54" y="108" text-anchor="end" font-size="12" fill="#64748b">90</text><line x1="62" y1="44.0" x2="692" y2="44.0" stroke="#1e293b" stroke-width="1"/><text x="54" y="48" text-anchor="end" font-size="12" fill="#64748b">120</text><line x1="62" y1="284" x2="692" y2="284" stroke="#475569" stroke-width="1"/><text x="62" y="304" text-anchor="middle" font-size="12" fill="#64748b">1 тыс.</text><text x="219.5" y="304" text-anchor="middle" font-size="12" fill="#64748b">5 тыс.</text><text x="377" y="304" text-anchor="middle" font-size="12" fill="#64748b">10 тыс.</text><text x="534.5" y="304" text-anchor="middle" font-size="12" fill="#64748b">50 тыс.</text><text x="692" y="304" text-anchor="middle" font-size="12" fill="#64748b">100 тыс.</text><text x="377" y="322" text-anchor="middle" font-size="12" fill="#94a3b8">Размер среза (строк кода) · медиана до 3 прогонов, потолок 120 с</text><path d="M62.0,212.2L219.5,204.1L377.0,196.0L534.5,190.2L692.0,162.5" fill="none" stroke="#3987e5" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="62.0" cy="212.2" r="4.5" fill="#3987e5" stroke="#0f172a" stroke-width="2"/><circle cx="219.5" cy="204.1" r="4.5" fill="#3987e5" stroke="#0f172a" stroke-width="2"/><circle cx="377.0" cy="196.0" r="4.5" fill="#3987e5" stroke="#0f172a" stroke-width="2"/><circle cx="534.5" cy="190.2" r="4.5" fill="#3987e5" stroke="#0f172a" stroke-width="2"/><circle cx="692.0" cy="162.5" r="4.5" fill="#3987e5" stroke="#0f172a" stroke-width="2"/><circle data-pt="Агрегация по срезам, T_1M_W12 (×1 поток):agg1:4" cx="692.0" cy="162.5" r="4" fill="transparent" stroke="transparent" tabindex="0" role="img" aria-label="agg1 (1 табл.): 61 с"/><path d="M377.0,163.5L534.5,153.8L692.0,135.0" fill="none" stroke="#d95926" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="377.0" cy="163.5" r="4.5" fill="#d95926" stroke="#0f172a" stroke-width="2"/><circle cx="534.5" cy="153.8" r="4.5" fill="#d95926" stroke="#0f172a" stroke-width="2"/><circle cx="692.0" cy="135.0" r="4.5" fill="#d95926" stroke="#0f172a" stroke-width="2"/><circle data-pt="Агрегация по срезам, T_1M_W12 (×1 поток):agg3:4" cx="692.0" cy="135.0" r="4" fill="transparent" stroke="transparent" tabindex="0" role="img" aria-label="agg3 (3 табл.): 74 с"/><path d="M377.0,154.1L534.5,137.8L692.0,133.5" fill="none" stroke="#199e70" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="377.0" cy="154.1" r="4.5" fill="#199e70" stroke="#0f172a" stroke-width="2"/><circle cx="534.5" cy="137.8" r="4.5" fill="#199e70" stroke="#0f172a" stroke-width="2"/><circle cx="692.0" cy="133.5" r="4.5" fill="#199e70" stroke="#0f172a" stroke-width="2"/><circle data-pt="Агрегация по срезам, T_1M_W12 (×1 поток):agg5:4" cx="692.0" cy="133.5" r="4" fill="transparent" stroke="transparent" tabindex="0" role="img" aria-label="agg5 (5 табл.): 75 с"/></svg><div class="tip" hidden></div></div></figure>
+<figure class="fig"><div class="fighead"><h3>Агрегация по срезам, T_1M_W45 (×1 поток)</h3><p class="note">полый маркер «≥120 с» — обе попытки за потолком, время не измерено</p></div><div class="plot" data-plot="Агрегация по срезам, T_1M_W45 (×1 поток)" data-series='[{&quot;name&quot;:&quot;agg1 (1 табл.)&quot;,&quot;color&quot;:&quot;#3987e5&quot;,&quot;data&quot;:[12.217,13.202,14.092,20.771,27.264],&quot;fmt&quot;:&quot;s&quot;,&quot;censored&quot;:[]},{&quot;name&quot;:&quot;agg3 (3 табл.)&quot;,&quot;color&quot;:&quot;#d95926&quot;,&quot;data&quot;:[null,null,14.67,26.873,38.479],&quot;fmt&quot;:&quot;s&quot;,&quot;censored&quot;:[]},{&quot;name&quot;:&quot;agg5 (5 табл.)&quot;,&quot;color&quot;:&quot;#199e70&quot;,&quot;data&quot;:[null,null,14.677,31.325,44.989],&quot;fmt&quot;:&quot;s&quot;,&quot;censored&quot;:[]}]' data-x='[&quot;1 тыс.&quot;,&quot;5 тыс.&quot;,&quot;10 тыс.&quot;,&quot;50 тыс.&quot;,&quot;100 тыс.&quot;]'><svg viewBox="0 0 720 330" role="img" aria-label="Агрегация по срезам, T_1M_W45 (×1 поток)"><line x1="62" y1="284.0" x2="692" y2="284.0" stroke="#1e293b" stroke-width="1"/><text x="54" y="288" text-anchor="end" font-size="12" fill="#64748b">0</text><line x1="62" y1="224.0" x2="692" y2="224.0" stroke="#1e293b" stroke-width="1"/><text x="54" y="228" text-anchor="end" font-size="12" fill="#64748b">30</text><line x1="62" y1="164.0" x2="692" y2="164.0" stroke="#1e293b" stroke-width="1"/><text x="54" y="168" text-anchor="end" font-size="12" fill="#64748b">60</text><line x1="62" y1="104.0" x2="692" y2="104.0" stroke="#1e293b" stroke-width="1"/><text x="54" y="108" text-anchor="end" font-size="12" fill="#64748b">90</text><line x1="62" y1="44.0" x2="692" y2="44.0" stroke="#1e293b" stroke-width="1"/><text x="54" y="48" text-anchor="end" font-size="12" fill="#64748b">120</text><line x1="62" y1="284" x2="692" y2="284" stroke="#475569" stroke-width="1"/><text x="62" y="304" text-anchor="middle" font-size="12" fill="#64748b">1 тыс.</text><text x="219.5" y="304" text-anchor="middle" font-size="12" fill="#64748b">5 тыс.</text><text x="377" y="304" text-anchor="middle" font-size="12" fill="#64748b">10 тыс.</text><text x="534.5" y="304" text-anchor="middle" font-size="12" fill="#64748b">50 тыс.</text><text x="692" y="304" text-anchor="middle" font-size="12" fill="#64748b">100 тыс.</text><text x="377" y="322" text-anchor="middle" font-size="12" fill="#94a3b8">Размер среза (строк кода) · медиана до 3 прогонов, потолок 120 с</text><path d="M62.0,259.6L219.5,257.6L377.0,255.8L534.5,242.5L692.0,229.5" fill="none" stroke="#3987e5" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="62.0" cy="259.6" r="4.5" fill="#3987e5" stroke="#0f172a" stroke-width="2"/><circle cx="219.5" cy="257.6" r="4.5" fill="#3987e5" stroke="#0f172a" stroke-width="2"/><circle cx="377.0" cy="255.8" r="4.5" fill="#3987e5" stroke="#0f172a" stroke-width="2"/><circle cx="534.5" cy="242.5" r="4.5" fill="#3987e5" stroke="#0f172a" stroke-width="2"/><circle cx="692.0" cy="229.5" r="4.5" fill="#3987e5" stroke="#0f172a" stroke-width="2"/><circle data-pt="Агрегация по срезам, T_1M_W45 (×1 поток):agg1:4" cx="692.0" cy="229.5" r="4" fill="transparent" stroke="transparent" tabindex="0" role="img" aria-label="agg1 (1 табл.): 27 с"/><path d="M377.0,254.7L534.5,230.3L692.0,207.0" fill="none" stroke="#d95926" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="377.0" cy="254.7" r="4.5" fill="#d95926" stroke="#0f172a" stroke-width="2"/><circle cx="534.5" cy="230.3" r="4.5" fill="#d95926" stroke="#0f172a" stroke-width="2"/><circle cx="692.0" cy="207.0" r="4.5" fill="#d95926" stroke="#0f172a" stroke-width="2"/><circle data-pt="Агрегация по срезам, T_1M_W45 (×1 поток):agg3:4" cx="692.0" cy="207.0" r="4" fill="transparent" stroke="transparent" tabindex="0" role="img" aria-label="agg3 (3 табл.): 38 с"/><path d="M377.0,254.6L534.5,221.3L692.0,194.0" fill="none" stroke="#199e70" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="377.0" cy="254.6" r="4.5" fill="#199e70" stroke="#0f172a" stroke-width="2"/><circle cx="534.5" cy="221.3" r="4.5" fill="#199e70" stroke="#0f172a" stroke-width="2"/><circle cx="692.0" cy="194.0" r="4.5" fill="#199e70" stroke="#0f172a" stroke-width="2"/><circle data-pt="Агрегация по срезам, T_1M_W45 (×1 поток):agg5:4" cx="692.0" cy="194.0" r="4" fill="transparent" stroke="transparent" tabindex="0" role="img" aria-label="agg5 (5 табл.): 45 с"/></svg><div class="tip" hidden></div></div></figure>
+<details><summary>Таблица значений</summary><table><thead><tr><th>ячейка</th><th>прогоны, с</th><th>медиана, с</th></tr></thead><tbody>
+<tr><td>agg1_1k|T_1M_W12</td><td>35.5 / 35.9 / 44.9</td><td>35.9</td></tr><tr><td>agg1_5k|T_1M_W12</td><td>38.3 / 40.0 / 40.3</td><td>40.0</td></tr><tr><td>agg1_10k|T_1M_W12</td><td>41.8 / 44.0 / 45.2</td><td>44.0</td></tr><tr><td>agg1_50k|T_1M_W12</td><td>46.7 / 46.9 / 56.4</td><td>46.9</td></tr><tr><td>agg1_100k|T_1M_W12</td><td>60.2 / 60.7 / 61.1</td><td>60.7</td></tr><tr><td>agg3_10k|T_1M_W12</td><td>59.2 / 60.3 / 60.9</td><td>60.3</td></tr><tr><td>agg3_50k|T_1M_W12</td><td>63.3 / 65.1 / 66.6</td><td>65.1</td></tr><tr><td>agg3_100k|T_1M_W12</td><td>72.8 / 74.5 / 74.6</td><td>74.5</td></tr><tr><td>agg5_10k|T_1M_W12</td><td>62.8 / 64.9 / 65.7</td><td>64.9</td></tr><tr><td>agg5_50k|T_1M_W12</td><td>71.5 / 73.1 / 73.5</td><td>73.1</td></tr><tr><td>agg5_100k|T_1M_W12</td><td>74.4 / 75.2 / 76.5</td><td>75.2</td></tr><tr><td>agg1_1k|T_1M_W45</td><td>11.9 / 12.2 / 16.3</td><td>12.2</td></tr><tr><td>agg1_5k|T_1M_W45</td><td>13.2 / 13.2 / 15.9</td><td>13.2</td></tr><tr><td>agg1_10k|T_1M_W45</td><td>13.7 / 14.1 / 17.1</td><td>14.1</td></tr><tr><td>agg1_50k|T_1M_W45</td><td>20.1 / 20.8 / 20.9</td><td>20.8</td></tr><tr><td>agg1_100k|T_1M_W45</td><td>25.2 / 27.3 / 28.1</td><td>27.3</td></tr><tr><td>agg3_10k|T_1M_W45</td><td>14.7 / 14.7 / 15.4</td><td>14.7</td></tr><tr><td>agg3_50k|T_1M_W45</td><td>26.8 / 26.9 / 26.9</td><td>26.9</td></tr><tr><td>agg3_100k|T_1M_W45</td><td>34.6 / 38.5 / 41.9</td><td>38.5</td></tr><tr><td>agg5_10k|T_1M_W45</td><td>14.3 / 14.7 / 17.3</td><td>14.7</td></tr><tr><td>agg5_50k|T_1M_W45</td><td>30.0 / 31.3 / 32.8</td><td>31.3</td></tr><tr><td>agg5_100k|T_1M_W45</td><td>45.0 / 45.0 / 51.3</td><td>45.0</td></tr>
+</tbody></table></details>
+<ul class="out">
+<li>кривые монотонные: «V-ямы» первого графика были артефактом цензуры;</li>
+<li>срез диапазоном почти не экономит: 10 тыс. из миллиона стоит почти как 100 тыс. — EAV-джойн читает всю таблицу;</li>
+<li>масштаб по строкам таблицы — порядка <b>60 мкс/строку</b> (1М ≈ 60 с на 2 ядрах), повторяемо: прогоны 60.7/60.2/61.1 с.</li>
+</ul>
+
+<h2>5. Замеры: ×50 потоков</h2>
+<figure class="fig"><div class="fighead"><h3>×50 потоков на пустом сервере: sel1_10</h3><p class="note">перезамер 25.10 вечером: обслуживался ли «запретный» ×50</p></div><div class="x50grid"><div class="x50cell"><span class="x50table">T_1K_W45</span><span class="x50val" style="color:#f1f5f9">7.3 rps</span><span class="x50sub">p95 6.9 с</span></div><div class="x50cell"><span class="x50table">T_10K_W12</span><span class="x50val" style="color:#f1f5f9">11.2 rps</span><span class="x50sub">p95 6.1 с</span></div><div class="x50cell"><span class="x50table">T_10K_W45</span><span class="x50val" style="color:#f1f5f9">9.5 rps</span><span class="x50sub">p95 7.2 с</span></div><div class="x50cell"><span class="x50table">T_100K_W12</span><span class="x50val" style="color:#f1f5f9">11.1 rps</span><span class="x50sub">p95 5.8 с</span></div><div class="x50cell"><span class="x50table">T_100K_W45</span><span class="x50val" style="color:#f1f5f9">11.2 rps</span><span class="x50sub">p95 7.2 с</span></div><div class="x50cell"><span class="x50table">T_1M_W12</span><span class="x50val" style="color:#f1f5f9">11.4 rps</span><span class="x50sub">p95 7.5 с</span></div><div class="x50cell"><span class="x50table">T_1M_W45</span><span class="x50val" style="color:#f1f5f9">10.5 rps</span><span class="x50sub">p95 5.9 с</span></div></div></figure>
+<ul class="out">
+<li>лёгкие sel-запросы ×50 <b>обслуживаются</b> (7–11 rps, p95 ~6–7 с) — «отказы» первого замера были самоиндуцированной очередью: прерванные тяжёлые агрегаты догорают в MySQL и отравляют соседние ячейки сетки;</li>
+<li>тяжёлые отчёты ×10 не обслуживаются даже на пустом сервере (контрольные пробы: 10/10 таймаутов) — для них насыщение честное;</li>
+<li>порог потоков определяется ёмкостью воркеров Apache и хвостами тяжёлых запросов, а не числом потоков самого по себе.</li>
+</ul>
+
+<h2>6. Подбор конфигурации: правила из замеров</h2>
+<div class="cards">
+  <div class="card"><h3>Ключи диапазонных фильтров — фиксированной ширины</h3>
+    Числовой фильтр по коду над longtext не попадает в индекс: читается вся таблица
+    (24.3 с на 500 тыс.). Набивка нулями + строковые границы — <b>3.2 с (×7.6)</b>, читается только срез.
+    <div class="n">Коды для выборок и отчётов набивать до одной ширины; типизированная числовая колонка значения — отдельное схемное решение (тикет #5278).</div></div>
+  <div class="card"><h3>Срез отчёта диапазоном почти не экономит</h3>
+    Агрегат по 10 тыс. из миллиона стоит почти как по 100 тыс. — EAV-джойн читает таблицу целиком.
+    Полное чтение — <b>38–65 с на 1 млн строк (2 vCPU)</b>, зависит от числа таблиц в JOIN.
+    <div class="n">Тяжёлые агрегаты — отдельным контуром (ночь, одиночный поток); в интерактив большие срезы не отдавать.</div></div>
+  <div class="card"><h3>Ширина строки выборкам безразлична</h3>
+    p95 выборки при 12 и 45 реквизитах отличается в <b>0.9–1.1×</b> — стоимость определяют колонки запроса, не ширина хранения.
+    <div class="n">45 реквизитов — не повод дробить таблицу. На агрегатах сравнение ширины не чистое: у T_1M_W45 вдвое меньше строк.</div></div>
+  <div class="card"><h3>Запись — только батчами</h3>
+    <b>batch100 = ×21</b> к построчной записи. Точечный <code>one</code>/<code>upd5</code> — зона насыщения
+    на любых потоках, в интерактив не ставить.
+    <div class="n">Массовые обновления — upd10–upd500, до ×25 потоков.</div></div>
+  <div class="card"><h3>Потоки: до ×25 деградация, ×50 — только лёгкие</h3>
+    Выборки: ×10 — <b>×2.3</b> латентности, ×25 — <b>×5.4</b>. ×50 лёгких sel обслуживается
+    (7–11 rps), тяжёлые отчёты уже на ×10 дают <b>10/10 отказов</b> (очередь воркеров Apache).
+    <div class="n">Ёмкость потоков определяется воркерами Apache и хвостами тяжёлых запросов, не числом потоков само по себе.</div></div>
+  <div class="card"><h3>Большие списки не отдавать</h3>
+    Пагинация по 20 строк из 100К/1М — <b>насыщение уже на ×5</b>.
+    <div class="n">Экраны строить на фильтрах и выборках по ключу; навигатор по данным — через индексные пути.</div></div>
+  <div class="card"><h3>RAM: данные ×2, swap обязателен</h3>
+    Пул InnoDB 128 МБ на 2.7 ГБ данных = первые прогоны с диска. Self-join по всей EAV-таблице
+    уложил mysqld (OOM при 1.9 ГБ RAM); swap 2 ГБ снял риск.
+    <div class="n">RAM ≥ 2× объёма данных; пул ≥ горячий набор; тяжёлые self-join отчёты ограничивать (тикет #5276).</div></div>
+  <div class="card"><h3>Ядра: агрегат масштабируется линейно</h3>
+    Стоимость агрегата — чтение таблицы, она делится по ядрам примерно линейно
+    (проверено до <b>16 ядер / 700 млн строк</b>, habr 900308).
+    <div class="n">Выборке ядра отдельного запроса не ускоряют — они разгружают параллельный поток.</div></div>
+</div>
+
+<h2>7. Границы применимости</h2>
+<ul class="out">
+<li>Все цифры — один сервер класса 2 vCPU / 1.9 ГБ RAM (MySQL 8.0.46, PHP-ядро с REST v2). На другом железе
+абсолютные значения смещаются, формулы и относительные выводы — устойчивы;</li>
+<li>на измеренном диапазоне модель укладывается в <b>±15 %</b> (худшая ячейка перезамера — 8 %);
+за диапазоном (таблица &gt;1 млн, срез &gt;100 тыс., потоки ≠ опорных) это экстраполяция — допускайте ×1.5–2;</li>
+<li>не измерено: агрегаты на нескольких потоках по срезам (×1 только), запись при 45 реквизитах,
+срезы sel больше 5000 строк, ×50 для sel с срезом &gt;10 строк, параллельные клиенты разных типов;</li>
+<li>фон боевого сервера исключён не полностью: перезамер 25.10 шёл на пустом сервере, сетка 24–25.10 — с фоном;
+ячейки с ⚠️ в модель не закладывались;</li>
+<li>потолки замеров: сетка — 30 с, перезамер срезов — 120 с (обе попытки за потолком — время не измерено).</li>
+</ul>
+
+<p class="lead">Источники: <code>docs/hlt-stand/results.md</code> (сетка), <code>remeasure-2510.json</code> (перезамер),
+разборы — issues ideav/crm <a href="https://github.com/ideav/crm/issues/5267">#5267</a>,
+<a href="https://github.com/ideav/crm/issues/5279">#5279</a>/<a href="https://github.com/ideav/crm/issues/5281">#5281</a>,
+фильтр по индексу — <a href="https://github.com/ideav/crm/issues/5278">#5278</a>.
+Страница собрана для задачи <a href="https://github.com/ideav/crm/issues/5283">#5283</a>.</p>
+</main>
+<script>
+'use strict';
+var DATA = /*DATA-START*/
+{
+  "agg": {
+    "W12": { "refRows": 1000000, "j": {
+      "1": { "a": 38.3, "b": 0.217, "pts": [[1,35.9],[5,40.0],[10,44.0],[50,46.9],[100,60.7]] },
+      "3": { "a": 58.1, "b": 0.159, "pts": [[10,60.3],[50,65.1],[100,74.5]] },
+      "5": { "a": 65.2, "b": 0.111, "pts": [[10,64.9],[50,73.1],[100,75.2]] } } },
+    "W45": { "refRows": 500000, "j": {
+      "1": { "a": 12.5, "b": 0.151, "pts": [[1,12.2],[5,13.2],[10,14.1],[50,20.8],[100,27.3]] },
+      "3": { "a": 12.6, "b": 0.263, "pts": [[10,14.7],[50,26.9],[100,38.5]] },
+      "5": { "a": 12.5, "b": 0.334, "pts": [[10,14.7],[50,31.3],[100,45.0]] } } }
+  },
+  "sel": {
+    "a": 520, "b": 0.38,
+    "mul": { "5": 1.0, "10": 2.3, "25": 5.4 },
+    "pts": [[10,580],[100,590],[500,780],[5000,2700]],
+    "stages": {
+      "W12": { "1": [552,1395,6601], "3": [607,1365,3030], "5": [617,1392,3465] },
+      "W45": { "1": [567,1234,2930], "3": [641,1496,3556], "5": [645,1626,3522] } },
+    "x50": { "rps": "7.3–11.4", "p95": "5.9–7.5", "note": "sel1_10, перезамер 25.10, 7 таблиц" }
+  },
+  "write": {
+    "add1":  { "rps": { "5": 11.4, "25": 11.8 } },
+    "batch": { "rps": { "5": 2.4, "25": 2.3 }, "perCall": 100 }
+  }
+}
+/*DATA-END*/;
+var SEL_FIX_S = 0.52, SEL_PER_ROW_S = 0.00038;  // 0.52 с + 0.38 мс за строку среза (×5)
+var AGG_OK_MAX_SLICE = 100000;                  // измеренный потолок среза, строк
+var CORES_LINEAR_MAX = 16;
+
+function fmtMs(v) {
+  if (v == null) return '—';
+  if (v < 1000) return Math.round(v) + ' мс';
+  if (v < 60000) return (v / 1000).toFixed(v < 10000 ? 2 : 1) + ' с';
+  var m = Math.floor(v / 60000), s = Math.round((v % 60000) / 1000);
+  return m + ' мин ' + (s < 10 ? '0' : '') + s + ' с';
+}
+function fmtH(sec) {
+  if (sec < 90) return Math.round(sec) + ' с';
+  return (sec / 3600).toFixed(1) + ' ч';
+}
+function selMul(th) {
+  return DATA.sel.mul[th] || DATA.sel.mul['25'] * (+th / 25);
+}
+
+// ——— калькулятор ———
+var $ = function (id) { return document.getElementById(id); };
+var op = $('op'), join = $('join'), width = $('width'), nrows = $('nrows'),
+    slice = $('slice'), threads = $('threads'), cores = $('cores');
+
+var SEL_SLICES = [10, 100, 500, 5000], AGG_SLICES = [1000, 5000, 10000, 50000, 100000];
+var SEL_THREADS = ['5', '10', '25', '50'], AGG_THREADS = ['1', '5', '10'], WRI_THREADS = ['5', '25', '50'];
+
+function fillSelect(el, vals, fmt) {
+  el.innerHTML = '';
+  vals.forEach(function (v) {
+    var o = document.createElement('option');
+    o.value = v; o.textContent = fmt ? fmt(v) : v; el.appendChild(o);
+  });
+}
+function sliceLabel(v) {
+  var n = +v;
+  if (n < 0) return 'вся таблица';
+  return n >= 1000 ? (n / 1000) + ' тыс.' : n + ' строк';
+}
+
+function rebuildOptions() {
+  var keepS = slice.value, keepT = threads.value, o = op.value;
+  $('lw4').style.display = (o === 'add1' || o === 'batch') ? 'none' : '';
+  $('lw').style.display = (o === 'sel' || o === 'agg') ? '' : 'none';
+  $('lw2').style.display = (o === 'agg') ? '' : 'none';
+  $('lw3').style.display = (o === 'agg' || o === 'add1' || o === 'batch') ? '' : 'none';
+  $('lw5').style.display = (o === 'agg') ? '' : 'none';
+  if (o === 'sel') fillSelect(slice, SEL_SLICES, function (v) { return v + ' строк'; });
+  else if (o === 'agg') fillSelect(slice, [-1].concat(AGG_SLICES), sliceLabel);
+  else slice.innerHTML = '';
+  fillSelect(threads, o === 'sel' ? SEL_THREADS : o === 'agg' ? AGG_THREADS : WRI_THREADS,
+    function (v) { return '×' + v; });
+  if (o === 'sel' && slice.querySelector('option[value="' + keepS + '"]')) slice.value = keepS;
+  if (threads.querySelector('option[value="' + keepT + '"]')) threads.value = keepT;
+  run();
+}
+
+function badge(kind, text) { return '<span class="badge ' + kind + '">' + text + '</span>'; }
+function stat(k, v, s) { return '<div class="stat"><div class="k">' + k + '</div><div class="v">' + v +
+  '</div>' + (s ? '<div class="s">' + s + '</div>' : '') + '</div>'; }
+
+function selEstimate(S, th) {
+  var base = SEL_FIX_S + SEL_PER_ROW_S * S;
+  var mul = selMul(th);
+  return { t: base * mul * 1000, base: base, mul: mul, rps: (+th) / (base * mul) };
+}
+function aggEstimate(N, Sk, th, cpu) {
+  var fam = DATA.agg[width.value].j[join.value];
+  var aRow = fam.a / DATA.agg[width.value].refRows;    // с на строку таблицы, ×1 поток
+  var t1 = aRow * N + (fam.b / 1000) * Sk;             // с
+  return { t: t1 * 1000 * 2 / cpu, t1: t1 * 1000, aRow: aRow, fam: fam };
+}
+
+function nearestSel(S, th, e) {
+  var st = DATA.sel.stages[width.value] && DATA.sel.stages[width.value][join.value];
+  if (!st || (th !== '10' && th !== '25'))
+    return 'Опорные замеры ×5: ' + DATA.sel.pts.map(function (p) { return p[0] + ' → ' + p[1] + ' мс'; }).join(', ') +
+      ' · модель ' + fmtMs(e.base * 1000);
+  var i = th === '10' ? 1 : 2;
+  return 'Ближайший замер (×' + th + ', ' + join.value + ' табл., ' + width.value + '-опорник): p95 ' +
+    fmtMs(st[i]) + ' · модель ' + fmtMs(e.t) + ' · расхождение ' +
+    Math.abs(Math.round((e.t / st[i] - 1) * 100)) + ' %';
+}
+function nearestAgg(Sk, ae) {
+  var pts = ae.fam.pts, best = pts[0], bd = 1e9;
+  pts.forEach(function (p) { var d = Math.abs(p[0] - Sk / 1000); if (d < bd) { bd = d; best = p; } });
+  return 'Ближайший замер (' + width.value + ', agg' + join.value + ', срез ' + best[0] + ' тыс.): ' +
+    best[1] + ' с · модель ' + (ae.t1 / 1000).toFixed(1) + ' с · расхождение ' +
+    Math.abs(Math.round((ae.t1 / 1000 / best[1] - 1) * 100)) + ' %';
+}
+
+function run() {
+  var o = op.value, th = threads.value, form = '', flagTxt = '', near = '', items;
+  var N = +nrows.value, cpu = Math.max(2, Math.min(CORES_LINEAR_MAX, +cores.value || 2));
+  if (o === 'sel') {
+    var S = +slice.value, e = selEstimate(S, th);
+    var vd, vs;
+    if (th === '50') { vd = badge('ok', '✓ обслуживается'); vs = 'измерено для sel1_10: p95 ' + DATA.sel.x50.p95 + ' с'; }
+    else if (th === '25') { vd = badge('warn', '⚠ деградация'); vs = '≈ ×5.4 к ×5'; }
+    else if (th === '10') { vd = badge('ok', '✓ приемлемо'); vs = '×2.3 к ×5'; }
+    else { vd = badge('ok', '✓ штатно'); vs = 'опорный режим'; }
+    items = [stat('оценка p95', fmtMs(e.t), '×' + th + ' потоков'),
+      stat('пропускная способность', '≈' + e.rps.toFixed(1) + ' rps', 'потоки / латентность, нижняя граница'),
+      stat('вердикт', vd, vs)];
+    form = '<b>0.52 с</b> + <b>0.38 мс</b> × ' + S.toLocaleString('ru') + ' строк = ' + fmtMs(e.base * 1000) +
+      ' (×5) → × ' + e.mul.toFixed(1) + ' (×' + th + ' потоков) = <b>' + fmtMs(e.t) + '</b>';
+    if (th === '50' && S > 10) flagTxt = '×50 для срезов больше 10 строк не измерено — оценка экстраполяцией, возможна очередь воркеров';
+    near = nearestSel(S, th, e);
+    drawModel('sel', S, th);
+  } else if (o === 'agg') {
+    var raw = +slice.value, Sk = raw < 0 ? N : raw;
+    var ae = aggEstimate(N, Sk, th, cpu);
+    var sat = th === '10';
+    items = [stat('оценка ×1 поток', fmtMs(ae.t1), N.toLocaleString('ru') + ' строк, срез ' + Sk.toLocaleString('ru')),
+      stat('при ×' + th + (cpu > 2 ? ' и ' + cpu + ' vCPU' : ''), sat ? '—' : fmtMs(ae.t),
+        cpu > 2 ? 'линейно по ядрам (×2/' + cpu + ')' : 'тяжёлый отчёт в одиночном прогоне'),
+      stat('вердикт', sat ? badge('sat', '⛔ насыщение') : th === '5' ? badge('warn', '⚠ не измерено') : badge('ok', '✓ одиночный прогон'),
+        sat ? '×10: 10/10 отказов соединений' : th === '5' ? 'агрегаты на потоках не мерялись; по сетке лёгкие живут, тяжёлые — нет' : 'безопасный режим')];
+    form = 'чтение таблицы: <b>' + (ae.aRow * 1e6).toFixed(0) + ' мкс</b>/строку × ' + N.toLocaleString('ru') +
+      ' = ' + fmtMs(ae.aRow * N * 1000) + ' + срез: <b>' + ae.fam.b.toFixed(2) + ' с</b>/тыс. × ' +
+      Math.round(Sk / 1000).toLocaleString('ru') + ' тыс. = <b>' + fmtMs(ae.t1) + '</b>' +
+      (cpu > 2 ? ' → ÷' + (cpu / 2) + ' ядер = ' + fmtMs(ae.t) : '');
+    if (Sk > AGG_OK_MAX_SLICE) flagTxt = 'срез больше 100 тыс. — вне измеренного диапазона, допускайте ×1.5–2';
+    if (N > DATA.agg[width.value].refRows) flagTxt = (flagTxt ? flagTxt + '; ' : '') +
+      'таблица больше измеренной — экстраполяция по строкам, линейность по ядрам проверена до 700 млн (habr 900308)';
+    near = nearestAgg(Sk, ae);
+    drawModel('agg', Sk, th);
+  } else {
+    var w = DATA.write[o === 'batch' ? 'batch' : 'add1'];
+    var rowsPerSec = o === 'batch' ? w.rps['5'] * w.perCall : w.rps['5'];
+    var importSec = N / rowsPerSec;
+    items = [stat('скорость (×5)', o === 'batch' ? '2.4 вызова/с' : '11.4 вызова/с',
+        o === 'batch' ? '= 240 строк/с' : '= 11 строк/с'),
+      stat('объём ' + N.toLocaleString('ru') + ' строк', fmtH(importSec), 'одиночная загрузка'),
+      stat('вердикт', th === '50' ? badge('warn', '⚠ на пределе') : badge('ok', '✓ штатно'),
+        th === '50' ? 'add1 ×50: только T_100K обслуживается (p95 8.8 с); batch100 ×50 — насыщение' : 'опорный режим')];
+    form = (o === 'batch' ? '<b>240 строк/с</b> (2.4 вызова/с × 100 записей)' : '<b>11 строк/с</b>') +
+      ' → ' + N.toLocaleString('ru') + ' строк ≈ <b>' + fmtH(importSec) + '</b>' +
+      (o === 'add1' ? ' — используйте batch100 или BKI-импорт (×21 и быстрее)' :
+        ' — BKI-импорт ещё быстрее (грабля: чанки &gt;4 тыс. wide / &gt;15 тыс. narrow строк молча теряются)');
+    $('mplot').innerHTML = '';
+    $('mtitle').textContent = 'Запись — измерения в блоке 2';
+    $('mnote').textContent = '';
+    $('mtable').innerHTML = '';
+  }
+  $('stats').innerHTML = items.join('');
+  $('formula').innerHTML = 'Оценка: ' + form;
+  var fl = $('flag');
+  if (flagTxt) { fl.hidden = false; fl.textContent = '⚠ ' + flagTxt; } else fl.hidden = true;
+  $('nearest').innerHTML = near;
+}
+
+// ——— динамический график «модель и замеры» ———
+var M = { l: 62, r: 28, t: 24, b: 46 }, MW = 720, MH = 330;
+function niceTicks(max) {
+  var p = Math.pow(10, Math.floor(Math.log(max / 4) / Math.LN10));
+  var c = [1, 2, 5, 10].map(function (m) { return m * p; });
+  for (var i = 0; i < c.length; i++) if (c[i] >= max / 4) return c[i];
+  return c[3];
+}
+function fmtAxis(v) { return v >= 1000 ? (v / 1000) + ' с' : Math.round(v) + ' мс'; }
+function drawModel(kind, curS, th) {
+  var plot = $('mplot');
+  var pts, modelFn, xs, col, note;
+  if (kind === 'sel') {
+    pts = DATA.sel.pts; xs = SEL_SLICES; col = '#3987e5';
+    modelFn = function (S) { return (SEL_FIX_S + SEL_PER_ROW_S * S) * selMul(th) * 1000; };
+    note = 'точки — замеры ×5 (медианы чистых ячеек), линия — модель при ×' + th +
+      (th !== '5' ? ', пунктир — модель ×5' : '');
+    $('mtitle').textContent = 'Выборка (sel' + join.value + '): модель и замеры, p95';
+  } else {
+    var fam = DATA.agg[width.value].j[join.value];
+    pts = fam.pts; xs = AGG_SLICES; col = '#d95926';
+    var aRow = fam.a / DATA.agg[width.value].refRows;
+    modelFn = function (S) { return (aRow * (+nrows.value) + (fam.b / 1000) * S) * 1000; };  // мс, ×1
+    note = 'точки — перезамер 25.10 (медианы, потолок 120 с), линия — модель для текущего размера таблицы';
+    $('mtitle').textContent = 'Отчёт-агрегат (agg' + join.value + ', ' + width.value + '): модель и замеры ×1';
+  }
+  var vals = [];
+  xs.forEach(function (S) { vals.push(modelFn(S)); });
+  pts.forEach(function (p) { vals.push(p[1]); });
+  var vmax = niceTicks(Math.max.apply(null, vals) * 1.06);
+  var X = function (i) { return M.l + i * (MW - M.l - M.r) / (xs.length - 1); };
+  var Y = function (v) { return MH - M.b - v / vmax * (MH - M.t - M.b); };
+  var g = '';
+  for (var v = 0; v <= vmax + 1e-9; v += vmax / 4) {
+    var yy = Y(v);
+    g += '<line x1="' + M.l + '" y1="' + yy.toFixed(1) + '" x2="' + (MW - M.r) + '" y2="' + yy.toFixed(1) +
+      '" stroke="#1e293b" stroke-width="1"/><text x="' + (M.l - 8) + '" y="' + (yy + 4).toFixed(1) +
+      '" text-anchor="end" font-size="12" fill="#64748b">' + fmtAxis(v) + '</text>';
+  }
+  xs.forEach(function (S, i) {
+    g += '<text x="' + X(i).toFixed(1) + '" y="' + (MH - M.b + 20) + '" text-anchor="middle" font-size="12" fill="#64748b">' +
+      (S >= 1000 ? (S / 1000) + ' тыс.' : S) + '</text>';
+  });
+  g += '<text x="' + (MW / 2) + '" y="' + (MH - 8) + '" text-anchor="middle" font-size="12" fill="#94a3b8">Строк в срезе</text>';
+  if (kind === 'sel' && th !== '5') {
+    var m5 = xs.map(function (S, i) {
+      return X(i).toFixed(1) + ',' + Y((SEL_FIX_S + SEL_PER_ROW_S * S) * 1000).toFixed(1);
+    });
+    g += '<path d="M' + m5.join('L') + '" fill="none" stroke="' + col + '" stroke-width="1.5" stroke-dasharray="4 4" opacity=".6"/>';
+  }
+  var mp = xs.map(function (S, i) { return X(i).toFixed(1) + ',' + Y(modelFn(S)).toFixed(1); });
+  g += '<path d="M' + mp.join('L') + '" fill="none" stroke="' + col + '" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
+  pts.forEach(function (p) {
+    var i = xs.indexOf(p[0]);
+    if (i < 0) return;
+    g += '<circle data-pt="' + p[0] + '" cx="' + X(i).toFixed(1) + '" cy="' + Y(p[1]).toFixed(1) +
+      '" r="4.5" fill="' + col + '" stroke="#0f172a" stroke-width="2"/>';
+  });
+  var si = xs.indexOf(curS);
+  if (si >= 0) g += '<line x1="' + X(si) + '" y1="' + M.t + '" x2="' + X(si) + '" y2="' + (MH - M.b) +
+    '" stroke="#c98500" stroke-width="1" stroke-dasharray="3 3"/>';
+  plot.innerHTML = '<svg viewBox="0 0 ' + MW + ' ' + MH + '" role="img">' + g + '</svg><div class="tip" hidden></div>';
+  attachHover(plot, xs, function (i) {
+    var rows = [['модель', fmtMs(modelFn(xs[i])), col]];
+    pts.forEach(function (p) { if (p[0] === xs[i]) rows.push(['замер ×' + (kind === 'agg' ? '1' : '5'), fmtMs(p[1])]); });
+    return rows;
+  });
+  var tbl = '<summary>Таблица значений</summary><table><thead><tr><th>срез</th>';
+  xs.forEach(function (S) { tbl += '<th>' + (S >= 1000 ? (S / 1000) + ' тыс.' : S) + '</th>'; });
+  tbl += '</tr></thead><tbody><tr><td>модель</td>';
+  xs.forEach(function (S) { tbl += '<td>' + fmtMs(modelFn(S)) + '</td>'; });
+  tbl += '</tr><tr><td>замер' + (kind === 'agg' ? ' ×1 (перезамер)' : ' ×5') + '</td>';
+  xs.forEach(function (S) {
+    var p = null; pts.forEach(function (q) { if (q[0] === S) p = q; });
+    tbl += '<td>' + (p ? fmtMs(p[1]) : '—') + '</td>';
+  });
+  tbl += '</tr></tbody></table>';
+  $('mtable').innerHTML = tbl;
+}
+
+// ——— hover, как в load-charts.html ———
+function attachHover(plot, xs, rowsFn) {
+  var svg = plot.querySelector('svg'), tip = plot.querySelector('.tip');
+  var W = svg.viewBox.baseVal.width, H = svg.viewBox.baseVal.height;
+  var X = function (i) { return M.l + i * (W - M.l - M.r) / (xs.length - 1); };
+  var cross = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  cross.setAttribute('stroke', '#475569'); cross.setAttribute('stroke-width', '1');
+  cross.setAttribute('y1', M.t); cross.setAttribute('y2', H - M.b); cross.style.display = 'none';
+  svg.appendChild(cross);
+  var idx = null;
+  function show(i) {
+    idx = i; var r = plot.getBoundingClientRect(), sx = r.width / W;
+    cross.setAttribute('x1', X(i)); cross.setAttribute('x2', X(i)); cross.style.display = '';
+    tip.hidden = false;
+    tip.innerHTML = '<div class="t">' + (xs[i] >= 1000 ? (xs[i] / 1000) + ' тыс.' : xs[i]) + ' строк</div>' +
+      rowsFn(i).map(function (rw) {
+        return '<div class="r">' + (rw[2] ? '<span class="sw" style="background:' + rw[2] + '"></span>' : '') +
+          rw[0] + '<span class="v">' + rw[1] + '</span></div>';
+      }).join('');
+    tip.style.left = Math.min(X(i) * sx + 12, r.width - tip.offsetWidth - 4) + 'px';
+    tip.style.top = '8px';
+  }
+  function hide() { idx = null; cross.style.display = 'none'; tip.hidden = true; }
+  plot.onmousemove = function (e) {
+    var r = plot.getBoundingClientRect(), x = (e.clientX - r.left) / r.width * W;
+    var best = 0, bd = 1e9;
+    xs.forEach(function (_, i) { var d = Math.abs(X(i) - x); if (d < bd) { bd = d; best = i; } });
+    if (best !== idx || tip.hidden) show(best);
+  };
+  plot.onmouseleave = hide;
+}
+
+[op, join, width, nrows, slice, threads].forEach(function (el) { el.addEventListener('change', rebuildOptions); });
+cores.addEventListener('input', run);
+rebuildOptions();
+
+// ——— статические фигуры (разметка скопирована из load-charts.html) ———
+document.querySelectorAll('[data-plot]').forEach(function (plot) {
+  if (plot.dataset.bound) return; plot.dataset.bound = '1';
+  var svg = plot.querySelector('svg'), tip = plot.querySelector('.tip');
+  if (!svg || !tip) return;
+  var series = JSON.parse(plot.dataset.series), xsA = JSON.parse(plot.dataset.x);
+  var W = svg.viewBox.baseVal.width, H = svg.viewBox.baseVal.height;
+  var m = { l: 62, r: 28, t: 24, b: 46 };
+  var X = function (i) { return m.l + (xsA.length === 1 ? (W - m.l - m.r) / 2 : (i * (W - m.l - m.r)) / (xsA.length - 1)); };
+  var cross = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  cross.setAttribute('stroke', '#475569'); cross.setAttribute('stroke-width', '1');
+  cross.setAttribute('y1', m.t); cross.setAttribute('y2', H - m.b); cross.style.display = 'none';
+  svg.appendChild(cross);
+  var idx = null;
+  function show(i) {
+    idx = i; var r = plot.getBoundingClientRect(), sx = r.width / W;
+    cross.setAttribute('x1', X(i)); cross.setAttribute('x2', X(i)); cross.style.display = '';
+    tip.hidden = false;
+    tip.innerHTML = '<div class="t">' + xsA[i] + '</div>' + series.map(function (s) {
+      var v = s.data[i];
+      var val = v == null ? '—' : (s.censored.indexOf(i) >= 0 ? '≥120 с' :
+        s.fmt === 'rps' ? v.toFixed(1) + ' rps' : s.fmt === 's' ? v.toFixed(1) + ' с' : Math.round(v) + ' мс');
+      return '<div class="r"><span class="sw" style="background:' + s.color + '"></span>' + s.name +
+        '<span class="v">' + val + '</span></div>';
+    }).join('');
+    tip.style.left = Math.min(X(i) * sx + 12, r.width - tip.offsetWidth - 4) + 'px';
+    tip.style.top = '8px';
+  }
+  function hide() { idx = null; cross.style.display = 'none'; tip.hidden = true; }
+  plot.addEventListener('mousemove', function (e) {
+    var r = plot.getBoundingClientRect(), x = (e.clientX - r.left) / r.width * W;
+    var best = 0, bd = 1e9;
+    xsA.forEach(function (_, i) { var d = Math.abs(X(i) - x); if (d < bd) { bd = d; best = i; } });
+    if (best !== idx || tip.hidden) show(best);
+  });
+  plot.addEventListener('mouseleave', hide);
+});
+</script>
+</body>
+</html>
