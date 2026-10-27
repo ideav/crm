@@ -59,7 +59,7 @@ function world(){
     unset($GLOBALS["warning"]);
 }
 class Rows { public $rows; function __construct($rows){ $this->rows = $rows; } }
-function mysqli_fetch_array($r){ return ($r instanceof Rows && count($r->rows)) ? array_shift($r->rows) : null; }
+function fake_fetch($r){ return ($r instanceof Rows && count($r->rows)) ? array_shift($r->rows) : null; }
 function Exec_sql($sql, $desc){
     $DB =& $GLOBALS["DB"];
     $GLOBALS["SQL"][] = $desc;
@@ -100,16 +100,19 @@ function Check_Rec_masks($id){}
 function Grant_1level($t){ return "WRITE"; }
 function t9n($v){ return preg_match('/^\[RU\](.*?)\[EN\]/s', $v, $m) ? $m[1] : $v; }
 
+# В CI у php есть mysqli — mysqli_fetch_array не переопределить, вызовы ядра идут в заглушку
+function fake_db($code){ return str_replace("mysqli_fetch_array(", "fake_fetch(", $code); }
+
 $source = file_get_contents(__DIR__."/../index.php");
 foreach(array("BtCorePort", "BtWarn", "BtDrainWarnings", "BtSkipRequest", "BtChainFromRequest",
         "BtRecord", "BtHookBefore", "BtHookAfter", "BtHookAfterWarn") as $fn)
-    eval(extract_function_source($source, $fn));
+    eval(fake_db(extract_function_source($source, $fn)));
 
 # Ветка case "_m_move" главного switch ядра — как есть
 $from = strpos($source, "\t\tcase \"_m_move\":");
 $to = strpos($source, "\t\tcase \"_m_del\":", $from);
 if($from === false || $to === false) throw new Exception("case _m_move not found");
-eval('function run_move($id, $up){ global $z; $a = "_m_move"; switch($a){ '.substr($source, $from, $to - $from).' } return $a; }');
+eval('function run_move($id, $up){ global $z; $a = "_m_move"; switch($a){ '.fake_db(substr($source, $from, $to - $from)).' } return $a; }');
 
 # ── 1. Движок: смена родителя — служебный признак в наборе изменённых колонок ──
 world();
