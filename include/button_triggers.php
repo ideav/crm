@@ -25,6 +25,7 @@
 defined("BT_EVENTS") || define("BT_EVENTS", "PRESS,CREATE,UPDATE,DELETE,READ");
 defined("BT_MAX_DEPTH") || define("BT_MAX_DEPTH", 3);          # длина цепочки триггеров
 defined("BT_PROMPT_HOURLY_CAP") || define("BT_PROMPT_HOURLY_CAP", 60);  # промпт-задач триггеров в час на базу
+defined("BT_POSITION_CHANGED") || define("BT_POSITION_CHANGED", 0);  # в наборе изменённых колонок: сменился родитель записи (#5290)
 
 class BtFormulaError extends Exception {}
 class BtSkip extends Exception {}
@@ -532,10 +533,13 @@ function BtUpdateFires($action, $colId, $changed, $meta){
 		return count(array_intersect($refs, $changed)) > 0;
 	return count(array_diff($changed, array((int)$colId))) > 0;
 }
-# Изменённые колонки между двумя снимками записи; главное значение — id таблицы
+# Изменённые колонки между двумя снимками записи; главное значение — id таблицы, смена
+# родителя (_m_move) — BT_POSITION_CHANGED: на неё срабатывают только действия без ссылок
 function BtDiff($before, $after){
 	$changed = array();
 	if(!$before || !$after) return $changed;
+	if(isset($before["up"], $after["up"]) && (int)$before["up"] !== (int)$after["up"])
+		$changed[] = BT_POSITION_CHANGED;
 	if((string)$before["val"] !== (string)$after["val"])
 		$changed[] = (int)$after["type"];
 	$keys = array_unique(array_merge(array_keys($before["values"]), array_keys($after["values"])));
