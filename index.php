@@ -3524,6 +3524,8 @@ function Get_file($file, $fatal=TRUE) # $fatal - Die if not found
 	global $z;
 	if(!isset($file))
 		die ("Set file name!");
+	if((strpos($file, "..") !== FALSE) || (strpos($file, "\0") !== FALSE))  # No way out of the templates folders
+		return $fatal ? die("File [".htmlspecialchars($file)."] does not exist!") : "";
 
 	if(is_file($_SERVER['DOCUMENT_ROOT']."/templates/custom/$z/$file"))  # Search DB folder
 		$file = $_SERVER['DOCUMENT_ROOT']."/templates/custom/$z/$file";
@@ -10577,15 +10579,17 @@ function Make_tree($text, $cur_block)
 			}
 			elseif(strcasecmp($res[1], $file) == 0)
 			{
+# The template may be chosen by the request (?name=file), but only a plain file name is accepted
+				$req_file = isset($_GET[$res[2]]) && is_string($_GET[$res[2]]) && preg_match("/^[A-Za-z0-9_\-]+$/", $_GET[$res[2]])
+				            ? $_GET[$res[2]] : $res[2];
 			    if($res[2] == "a")
 			        $text = Get_file($GLOBALS["GLOBAL_VARS"]["action"].".html", FALSE);
-				elseif(isset($_GET[$res[2]])) # Check if we have the requested template
-					$text = Get_file($_GET[$res[2]].".html", FALSE);
 				else
-					$text = Get_file($res[2].".html", FALSE);
+					$text = Get_file($req_file.".html", FALSE);
 				if(strlen($text) == 0)
 					$text = Get_file("info.html");   # Default content is in info.html
-				$file_block = "$cur_block." . (isset($_REQUEST[$res[2]])?$_REQUEST[$res[2]]:$res[2]);
+				$file_block = "$cur_block." . (isset($_REQUEST[$res[2]]) && is_string($_REQUEST[$res[2]]) && preg_match("/^&?[A-Za-z0-9_\-]+$/", $_REQUEST[$res[2]])
+				                               ? $_REQUEST[$res[2]] : $res[2]);
 				$insertion_point = "{_block_.$file_block}";
 				$blocks[$file_block]["PARENT"] = $cur_block;
 				Make_tree($text, $file_block);
@@ -10663,7 +10667,7 @@ function Parse_block($block)
 							break;
 				}
 				elseif($sub[0] == "_global_")	# It's a Global Variable (marked by prefix "_global_.")
-					$item = isset($GLOBALS["GLOBAL_VARS"][$sub[1]]) ? $GLOBALS["GLOBAL_VARS"][$sub[1]] : (BuiltIn("[".strtoupper($sub[1])."]")==="[".strtoupper($sub[1])."]" ? "" : BuiltIn("[".strtoupper($sub[1])."]"));
+					$item = isset($GLOBALS["GLOBAL_VARS"][$sub[1]]) ? $GLOBALS["GLOBAL_VARS"][$sub[1]] : (BuiltIn("[".strtoupper($sub[1])."]")==="[".strtoupper($sub[1])."]" ? "" : htmlspecialchars(BuiltIn("[".strtoupper($sub[1])."]"), ENT_QUOTES | ENT_SUBSTITUTE)); # Built-ins carry request headers
 				elseif($sub[0] == "_request_")	# It's a _REQUEST var (marked by prefix "_request_.")
 				{
 					foreach($_GET as $k => $v)
@@ -10678,6 +10682,11 @@ function Parse_block($block)
 							$item = $v;
 							break;
 						}
+# Request values land in attributes and in scripts after "//": escape the markup, drop line breaks
+					if(isset($item) && !is_string($item))
+						unset($item);
+					elseif(isset($item) && !isApi())
+						$item = htmlspecialchars(str_replace(array("\r", "\n"), " ", $item), ENT_QUOTES | ENT_SUBSTITUTE);
 				}
 				if(isset($item))	# Insert item, masking "{"
 					$cur_content = str_ireplace("{".$point."}", str_replace("{", "&#123;", $item), $cur_content);
