@@ -3982,6 +3982,50 @@ function refAnchors($id, $par)
 	return count($via) ? $via : FALSE;
 }
 # </ref-anchors-5058>
+# Условие WHERE из адреса вызова запроса. Оно встаёт в скобки «AND (...)», поэтому
+# может только сузить выборку, а не снять ограничители запроса через OR. Отказ, если
+# строка закрывает лишнюю скобку, не закрывает свои скобки или кавычки, или содержит
+# вне кавычек «;» или комментарий (--, #, /*). Ведущий AND снимается.
+function Report_request_where($where)
+{
+	$where = trim($where);
+	if(strtoupper(substr($where, 0, 4)) == "AND " || strtoupper(substr($where, 0, 4)) == "AND(")
+		$where = trim(substr($where, 3));
+	$depth = 0;
+	$quote = "";
+	$len = strlen($where);
+	for($i = 0; $i < $len; $i++)
+	{
+		$c = $where[$i];
+		if($quote !== "")
+		{
+			if($c === "\\")
+				$i++;
+			elseif($c === $quote)
+				$quote = "";
+			continue;
+		}
+		if(($c === "'") || ($c === '"') || ($c === "`"))
+			$quote = $c;
+		elseif($c === "(")
+			$depth++;
+		elseif($c === ")")
+		{
+			if(--$depth < 0)
+				break;
+		}
+		elseif(($c === ";") || ($c === "#") || (substr($where, $i, 2) === "--") || (substr($where, $i, 2) === "/*"))
+		{
+			$depth = -1;
+			break;
+		}
+	}
+	if(($depth !== 0) || ($quote !== ""))
+		die_info(t9n("[RU]Недопустимое условие WHERE: незакрытые скобки или кавычки, «;» или комментарий"
+		        ."[EN]Invalid WHERE condition: unbalanced brackets or quotes, «;» or a comment"));
+	return $where;
+}
+
 function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FALSE) # $exe means we must retrieve data at last, not just prep the sql
 {
 	global $blocks, $obj, $z, $args;
@@ -4979,7 +5023,12 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 # Check if we got some WHERE parameters
 			if($exe && (isset($_REQUEST["WHERE"]) || isset($GLOBALS["STORED_REPS"][$id]["params"][REP_WHERE])))
 			    if(strlen(trim($where = isset($_REQUEST["WHERE"]) ? $_REQUEST["WHERE"] : $GLOBALS["STORED_REPS"][$id]["params"][REP_WHERE])))
-    			    $filter .= strtoupper(substr($where, 0, 3)) == "AND" ? " $where" : " AND $where";
+			    {
+			        if(isset($_REQUEST["WHERE"]))  # WHERE из адреса только сужает выборку: в скобках, без выхода из них
+			            $filter .= " AND (".Report_request_where($where).")";
+			        else
+    			        $filter .= strtoupper(substr($where, 0, 3)) == "AND" ? " $where" : " AND $where";
+			    }
 # Fill in the field set with built-in and request values, if any
 			preg_match_all("/(\[[0-9a-zA-Z\_]+\])/ims", $field, $builtins);
 			foreach($builtins[0] as $builtin)
