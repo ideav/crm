@@ -14563,7 +14563,7 @@ function BtRecord($id){
 			$values[$k] = (isset($values[$k]) && $values[$k] !== "" ? $values[$k]."," : "").(string)$c["rval"];
 		}
 	}
-	return array("id" => $id, "type" => (int)$row["t"], "val" => BtViewValue($meta["base"], $row["val"]), "values" => $values);
+	return array("id" => $id, "type" => (int)$row["t"], "up" => (int)$row["up"], "val" => BtViewValue($meta["base"], $row["val"]), "values" => $values);
 }
 # Пользователь, от имени которого выполняется действие: id записи «Пользователь» или логин.
 # Удалён — не найден; без роли — закрыт (Validate_Token такого не пускает). Нет токена —
@@ -15580,8 +15580,10 @@ if(Validate_Token())
 				}
 				if($row["up"]!=$up){
 #					echo("The same parent $up");
+					$btHook = BtHookBefore("move", $id);	# #5290: перенос к другому родителю — событие UPDATE
 					Exec_sql("UPDATE $z SET ord=$ord, up=$up WHERE id=$id", "Move Obj");
 					Exec_sql("UPDATE $z SET ord=ord-1 WHERE up=".$row["up"]." AND t=".$row["t"]." AND ord>".$row["ord"], "Move peers up");
+					BtHookAfterWarn($btHook);
 				}
 			}
 			else
