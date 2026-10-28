@@ -3002,7 +3002,9 @@
     //   pack   — РАЗНИЦА СДЕЛАНО/УПАКОВАНО: Σ «Кол-во факт» Партий ГП задания против
     //            Σ «Упаковано шт». Разошлись — сделанное лежит неупакованным (или упаковали не
     //            столько, сколько сделали);
-    //   sleeve — ВТУЛКИ НЕ ГОТОВЫ: у позиции задания есть незакрытые «Задачи на втулки».
+    //   sleeve — ВТУЛКИ НЕ ГОТОВЫ: у позиции задания есть незакрытые «Задачи на втулки»;
+    //   short  — ЗАКРЫТО НЕ ПОЛНОСТЬЮ (#5293): «Закончено» стоит, а проходов сделано меньше плана
+    //            (shortClosedRuns) — оператор нажал «Пропуск» или «Прекратить» на пульте слиттера.
     //
     // ОДНО ОКНО НА ОБЕ ГРУППЫ (решение заказчика 17.08.2026): видимый диапазон очереди [С; По] И
     // плановый день НЕ ПОЗЖЕ СЕГОДНЯ. У завтрашнего задания «не упаковано» и «втулки не нарезаны»
@@ -3010,11 +3012,12 @@
     //   opts: { todayKey, dateFrom, dateTo, packByCut, sleeveByPosition, positionsByCut, positionsById }
     //   positionsByCut — { cutId: [{ id, orderNo }] } (из «Обеспечений» задания).
     // Чистая (DOM не трогает) — покрыта тестом.
-    // → { pack: [{ cut, fact, packed, diff }], sleeve: [{ cut, positions: [{ id, orderNo, kind, … }] }] }
+    // → { pack: [{ cut, fact, packed, diff }], sleeve: [{ cut, positions: [{ id, orderNo, kind, … }] }],
+    //     short: [{ cut, done, planned, rest, orders: [orderNo] }] }
     function dashboardGroups(cuts, opts) {
         var o = opts || {};
         var today = Number(o.todayKey);
-        var res = { pack: [], sleeve: [] };
+        var res = { pack: [], sleeve: [], short: [] };
         if (!isFinite(today)) return res;
         var packByCut = o.packByCut || {};
         var sleeveByPosition = o.sleeveByPosition || {};
@@ -3041,6 +3044,15 @@
                 notReady.push(state);
             });
             if (notReady.length) res.sleeve.push({ cut: c, positions: notReady });
+            var sh = shortClosedRuns(c);
+            if (sh) {
+                var orders = [];
+                (positionsByCut[String(c.id)] || []).forEach(function(p) {
+                    var no = String((p && p.orderNo) || '').trim();
+                    if (no && orders.indexOf(no) < 0) orders.push(no);
+                });
+                res.short.push({ cut: c, done: sh.done, planned: sh.planned, rest: sh.rest, orders: orders });
+            }
         });
         function byPlan(a, b) {
             var av = planTsSeconds(a && a.cut && a.cut.planDate), bv = planTsSeconds(b && b.cut && b.cut.planDate);
@@ -3048,6 +3060,7 @@
         }
         res.pack.sort(byPlan);
         res.sleeve.sort(byPlan);
+        res.short.sort(byPlan);
         return res;
     }
 
@@ -3064,6 +3077,30 @@
         var n = Number(cut.actualRuns);
         if (!isFinite(n) || n <= 0) return 0;
         return Math.floor(n);
+    }
+
+    // #5293: ЗАДАНИЕ ЗАКРЫТО НЕ ПОЛНОСТЬЮ. «Пропуск» и «Прекратить» на пульте слиттера ставят
+    // «Закончено» так же, как «Завершить», и для планирования (cutIsFinishedWork) задание
+    // становится выполненным — недоделанные проходы из очереди уходят. Видно это только по
+    // проходам: «Кол-во резок факт» меньше «Кол-во резок план». Факт неизвестен — не судим.
+    // → { done, planned, rest } либо null. Чистая — покрыта тестом.
+    function shortClosedRuns(cut) {
+        if (!cut || planTsSeconds(cut.endDate) == null) return null;
+        var done = cutDoneRuns(cut), planned = Math.floor(Number(cut.plannedRuns) || 0);
+        if (done == null || !(planned > 0) || done >= planned) return null;
+        return { done: done, planned: planned, rest: planned - done };
+    }
+
+    // #5293: подпись карточки закрытого не полностью задания — диспетчер видит недоделку там же,
+    // где видит само задание, а не только в «Дэшборде». → { text, title } либо null.
+    function shortClosedNote(cut) {
+        var sh = shortClosedRuns(cut);
+        if (!sh) return null;
+        return {
+            text: 'закрыто не полностью: сделано ' + sh.done + ' из ' + sh.planned + ' проходов · не сделано ' + sh.rest,
+            title: 'На пульте слиттера задание закрыли («Пропуск» или «Прекратить»), не сделав все проходы. '
+                + 'Для планирования оно выполнено: недоделанные ' + sh.rest + ' проходов в очередь сами не вернутся.'
+        };
     }
 
     // #4572: КОГДА ЗАКРЫТЬ выполненную часть. Начало у неё фактическое, значит и окончание должно
@@ -15074,7 +15111,11 @@
         rowsToPackState: rowsToPackState,       // строки отчёта packer → «сделано/упаковано» по заданиям
         rowsToSleeveTasks: rowsToSleeveTasks,   // строки отчёта sleeve_tasks → задачи на втулки по позициям
         sleeveReadiness: sleeveReadiness,       // готовы ли втулки позиции (null = готовы / не знаем)
-        dashboardGroups: dashboardGroups,       // две группы дэшборда по одному окну [С; По] ≤ сегодня
+        dashboardGroups: dashboardGroups,       // группы дэшборда по одному окну [С; По] ≤ сегодня
+        // #5293: закрыто не полностью («Пропуск»/«Прекратить» до последнего прохода).
+        // Проверяется `experiments/atex-pp-5293-short-closed.test.js`.
+        shortClosedRuns: shortClosedRuns,       // { done, planned, rest } либо null
+        shortClosedNote: shortClosedNote,       // подпись карточки либо null
         deviationSettlePlan: deviationSettlePlan, // #4346/#4564: «Урегулировать» — переносы + разделения
         // #4736 (ТЗ §15): ручной сдвиг — кого он двигает, откуда считается и что его останавливает.
         // Проверяется `experiments/atex-pp-4736-manual-shift-over-fixed.test.js`.
@@ -20355,7 +20396,8 @@
             groups: groups,
             n: groups.pack.length,      // разница Сделано/Упаковано
             m: groups.sleeve.length,    // втулки не готовы
-            total: groups.pack.length + groups.sleeve.length
+            k: groups.short.length,     // #5293: закрыто не полностью
+            total: groups.pack.length + groups.sleeve.length + groups.short.length
         };
     };
 
@@ -20365,9 +20407,10 @@
         if (!this.dashBtn) return;
         var st = this.dashboardState();
         this.dashBtn.style.display = st.total ? '' : 'none';
-        this.dashBtn.textContent = 'Дэшборд ' + st.n + '/' + st.m;
+        this.dashBtn.textContent = 'Дэшборд ' + st.n + '/' + st.m + '/' + st.k;
         this.dashBtn.title = 'Сделано ≠ упаковано — ' + st.n + ': рулоны сделаны, а упаковано другое число.\n'
             + 'Втулки не готовы — ' + st.m + ': у позиции задания есть незакрытые задачи на втулки.\n'
+            + 'Закрыто не полностью — ' + st.k + ': задание закрыли на пульте, не сделав все проходы.\n'
             + 'Считаем по видимому диапазону дат, по сегодняшний день включительно.';
     };
 
@@ -20459,11 +20502,33 @@
         }
         content.appendChild(sleeveBox);
 
+        // 3) #5293: закрыто не полностью — «Закончено» стоит, проходов сделано меньше плана.
+        var shortBox = el('div', { class: 'atex-pp-dev-group atex-pp-dash-short' });
+        shortBox.appendChild(el('h3', { class: 'atex-pp-dev-group-title',
+            text: 'Закрыто не полностью — ' + st.groups.short.length }));
+        if (!st.groups.short.length) {
+            shortBox.appendChild(el('p', { class: 'atex-pp-hint', text: 'нет' }));
+        } else {
+            var shortList = el('ul', { class: 'atex-pp-dev-list' });
+            st.groups.short.forEach(function(item) {
+                var who = item.orders.length ? ('заказ ' + item.orders.join(', ') + ': ') : '';
+                shortList.appendChild(el('li', {
+                    class: 'atex-pp-dev-item', title: 'id ' + item.cut.id,
+                    text: self.dashboardItemText(item.cut, who + 'сделано ' + item.done + ' из '
+                        + item.planned + ' проходов — не сделано ' + item.rest)
+                }));
+            });
+            shortBox.appendChild(shortList);
+        }
+        content.appendChild(shortBox);
+
         content.appendChild(el('p', { class: 'atex-pp-hint', text:
             'Разница Сделано/Упаковано: «Кол-во факт» Партий ГП задания против «Упаковано шт» — '
             + 'первое пишет пульт слиттера, второе рабочее место «Упаковка». Втулки: задание '
             + 'считается обеспеченным, когда у всех «Задач на втулки» его позиций проставлено '
             + '«Закончено» (пульт втулкореза) либо позиция помечена как уже нарезанная. '
+            + 'Закрыто не полностью: на пульте слиттера задание закрыли («Пропуск» или «Прекратить»), '
+            + 'а «Кол-во резок факт» меньше плана — недоделанные проходы в очередь сами не вернутся. '
             + 'Дэшборд ничего не меняет — он только называет расхождение.' }));
 
         var actions = el('div', { class: 'atex-pp-supply-actions' });
@@ -30155,6 +30220,13 @@
             if (settleNote) {
                 cardPanel.appendChild(el('div', { class: 'atex-pp-cut-chain-note is-settle',
                     title: settleNote.title, text: 'ℹ ' + settleNote.text }));
+            }
+            // #5293: задание закрыли на пульте, не сделав все проходы («Пропуск»/«Прекратить») —
+            // для планирования оно выполнено, поэтому недоделку называем прямо на карточке.
+            var shortNote = shortClosedNote(c);
+            if (shortNote) {
+                cardPanel.appendChild(el('div', { class: 'atex-pp-cut-short-note',
+                    title: shortNote.title, text: '⚠ ' + shortNote.text }));
             }
             var lastOfDay = sc && (idx === activeGroup.cuts.length - 1 || (nextDay != null && nextDay !== myDay));
             if (lastOfDay) {

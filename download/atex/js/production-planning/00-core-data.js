@@ -3001,7 +3001,9 @@
     //   pack   — РАЗНИЦА СДЕЛАНО/УПАКОВАНО: Σ «Кол-во факт» Партий ГП задания против
     //            Σ «Упаковано шт». Разошлись — сделанное лежит неупакованным (или упаковали не
     //            столько, сколько сделали);
-    //   sleeve — ВТУЛКИ НЕ ГОТОВЫ: у позиции задания есть незакрытые «Задачи на втулки».
+    //   sleeve — ВТУЛКИ НЕ ГОТОВЫ: у позиции задания есть незакрытые «Задачи на втулки»;
+    //   short  — ЗАКРЫТО НЕ ПОЛНОСТЬЮ (#5293): «Закончено» стоит, а проходов сделано меньше плана
+    //            (shortClosedRuns) — оператор нажал «Пропуск» или «Прекратить» на пульте слиттера.
     //
     // ОДНО ОКНО НА ОБЕ ГРУППЫ (решение заказчика 17.08.2026): видимый диапазон очереди [С; По] И
     // плановый день НЕ ПОЗЖЕ СЕГОДНЯ. У завтрашнего задания «не упаковано» и «втулки не нарезаны»
@@ -3009,11 +3011,12 @@
     //   opts: { todayKey, dateFrom, dateTo, packByCut, sleeveByPosition, positionsByCut, positionsById }
     //   positionsByCut — { cutId: [{ id, orderNo }] } (из «Обеспечений» задания).
     // Чистая (DOM не трогает) — покрыта тестом.
-    // → { pack: [{ cut, fact, packed, diff }], sleeve: [{ cut, positions: [{ id, orderNo, kind, … }] }] }
+    // → { pack: [{ cut, fact, packed, diff }], sleeve: [{ cut, positions: [{ id, orderNo, kind, … }] }],
+    //     short: [{ cut, done, planned, rest, orders: [orderNo] }] }
     function dashboardGroups(cuts, opts) {
         var o = opts || {};
         var today = Number(o.todayKey);
-        var res = { pack: [], sleeve: [] };
+        var res = { pack: [], sleeve: [], short: [] };
         if (!isFinite(today)) return res;
         var packByCut = o.packByCut || {};
         var sleeveByPosition = o.sleeveByPosition || {};
@@ -3040,6 +3043,15 @@
                 notReady.push(state);
             });
             if (notReady.length) res.sleeve.push({ cut: c, positions: notReady });
+            var sh = shortClosedRuns(c);
+            if (sh) {
+                var orders = [];
+                (positionsByCut[String(c.id)] || []).forEach(function(p) {
+                    var no = String((p && p.orderNo) || '').trim();
+                    if (no && orders.indexOf(no) < 0) orders.push(no);
+                });
+                res.short.push({ cut: c, done: sh.done, planned: sh.planned, rest: sh.rest, orders: orders });
+            }
         });
         function byPlan(a, b) {
             var av = planTsSeconds(a && a.cut && a.cut.planDate), bv = planTsSeconds(b && b.cut && b.cut.planDate);
@@ -3047,6 +3059,7 @@
         }
         res.pack.sort(byPlan);
         res.sleeve.sort(byPlan);
+        res.short.sort(byPlan);
         return res;
     }
 
@@ -3063,6 +3076,30 @@
         var n = Number(cut.actualRuns);
         if (!isFinite(n) || n <= 0) return 0;
         return Math.floor(n);
+    }
+
+    // #5293: ЗАДАНИЕ ЗАКРЫТО НЕ ПОЛНОСТЬЮ. «Пропуск» и «Прекратить» на пульте слиттера ставят
+    // «Закончено» так же, как «Завершить», и для планирования (cutIsFinishedWork) задание
+    // становится выполненным — недоделанные проходы из очереди уходят. Видно это только по
+    // проходам: «Кол-во резок факт» меньше «Кол-во резок план». Факт неизвестен — не судим.
+    // → { done, planned, rest } либо null. Чистая — покрыта тестом.
+    function shortClosedRuns(cut) {
+        if (!cut || planTsSeconds(cut.endDate) == null) return null;
+        var done = cutDoneRuns(cut), planned = Math.floor(Number(cut.plannedRuns) || 0);
+        if (done == null || !(planned > 0) || done >= planned) return null;
+        return { done: done, planned: planned, rest: planned - done };
+    }
+
+    // #5293: подпись карточки закрытого не полностью задания — диспетчер видит недоделку там же,
+    // где видит само задание, а не только в «Дэшборде». → { text, title } либо null.
+    function shortClosedNote(cut) {
+        var sh = shortClosedRuns(cut);
+        if (!sh) return null;
+        return {
+            text: 'закрыто не полностью: сделано ' + sh.done + ' из ' + sh.planned + ' проходов · не сделано ' + sh.rest,
+            title: 'На пульте слиттера задание закрыли («Пропуск» или «Прекратить»), не сделав все проходы. '
+                + 'Для планирования оно выполнено: недоделанные ' + sh.rest + ' проходов в очередь сами не вернутся.'
+        };
     }
 
     // #4572: КОГДА ЗАКРЫТЬ выполненную часть. Начало у неё фактическое, значит и окончание должно
