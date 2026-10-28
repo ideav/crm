@@ -3351,6 +3351,43 @@
         return { moves: plan, splits: splits };
     }
 
+    // #5295: «ВЕРНУТЬ ОСТАТОК» у задания, закрытого не полностью (shortClosedRuns, #5293). Ручное
+    // действие из «Дэшборда» по одному заданию (решение владельца 29.10.2026): «Пропуск» мог быть
+    // намеренным, по данным это не различить. Делит задание тем же правилом, что «Урегулировать»
+    // частично выполненное (#4564): место остатку выбирает deviationSettlePlan — перед следующим
+    // НЕвыполненным заданием станка, нет его — ближайший свободный день. Отличие одно: выполненная
+    // часть уже закрыта пультом, поэтому её день, дата плана и «Закончено» остаются как есть
+    // (keepFinished); у неё меняется только «Кол-во резок план» = факт (в том числе 0 — закрыли,
+    // не сделав ни прохода: тогда остаток = весь план).
+    //   opts — как у deviationSettlePlan.
+    // Чистая — покрыта тестом. → { moves, splits } (пусто — возвращать нечего или некуда).
+    function shortRestReturnPlan(cuts, cut, opts) {
+        var none = { moves: [], splits: [] };
+        var sh = shortClosedRuns(cut);
+        if (!sh) return none;
+        var id = String(cut.id);
+        var settle = deviationSettlePlan(cuts, { overdue: [cut] }, opts);
+        var restPlanStart = null, restReason = null;
+        (settle.splits || []).forEach(function(sp) {
+            if (String(sp.id) === id) { restPlanStart = sp.restPlanStart; restReason = sp.restReason; }
+        });
+        // Закрыто с нуля проходов: deviationSettlePlan делить такое не умеет и ставит на место
+        // остатка само задание — это и есть место остатка, а закрытая запись не двигается.
+        var moves = (settle.moves || []).filter(function(p) {
+            if (String(p.id) !== id) return true;
+            if (restPlanStart == null) { restPlanStart = p.planStart; restReason = p.reason; }
+            return false;
+        });
+        if (restPlanStart == null) return none;
+        var donePlanStart = planTsSeconds(cut.planDate);
+        if (donePlanStart == null) donePlanStart = planTsSeconds(cut.startDate);
+        return { moves: moves, splits: [{
+            id: id, doneRuns: sh.done, restRuns: sh.rest,
+            donePlanStart: donePlanStart, doneCloseTs: null, keepFinished: true,
+            restPlanStart: restPlanStart, restReason: restReason
+        }] };
+    }
+
     // Отображение «Номера» резки: «номер» = плановая дата начала (cut_plan_date, #3242),
     // приходит unix-штампом (секунды) → форматируем как дату-время. Короткие record id
     // и не-штампы не форматируем как 1970-дату.
@@ -15116,6 +15153,7 @@
         // Проверяется `experiments/atex-pp-5293-short-closed.test.js`.
         shortClosedRuns: shortClosedRuns,       // { done, planned, rest } либо null
         shortClosedNote: shortClosedNote,       // подпись карточки либо null
+        shortRestReturnPlan: shortRestReturnPlan, // #5295: «Вернуть остаток» → { moves, splits }
         deviationSettlePlan: deviationSettlePlan, // #4346/#4564: «Урегулировать» — переносы + разделения
         // #4736 (ТЗ §15): ручной сдвиг — кого он двигает, откуда считается и что его останавливает.
         // Проверяется `experiments/atex-pp-4736-manual-shift-over-fixed.test.js`.
@@ -20426,8 +20464,9 @@
         return parts.join(' · ');
     };
 
-    // #4774: форма «Дэшборд» — две группы + «Закрыть». Действий у формы нет: она НАЗЫВАЕТ
-    // расхождение, а исправляют его в своих рабочих местах («Упаковка» и пульт втулкореза).
+    // #4774: форма «Дэшборд» — группы + «Закрыть». «Сделано ≠ упаковано» и «Втулки» форма только
+    // НАЗЫВАЕТ, исправляют их в своих рабочих местах («Упаковка» и пульт втулкореза). У «Закрыто не
+    // полностью» есть действие — «Вернуть остаток» (#5295).
     AtexProductionPlanning.prototype.openDashboard = function() {
         var self = this;
         var st = this.dashboardState();
@@ -20512,11 +20551,31 @@
             var shortList = el('ul', { class: 'atex-pp-dev-list' });
             st.groups.short.forEach(function(item) {
                 var who = item.orders.length ? ('заказ ' + item.orders.join(', ') + ': ') : '';
-                shortList.appendChild(el('li', {
+                var li = el('li', {
                     class: 'atex-pp-dev-item', title: 'id ' + item.cut.id,
                     text: self.dashboardItemText(item.cut, who + 'сделано ' + item.done + ' из '
                         + item.planned + ' проходов — не сделано ' + item.rest)
-                }));
+                });
+                // #5295: вернуть недоделанные проходы в план — по одному заданию и с подтверждением:
+                // «Пропуск» мог быть намеренным (кончился материал, заказ снят).
+                var retBtn = el('button', { class: 'atex-pp-btn atex-pp-dash-return', type: 'button',
+                    text: 'Вернуть остаток' });
+                var retActions = el('span', { class: 'atex-pp-dash-return-actions' }, [retBtn]);
+                retBtn.addEventListener('click', function() {
+                    if (self.busy) return;
+                    var msg = el('span', { class: 'atex-pp-confirm-msg', text:
+                        'Вернуть в план ' + item.rest + ' проходов? Закрытое задание останется со сделанными '
+                        + item.done + ', остаток встанет новым заданием перед следующим заданием станка, '
+                        + 'очередь за ним сдвинется.' });
+                    self.confirmAction(msg, retActions, [
+                        { label: 'Вернуть', warning: true, inline: true, onConfirm: function() {
+                            close();
+                            self.returnShortRest(item.cut.id);
+                        } }
+                    ]);
+                });
+                li.appendChild(retActions);
+                shortList.appendChild(li);
             });
             shortBox.appendChild(shortList);
         }
@@ -20528,8 +20587,9 @@
             + 'считается обеспеченным, когда у всех «Задач на втулки» его позиций проставлено '
             + '«Закончено» (пульт втулкореза) либо позиция помечена как уже нарезанная. '
             + 'Закрыто не полностью: на пульте слиттера задание закрыли («Пропуск» или «Прекратить»), '
-            + 'а «Кол-во резок факт» меньше плана — недоделанные проходы в очередь сами не вернутся. '
-            + 'Дэшборд ничего не меняет — он только называет расхождение.' }));
+            + 'а «Кол-во резок факт» меньше плана — недоделанные проходы в очередь сами не вернутся; '
+            + 'вернуть их можно кнопкой «Вернуть остаток». Остальные группы дэшборд только называет — '
+            + 'исправляют их в своих рабочих местах.' }));
 
         var actions = el('div', { class: 'atex-pp-supply-actions' });
         var closeBtn = el('button', { class: 'atex-pp-btn', type: 'button', text: 'Закрыть' });
@@ -20546,21 +20606,11 @@
     // preserveOrder=true — «сдвинуть последующие по общим правилам», не пересобирая порядок
     // (ТЗ: «Порядок заданий остается прежним»). Пере-планирования избегают задания прошлых дней
     // (#4294), поэтому досрочные, уехавшие в свой фактический день, пересборка не тронет.
-    AtexProductionPlanning.prototype.settleDeviations = function(groups) {
+    // Опции решения deviationSettlePlan — общие для «Урегулировать» и «Вернуть остаток» (#5295).
+    AtexProductionPlanning.prototype.settlePlanOpts = function(closedSlittersNow, notOpenSlittersNow) {
         var self = this;
-        this._ppOp = 'settleDeviations';   // #4177/#4480
-        if (this.busy) return Promise.resolve(false);
-        var cutMeta = this.meta && this.meta.cut;
-        if (!cutMeta || cutMeta.id == null) {
-            this.notify('Нет метаданных таблицы «' + TABLE.cut + '»', 'error');
-            return Promise.resolve(false);
-        }
         var win = this.workingWindow();
-        // #4833: карты смен нужны и решению (двигать начатое с неизвестным фактом у станка
-        // вне смены), и предупреждению о вслепую оставленных — читаем их ОДИН раз.
-        var closedSlittersNow = this.shiftClosedSlittersToday();
-        var notOpenSlittersNow = this.shiftNotOpenSlittersNow();
-        var settle = deviationSettlePlan(this.cuts || [], groups, {
+        return {
             todayKey: planDateDayKey(controllerNowMs(this)),
             shiftStartMin: Number(win && win.startMin) || 0,
             shiftEndMin: Number(win && win.cutEndMin) || 0,   // #4572: чем закрывать выполненную часть
@@ -20570,7 +20620,28 @@
             // #4833: у станка вне смены работа не идёт — начатое с неизвестным фактом едет.
             shiftNotOpenSlitters: notOpenSlittersNow,
             freeDayMsFor: function(sid) { return self.nearestFreeDayMs(sid); }
-        });
+        };
+    };
+
+    // opts (#5295): { settle — готовое решение вместо deviationSettlePlan(groups),
+    //   label — название действия в окне прогресса и сообщениях, doneText(splitN) — итог }.
+    AtexProductionPlanning.prototype.settleDeviations = function(groups, opts) {
+        var self = this;
+        var o = opts || {};
+        var label = o.label || 'Урегулирование отклонений';
+        this._ppOp = o.settle ? 'returnShortRest' : 'settleDeviations';   // #4177/#4480
+        if (this.busy) return Promise.resolve(false);
+        var cutMeta = this.meta && this.meta.cut;
+        if (!cutMeta || cutMeta.id == null) {
+            this.notify('Нет метаданных таблицы «' + TABLE.cut + '»', 'error');
+            return Promise.resolve(false);
+        }
+        // #4833: карты смен нужны и решению (двигать начатое с неизвестным фактом у станка
+        // вне смены), и предупреждению о вслепую оставленных — читаем их ОДИН раз.
+        var closedSlittersNow = this.shiftClosedSlittersToday();
+        var notOpenSlittersNow = this.shiftNotOpenSlittersNow();
+        var settle = o.settle
+            || deviationSettlePlan(this.cuts || [], groups, this.settlePlanOpts(closedSlittersNow, notOpenSlittersNow));
         var plan = settle.moves || [];
         var splits = settle.splits || [];
         // #4564: факт проходов не приходит из отчёта — начатое задание при ИДУЩЕЙ смене станка
@@ -20624,7 +20695,7 @@
                 });
                 return e;
             })());
-        if (refuseManualShift(self, settleShift, 'Урегулирование отклонений')) return Promise.resolve(false);
+        if (refuseManualShift(self, settleShift, label)) return Promise.resolve(false);
 
         var createdRestIds = [];   // #4569: id остатков, созданных этим действием
         // #4742: РАМКА ДЕЙСТВИЯ — от первой записи до последней. «Урегулировать» состои́т из пяти
@@ -20632,7 +20703,7 @@
         // каждая внутри снимает `busy`, чтобы следующая вообще смогла начаться. Рамка держит окно
         // прогресса и блокировку поверх них: оператор видит действие целиком, а не «успех» на
         // середине и всплывающее следом окно.
-        actionBegin(this, 'Урегулирование отклонений…', writes.length);
+        actionBegin(this, label + '…', writes.length);
         // #4477: пулом до 5 потоков через шлюз (было — цепочкой в один поток); совпавшее с
         // хранимым отсеяно и выше (writes), и в самом шлюзе.
         return postCutStarts(self, writes.map(function(p) {
@@ -20703,6 +20774,10 @@
             var byReason = function(r) { return writes.filter(function(p) { return p.reason === r; }).length; };
             var freeDay = byReason('free-day');
             var splitN = splits.filter(function(sp) { return sp.restRuns > 0; }).length;
+            if (typeof o.doneText === 'function') {
+                self.notify(o.doneText(splitN), 'success');
+                return res;
+            }
             // #4596: «просроченных» здесь читается как «не выполненных в свой день» — в этом же
             // числе едут задания станков, закрывших смену сегодня (решение по ним одно).
             self.notify('Урегулировано заданий: ' + (writes.length + splits.length)
@@ -20714,8 +20789,35 @@
         }).catch(function(err) {
             actionEnd(self); self.setBusy(false);
             self.reload().then(function() { self.render(); }).catch(function() {});
-            self.notify('Ошибка урегулирования отклонений: ' + (err && err.message || err), 'error');
+            self.notify('Ошибка: ' + label.toLowerCase() + ' — ' + (err && err.message || err), 'error');
             return false;
+        });
+    };
+
+    // #5295: «ВЕРНУТЬ ОСТАТОК» задания, закрытого не полностью (кнопка в «Дэшборде»). Решение —
+    // shortRestReturnPlan, запись и пересборка — общий путь «Урегулировать» (settleDeviations):
+    // разделение, сдвиг паровоза встык и потолок дня.
+    AtexProductionPlanning.prototype.returnShortRest = function(cutId) {
+        if (this.busy) return Promise.resolve(false);
+        var cut = (this.cuts || []).filter(function(c) { return c && String(c.id) === String(cutId); })[0];
+        var sh = shortClosedRuns(cut);
+        if (!sh) {
+            this.notify('Возвращать нечего: задание не закрыто или все проходы сделаны', 'info');
+            return Promise.resolve(false);
+        }
+        var settle = shortRestReturnPlan(this.cuts || [], cut,
+            this.settlePlanOpts(this.shiftClosedSlittersToday(), this.shiftNotOpenSlittersNow()));
+        if (!settle.splits.length) {
+            this.notify('Некуда поставить остаток: у станка нет ни следующего задания, ни свободного '
+                + 'рабочего дня', 'error');
+            return Promise.resolve(false);
+        }
+        return this.settleDeviations(null, {
+            settle: settle,
+            label: 'Возврат остатка',
+            doneText: function() {
+                return 'Остаток возвращён в план: ' + sh.rest + ' проходов (id ' + cut.id + ')';
+            }
         });
     };
 
@@ -20909,7 +21011,8 @@
             list.forEach(function(sp) {
                 var id = String(sp.id);
                 // Закрыть выполненную часть концом смены её фактического дня.
-                if (finishedReqId) {
+                // #5295: у задания, закрытого пультом, «Закончено» — факт; не переписываем.
+                if (finishedReqId && !sp.keepFinished) {
                     var f = {};
                     // #4572: момент закрытия посчитан чистым правилом (не позже фактического начала
                     // следующего задания станка) — здесь только формат DATETIME.
@@ -25606,7 +25709,9 @@
                     var segIdx = ci + 1;
                     return function() {
                         var cutFields = buildFields(cutReqIds, {
-                            status: (parentCut && parentCut.status) || CUT_STATUSES[0],
+                            // #5295: новая запись не начата — «Завершён» закрытого родителя ей не наследуется.
+                            status: (parentCut && parentCut.status && String(parentCut.status).trim() !== 'Завершён')
+                                ? parentCut.status : CUT_STATUSES[0],
                             slitter: (upd && upd.slitterId != null) ? upd.slitterId : (parentCut && parentCut.slitter && parentCut.slitter.id),   // #4085: голова переназначена слоем размещения → продолжение на тот же станок
                             // #4155: «Партия сырья» головы цепочки (не пустой parentCut.batchId,
                             // который отчёт cut_planning не отдаёт) — иначе продолжение без сырья.

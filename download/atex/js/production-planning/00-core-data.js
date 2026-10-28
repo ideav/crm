@@ -3350,6 +3350,43 @@
         return { moves: plan, splits: splits };
     }
 
+    // #5295: «ВЕРНУТЬ ОСТАТОК» у задания, закрытого не полностью (shortClosedRuns, #5293). Ручное
+    // действие из «Дэшборда» по одному заданию (решение владельца 29.10.2026): «Пропуск» мог быть
+    // намеренным, по данным это не различить. Делит задание тем же правилом, что «Урегулировать»
+    // частично выполненное (#4564): место остатку выбирает deviationSettlePlan — перед следующим
+    // НЕвыполненным заданием станка, нет его — ближайший свободный день. Отличие одно: выполненная
+    // часть уже закрыта пультом, поэтому её день, дата плана и «Закончено» остаются как есть
+    // (keepFinished); у неё меняется только «Кол-во резок план» = факт (в том числе 0 — закрыли,
+    // не сделав ни прохода: тогда остаток = весь план).
+    //   opts — как у deviationSettlePlan.
+    // Чистая — покрыта тестом. → { moves, splits } (пусто — возвращать нечего или некуда).
+    function shortRestReturnPlan(cuts, cut, opts) {
+        var none = { moves: [], splits: [] };
+        var sh = shortClosedRuns(cut);
+        if (!sh) return none;
+        var id = String(cut.id);
+        var settle = deviationSettlePlan(cuts, { overdue: [cut] }, opts);
+        var restPlanStart = null, restReason = null;
+        (settle.splits || []).forEach(function(sp) {
+            if (String(sp.id) === id) { restPlanStart = sp.restPlanStart; restReason = sp.restReason; }
+        });
+        // Закрыто с нуля проходов: deviationSettlePlan делить такое не умеет и ставит на место
+        // остатка само задание — это и есть место остатка, а закрытая запись не двигается.
+        var moves = (settle.moves || []).filter(function(p) {
+            if (String(p.id) !== id) return true;
+            if (restPlanStart == null) { restPlanStart = p.planStart; restReason = p.reason; }
+            return false;
+        });
+        if (restPlanStart == null) return none;
+        var donePlanStart = planTsSeconds(cut.planDate);
+        if (donePlanStart == null) donePlanStart = planTsSeconds(cut.startDate);
+        return { moves: moves, splits: [{
+            id: id, doneRuns: sh.done, restRuns: sh.rest,
+            donePlanStart: donePlanStart, doneCloseTs: null, keepFinished: true,
+            restPlanStart: restPlanStart, restReason: restReason
+        }] };
+    }
+
     // Отображение «Номера» резки: «номер» = плановая дата начала (cut_plan_date, #3242),
     // приходит unix-штампом (секунды) → форматируем как дату-время. Короткие record id
     // и не-штампы не форматируем как 1970-дату.
