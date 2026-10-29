@@ -171,6 +171,8 @@ for old in "${list[@]}"; do
                 src="$ren"
             fi
             node "$migrate" files-dir --src "$src" --dst "$webroot" --db "$db" --apply | grep -v '^скопирован ' || true
+            # Загруженные файлы — под имена нового ядра (хеш пути зависит от соли установки и имени базы).
+            php "$here/scripts/old-integram-upload-names.php" "$db" "$webroot"
             if [ "$(id -u)" = 0 ] && id www-data >/dev/null 2>&1; then
                 for d in "$webroot/templates/custom/$db" "$webroot/download/$db"; do [ ! -d "$d" ] || chown -R www-data:www-data "$d"; done
             fi
