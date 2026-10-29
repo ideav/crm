@@ -100,6 +100,7 @@
 | удалённый файл всё ещё на сервере | `update.php` только копирует, не удаляет | [deploy.md](deploy.md) |
 | `Uncaught SyntaxError: Unexpected token '<'` на своём `.js` | файл под `assets/` — каталога нет в `update.conf`, сервер отдаёт HTML; вендорное класть в `js/` | [deploy.md](deploy.md) |
 | пред-авторизационная ручка отвечает `401 No authorization token provided` | ветки на сервере нет — `index.php` старее фичи (он не в `update.conf`), выкладывать отдельно | [deploy.md](deploy.md) |
+| `Authorization: Bearer`/Basic → `401 No authorization token provided`, `X-Authorization` с тем же токеном работает | PHP как CGI, веб-сервер не передаёт `Authorization` — нужен `CGIPassAuth On` (на ideav.ru включён) | [00-start.md](00-start.md) |
 | страница пустая, при `?debug` в тексте сырые `{_block_..&имя}` | шаблон уехал вперёд ядра: разбор блока рвётся на первой точке вставки без значения — новую переменную ядра держать в отдельном подблоке через `{_parent_.ИМЯ}` | [deploy.md](deploy.md) |
 | в ЛК выбран шаблон, а база вышла обычной русской | имени нет в `TEMPLATES` — `newDb()` молча подставляет `ru`; `include/connection.php` выкладывается вручную | [deploy.md](deploy.md) |
 | база из шаблона открывается без стилей и скриптов | нет каталогов `templates/custom/<шаблон>` и `download/<шаблон>` — `cp -r` в `newDb()` копировать нечего | [deploy.md](deploy.md) |
