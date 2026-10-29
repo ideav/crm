@@ -28,6 +28,8 @@ include=(
     docker
     scripts/install-local-docker.sh
     scripts/import-old-integram.sh
+    scripts/reset-passwords.php
+    scripts/old-integram-upload-names.php
     tools/old-integram-migration
     build.sh
     local
