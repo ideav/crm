@@ -58,16 +58,17 @@ PREPARE d FROM @d; EXECUTE d; DEALLOCATE PREPARE d;` };
 }
 const pad = (x) =>`CONCAT(${x}, REPEAT(' ', ${VAL_LIM} - CHAR_LENGTH(${x})))`;
 const MERGE_STATEMENTS = [
-    // 1. Структура как у нового ядра: val -> longtext utf8mb4, индекс t_val с префиксом 127
+    // 1. Структура как у нового ядра: val -> longtext utf8mb4, индекс t_val с префиксом 127.
+    // Индексов может не быть (таблица со старого сервера); DROP/ADD KEY IF [NOT] EXISTS нет в MySQL.
+    // t_val снимается до перевода val: старое ядро строит его по всей колонке varchar(127), и такой
+    // индекс по longtext MariaDB 11 отвергает («Specified key was too long»). up_t ядро называет в USE INDEX.
+    byIndex('t_val', '> 0', 'DROP KEY t_val'),
     `ALTER TABLE {T}
   MODIFY id  int UNSIGNED NOT NULL AUTO_INCREMENT,
   MODIFY t   int UNSIGNED NOT NULL,
   MODIFY up  int UNSIGNED NOT NULL,
   MODIFY ord int UNSIGNED NOT NULL,
   MODIFY val longtext CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL`,
-    // Индексов может не быть (таблица со старого сервера); DROP/ADD KEY IF [NOT] EXISTS нет в MySQL.
-    // up_t ядро называет в USE INDEX.
-    byIndex('t_val', '> 0', 'DROP KEY t_val'),
     `ALTER TABLE {T} ADD KEY t_val (t, val(127))`,
     byIndex('up_t', '= 0', 'ADD KEY up_t (up, t)'),
     // 2. Хвосты (t = 0) — в val родителя; каждый кусок, кроме последнего, добивается пробелами до 127
