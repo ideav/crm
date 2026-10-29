@@ -130,7 +130,7 @@ rename_files() {  # <каталог> <старое имя>
     local re; re="$(printf "$OLD_URL_RE" "$2")"
     find "$1/templates/custom" -type f \( -name '*.html' -o -name '*.htm' \) -print0 2>/dev/null \
         | xargs -0 -r sed -i -E "s#/$2([/?\#\"' )<&,;]|\$)#/{_global_.z}\1#g"
-    find "$1" -type f \( -name '*.js' -o -name '*.css' -o -name '*.json' -o -name '*.txt' -o -name '*.xml' \
+    find "$1" -type f -not -path '*/backups/*' -not -path '*/logs/*' \( -name '*.js' -o -name '*.css' -o -name '*.json' -o -name '*.txt' -o -name '*.xml' \
         -o -name '*.svg' -o -name '*.csv' -o -name '*.md' -o \( -path '*/download/*' -name '*.htm*' \) \) -print0 \
         | xargs -0 -r grep -nHE "$re" | sed "s#^$1/#ВНИМАНИЕ: адрес /$2 в файле #" | cut -c1-220 || true
 }
