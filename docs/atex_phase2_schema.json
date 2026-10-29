@@ -41,11 +41,11 @@
       {"name": "Склад", "ref": "Склад"}
     ]},
     {"name": "Вал", "type": "NUMBER", "unique": true, "fields": [
-      {"name": "Раппорт, мм", "type": "SIGNED"},
-      {"name": "Станки высечки", "ref": "Станок высечки", "multi": true}
+      {"name": "Раппорт, мм", "type": "SIGNED"}
     ]},
     {"name": "Станок высечки", "unique": true, "fields": [
       {"name": "Статус станка высечки", "type": "SHORT"},
+      {"name": "Допустимые валы", "ref": "Вал", "multi": true},
       {"name": "Стоп-лист сырья", "ref": "Сырьё этикетки", "multi": true},
       {"name": "Упаковочное место", "ref": "Упаковочное место"}
     ]},
