@@ -74,15 +74,14 @@ curl -s -X POST "https://ideav.ru/{db}/_m_new/18?JSON=1" \
   -F "token=<token>" -F "_xsrf=<xsrf>" -F "up=1" -F "t18=manager"
 ```
 
-> ⚠️ На ideav.ru токен передаётся заголовком `X-Authorization`, cookie
-> `idb_{db}` или form-полем `token=`. Ядро понимает и `Authorization: <token>`,
-> `Authorization: Bearer <token>`, Basic (`index.php`, разбор заголовков в
-> проверке сессии), но веб-сервер ideav.ru заголовок `Authorization` до ядра не
-> передаёт, поэтому там он фактически игнорируется: ответ —
-> `401 [{"error":"No authorization token provided"}]`, как без токена (проверено
-> 29.10.2026; на integram.io `Authorization: Bearer` доходит). Строка запроса
-> `?token=<token>` не читается нигде. Заголовок читается, только если в адресе
-> или теле есть параметр `JSON` (`JSON`, `JSON_KV`, `JSON_OBJ`…). PowerShell-скрипты в
+> ⚠️ Токен передаётся заголовком `X-Authorization` (рекомендуется: доходит до ядра
+> на любой установке), `Authorization: <token>` или `Authorization: Bearer <token>`,
+> cookie `idb_{db}` или form-полем `token=`; `Authorization: Basic` (curl
+> `-u логин:пароль`) входит логином и паролем. Заголовки читаются, только если в
+> адресе или теле есть параметр `JSON` (`JSON`, `JSON_KV`, `JSON_OBJ`…). Строка
+> запроса `?token=<token>` не читается — ответ `401 [{"error":"No authorization token provided"}]`.
+> Там, где PHP работает как CGI, `Authorization` доходит до ядра, только если веб-сервер
+> его передаёт (`CGIPassAuth On`); на ideav.ru это включено. PowerShell-скрипты в
 > `docs/` посылают токен заголовком `X-Authorization`, потому что вручную
 > заданный через `-Headers` cookie `Invoke-RestMethod` отбрасывает.
 

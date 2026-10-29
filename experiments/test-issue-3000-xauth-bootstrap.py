@@ -8,10 +8,10 @@ PowerShell drops that header, so the live Integram server answered
 `401 [{"error":"No authorization token provided"}]` (see the issue log and the
 live-server transport probe in atex#44).
 
-The server only reads the token from the `X-Authorization` header, the
-`idb_<db>` cookie, or the POST body `token=` field — never from an
-`Authorization: Bearer` header or a `?token=` query string. The scripts must
-therefore send the token in the `X-Authorization` header on every request.
+`X-Authorization` reaches the core on every installation (`Authorization`
+needs the web server to pass it to PHP-CGI, see issue #5309), and a `?token=`
+query string is never read. The scripts must therefore send the token in the
+`X-Authorization` header on every request.
 
 Run with:
   python3 experiments/test-issue-3000-xauth-bootstrap.py
@@ -70,23 +70,13 @@ for path in POWERSHELL_SCRIPTS:
 
 workflow = read(WORKFLOW_DOC)
 
-# The doc must steer agents to the working transport and warn off the ignored
-# ones. A bare "Authorization: Bearer" recommendation (without being marked as
-# ignored) would re-introduce the bug for future readers.
+# The doc must steer agents to the transport that works on every installation
+# and never present the unread ?token= query string as a way to authenticate.
 if "X-Authorization" not in workflow:
     fail("docs/integram-app-workflow.md no longer documents the X-Authorization transport")
 
-wf_lines = workflow.splitlines()
-for i, ln in enumerate(wf_lines):
-    if "Authorization: Bearer" not in ln:
-        continue
-    # A mention is acceptable only if it is flagged as ignored within the same
-    # warning block (this or an adjacent line).
-    context = " ".join(wf_lines[max(0, i - 2): i + 3]).lower()
-    if "игнор" not in context:
-        fail(
-            "docs/integram-app-workflow.md still recommends Authorization: Bearer "
-            f"without marking it as ignored: {ln.strip()}"
-        )
+for ln in workflow.splitlines():
+    if "?token=" in ln and "не читается" not in ln and "игнор" not in ln:
+        fail(f"docs/integram-app-workflow.md mentions ?token= without marking it unread: {ln.strip()}")
 
-print("PASS: bootstrap scripts send the token via X-Authorization; docs warn off ignored transports")
+print("PASS: bootstrap scripts send the token via X-Authorization; docs mark ?token= as unread")
