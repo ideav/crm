@@ -17,7 +17,7 @@ function env($name, $default = ''){
     return ($v === false || $v === '') ? $default : $v;
 }
 function stop($msg){
-    fwrite(STDERR, "СТОП: $msg\n");
+    file_put_contents('php://stderr', "СТОП: $msg\n");
     exit(1);
 }
 
