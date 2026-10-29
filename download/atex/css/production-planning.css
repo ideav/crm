@@ -1318,6 +1318,9 @@
     overflow: auto;
 }
 .atex-pp-dev-item { margin: 2px 0; font-size: 13px; }
+/* #5295: «Вернуть остаток» у задания, закрытого не полностью. */
+.atex-pp-dash-return-actions { display: inline-flex; gap: 6px; align-items: center; margin-left: 8px; }
+.atex-pp-dash-return { padding: 1px 8px; font-size: 12px; }
 /* #4381: начатое задание в списке отклонений — приглушённое: «Урегулировать» его не двигает. */
 .atex-pp-dev-item.is-started { color: var(--pp-muted); }
 
