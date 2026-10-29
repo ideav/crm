@@ -91,13 +91,26 @@
     // #5301: строки отчёта позиций → только позиции рулонного производства. Позиция
     // «Вид продукции = этикетка» планируется высечкой и в резки Фазы 1 не попадает; позиция
     // без вида — рулон. Позицию с неизвестным видом не берёт ни один планировщик — называем её.
-    // Нет модуля (шаблон без тега) — фильтровать нечем: берём все строки и говорим об этом.
+    // Нет модуля (шаблон без тега, файл не загрузился) — оставляем только строки с пустым
+    // видом или «рулон» простым сравнением строки (#5306) и называем ошибку в
+    // `rollPositionRows.missingModule`: позиция этикетки не уходит в резки и тогда.
+    var ROLL_KIND_FALLBACK_COLUMNS = ['product_kind', 'position_product_kind'];
     function rollPositionRows(rows) {
         var lp = labelProduction();
         if (!lp) {
-            console.error('[pp] #5301 нет label-production.js — позиции не разделены по виду продукции');
-            return rows || [];
+            var msg = 'Не загрузился label-production.js: позиции с видом продукции, отличным от «рулон», не планируются';
+            console.error('[pp] #5306 ' + msg);
+            rollPositionRows.missingModule = msg;
+            return (rows || []).filter(function(row) {
+                var raw = '';
+                for (var i = 0; i < ROLL_KIND_FALLBACK_COLUMNS.length && raw === ''; i++) {
+                    raw = String(row && row[ROLL_KIND_FALLBACK_COLUMNS[i]] != null ? row[ROLL_KIND_FALLBACK_COLUMNS[i]] : '').trim();
+                }
+                var kind = raw.replace(/^\d+:/, '').trim().toLowerCase();
+                return kind === '' || kind === 'рулон';
+            });
         }
+        rollPositionRows.missingModule = '';
         var res = lp.filterPositionRows(rows, lp.PRODUCT_KIND.ROLL);
         if (res.unknown.length) {
             console.warn('[pp] #5301 позиции с неизвестным «Видом продукции» не планируются:',
@@ -16642,6 +16655,7 @@
         console.log('[pp] 📋 loadPositions: запрос positions_list...');
         return this.getJson('report/positions_list?JSON_KV&LIMIT=0,2000').then(function(rows) {
             rows = rollPositionRows(rows || []);   // #5301: позиции этикетки планирует высечка
+            if (rollPositionRows.missingModule) self.notify(rollPositionRows.missingModule, 'error');   // #5306
             self.positions = rowsToPositions(rows || []);
             self.genPositions = rowsToGenPositions(rows || []);
             self.positionLengthById = positionLengthMap(self.genPositions);   // #4301: длина прогона резки берётся из «Длина, м» позиции заказа
