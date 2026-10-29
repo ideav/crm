@@ -2349,7 +2349,7 @@ function GetSha($i)
 # Get the Subdirectory name to securely store files on the server
 function GetSubdir($id)
 {
-	return UPLOAD_DIR.floor($id / 1000).substr(GetSha(floor($id / 1000)), 0, 8);
+	return UPLOAD_DIR.floor((int)$id / 1000).substr(GetSha(floor((int)$id / 1000)), 0, 8);  # PHP 8: «имя:файл» — id не число, TypeError
 }
 # Get the Filename to securely store files on the server
 function GetFilename($id)
@@ -3438,7 +3438,7 @@ function Format_Val_View($typ, $val, $id=0)
 				if($val != "")
 				{
 					if(strlen($val) > 8)	# This might be DATETIME
-						$val = date("d.m.Y", $val + $GLOBALS["tzone"]);	# Microtime
+						$val = date("d.m.Y", (int)$val + $GLOBALS["tzone"]);	# Microtime; PHP 8: текст в поле-дате — TypeError
 					else
 						$val = substr($val, 6, 2).".".substr($val, 4, 2).".".substr($val, 0, 4);
 				}
@@ -6804,9 +6804,11 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                                 GROUP BY reqs.id ORDER BY a.id, reqs.ord";
         			$data_set = Exec_sql($sql, "Get Typs for backup");
             		if(!is_dir($path="templates/custom/$z/backups"))
-            			mkdir($path);
+            			@mkdir($path, 0777, true);
             		$name = $z."_".date("Ymd_His").".csv";
-                    $file = fopen("$path/$name", "a+");
+                    $file = @fopen("$path/$name", "a+");
+                    if(!$file)  # PHP 8: fwrite(false) — TypeError
+                        die(t9n("[RU]Не удалось создать файл выгрузки[EN]Cannot create the export file"));
 					fwrite($file, pack('CCC', 0xef, 0xbb, 0xbf));
         			while($row = mysqli_fetch_array($data_set))  # All but buttons and calculatables
         				if(($GLOBALS["REV_BT"][$row["t"]] != "CALCULATABLE") && ($GLOBALS["REV_BT"][$row["t"]] != "BUTTON"))

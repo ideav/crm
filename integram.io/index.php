@@ -1303,7 +1303,7 @@ function GetSha($i)
 # Get the Subdirectory name to securely store files on the server
 function GetSubdir($id)
 {
-	return UPLOAD_DIR.floor($id / 1000).substr(GetSha(floor($id / 1000)), 0, 8);
+	return UPLOAD_DIR.floor((int)$id / 1000).substr(GetSha(floor((int)$id / 1000)), 0, 8);  # PHP 8: «имя:файл» — id не число, TypeError
 }
 # Get the Filename to securely store files on the server
 function GetFilename($id)
