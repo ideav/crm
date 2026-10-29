@@ -1567,6 +1567,7 @@
         var self = this;
         console.log('[pp] 📋 loadPositions: запрос positions_list...');
         return this.getJson('report/positions_list?JSON_KV&LIMIT=0,2000').then(function(rows) {
+            rows = rollPositionRows(rows || []);   // #5301: позиции этикетки планирует высечка
             self.positions = rowsToPositions(rows || []);
             self.genPositions = rowsToGenPositions(rows || []);
             self.positionLengthById = positionLengthMap(self.genPositions);   // #4301: длина прогона резки берётся из «Длина, м» позиции заказа
