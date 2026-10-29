@@ -62,10 +62,19 @@ function Limit_sql_time($seconds, $connection = NULL){
     if(!($connection instanceof mysqli))
         return FALSE;
     $seconds = min(TIME_LIMIT_MAX, max(1, (int)$seconds));
-    $sql = (stripos((string)@mysqli_get_server_info($connection), "mariadb") !== FALSE)
+    $sql = Is_mariadb($connection)
         ? "SET SESSION max_statement_time=$seconds"
         : "SET SESSION max_execution_time=".($seconds * 1000);
     return (bool)@mysqli_query($connection, $sql);
+}
+
+# Сервер БД — MariaDB (а не MySQL). Без соединения — FALSE (поведение MySQL).
+function Is_mariadb($connection = NULL){
+    if($connection === NULL)
+        $connection = isset($GLOBALS["connection"]) ? $GLOBALS["connection"] : NULL;
+    if(!($connection instanceof mysqli))
+        return FALSE;
+    return stripos((string)@mysqli_get_server_info($connection), "mariadb") !== FALSE;
 }
 
 # Отметить запрос как выполняющийся: по этой метке запрос добивается на сервере,
@@ -5595,6 +5604,15 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
     		$GLOBALS["STORED_REPS"][$id]["sql"] = " WITH RECURSIVE c AS (SELECT id, 0 t FROM $z WHERE t=$typ AND up!=0 AND t!=up AND val!='' $cond"
                     ."  UNION SELECT ".$dep_sel.", ref.t FROM $z ref INNER JOIN c ON ".$dep_join." WHERE ref.t=$typ".$dep_guard." $rec_limit)"
                     ." SELECT DISTINCT id $name FROM c";
+		# MariaDB не допускает LIMIT в рекурсивной части CTE (ERROR 1235 "global ORDER_BY/LIMIT
+		# in recursive CTE spec"). Ограничение переносится на итоговую выборку — у MySQL LIMIT
+		# в рекурсивной части по смыслу равен LIMIT внешнего SELECT. Внешний LIMIT — внутри
+		# производной таблицы: этот SQL подставляется и подзапросом в IN(...), где LIMIT
+		# напрямую запрещён. Обход без LIMIT конечен: UNION отбрасывает повторы, циклы гаснут.
+		$rec_tail = " $rec_limit) SELECT DISTINCT id $name FROM c";
+		if(Is_mariadb() && substr($GLOBALS["STORED_REPS"][$id]["sql"], -strlen($rec_tail)) === $rec_tail)
+			$GLOBALS["STORED_REPS"][$id]["sql"] = " SELECT * FROM ("
+				.substr($GLOBALS["STORED_REPS"][$id]["sql"], 0, -strlen($rec_tail)).") SELECT DISTINCT id $name FROM c $rec_limit) rec";
         trace("RECURSIVE ".$GLOBALS["STORED_REPS"][$id]["sql"]);
         mywrite("\r\n".$GLOBALS["STORED_REPS"][$id]["sql"]);
 	}
@@ -11373,6 +11391,12 @@ function check()
     header('HTTP/1.0 403 Forbidden');
 	my_die(t9n("[RU]Неверный или устаревший токен CSRF<br/>[EN]Invalid or expired CSRF token <br/>"));
 }
+# Значение для строкового литерала JSON, собираемого вручную ("…" вокруг ставит вызывающий):
+# экранированы ", \ и управляющие символы; кириллица и / остаются как есть.
+function Json_str($value)
+{
+	return substr(json_encode((string)$value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE), 1, -1);
+}
 function api_dump($json, $name="api.json")
 {
 	sendJsonHeaders($name);
@@ -16075,7 +16099,7 @@ if(Validate_Token())
         	$meta = "{";
         	while($row = mysqli_fetch_array($data_set)){
                 if($meta === "{")
-        	        $meta .= "\"id\":\"".$row["id"]."\",\"up\":\"".$row["up"]."\",\"type\":\"".$row["t"]."\",\"val\":\"".$row["val"]."\"";
+        	        $meta .= "\"id\":\"".$row["id"]."\",\"up\":\"".$row["up"]."\",\"type\":\"".$row["t"]."\",\"val\":\"".Json_str($row["val"])."\"";
                 if(!is_null($row["ref_id"]) && $row["ref_id"] === $row["id"] && !$row["ord"]) // issue #2967: skip the table self-descriptor row (ord=0). #3587: самоссылающаяся подчинённая таблица (ord>0) — настоящий реквизит, не пропускать
                     continue;
                 if(!isset($reqs))
@@ -16083,7 +16107,7 @@ if(Validate_Token())
                 else
                     $reqs .= ",";
                 $reqs .= "\"".$row["ord"]."\":{\"id\":\"".$row["req_t"]."\""
-                            .",\"val\":\"".$row["req_val"]."\""
+                            .",\"val\":\"".Json_str($row["req_val"])."\""
                             .",\"type\":\"".$row["base_typ"]."\""
                             .($row["arr_id"]?",\"arr_id\":\"".$row["arr_id"]."\"":"")
                             .($row["ref"]?",\"ref\":\"".$row["ref"]."\",\"ref_id\":\"".$row["ref_id"]."\"":"")
@@ -16140,10 +16164,10 @@ if(Validate_Token())
 				if(!isset($meta[$row["id"]])){
 					$tblAttrs = isset($tableAttrs[$row["id"]]) ? (string)$tableAttrs[$row["id"]] : "";
 					$tblAlias = strlen($tblAttrs) ? FieldAttrsAlias($tblAttrs, "") : "";
-					$meta[$row["id"]] = "\"id\":\"".$row["id"]."\",\"up\":\"".$row["up"]."\",\"type\":\"".$row["t"]."\",\"val\":\"".addcslashes($row["val"], "\\\'")."\",\"unique\":\"".$row["uniq"]."\""
+					$meta[$row["id"]] = "\"id\":\"".$row["id"]."\",\"up\":\"".$row["up"]."\",\"type\":\"".$row["t"]."\",\"val\":\"".Json_str($row["val"])."\",\"unique\":\"".$row["uniq"]."\""
 									.$granted . (isset($refs[$row["id"]]) ? ",\"referenced\":\"".$refs[$row["id"]]."\"" : "")
 									.(strlen($tblAttrs) ? FieldAttrsMetaProperties($tblAttrs) : "") // #5250: + parsed field_attrs
-									.($tblAlias !== "" ? ",\"alias\":\"".addcslashes($tblAlias, "\\\'")."\"" : "")
+									.($tblAlias !== "" ? ",\"alias\":\"".Json_str($tblAlias)."\"" : "")
 									.(isset($GLOBALS["GRANTS"]["EXPORT"][$row["id"]]) || isset($GLOBALS["GRANTS"]["EXPORT"][1]) ? ",\"export\":\"1\"" : "")
 									.(isset($GLOBALS["GRANTS"]["DELETE"][$row["id"]]) || isset($GLOBALS["GRANTS"]["DELETE"][1]) ? ",\"delete\":\"1\"" : "");
 				}
@@ -16152,7 +16176,7 @@ if(Validate_Token())
                 if($row["ord"])
 					if(!isset($GLOBALS["GRANTS"][$row["req_t"]]) || ($GLOBALS["GRANTS"][$row["req_t"]] !== "BARRED"))
 						$metaReqs[$row["id"]][] = "{\"num\":".$row["ord"].",\"id\":\"".$row["req_t"]."\""
-                                .",\"val\":\"".addcslashes($row["req_val"], "\\\'")."\""
+                                .",\"val\":\"".Json_str($row["req_val"])."\""
                                 .",\"orig\":\"".($row["ref"]?$row["ref"]:$row["ref_id"])."\""
                                 .",\"type\":\"".($row["base_typ"]??"1")."\""
                                 .($row["arr_id"]?",\"arr_id\":\"".$row["arr_id"]."\"":"")
