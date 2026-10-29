@@ -8,6 +8,11 @@
 #   bash scripts/import-old-integram.sh --dump old.sql.gz                       # какие базы есть в дампе
 #   bash scripts/import-old-integram.sh --dump old.sql.gz --db r7ohr,sales \
 #        [--files old-files.tgz] [--webroot /var/www/html] [--url http://localhost] [--server-name localhost]
+#   bash scripts/import-old-integram.sh --dump old.sql.gz --db demo --as r7ohr [--files old-files.tgz]
+#
+# --as <имя> — база переносится под другим именем (одна база в --db): таблица, папки
+# templates/custom/<база> и download/<база>, логин владельца. Адреса /<старое имя>/… в шаблонах базы
+# заменяются на /{_global_.z}/…; в значениях базы и статических файлах — выводятся списком (см. rename_sql).
 #
 # Доступ к БД — из переменных INTEGRAM_DB_HOST/PORT/NAME/USER/PASSWORD (как у самого сайта;
 # без Docker: `. /etc/apache2/envvars`). Мастер-пароль INTEGRAM_MASTER_PASSWORD нужен для шага меню.
@@ -19,11 +24,12 @@ set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 migrate="$here/tools/old-integram-migration/migrate.js"
-dump="" dbs="" files="" webroot="$here" url="http://localhost" server_name="localhost"
+dump="" dbs="" as="" files="" webroot="$here" url="http://localhost" server_name="localhost"
 while [ $# -gt 0 ]; do
     case "$1" in
         --dump) dump="$2"; shift 2 ;;
         --db) dbs="$2"; shift 2 ;;
+        --as) as="$2"; shift 2 ;;
         --files) files="$2"; shift 2 ;;
         --webroot) webroot="$2"; shift 2 ;;
         --url) url="${2%/}"; shift 2 ;;
@@ -93,8 +99,41 @@ IFS=',' read -r -a list <<< "$dbs"
 for db in "${list[@]}"; do
     [[ "$db" =~ ^[A-Za-z][A-Za-z0-9_]{0,14}$ ]] || stop "недопустимое имя базы «$db» (буква, затем буквы/цифры/_, до 15 символов)"
     grep -qx "$db" <<< "$found" || stop "базы $db нет в дампе"
+    [ -n "$as" ] && continue
     [ -z "$(sql -N -e "SHOW TABLES LIKE '$db'")" ] || stop "база $db уже есть в этой установке — повторный перенос: tools/old-integram-migration/README.md, раздел о transfer"
 done
+if [ -n "$as" ]; then
+    [ "${#list[@]}" -eq 1 ] || stop "--as переименовывает одну базу, а в --db их ${#list[@]}"
+    [[ "$as" =~ ^[A-Za-z][A-Za-z0-9_]{0,14}$ ]] || stop "недопустимое имя базы «$as» (буква, затем буквы/цифры/_, до 15 символов)"
+    case "$as" in my|ru|en) stop "имя $as занято служебной таблицей" ;; esac
+    [ -z "$(sql -N -e "SHOW TABLES LIKE '$as'")" ] || stop "база $as уже есть в этой установке"
+fi
+
+# Переименование базы. Имя новой базы нигде не прописывается: адреса берут имя текущей базы у ядра.
+# Адрес старой базы — /<старое> перед разделителем адреса или концом строки; слово без косой черты
+# перед ним («demo-версия») адресом не считается.
+#   - Шаблоны базы (templates/custom/<база>/*.html) отрисовывает ядро: /<старое>/ → /{_global_.z}/.
+#   - В значениях базы (запросы, кнопки, тексты) и в статических файлах (download/<база>, .js, .css)
+#     подстановки имени нет — такие места не меняются, а выводятся списком для ручной правки.
+#   - Владелец базы — пользователь с логином, равным имени базы (у него права администратора базы):
+#     логин <старое> → <новое>.
+OLD_URL_RE='/%s([/?#"'"'"' )<&,;]|$)'
+rename_sql() {  # <таблица> <старое имя> <новое имя>
+    echo "UPDATE \`$1\` SET val = '$3' WHERE t = 18 AND up = 1 AND val = '$2'
+          AND NOT EXISTS (SELECT 1 FROM (SELECT id FROM \`$1\` WHERE t = 18 AND up = 1 AND val = '$3') x);"
+    echo "SELECT IF(ROW_COUNT() > 0, 'логин владельца базы: $2 → $3', 'логина $2 нет или $3 уже занят — логин владельца не менялся');"
+    # REGEXP есть и в MySQL, и в MariaDB; BINARY — с учётом регистра.
+    echo "SELECT CONCAT('ВНИМАНИЕ: адрес /$2 в строке ', id, ' (тип ', t, '): ', REPLACE(LEFT(val, 150), '\n', ' '))
+          FROM \`$1\` WHERE BINARY val REGEXP '$(printf "$OLD_URL_RE" "$2" | sed "s/'/''/g")' ORDER BY id;"
+}
+rename_files() {  # <каталог> <старое имя>
+    local re; re="$(printf "$OLD_URL_RE" "$2")"
+    find "$1/templates/custom" -type f \( -name '*.html' -o -name '*.htm' \) -print0 2>/dev/null \
+        | xargs -0 -r sed -i -E "s#/$2([/?\#\"' )<&,;]|\$)#/{_global_.z}\1#g"
+    find "$1" -type f \( -name '*.js' -o -name '*.css' -o -name '*.json' -o -name '*.txt' -o -name '*.xml' \
+        -o -name '*.svg' -o -name '*.csv' -o -name '*.md' -o \( -path '*/download/*' -name '*.htm*' \) \) -print0 \
+        | xargs -0 -r grep -nHE "$re" | sed "s#^$1/#ВНИМАНИЕ: адрес /$2 в файле #" | cut -c1-220 || true
+}
 
 if [ -n "$files" ]; then
     mkdir -p "$work/files"
@@ -104,22 +143,33 @@ token_for() {
     INTEGRAM_SERVER_NAME="$server_name" php -r '$z = $argv[1]; $h = getenv("INTEGRAM_ADMINHASH") ?: sha1(getenv("INTEGRAM_SERVER_NAME").$z.getenv("INTEGRAM_MASTER_PASSWORD")); echo hash("sha512", $h.$z);' "$1"
 }
 
-for db in "${list[@]}"; do
+for old in "${list[@]}"; do
+    db="${as:-$old}"
     echo
-    echo "=== $db"
+    [ "$db" = "$old" ] && echo "=== $db" || echo "=== $old → $db"
     # 4. Таблица базы и склейка 127-символьных хвостов старого ядра (migrate.js sql).
-    sql -e "RENAME TABLE \`oldimp_$db\` TO \`$db\`"
+    sql -e "RENAME TABLE \`oldimp_$old\` TO \`$db\`"
     node "$migrate" sql --db "$db" | sql
     sql -N -e "SELECT CONCAT('таблица: ', COUNT(*), ' строк, хвостов ', SUM(t = 0)) FROM \`$db\`"
+    [ "$db" = "$old" ] || rename_sql "$db" "$old" "$db" | sql -N
 
     # 5. Папки базы: templates/custom/<db>, download/<db>. Архив мог быть снят от любого каталога —
     #    корень ищется по templates/custom/<db> или download/<db>.
     if [ -n "$files" ]; then
-        hit="$(find "$work/files" -type d \( -path "*/templates/custom/$db" -o -path "*/download/$db" \) | head -1)"
+        hit="$(find "$work/files" -type d \( -path "*/templates/custom/$old" -o -path "*/download/$old" \) | head -1)"
         if [ -z "$hit" ]; then
-            echo "ВНИМАНИЕ: в архиве нет папок templates/custom/$db и download/$db — файлы базы не перенесены"
+            echo "ВНИМАНИЕ: в архиве нет папок templates/custom/$old и download/$old — файлы базы не перенесены"
         else
-            case "$hit" in */templates/custom/"$db") src="${hit%/templates/custom/$db}" ;; *) src="${hit%/download/$db}" ;; esac
+            case "$hit" in */templates/custom/"$old") src="${hit%/templates/custom/$old}" ;; *) src="${hit%/download/$old}" ;; esac
+            if [ "$db" != "$old" ]; then
+                # Папки под новым именем во временном каталоге; в шаблонах адрес базы — из ядра.
+                ren="$work/renamed"
+                for d in templates/custom download; do
+                    [ ! -d "$src/$d/$old" ] || { mkdir -p "$ren/$d"; cp -a "$src/$d/$old" "$ren/$d/$db"; }
+                done
+                rename_files "$ren" "$old"
+                src="$ren"
+            fi
             node "$migrate" files-dir --src "$src" --dst "$webroot" --db "$db" --apply | grep -v '^скопирован ' || true
             if [ "$(id -u)" = 0 ] && id www-data >/dev/null 2>&1; then
                 for d in "$webroot/templates/custom/$db" "$webroot/download/$db"; do [ ! -d "$d" ] || chown -R www-data:www-data "$d"; done
@@ -128,11 +178,14 @@ for db in "${list[@]}"; do
     fi
 
     # 6. Меню в формате нового ядра (migrate.js menu) — через API этой установки мастер-токеном.
+    #    Сбой меню не останавливает перенос: таблица и файлы уже на месте, шаг повторяется отдельно.
+    menu_retry="node $migrate menu --new $url/$db --new-token <токен> --apply"
     if [ -z "${INTEGRAM_MASTER_PASSWORD:-}${INTEGRAM_ADMINHASH:-}" ]; then
         echo "ВНИМАНИЕ: не задан INTEGRAM_MASTER_PASSWORD — меню не переведено. Повторите шаг вручную:"
-        echo "  node $migrate menu --new $url/$db --new-token <токен> --apply"
-    else
-        node "$migrate" menu --new "$url/$db" --new-token "$(token_for "$db")" --apply | sed 's/^сделано: /меню: /'
+        echo "  $menu_retry"
+    elif ! node "$migrate" menu --new "$url/$db" --new-token "$(token_for "$db")" --apply | sed 's/^сделано: /меню: /'; then
+        echo "ВНИМАНИЕ: меню базы $db не переведено (ошибка выше). Данные и файлы перенесены. Повторите шаг:"
+        echo "  $menu_retry"
     fi
 done
 
