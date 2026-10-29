@@ -72,6 +72,40 @@
         return packingCached;
     }
 
+    // #5301: вид продукции позиции (рулон / этикетка) — общий модуль
+    // download/atex/js/label-production.js, подключается шаблоном (window.AtexLabelProduction),
+    // в Node — соседним файлом рядом с бандлом. Ищем каждый раз, как packing() (#4685).
+    var labelProductionCached = null;
+    function labelProduction() {
+        if (labelProductionCached) return labelProductionCached;
+        if (typeof window !== 'undefined' && window.AtexLabelProduction) {
+            labelProductionCached = window.AtexLabelProduction.core;
+            return labelProductionCached;
+        }
+        if (typeof require === 'function') {
+            try { labelProductionCached = require('./label-production.js').core; } catch (e) { /* модуль рядом не лежит */ }
+        }
+        return labelProductionCached;
+    }
+
+    // #5301: строки отчёта позиций → только позиции рулонного производства. Позиция
+    // «Вид продукции = этикетка» планируется высечкой и в резки Фазы 1 не попадает; позиция
+    // без вида — рулон. Позицию с неизвестным видом не берёт ни один планировщик — называем её.
+    // Нет модуля (шаблон без тега) — фильтровать нечем: берём все строки и говорим об этом.
+    function rollPositionRows(rows) {
+        var lp = labelProduction();
+        if (!lp) {
+            console.error('[pp] #5301 нет label-production.js — позиции не разделены по виду продукции');
+            return rows || [];
+        }
+        var res = lp.filterPositionRows(rows, lp.PRODUCT_KIND.ROLL);
+        if (res.unknown.length) {
+            console.warn('[pp] #5301 позиции с неизвестным «Видом продукции» не планируются:',
+                res.unknown.map(function(r) { return r.position_id + ' «' + r.product_kind + '»'; }).join(', '));
+        }
+        return res.rows;
+    }
+
     // #3914: диагностическая трассировка планирования дня. По умолчанию МОЛЧИТ
     // (в Node/тестах window нет). Включить в браузере одним из способов:
     //   • в консоли:  window.PP_TRACE = true   (потом нажать «Сгенерировать»)
@@ -16607,6 +16641,7 @@
         var self = this;
         console.log('[pp] 📋 loadPositions: запрос positions_list...');
         return this.getJson('report/positions_list?JSON_KV&LIMIT=0,2000').then(function(rows) {
+            rows = rollPositionRows(rows || []);   // #5301: позиции этикетки планирует высечка
             self.positions = rowsToPositions(rows || []);
             self.genPositions = rowsToGenPositions(rows || []);
             self.positionLengthById = positionLengthMap(self.genPositions);   // #4301: длина прогона резки берётся из «Длина, м» позиции заказа
