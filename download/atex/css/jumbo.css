@@ -1,0 +1,157 @@
+/* Рабочие места «Раскрой джамбо» и «Пульт большого слиттера» (ideav/crm#5315). */
+.atex-jb {
+    --atex-jb-border: var(--border-color, #e5e7eb);
+    --atex-jb-panel: var(--bg-secondary, #ffffff);
+    --atex-jb-muted: var(--text-secondary, #6b7280);
+    --atex-jb-ok: #15803d;
+    --atex-jb-ok-bg: #dcfce7;
+    --atex-jb-warn: #92400e;
+    --atex-jb-warn-bg: #fef3c7;
+    --atex-jb-bad: #b91c1c;
+    --atex-jb-bad-bg: #fee2e2;
+    --atex-jb-info: #1d4ed8;
+    --atex-jb-info-bg: #dbeafe;
+    --atex-jb-pick-bg: #e8eef6;
+    --atex-jb-edge-a: #9ca3af;
+    --atex-jb-edge-b: #d1d5db;
+    --atex-jb-edge-ink: #111827;
+    height: 100%;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow: auto;
+    padding: 8px;
+    background: var(--bg-primary, #f8fafc);
+    color: var(--text-primary, #111827);
+    box-sizing: border-box;
+}
+
+[data-theme="dark"] .atex-jb {
+    --atex-jb-ok: #4ade80;
+    --atex-jb-ok-bg: rgba(74, 222, 128, 0.14);
+    --atex-jb-warn: #fcd34d;
+    --atex-jb-warn-bg: rgba(251, 191, 36, 0.16);
+    --atex-jb-bad: #fca5a5;
+    --atex-jb-bad-bg: rgba(248, 113, 113, 0.16);
+    --atex-jb-info: #93c5fd;
+    --atex-jb-info-bg: rgba(96, 165, 250, 0.16);
+    --atex-jb-pick-bg: rgba(141, 169, 196, 0.2);
+    --atex-jb-edge-a: #4b5563;
+    --atex-jb-edge-b: #374151;
+    --atex-jb-edge-ink: #f3f4f6;
+}
+
+.atex-jb * { box-sizing: border-box; }
+
+.atex-jb-toolbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 8px 0;
+}
+
+.atex-jb-title { margin: 0; font-size: 1.1rem; font-weight: 600; flex: 1 1 auto; }
+
+.atex-jb-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border: 1px solid var(--atex-jb-border);
+    border-radius: 6px;
+    background: var(--atex-jb-panel);
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+.atex-jb-btn:hover { border-color: var(--atex-navy-l, #1d5596); }
+.atex-jb-btn-primary { background: var(--atex-navy, #134174); border-color: var(--atex-navy, #134174); color: var(--atex-on-navy, #ffffff); }
+.atex-jb-btn-primary:hover { background: var(--atex-navy-d, #0e3158); }
+.atex-jb-btn-ok { background: var(--atex-jb-ok); border-color: var(--atex-jb-ok); color: #ffffff; }
+.atex-jb-btn-sm { padding: 2px 8px; font-size: 0.85rem; }
+.atex-jb-btn-lg { padding: 12px 18px; font-size: 1.05rem; min-height: 48px; }
+
+.atex-jb-input {
+    padding: 6px 8px;
+    border: 1px solid var(--atex-jb-border);
+    border-radius: 6px;
+    background: var(--atex-jb-panel);
+    color: inherit;
+    font: inherit;
+    min-width: 220px;
+}
+.atex-jb-input-sm { min-width: 0; width: 100px; }
+.atex-jb-field { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
+
+.atex-jb-message { padding: 8px 12px; border-radius: 6px; background: var(--atex-jb-info-bg); color: var(--atex-jb-info); }
+.atex-jb-message.is-ok { background: var(--atex-jb-ok-bg); color: var(--atex-jb-ok); }
+.atex-jb-message.is-warn { background: var(--atex-jb-warn-bg); color: var(--atex-jb-warn); }
+.atex-jb-message.is-error { background: var(--atex-jb-bad-bg); color: var(--atex-jb-bad); }
+
+.atex-jb-kpi { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; }
+.atex-jb-kpi-tile { padding: 10px 12px; border: 1px solid var(--atex-jb-border); border-radius: 8px; background: var(--atex-jb-panel); }
+.atex-jb-kpi-tile.is-ok .atex-jb-kpi-value { color: var(--atex-jb-ok); }
+.atex-jb-kpi-tile.is-warn { background: var(--atex-jb-warn-bg); }
+.atex-jb-kpi-tile.is-bad { background: var(--atex-jb-bad-bg); }
+.atex-jb-kpi-value { font-size: 1.4rem; font-weight: 600; }
+.atex-jb-kpi-label { font-size: 0.8rem; color: var(--atex-jb-muted); }
+
+.atex-jb-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 380px); gap: 8px; align-items: start; }
+.atex-jb-main, .atex-jb-side { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+@media (max-width: 1000px) { .atex-jb-layout { grid-template-columns: minmax(0, 1fr); } }
+
+.atex-jb-panel { padding: 10px 12px; border: 1px solid var(--atex-jb-border); border-radius: 8px; background: var(--atex-jb-panel); overflow-x: auto; }
+.atex-jb-panel-title { margin: 4px 0 8px; font-size: 0.95rem; font-weight: 600; }
+.atex-jb-muted { color: var(--atex-jb-muted); font-size: 0.85rem; margin: 4px 0; }
+.atex-jb-empty { color: var(--atex-jb-muted); padding: 8px 0; }
+
+.atex-jb-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+.atex-jb-table th, .atex-jb-table td { padding: 5px 8px; border-bottom: 1px solid var(--atex-jb-border); text-align: left; vertical-align: top; }
+.atex-jb-table th { font-weight: 600; color: var(--atex-jb-muted); white-space: nowrap; }
+.atex-jb-table .num { text-align: right; white-space: nowrap; }
+.atex-jb-table tr.is-deficit td { background: var(--atex-jb-bad-bg); }
+.atex-jb-table tr.is-late td { background: var(--atex-jb-warn-bg); }
+.atex-jb-table tr.is-total td { font-weight: 600; }
+.atex-jb-pick { cursor: pointer; }
+.atex-jb-pick:hover td, .atex-jb-pick.is-picked td { background: var(--atex-jb-pick-bg); }
+
+.atex-jb-badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 0.78rem; background: var(--atex-jb-border); white-space: nowrap; }
+.atex-jb-badge.is-ok { background: var(--atex-jb-ok-bg); color: var(--atex-jb-ok); }
+.atex-jb-badge.is-warn { background: var(--atex-jb-warn-bg); color: var(--atex-jb-warn); }
+.atex-jb-badge.is-bad { background: var(--atex-jb-bad-bg); color: var(--atex-jb-bad); }
+.atex-jb-badge.is-info { background: var(--atex-jb-info-bg); color: var(--atex-jb-info); }
+
+/* Полотно раскроя: полосы пропорционально ширине. */
+.atex-jb-web { display: flex; gap: 2px; margin: 10px 0; height: 64px; }
+.atex-jb-web-strip {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    min-width: 0; overflow: hidden; border-radius: 4px;
+    background: var(--atex-navy, #134174); color: #ffffff; font-weight: 600; font-size: 0.85rem;
+}
+.atex-jb-web-strip.is-stock { background: var(--atex-navy-l, #1d5596); }
+.atex-jb-web-strip small { font-weight: 400; font-size: 0.7rem; opacity: 0.85; white-space: nowrap; }
+.atex-jb-web-edge { background: repeating-linear-gradient(45deg, var(--atex-jb-edge-a), var(--atex-jb-edge-a) 4px, var(--atex-jb-edge-b) 4px, var(--atex-jb-edge-b) 8px); color: var(--atex-jb-edge-ink); }
+
+/* Пульт (планшет). */
+.atex-jb-pad { display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); gap: 8px; align-items: start; }
+@media (max-width: 800px) { .atex-jb-pad { grid-template-columns: minmax(0, 1fr); } }
+.atex-jb-job { padding: 8px 10px; border: 1px solid var(--atex-jb-border); border-radius: 8px; margin-bottom: 6px; cursor: pointer; background: var(--atex-jb-panel); }
+.atex-jb-job.is-picked { border-color: var(--atex-navy, #134174); background: var(--atex-jb-pick-bg); }
+.atex-jb-job-top { display: flex; justify-content: space-between; gap: 8px; }
+.atex-jb-job-no { font-weight: 600; }
+.atex-jb-job-time, .atex-jb-job-meta { font-size: 0.82rem; color: var(--atex-jb-muted); }
+.atex-jb-pad-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.atex-jb-pad-head .atex-jb-badge { margin-left: auto; }
+.atex-jb-pad-order { font-size: 1.6rem; font-weight: 700; }
+.atex-jb-pad-sub { font-size: 1.05rem; }
+.atex-jb-steps { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.atex-jb-step { padding: 4px 10px; border-radius: 14px; border: 1px solid var(--atex-jb-border); font-size: 0.82rem; color: var(--atex-jb-muted); }
+.atex-jb-step.is-done { background: var(--atex-jb-ok-bg); color: var(--atex-jb-ok); border-color: transparent; }
+.atex-jb-step.is-now { background: var(--atex-navy, #134174); color: #ffffff; border-color: transparent; }
+
+.atex-jb-modal { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; background: rgba(15, 23, 42, 0.45); }
+.atex-jb-modal[hidden] { display: none; }
+.atex-jb-modal-box { width: min(680px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; padding: 16px; border-radius: 10px; background: var(--atex-jb-panel); color: inherit; }
+.atex-jb-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }

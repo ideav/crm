@@ -1,0 +1,58 @@
+<!-- Рабочее место atex «Раскрой джамбо» (роль Диспетчер). -->
+<!-- Решение ideav/crm#5315 (Фаза 2, шаг 6). См. docs/atex_workplaces.md §3.17 -->
+<!-- и docs/WORKSPACE_DEVELOPMENT_GUIDE.md. URL: /atex/jumbo-cutting -->
+<link rel="stylesheet" href="/download/{_global_.z}/css/atex-brand.css?{_global_.version}.3">
+<link rel="stylesheet" href="/download/{_global_.z}/css/jumbo.css?{_global_.version}.2">
+<script src="/download/{_global_.z}/js/label-production.js?{_global_.version}.3" defer></script>
+<script src="/download/{_global_.z}/js/jumbo-cut-map.js?{_global_.version}.2" defer></script>
+<script src="/download/{_global_.z}/js/jumbo-cutting.js?{_global_.version}.2" defer></script>
+
+<div id="atex-jc-app" class="atex-jb atex-brand"
+     data-db="{_global_.z}"
+     data-xsrf="{_global_.xsrf}"
+     data-user-id="{_global_.user_id}">
+    <div class="atex-jb-toolbar">
+        <h1 class="atex-jb-title">Раскрой джамбо — большой слиттер</h1>
+        <button class="atex-jb-btn" type="button" data-act="refresh" title="Перечитать очередь, потребность и партии">
+            <i class="pi pi-refresh"></i><span>Обновить</span>
+        </button>
+    </div>
+
+    <div id="atex-jc-message" class="atex-jb-message" hidden></div>
+    <div id="atex-jc-kpi" class="atex-jb-kpi"></div>
+
+    <div class="atex-jb-layout">
+        <div class="atex-jb-main">
+            <section class="atex-jb-panel">
+                <h2 class="atex-jb-panel-title">Очередь большого слиттера</h2>
+                <div id="atex-jc-queue"></div>
+            </section>
+            <section class="atex-jb-panel">
+                <h2 class="atex-jb-panel-title">Потребность в форматах — задания высечки без мастер-рулона</h2>
+                <div id="atex-jc-demand"></div>
+            </section>
+            <section id="atex-jc-picker" class="atex-jb-panel"></section>
+        </div>
+        <aside class="atex-jb-side">
+            <section class="atex-jb-panel">
+                <h2 class="atex-jb-panel-title">Партии джамбо к резке</h2>
+                <div id="atex-jc-batches"></div>
+                <p class="atex-jb-muted">* фактическая ширина партии отличается от справочника сырья.</p>
+            </section>
+            <section class="atex-jb-panel">
+                <h2 class="atex-jb-panel-title">Настройки раскроя</h2>
+                <div id="atex-jc-settings"></div>
+            </section>
+        </aside>
+    </div>
+
+    <div id="atex-jc-modal" class="atex-jb-modal" hidden>
+        <div class="atex-jb-modal-box" role="dialog" aria-modal="true">
+            <div id="atex-jc-modal-text"></div>
+            <div class="atex-jb-modal-actions">
+                <button id="atex-jc-modal-cancel" class="atex-jb-btn" type="button">Отмена</button>
+                <button id="atex-jc-modal-ok" class="atex-jb-btn atex-jb-btn-primary" type="button">Подтвердить</button>
+            </div>
+        </div>
+    </div>
+</div>
