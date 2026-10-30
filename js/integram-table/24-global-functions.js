@@ -265,11 +265,27 @@ function parseIntegramDateValue(str) {
 }
 
 /**
+ * Значение DATE/DATETIME-ячейки без префикса ссылки (issue #5313).
+ *
+ * Ссылка на справочник с DATE/DATETIME-главным значением приходит из object/?JSON_OBJ как
+ * "id:метка" ("1001353:1790226000"), а тип колонки у неё — тип справочника. Сама дата
+ * ("1790226000", "20260924", "24.09.2026 08:00:00") с "цифры:" не начинается, поэтому префикс
+ * снимается только у ссылки.
+ *
+ * @param {*} value сырое значение из record.r[]
+ * @returns {string}
+ */
+function stripIntegramDateRefPrefix(value) {
+    return String(value).trim().replace(/^\d+:(?=\S)/, '');
+}
+
+/**
  * Ячейка DATE/DATETIME плоским текстом для буфера обмена (issue #4120).
  *
  * API отдаёт эти колонки unix-штампом в секундах, поэтому «Копировать в буфер» подчинённой
  * таблицы клала в clipboard сырой штамп (`1782968400`) вместо `02.07.2026 08:00:00` — того,
- * что видно в ячейке. Формат совпадает с formatDateDisplay/formatDateTimeDisplay.
+ * что видно в ячейке. Формат совпадает с formatDateDisplay/formatDateTimeDisplay. Ссылка на
+ * справочник-дату ("id:штамп") форматируется по метке (issue #5313).
  *
  * @param {*} value сырое значение из record.r[]
  * @param {string} format нормализованный формат колонки (normalizeFormat(req.type))
@@ -280,7 +296,7 @@ function formatIntegramDateCellPlain(value, format) {
     if (format !== 'DATE' && format !== 'DATETIME') return null;
     if (value === null || value === undefined || value === '') return null;
 
-    const date = parseIntegramDateValue(String(value).trim());
+    const date = parseIntegramDateValue(stripIntegramDateRefPrefix(value));
     if (!date || isNaN(date.getTime())) return null;
 
     const pad = (v) => String(v).padStart(2, '0');
@@ -292,6 +308,7 @@ function formatIntegramDateCellPlain(value, format) {
 if (typeof window !== 'undefined') {
     window.parseIntegramDateValue = parseIntegramDateValue;
     window.formatIntegramDateCellPlain = formatIntegramDateCellPlain;
+    window.stripIntegramDateRefPrefix = stripIntegramDateRefPrefix;
 }
 
 /**
