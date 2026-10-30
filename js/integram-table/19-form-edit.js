@@ -1977,9 +1977,10 @@
                         // Display as checkbox icon: any non-empty value = YES, empty = NO
                         const boolVal = value !== null && value !== undefined && value !== '' && value !== 0 && value !== '0' && value !== false;
                         return boolVal ? '<span class="boolean-check"><i class="pi pi-check"></i></span>' : '<span class="boolean-uncheck"><i class="pi pi-times"></i></span>';
+                    // Ссылка на справочник-дату приходит как "id:штамп" — формат по метке (issue #5313)
                     case 'DATE':
                         if (value) {
-                            const dateObj = this.parseDDMMYYYY(value);
+                            const dateObj = this.parseDDMMYYYY(stripIntegramDateRefPrefix(value));
                             if (dateObj && !isNaN(dateObj.getTime())) {
                                 return this.formatDateDisplay(dateObj);
                             }
@@ -1987,7 +1988,7 @@
                         break;
                     case 'DATETIME':
                         if (value) {
-                            const datetimeObj = this.parseDDMMYYYYHHMMSS(value);
+                            const datetimeObj = this.parseDDMMYYYYHHMMSS(stripIntegramDateRefPrefix(value));
                             if (datetimeObj && !isNaN(datetimeObj.getTime())) {
                                 return this.formatDateTimeDisplay(datetimeObj);
                             }
