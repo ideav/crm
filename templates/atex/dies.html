@@ -1,0 +1,68 @@
+<!-- Рабочее место atex «Ножи и валы» (роли Технолог, Диспетчер). -->
+<!-- Решение ideav/crm#5314 (Фаза 2, шаг 3). См. docs/atex_workplaces.md §3.16 -->
+<!-- и docs/WORKSPACE_DEVELOPMENT_GUIDE.md. URL: /atex/dies -->
+<link rel="stylesheet" href="/css/integram-table.css?{_global_.version}.1">
+<link rel="stylesheet" href="/download/{_global_.z}/css/atex-brand.css?{_global_.version}.3">
+<link rel="stylesheet" href="/download/{_global_.z}/css/dies.css?{_global_.version}.1">
+<script src="/js/integram-table.js?{_global_.version}.1" defer></script>
+<script src="/download/{_global_.z}/js/label-production.js?{_global_.version}.3" defer></script>
+<script src="/download/{_global_.z}/js/dies.js?{_global_.version}.2" defer></script>
+
+<div id="atex-dies-app" class="atex-dies atex-brand"
+     data-db="{_global_.z}"
+     data-xsrf="{_global_.xsrf}"
+     data-user-id="{_global_.user_id}">
+    <div class="atex-dies-toolbar">
+        <div class="atex-dies-tabs" role="tablist">
+            <button class="atex-dies-tab is-active" type="button" data-tab="dies" role="tab">Ножи</button>
+            <button class="atex-dies-tab" type="button" data-tab="cylinders" role="tab">Валы</button>
+        </div>
+        <button id="atex-dies-refresh" class="atex-dies-btn" type="button" title="Перечитать ножи, валы и пробег">
+            <i class="pi pi-refresh"></i><span>Обновить</span>
+        </button>
+    </div>
+
+    <div id="atex-dies-message" class="atex-dies-message" hidden></div>
+
+    <section class="atex-dies-pane" data-pane="dies">
+        <div id="atex-dies-kpi" class="atex-dies-kpi"></div>
+        <div class="atex-dies-layout">
+            <div class="atex-dies-main">
+                <div id="atex-dies-grid" class="atex-dies-grid"></div>
+            </div>
+            <aside class="atex-dies-side">
+                <section id="atex-dies-card" class="atex-dies-panel">
+                    <div class="atex-dies-empty">Выберите нож в таблице — здесь появятся пробег, история и смена состояния.</div>
+                </section>
+                <section class="atex-dies-panel">
+                    <h2 class="atex-dies-panel-title">У порога заточки</h2>
+                    <div id="atex-dies-wear" class="atex-dies-list"></div>
+                </section>
+            </aside>
+        </div>
+    </section>
+
+    <section class="atex-dies-pane" data-pane="cylinders" hidden>
+        <div class="atex-dies-layout">
+            <div class="atex-dies-main">
+                <div id="atex-dies-cyl-grid" class="atex-dies-grid"></div>
+            </div>
+            <aside class="atex-dies-side">
+                <section class="atex-dies-panel">
+                    <h2 class="atex-dies-panel-title">Валы: станки и ножи</h2>
+                    <div id="atex-dies-cylinders" class="atex-dies-list"></div>
+                </section>
+            </aside>
+        </div>
+    </section>
+
+    <div id="atex-dies-modal" class="atex-dies-modal" hidden>
+        <div class="atex-dies-modal-box" role="dialog" aria-modal="true">
+            <div id="atex-dies-modal-text" class="atex-dies-modal-text"></div>
+            <div class="atex-dies-modal-actions">
+                <button id="atex-dies-modal-cancel" class="atex-dies-btn" type="button">Отмена</button>
+                <button id="atex-dies-modal-ok" class="atex-dies-btn atex-dies-btn-primary" type="button">Подтвердить</button>
+            </div>
+        </div>
+    </div>
+</div>
