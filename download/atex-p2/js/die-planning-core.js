@@ -394,20 +394,101 @@
 
     // ── Мастер-рулоны ───────────────────────────────────────────────────────
 
-    // Покрытие каждого задания: склад, затем очередь первичной резки (по сроку заданий).
-    // rolls — [{ id, format, materialId, rest, status }]; queue — источники JC.queueSupply.
-    // → { id задания: { stock, planned, deficit, late } }.
-    function coverJobs(jobs, rolls, queue, tolerance) {
+    // Покрытие заданий — одна мера для блокировки «нет МР нужного формата», вкладки «Дефицит
+    // форматов» и «Зарезервировать МР» (правила склада, master-rolls-core.js):
+    //   нужно   = метраж задания − уже вырубленное (расход журнала по заданию);
+    //   резерв  = свои рулоны на складе: резерв у рулона на это задание или поле «Мастер-рулон» задания;
+    //   склад   = свободные ЦЕЛЫЕ рулоны (их берёт «Зарезервировать МР»), по сроку заданий;
+    //   в резке = очередь первичной резки; дефицит — остаток.
+    // Рулон в резерве другого открытого задания (или из него вырубает открытое задание) свободным не
+    // считается. Початые свободные рулоны в покрытие не идут: их резервируют вручную; их метраж
+    // подходящего формата — в поле opened (справочно).
+    // rolls — рулоны склада МР ({ id, format, materialId, rest, status, reserveTaskId });
+    // queue — источники JC.queueSupply; opts — { tasks: задания склада МР (MR.buildTasks), moves: журнал }.
+    function jobDemand(jobs, rolls, tolerance, opts) {
+        var o = opts || {}, moves = o.moves || [], idx = {};
+        (o.tasks || []).forEach(function(t) { idx[t.id] = t; });
         var list = (jobs || []).filter(function(j) { return num(j.minFormat) || num(j.usedFormat) || num(j.optFormat); })
             .sort(function(a, b) { return a.start - b.start || (num(a.id) - num(b.id)); });
-        var groups = list.map(function(j) {
-            var min = num(j.minFormat) || num(j.usedFormat) || num(j.optFormat), range = JC.formatRange(min, j.optFormat, tolerance);
-            return { key: j.id, jobId: j.id, materialId: String(j.materialId), material: j.material, min: range.min, max: range.max, meters: num(j.footage), due: num(j.start) };
+        var own = {}, owner = {};
+        list.forEach(function(j) { own[j.id] = true; });
+        (rolls || []).forEach(function(r) {
+            if (r.reserveTaskId && own[r.reserveTaskId]) owner[r.id] = String(r.reserveTaskId);
         });
-        var covered = JC.coverDemand(groups, JC.stockSupply(rolls), queue || []);
+        list.forEach(function(j) { if (j.masterRollId && !owner[j.masterRollId]) owner[j.masterRollId] = j.id; });
+        var heldByOther = function(r) {
+            if (owner[r.id]) return true;
+            if (r.reserveTaskId) { var rt = idx[r.reserveTaskId]; if (!rt || rt.open) return true; }
+            return MR.holder(r, idx, moves) !== '';
+        };
+        var free = [], opened = [];
+        (rolls || []).forEach(function(r) {
+            if (!MR.onStock(r) || heldByOther(r)) return;
+            if (norm(r.status) === MR.ROLL_STATUS.STOCK) free.push(r); else opened.push(r);
+        });
+        var demand = list.map(function(j) {
+            var min = num(j.minFormat) || num(j.usedFormat) || num(j.optFormat), range = JC.formatRange(min, j.optFormat, tolerance);
+            var consumed = 0;
+            moves.forEach(function(m) { if (m.kind === MR.MOVE_KIND.OUT && String(m.taskId) === String(j.id)) consumed -= num(m.delta); });
+            var need = Math.max(0, round1(num(j.footage) - consumed));
+            var reserved = round1((rolls || []).filter(function(r) { return owner[r.id] === j.id && MR.onStock(r); }).reduce(function(a, r) { return a + num(r.rest); }, 0));
+            return { key: j.id, jobId: j.id, materialId: String(j.materialId), material: j.material, min: range.min, max: range.max,
+                need: need, reserved: Math.min(reserved, need), meters: Math.max(0, round1(need - reserved)), due: num(j.start) };
+        });
+        return { demand: demand, free: free, opened: opened };
+    }
+
+    // Склад — по правилу «Зарезервировать МР» (MR.autoPick): по сроку заданий, свободные целые рулоны
+    // в допуске формата, ближайший к мин. формату и старый первым, рулон целиком — одному заданию.
+    // Остаток — очередь первичной резки (JC.coverDemand).
+    function coverAll(jobs, rolls, queue, tolerance, opts) {
+        var d = jobDemand(jobs, rolls, tolerance, opts), taken = {};
+        var free = d.free.slice().sort(function(a, b) { return num(a.format) - num(b.format) || num(a.id) - num(b.id); });
+        var rest = d.demand.map(function(g) {
+            var left = g.meters, stock = 0, hi = g.min + num(tolerance);
+            free.forEach(function(r) {
+                if (!(left > 0) || taken[r.id]) return;
+                var f = num(r.format);
+                if (String(r.materialId) !== g.materialId || f < g.min || f > hi) return;
+                taken[r.id] = true;
+                var m = Math.min(left, num(r.rest));
+                stock += m; left -= m;
+            });
+            return Object.assign({}, g, { meters: Math.max(0, round1(left)), stockTaken: round1(stock) });
+        });
+        var covered = JC.coverDemand(rest, [], queue || []);
+        return { demand: d, covered: covered.map(function(c) { return Object.assign(c, { stock: c.stockTaken }); }) };
+    }
+
+    // → { id задания: { need, reserved, stock, planned, deficit, late } }.
+    function coverJobs(jobs, rolls, queue, tolerance, opts) {
+        var covered = coverAll(jobs, rolls, queue, tolerance, opts).covered;
         var out = {};
-        covered.forEach(function(g) { out[g.jobId] = { stock: g.stock, planned: g.planned, deficit: g.deficit, late: g.late }; });
+        covered.forEach(function(g) { out[g.jobId] = { need: g.need, reserved: g.reserved, stock: g.stock, planned: g.planned, deficit: g.deficit, late: g.late }; });
         return out;
+    }
+
+    // Вкладка «Дефицит форматов»: та же мера, сложенная по сырью и диапазону формата.
+    // → [{ key, materialId, material, min, max, meters (нужно), reserved, stock, planned, deficit, opened, due, late, jobs }].
+    function coverGroups(jobs, rolls, queue, tolerance, opts) {
+        var all = coverAll(jobs, rolls, queue, tolerance, opts), d = all.demand, covered = all.covered;
+        var by = {}, order = [];
+        covered.forEach(function(c) {
+            var key = c.materialId + '|' + c.min + '|' + c.max;
+            var g = by[key];
+            if (!g) { g = by[key] = { key: key, materialId: c.materialId, material: c.material, min: c.min, max: c.max, meters: 0, reserved: 0, stock: 0, planned: 0, deficit: 0, opened: 0, due: 0, late: false, jobs: [] }; order.push(key); }
+            g.meters = round1(g.meters + c.need); g.reserved = round1(g.reserved + c.reserved); g.stock = round1(g.stock + c.stock);
+            g.planned = round1(g.planned + c.planned); g.deficit = round1(g.deficit + c.deficit);
+            if (c.late) g.late = true;
+            if (c.due > 0 && (!g.due || c.due < g.due)) g.due = c.due;
+            g.jobs.push(c.jobId);
+        });
+        return order.map(function(k) {
+            var g = by[k];
+            g.opened = round1(d.opened.filter(function(r) { var f = num(r.format); return String(r.materialId) === g.materialId && f >= g.min && f <= g.max; })
+                .reduce(function(a, r) { return a + num(r.rest); }, 0));
+            return g;
+        });
     }
 
     // Резерв по заданиям (задания высечки в виде задач склада MR.buildTasks): рулоны подбираются
@@ -464,12 +545,66 @@
         return { knives: kl, cylinders: cl, until: until };
     }
 
+    // Записанный план (без «Упорядочить»): у каждого станка — записанные на него задания, кроме
+    // выполненных и отменённых, по записанному старту, с записанной наладкой и длительностью.
+    // Станок делает одно задание за раз: задание не начинается раньше конца предыдущего, записанные
+    // пересечения раскладываются подряд (item.shifted — сдвиг от записанного старта, мин).
+    // Задание без старта идёт за предыдущим или с from. Задания без станка в план не входят.
+    function recordedPlan(jobs, machines, settings, from) {
+        var s = withDefaults(settings), cal = createCalendar(s), out = {}, summary = { jobs: 0, late: 0, setupMinutes: 0, cylinderChanges: 0 };
+        (machines || []).forEach(function(m) {
+            var list = (jobs || []).filter(function(j) { return !isFinal(j) && String(j.machineId || '') === String(m.id); })
+                .sort(function(a, b) { return (num(a.start) || Infinity) - (num(b.start) || Infinity) || (num(a.id) - num(b.id)); });
+            var cur = null, items = [];
+            list.forEach(function(j) {
+                var setup = num(j.setup), run = num(j.duration) > 0 ? num(j.duration) : runMinutes(j.footage, s);
+                var kind = setup <= 0 ? 'none' : setup >= s.cylinderChange ? 'cylinder' : 'knife';
+                var c = num(j.start) > 0 ? cal.cursorAt(num(j.start)) : (cur || cal.cursorAt(num(from)));
+                if (cur && curKey(cur) > curKey(c)) c = cur;
+                var segs = [];
+                if (setup > 0) { var a = cal.advance(c, setup, 'setup-' + kind); segs = segs.concat(a.segments); c = a.cursor; }
+                if (run > 0 || !segs.length) { var b = cal.advance(c, run, 'run'); segs = segs.concat(b.segments); c = b.cursor; }
+                cur = c;
+                tagSegs(segs, j.id);
+                var last = segs[segs.length - 1];
+                var item = { jobId: j.id, machineId: m.id, start: segs[0].start, end: last.end, setup: setup, setupKind: kind, run: run,
+                    due: j.due || 0, late: j.due > 0 && last.end > j.due, fixed: isStarted(j), segments: segs,
+                    shifted: num(j.start) > 0 ? Math.max(0, Math.round((segs[0].start - num(j.start)) / 60)) : 0 };
+                items.push(item);
+                summary.jobs++; summary.setupMinutes += setup;
+                if (item.late) summary.late++;
+                if (kind === 'cylinder') summary.cylinderChanges++;
+            });
+            out[m.id] = { items: items };
+        });
+        return { machines: out, unplaced: [], summary: summary, from: from };
+    }
+    function tagSegs(segs, jobId) { segs.forEach(function(g) { g.jobId = jobId; }); return segs; }
+
+    // Область записи «Применить» / «Задачи на втулки»: items — [{ jobId, machineId, start }];
+    // scope — { all } | { machineId?, fromDay?, toDay? } | { jobIds }. Пустая область — ничего.
+    function inScope(items, scope, settings) {
+        var sc = scope || {}, cal = createCalendar(withDefaults(settings));
+        if (sc.all) return (items || []).slice();
+        if (Array.isArray(sc.jobIds)) return (items || []).filter(function(i) { return sc.jobIds.indexOf(String(i.jobId)) >= 0; });
+        if (!sc.machineId && sc.fromDay == null && sc.toDay == null) return [];
+        return (items || []).filter(function(i) {
+            if (sc.machineId && String(i.machineId) !== String(sc.machineId)) return false;
+            var d = cal.dayOf(num(i.start));
+            if (sc.fromDay != null && d < sc.fromDay) return false;
+            if (sc.toDay != null && d > sc.toDay) return false;
+            return true;
+        });
+    }
+
     // Полосы дня по станкам: наладка вала, наладка ножа, вырубка; занято и свободно.
+    // Выполненные задания не рисуются.
     function ganttDay(planMachines, machines, day, settings) {
         var s = withDefaults(settings), rows = [];
         (machines || []).forEach(function(m) {
             var bars = [], used = 0;
             ((planMachines[m.id] || { items: [] }).items).forEach(function(it) {
+                if (it.done) return;
                 it.segments.forEach(function(g) {
                     if (g.day !== day || !(g.minutes > 0)) return;
                     bars.push({ jobId: it.jobId, kind: it.fixed && g.kind === 'run' ? 'run' : g.kind, from: g.from, minutes: g.minutes, fixed: it.fixed, done: !!it.done });
@@ -683,7 +818,7 @@
             dueEnd: dueEnd, buildJobs: buildJobs, setupKind: setupKind, setupMinutes: setupMinutes, runMinutes: runMinutes,
             machineAllows: machineAllows, createCalendar: createCalendar, orderQueue: orderQueue, compareJobs: compareJobs,
             jobFlags: jobFlags, openMetersByDie: openMetersByDie, coverJobs: coverJobs, planReservations: planReservations,
-            toolLoad: toolLoad, ganttDay: ganttDay, queueGrid: queueGrid, turretFits: turretFits, formJobs: formJobs, jobCreateFields: jobCreateFields, jobPlanFields: jobPlanFields,
+            toolLoad: toolLoad, ganttDay: ganttDay, recordedPlan: recordedPlan, inScope: inScope, coverGroups: coverGroups, queueGrid: queueGrid, turretFits: turretFits, formJobs: formJobs, jobCreateFields: jobCreateFields, jobPlanFields: jobPlanFields,
             sleeveDiameterMm: sleeveDiameterMm, pickCutter: pickCutter, sleevePlan: sleevePlan,
             sleeveCreateFields: sleeveCreateFields, sleeveUpdateFields: sleeveUpdateFields,
             refIds: refIds, machinesFromRecords: machinesFromRecords, buildDieIndex: buildDieIndex, dieInfo: dieInfo, resolveSleeveTask: resolveSleeveTask

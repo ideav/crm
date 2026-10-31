@@ -198,7 +198,7 @@ if (C) (function() {
         { id: 'r2', format: 305, materialId: 'm2', rest: 2000, status: 'на складе' },
         { id: 'r3', format: 400, materialId: 'm1', rest: 2000, status: 'на складе' }];
     var cov = C.coverJobs(cj, rolls, [], 15);
-    assert(cov['1'].deficit === 0 && cov['2'].deficit === 1000, 'склад покрывает первое задание, второму не хватает 1000 м; чужое сырьё и формат не считаются', JSON.stringify(cov));
+    assert(cov['1'].deficit === 0 && cov['2'].deficit === 1500, 'рулон склада целиком уходит первому заданию (как у резерва), второму не хватает 1500 м; чужое сырьё и формат не считаются', JSON.stringify(cov));
     var cov2 = C.coverJobs(cj, rolls, [{ jobId: 'q', materialId: 'm1', format: 305, meters: 2000, readyAt: 100 }], 15);
     assert(cov2['2'].deficit === 0 && cov2['2'].planned > 0, 'остаток закрывает очередь первичной резки', JSON.stringify(cov2['2']));
 
