@@ -156,7 +156,7 @@
             if (!j.cylinderId && d && d.cylinderId) { j.cylinderId = d.cylinderId; j.cylinder = String(d.cylinder || ''); j.cylinderMissing = true; }
         });
         var machineTable = meta.filter(function(x) { return String(x.id) === String(t.machine.id); })[0];
-        var machines = C.machinesFromRecords(r[6], t, { turretReq: extra.sreq(machineTable, 'Туррель') });
+        var machines = C.machinesFromRecords(r[6], t, { turretReq: extra.sreq(machineTable, 'Туррель'), maxCylinderReq: extra.sreq(machineTable, 'Макс. вал') });
         var diInfo = C.dieInfo(dies, brandRes, settings.dieResource);
         var rolls = mr.rolls.map(function(x) { return { id: x.id, no: x.no, format: x.format, materialId: x.materialId, rest: x.rest, status: x.status }; });
         var queue = jc && jc.openJobs ? JC.queueSupply(jc.openJobs, settings.mrLength) : [];
@@ -392,13 +392,13 @@
             '<p class="atex-dp-muted">Пробег пишет только пульт высечки движениями; здесь — прогноз.</p>';
     };
 
-    // Подсказка к станку: допустимые валы и стоп-лист.
+    // Подсказка к станку: допустимые валы, «Макс. вал» и стоп-лист.
     AtexDiePlanningApp.prototype.machineHint = function(id) {
         var m = this.state.machines.filter(function(x) { return x.id === id; })[0];
         if (!m) return '';
         var names = this.state.cylinderNames || {};
         var cyl = m.cylinders.length ? ' · валы ' + m.cylinders.map(function(c) { return names[c] || c; }).join(', ') : ' · любой вал';
-        return esc(cyl) + (m.stopMaterials.length ? ' · стоп-лист: ' + m.stopMaterials.length : '') + (m.turret ? ' · туррель: втулка ≥ 2× диаметра' : '');
+        return esc(cyl + (m.maxCylinder > 0 ? ' · вал ≤ ' + m.maxCylinder : '')) + (m.stopMaterials.length ? ' · стоп-лист: ' + m.stopMaterials.length : '') + (m.turret ? ' · туррель: втулка ≥ 2× диаметра' : '');
     };
 
     AtexDiePlanningApp.prototype.planMachineOf = function(jobId) {
