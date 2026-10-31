@@ -462,6 +462,38 @@
         return { day: day, capacity: s.dayCapacityMin, rows: rows };
     }
 
+    // Очередь колонками «станок × день»: колонка у каждого станка справочника (и без заданий),
+    // в колонке — дни горизонта; в дне — задания дня по порядку, сумма минут и ёмкость смены.
+    // Задание, перешедшее на следующий день, там — продолжение без наладки. Выполненные не показываются.
+    function queueGrid(planMachines, machines, days, settings) {
+        var s = withDefaults(settings);
+        var columns = (machines || []).map(function(m) {
+            var byDay = {};
+            (days || []).forEach(function(d) { byDay[d] = { day: d, capacity: s.dayCapacityMin, minutes: 0, items: [] }; });
+            (((planMachines || {})[m.id] || { items: [] }).items).forEach(function(it) {
+                if (it.done) return;
+                var firstDay = null;
+                (it.segments || []).forEach(function(g) { if (firstDay == null || g.day < firstDay) firstDay = g.day; });
+                var per = {};
+                (it.segments || []).forEach(function(g) {
+                    if (!byDay[g.day]) return;
+                    var p = per[g.day] = per[g.day] || { setup: 0, run: 0, from: g.from };
+                    if (/^setup/.test(g.kind)) p.setup += g.minutes; else p.run += g.minutes;
+                    if (g.from < p.from) p.from = g.from;
+                });
+                Object.keys(per).forEach(function(k) {
+                    var d = byDay[k], p = per[k], cont = Number(k) !== firstDay;
+                    d.items.push({ jobId: it.jobId, from: p.from, setup: p.setup, run: p.run, minutes: p.setup + p.run,
+                        setupKind: p.setup > 0 ? it.setupKind : 'none', continuation: cont, fixed: !!it.fixed, late: !!it.late, start: it.start });
+                    d.minutes += p.setup + p.run;
+                });
+            });
+            return { machineId: m.id, name: m.name || m.id, active: m.active !== false, status: m.status || '',
+                days: (days || []).map(function(d) { var x = byDay[d]; x.items.sort(function(a, b) { return a.from - b.from; }); return x; }) };
+        });
+        return { columns: columns, capacity: s.dayCapacityMin };
+    }
+
     // ── Формирование заданий ────────────────────────────────────────────────
 
     // positions — LO.positionFromRow; dies — LO.buildDies (+ cylinderId); jobs — buildJobs.
@@ -628,7 +660,7 @@
             dueEnd: dueEnd, buildJobs: buildJobs, setupKind: setupKind, setupMinutes: setupMinutes, runMinutes: runMinutes,
             machineAllows: machineAllows, createCalendar: createCalendar, orderQueue: orderQueue, compareJobs: compareJobs,
             jobFlags: jobFlags, openMetersByDie: openMetersByDie, coverJobs: coverJobs, planReservations: planReservations,
-            toolLoad: toolLoad, ganttDay: ganttDay, formJobs: formJobs, jobCreateFields: jobCreateFields, jobPlanFields: jobPlanFields,
+            toolLoad: toolLoad, ganttDay: ganttDay, queueGrid: queueGrid, formJobs: formJobs, jobCreateFields: jobCreateFields, jobPlanFields: jobPlanFields,
             sleeveDiameterMm: sleeveDiameterMm, pickCutter: pickCutter, sleevePlan: sleevePlan,
             sleeveCreateFields: sleeveCreateFields, sleeveUpdateFields: sleeveUpdateFields,
             refIds: refIds, machinesFromRecords: machinesFromRecords, buildDieIndex: buildDieIndex, dieInfo: dieInfo, resolveSleeveTask: resolveSleeveTask

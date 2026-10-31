@@ -134,3 +134,13 @@
 .atex-dp-legend { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 0.82rem; color: var(--atex-dp-muted); }
 .atex-dp-legend .atex-dp-bar { position: static; display: inline-block; width: 14px; height: 14px; line-height: 14px; vertical-align: middle; }
 .atex-dp-legend .atex-dp-bar.is-free { background: var(--atex-dp-panel); border: 1px solid var(--atex-dp-border); }
+
+/* Очередь в разметке планирования Фазы 1 (#5340): классы atex-pp-* из production-planning.css. */
+.atex-dp.atex-pp .atex-dp-tabs { margin: 4px 0 10px; }
+.atex-dp-quality .is-late, .atex-pp-day-mins.is-late { color: var(--pp-warn, #b91c1c); font-weight: 600; }
+.atex-dp-cut-line { font-size: 13px; margin-top: 4px; color: var(--pp-muted, #6b7280); }
+.atex-dp-cut-line .atex-dp-badge { margin-right: 4px; }
+.atex-pp-cut.atex-dp-changed { box-shadow: inset 4px 0 0 #eab308; }
+.atex-pp-cut[data-job-id] { cursor: pointer; }
+.atex-dp-side-table th { width: 40%; white-space: nowrap; }
+.atex-dp-quality { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin: 6px 0 10px; padding: 6px 10px; border: 1px solid rgba(128, 128, 128, .3); border-radius: 6px; font-size: 13px; }
