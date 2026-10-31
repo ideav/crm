@@ -1,0 +1,47 @@
+<!-- Рабочее место atex «Склад мастер-рулонов» (роль Кладовщик). -->
+<!-- Решение ideav/crm#5325 (Фаза 2, шаг 5). См. docs/atex_workplaces.md §3.19 -->
+<!-- и docs/WORKSPACE_DEVELOPMENT_GUIDE.md. URL: /&lt;база&gt;/master-rolls -->
+<link rel="stylesheet" href="/download/{_global_.z}/css/atex-brand.css?{_global_.version}.3">
+<link rel="stylesheet" href="/download/{_global_.z}/css/master-rolls.css?{_global_.version}.1">
+<script src="/download/{_global_.z}/js/master-rolls-core.js?{_global_.version}.1" defer></script>
+<script src="/download/{_global_.z}/js/master-rolls.js?{_global_.version}.2" defer></script>
+
+<div id="atex-mr-app" class="atex-mr atex-brand"
+     data-db="{_global_.z}"
+     data-xsrf="{_global_.xsrf}"
+     data-user-id="{_global_.user_id}">
+    <div class="atex-mr-toolbar">
+        <h1 class="atex-mr-title">Склад мастер-рулонов</h1>
+        <button class="atex-mr-btn" type="button" data-act="receipt" title="Оприходовать рулоны не из задания первичной резки (начальные остатки, возврат)">
+            <i class="pi pi-plus"></i><span>Приход</span>
+        </button>
+        <button class="atex-mr-btn" type="button" data-act="inventory" title="Акт инвентаризации по рулонам на складе">
+            <i class="pi pi-check-square"></i><span>Инвентаризация</span>
+        </button>
+        <button class="atex-mr-btn" type="button" data-act="refresh" title="Перечитать рулоны, задания и журнал">
+            <i class="pi pi-refresh"></i><span>Обновить</span>
+        </button>
+    </div>
+
+    <div id="atex-mr-message" class="atex-mr-message" hidden></div>
+    <div id="atex-mr-kpi" class="atex-mr-kpi"></div>
+
+    <div class="atex-mr-tabs" role="tablist">
+        <button class="atex-mr-tab is-active" type="button" data-tab="stock">Остатки по форматам</button>
+        <button class="atex-mr-tab" type="button" data-tab="rolls">Рулоны</button>
+        <button class="atex-mr-tab" type="button" data-tab="reserve">Резерв под задания</button>
+        <button class="atex-mr-tab" type="button" data-tab="moves">Движение</button>
+    </div>
+    <section id="atex-mr-body" class="atex-mr-panel"></section>
+
+    <div id="atex-mr-modal" class="atex-mr-modal" hidden>
+        <div class="atex-mr-modal-box" role="dialog" aria-modal="true">
+            <div id="atex-mr-modal-text"></div>
+            <div id="atex-mr-modal-error" class="atex-mr-modal-error"></div>
+            <div class="atex-mr-modal-actions">
+                <button id="atex-mr-modal-cancel" class="atex-mr-btn" type="button">Отмена</button>
+                <button id="atex-mr-modal-ok" class="atex-mr-btn atex-mr-btn-primary" type="button">Подтвердить</button>
+            </div>
+        </div>
+    </div>
+</div>

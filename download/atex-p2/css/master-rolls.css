@@ -1,0 +1,112 @@
+/* Рабочее место «Склад мастер-рулонов» (ideav/crm#5325). */
+.atex-mr {
+    --atex-mr-border: var(--border-color, #e5e7eb);
+    --atex-mr-panel: var(--bg-secondary, #ffffff);
+    --atex-mr-muted: var(--text-secondary, #6b7280);
+    --atex-mr-ok: #15803d;
+    --atex-mr-ok-bg: #dcfce7;
+    --atex-mr-warn: #92400e;
+    --atex-mr-warn-bg: #fef3c7;
+    --atex-mr-bad: #b91c1c;
+    --atex-mr-bad-bg: #fee2e2;
+    --atex-mr-info: #1d4ed8;
+    --atex-mr-info-bg: #dbeafe;
+    --atex-mr-pick-bg: #e8eef6;
+    height: 100%;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow: auto;
+    padding: 8px;
+    background: var(--bg-primary, #f8fafc);
+    color: var(--text-primary, #111827);
+    box-sizing: border-box;
+}
+
+[data-theme="dark"] .atex-mr {
+    --atex-mr-ok: #4ade80;
+    --atex-mr-ok-bg: rgba(74, 222, 128, 0.14);
+    --atex-mr-warn: #fcd34d;
+    --atex-mr-warn-bg: rgba(251, 191, 36, 0.16);
+    --atex-mr-bad: #fca5a5;
+    --atex-mr-bad-bg: rgba(248, 113, 113, 0.16);
+    --atex-mr-info: #93c5fd;
+    --atex-mr-info-bg: rgba(96, 165, 250, 0.16);
+    --atex-mr-pick-bg: rgba(141, 169, 196, 0.2);
+}
+
+.atex-mr * { box-sizing: border-box; }
+
+.atex-mr-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.atex-mr-title { margin: 0; font-size: 1.1rem; font-weight: 600; flex: 1 1 auto; }
+
+.atex-mr-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 12px; border: 1px solid var(--atex-mr-border); border-radius: 6px;
+    background: var(--atex-mr-panel); color: inherit; font: inherit; cursor: pointer;
+}
+.atex-mr-btn:hover { border-color: var(--atex-navy-l, #1d5596); }
+.atex-mr-btn:disabled { opacity: 0.5; cursor: default; }
+.atex-mr-btn-primary { background: var(--atex-navy, #134174); border-color: var(--atex-navy, #134174); color: var(--atex-on-navy, #ffffff); }
+.atex-mr-btn-primary:hover { background: var(--atex-navy-d, #0e3158); }
+.atex-mr-btn-sm { padding: 2px 8px; font-size: 0.85rem; }
+
+.atex-mr-input {
+    padding: 5px 8px; border: 1px solid var(--atex-mr-border); border-radius: 6px;
+    background: var(--atex-mr-panel); color: inherit; font: inherit; min-width: 0;
+}
+.atex-mr-input-num { width: 100px; text-align: right; }
+.atex-mr-field { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
+.atex-mr-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0 12px; }
+
+.atex-mr-message { padding: 8px 12px; border-radius: 6px; background: var(--atex-mr-info-bg); color: var(--atex-mr-info); }
+.atex-mr-message.is-ok { background: var(--atex-mr-ok-bg); color: var(--atex-mr-ok); }
+.atex-mr-message.is-warn { background: var(--atex-mr-warn-bg); color: var(--atex-mr-warn); }
+.atex-mr-message.is-error { background: var(--atex-mr-bad-bg); color: var(--atex-mr-bad); }
+
+.atex-mr-kpi { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; }
+.atex-mr-kpi-tile { padding: 10px 12px; border: 1px solid var(--atex-mr-border); border-radius: 8px; background: var(--atex-mr-panel); }
+.atex-mr-kpi-tile.is-warn { background: var(--atex-mr-warn-bg); }
+.atex-mr-kpi-tile.is-bad { background: var(--atex-mr-bad-bg); }
+.atex-mr-kpi-value { font-size: 1.4rem; font-weight: 600; }
+.atex-mr-kpi-label { font-size: 0.8rem; color: var(--atex-mr-muted); }
+
+.atex-mr-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--atex-mr-border); flex-wrap: wrap; }
+.atex-mr-tab {
+    padding: 6px 14px; border: 1px solid transparent; border-bottom: none; border-radius: 6px 6px 0 0;
+    background: none; color: var(--atex-mr-muted); font: inherit; cursor: pointer;
+}
+.atex-mr-tab.is-active { border-color: var(--atex-mr-border); background: var(--atex-mr-panel); color: inherit; font-weight: 600; }
+
+.atex-mr-panel { padding: 10px 12px; border: 1px solid var(--atex-mr-border); border-radius: 8px; background: var(--atex-mr-panel); overflow-x: auto; }
+.atex-mr-filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+.atex-mr-muted { color: var(--atex-mr-muted); font-size: 0.85rem; margin: 4px 0; }
+.atex-mr-empty { color: var(--atex-mr-muted); padding: 8px 0; }
+
+.atex-mr-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+.atex-mr-table th, .atex-mr-table td { padding: 5px 8px; border-bottom: 1px solid var(--atex-mr-border); text-align: left; vertical-align: top; }
+.atex-mr-table th { font-weight: 600; color: var(--atex-mr-muted); white-space: nowrap; }
+.atex-mr-table .num { text-align: right; white-space: nowrap; }
+.atex-mr-table tr.is-deficit td { background: var(--atex-mr-bad-bg); }
+.atex-mr-table tr.is-total td { font-weight: 600; }
+.atex-mr-table tr.is-changed td { background: var(--atex-mr-pick-bg); }
+.atex-mr-plus { color: var(--atex-mr-ok); }
+.atex-mr-minus { color: var(--atex-mr-bad); }
+
+.atex-mr-badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 0.78rem; background: var(--atex-mr-border); white-space: nowrap; }
+.atex-mr-badge.is-ok { background: var(--atex-mr-ok-bg); color: var(--atex-mr-ok); }
+.atex-mr-badge.is-warn { background: var(--atex-mr-warn-bg); color: var(--atex-mr-warn); }
+.atex-mr-badge.is-bad { background: var(--atex-mr-bad-bg); color: var(--atex-mr-bad); }
+.atex-mr-badge.is-info { background: var(--atex-mr-info-bg); color: var(--atex-mr-info); }
+
+.atex-mr-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.atex-mr-chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 4px 1px 8px; border-radius: 10px; background: var(--atex-mr-pick-bg); font-size: 0.8rem; }
+.atex-mr-chip button { border: none; background: none; color: var(--atex-mr-bad); cursor: pointer; font: inherit; padding: 0 4px; }
+
+.atex-mr-modal { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; background: rgba(15, 23, 42, 0.45); }
+.atex-mr-modal[hidden] { display: none; }
+.atex-mr-modal-box { width: min(760px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; padding: 16px; border-radius: 10px; background: var(--atex-mr-panel); color: inherit; }
+.atex-mr-modal-box h3 { margin: 0 0 8px; font-size: 1rem; }
+.atex-mr-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.atex-mr-modal-error { color: var(--atex-mr-bad); min-height: 1.2em; margin-top: 8px; }
