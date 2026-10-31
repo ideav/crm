@@ -1715,9 +1715,9 @@ API-операции и критерии приёмки.
 
 ### 3.17 Раскрой джамбо (Диспетчер, Фаза 2 — этикетка)
 
-**URL:** `/atex/jumbo-cutting` · **Шаблон:** `templates/atex/jumbo-cutting.html` ·
-**JS:** `download/atex/js/jumbo-cutting.js` + общее ядро `download/atex/js/jumbo-cut-map.js` ·
-**CSS:** `download/atex/css/jumbo.css` · **Тест:** `experiments/atex-p2-5315-jumbo-cut-map.test.js`.
+**URL:** `/atex/jumbo-cutting` · **Шаблон:** `templates/atex-p2/jumbo-cutting.html` ·
+**JS:** `download/atex-p2/js/jumbo-cutting.js` + общее ядро `download/atex-p2/js/jumbo-cut-map.js` ·
+**CSS:** `download/atex-p2/css/jumbo.css` · **Тест:** `experiments/atex-p2-5315-jumbo-cut-map.test.js`.
 Состав решения — [`atex_phase2_solution_composition.md`](atex_phase2_solution_composition.md) §5.4.
 
 Таблицы находятся по именам через `resolveProductionTables` (`label-production.js`), id в коде нет.
@@ -1755,8 +1755,8 @@ API-операции и критерии приёмки.
 
 ### 3.18 Пульт большого слиттера (Оператор, планшет, Фаза 2 — этикетка)
 
-**URL:** `/atex/jumbo-slitter` · **Шаблон:** `templates/atex/jumbo-slitter.html` ·
-**JS:** `download/atex/js/jumbo-slitter.js` + `jumbo-cut-map.js` · **CSS:** `jumbo.css`.
+**URL:** `/atex/jumbo-slitter` · **Шаблон:** `templates/atex-p2/jumbo-slitter.html` ·
+**JS:** `download/atex-p2/js/jumbo-slitter.js` + `jumbo-cut-map.js` · **CSS:** `jumbo.css`.
 Состав решения — §5.7.
 
 - Слева — открытые задания первичной резки по план-старту; выбрано задание «В работе» или первое.

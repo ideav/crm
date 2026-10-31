@@ -1,6 +1,6 @@
 // ideav/crm#5315 — Фаза 2 atex, шаг 6: раскрой джамбо и пульт большого слиттера.
 //
-// Что проверяется (ядро download/atex/js/jumbo-cut-map.js):
+// Что проверяется (ядро download/atex-p2/js/jumbo-cut-map.js):
 //   1. ходовые ширины из «Настройки» («251-258; 307-318») разбираются в диапазоны, кривая
 //      строка — ошибка, а не тихий пропуск;
 //   2. потребность в форматах: открытые задания высечки без мастер-рулона → группы
@@ -27,7 +27,7 @@ function assert(cond, name, extra) {
 
 var JC;
 try {
-    JC = require('../download/atex/js/jumbo-cut-map.js').core;
+    JC = require('../download/atex-p2/js/jumbo-cut-map.js').core;
 } catch (e) {
     assert(false, 'модуль jumbo-cut-map.js загружается в Node', e.message);
     console.log('\n' + passed + '/' + total + ' проверок пройдено.');
@@ -256,14 +256,14 @@ function rangesOf(variant, demand, running) {
     var f = JC.jobFields(t, { start: T0, batchId: 'b1', minutes: 90, edge: 68 });
     assert(f.t16 === String(T0) && f.t109 === 'b1' && f.t112 === 'Запланировано' && f.t114 === '68', 'поля нового задания первичной резки', JSON.stringify(f));
 
-    var JS = require('../download/atex/js/jumbo-slitter.js').core;
+    var JS = require('../download/atex-p2/js/jumbo-slitter.js').core;
     assert(JS.batchRestAfter(4000, [2000, 2000], 1) === 2000 && JS.batchRestAfter(4000, [2000, 2000], 2) === 0,
         'остаток партии — от длины и принятых съёмов (повтор не вычитает дважды)');
     var grid = JS.rollGrid(j1);
     assert(grid.length === 5 && grid[0].cells[0].no === 'МР-0001' && grid[1].cells[0].no === 'МР-0002' && !grid[2].cells[0] && !grid[0].cells[1],
         'сетка пульта: полоса × съём, принятые рулоны на своих местах');
 
-    var JCut = require('../download/atex/js/jumbo-cutting.js').core;
+    var JCut = require('../download/atex-p2/js/jumbo-cutting.js').core;
     var demand = [{ key: 'g', materialId: 'm1', min: 266, max: 281, opt: 271, deficit: 5000 }];
     var mv = JCut.manualVariant(st.batches.b1, [{ format: 270, count: 3 }, { format: 325, count: 2 }], demand, 0);
     assert(mv.ok && mv.variant.edge === 68 && mv.variant.strips[0].purpose === 'под дефицит' && mv.variant.strips[1].purpose === 'в запас' && mv.variant.coveredTotal === 5000,

@@ -28,7 +28,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function(root) {
     'use strict';
 
-    var LP = (root && root.AtexLabelProduction) || (typeof require === 'function' ? require('./label-production.js') : null);
+    var LP = (root && root.AtexLabelProduction) || (typeof require === 'function' ? require('../../atex/js/label-production.js') : null);
     var JM = (root && root.AtexJumboCutMap) || (typeof require === 'function' ? require('./jumbo-cut-map.js') : null);
     var lp = LP ? LP.core : null;
     var jc = JM ? JM.core : null;
