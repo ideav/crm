@@ -952,6 +952,13 @@ function isApi(){
     global $dumpAPI;
     return (isset($dumpAPI) || !empty(array_filter(array_merge($_POST, $_GET), function($value, $key) { return strpos($key, 'JSON') === 0;}, ARRAY_FILTER_USE_BOTH)));
 }
+# #5335: действия, которые отвечают JSON без ?JSON в адресе. Признак API ставится до
+# Validate_Token: заголовок X-Authorization/Authorization читается только у API-запроса,
+# и запрос без токена получает 401 JSON, а не страницу входа.
+function Api_always_json_mark($a){
+    if($a === "_m_batch")
+        $GLOBALS["dumpAPI"] = 1;
+}
 # <bad-path-5186>
 # #5186: адрес с вебрута не похож на имя базы (DB_MASK). Браузеру — HTML-страница вместо
 # голого текста: адрес с точкой (удалённый или опечатанный *.html, *.php, картинка) —
@@ -15410,6 +15417,7 @@ switch($a)  # Check actions, which don't require authentication
 if(isset($GLOBALS["BT_CALLBACK"]))
 	BtCallbackApply();
 $GLOBALS["GLOBAL_VARS"]["uri"] = htmlentities($_SERVER["REQUEST_URI"]);
+Api_always_json_mark($a);
 if(Validate_Token())
 {
 #print_r($GLOBALS); die();
@@ -15559,7 +15567,7 @@ if(Validate_Token())
 		# Ответ: {"results":[{"n":0,"op":"save","id":831921,"ok":true}
 		#   ,{"n":2,"op":"new","type":1078,"id":<новая запись>,"ok":true} ...],"ok":N,"failed":M}
 		case "_m_batch":
-			$GLOBALS["dumpAPI"] = 1;	# Ответ всегда JSON, без ?JSON в адресе
+			# Ответ всегда JSON, без ?JSON в адресе: признак ставит Api_always_json_mark до Validate_Token
 			if($_SERVER["REQUEST_METHOD"] !== "POST")
 				my_die(t9n("[RU]Для пакетной записи используйте POST[EN]Use POST for batch write"), "405 Method Not Allowed");
 			Limit_time(300);	# Пакет — это десятки сохранений, лимит по умолчанию мал
