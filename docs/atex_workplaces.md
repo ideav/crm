@@ -1765,8 +1765,8 @@ API-операции и критерии приёмки.
 Справочник оснастки высечки этикетки, состояния ножей и их пробег (ТЗ Фазы 2 §5.6, состав решения
 §1.1, §5.2, макет `download/atex/js/phase2-dies.html`).
 
-**Реализация.** URL `/atex/dies`; шаблон `templates/atex/dies.html`, логика `download/atex/js/dies.js`,
-стили `download/atex/css/dies.css`; модель (состояния, пробег, ресурс, раппорт) — общий модуль
+**Реализация.** URL `/atex/dies`; шаблон `templates/atex-p2/dies.html`, логика `download/atex-p2/js/dies.js`,
+стили `download/atex-p2/css/dies.css`; модель (состояния, пробег, ресурс, раппорт) — общий модуль
 `download/atex/js/label-production.js`. Тест — `experiments/atex-p2-5314-dies.test.js`.
 
 - **Ножи / Валы** — две вкладки, на каждой компонент `integram-table` над таблицей «Нож» / «Вал»

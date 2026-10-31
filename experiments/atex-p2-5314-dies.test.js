@@ -145,10 +145,10 @@ var A = LP.DIE_ACTION || {};
         'число настройки: пробелы-разделители, мусор → NaN');
 })();
 
-// ── 6. Рабочее место: ножи, показатели, валы (download/atex/js/dies.js) ──────
+// ── 6. Рабочее место: ножи, показатели, валы (download/atex-p2/js/dies.js) ──────
 (function() {
     var D = null;
-    try { D = require('../download/atex/js/dies.js').core; } catch (e) { /* модуля нет */ }
+    try { D = require('../download/atex-p2/js/dies.js').core; } catch (e) { /* модуля нет */ }
     assert(!!D, 'модуль рабочего места dies.js загружается в Node');
     if (!D) return;
 
