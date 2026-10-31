@@ -1,0 +1,53 @@
+{
+ "roles": [
+  {"name": "Диспетчер", "grants": [
+   {"table": "Задание высечки", "level": "WRITE"},
+   {"table": "Мастер-рулон", "level": "READ"},
+   {"table": "Мастер-рулон", "field": "Задание высечки", "level": "WRITE"},
+   {"table": "Движение мастер-рулона", "level": "WRITE"},
+   {"table": "Задача на втулки", "level": "WRITE"},
+   {"table": "Заказанное количество", "level": "READ"},
+   {"table": "Заказ", "level": "READ"},
+   {"table": "Нож", "level": "READ"},
+   {"table": "Вал", "level": "READ"},
+   {"table": "Станок высечки", "level": "READ"},
+   {"table": "Движение пробега", "level": "READ"},
+   {"table": "Марка ножа", "level": "READ"},
+   {"table": "Состояние ножа", "level": "READ"},
+   {"table": "Вид движения мастер-рулона", "level": "READ"},
+   {"table": "Сырьё этикетки", "level": "READ"},
+   {"table": "Основа сырья", "level": "READ"},
+   {"table": "Вид продукции", "level": "READ"},
+   {"table": "Партия джамбо", "level": "READ"},
+   {"table": "Задание первичной резки", "level": "READ"},
+   {"table": "Полоса раскроя", "level": "READ"},
+   {"table": "Втулкорез", "level": "READ"},
+   {"table": "Диаметр втулки", "level": "READ"},
+   {"table": "Настройка", "level": "READ"}
+  ]},
+  {"name": "Руководитель", "grants": [
+   {"table": "Задание высечки", "level": "READ"},
+   {"table": "Мастер-рулон", "level": "READ"},
+   {"table": "Движение мастер-рулона", "level": "READ"},
+   {"table": "Задача на втулки", "level": "READ"},
+   {"table": "Заказанное количество", "level": "READ"},
+   {"table": "Заказ", "level": "READ"},
+   {"table": "Нож", "level": "READ"},
+   {"table": "Вал", "level": "READ"},
+   {"table": "Станок высечки", "level": "READ"},
+   {"table": "Движение пробега", "level": "READ"},
+   {"table": "Марка ножа", "level": "READ"},
+   {"table": "Состояние ножа", "level": "READ"},
+   {"table": "Вид движения мастер-рулона", "level": "READ"},
+   {"table": "Сырьё этикетки", "level": "READ"},
+   {"table": "Основа сырья", "level": "READ"},
+   {"table": "Вид продукции", "level": "READ"},
+   {"table": "Партия джамбо", "level": "READ"},
+   {"table": "Задание первичной резки", "level": "READ"},
+   {"table": "Полоса раскроя", "level": "READ"},
+   {"table": "Втулкорез", "level": "READ"},
+   {"table": "Диаметр втулки", "level": "READ"},
+   {"table": "Настройка", "level": "READ"}
+  ]}
+ ]
+}
