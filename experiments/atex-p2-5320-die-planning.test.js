@@ -313,7 +313,10 @@ if (C) (function() {
     var sp4 = C.sleevePlan({ jobs: [sj[0]], tasks: { P1: [{ id: 't1', start: MON - 99, qty: 50, cutterId: 'tc76', touched: true }] }, cutters: cutters });
     assert(sp4.ops.length === 0 && sp4.skipped.some(function(x) { return x.positionId === 'P1' && /начат/.test(x.reason); }), 'вся партия уже в работе — ничего не создаём, причина названа', JSON.stringify(sp4));
     var sp5 = C.sleevePlan({ jobs: [J(1, { start: MON, rolls: 5, positionId: 'P1', sleeve: 'Втулка 3 дюйма' })], tasks: {}, cutters: cutters });
-    assert(sp5.ops.length === 1 && sp5.ops[0].cutterId === '' && sp5.warnings.length === 1, 'диаметр не разобран — задача без втулкореза и предупреждение', JSON.stringify(sp5));
+    assert(sp5.ops.length === 0 && sp5.skipped.some(function(x) { return x.positionId === 'P1' && /втулкорез/.test(x.reason); }),
+        'втулкорез не подобран — задача не создаётся (пульт втулкореза видит только задачи своего станка), причина названа', JSON.stringify(sp5));
+    var sp6 = C.sleevePlan({ jobs: [J(1, { start: MON + 60, rolls: 5, positionId: 'P1', sleeve: '' })], tasks: { P1: [{ id: 't9', start: MON, qty: 5, cutterId: 'tc76', touched: false }] }, cutters: cutters });
+    assert(sp6.ops.length === 1 && sp6.ops[0].op === 'update' && sp6.ops[0].cutterId === 'tc76', 'втулкорез не подобран, задача уже есть — дата приводится, втулкорез задачи сохраняется', JSON.stringify(sp6));
     var sT = { sleeveTask: { id: '1080', reqs: { cutter: '1180', qty: '16399' } } };
     var sf = C.sleeveCreateFields(sT, { start: MON, qty: 50, cutterId: 'tc76' });
     assert(sf.t1080 === String(MON) && sf.t16399 === '50' && sf.t1180 === 'tc76', 'поля задачи на втулки: главное значение — старт, количество, втулкорез', JSON.stringify(sf));

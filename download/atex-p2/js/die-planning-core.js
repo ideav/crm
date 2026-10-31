@@ -538,8 +538,12 @@
             var rolls = Math.round(num(j.rolls));
             if (!(rolls > 0)) { skipped.push({ positionId: j.positionId, reason: 'у позиции нет рулонов' }); return; }
             var cutter = pickCutter(inp.cutters, sleeveDiameterMm(j.sleeve)), cutterId = cutter ? cutter.id : '';
-            if (!cutter) warnings.push('позиция ' + j.positionId + ': втулкорез не подобран (втулка «' + (j.sleeve || 'не указана') + '»)');
             var have = (inp.tasks || {})[j.positionId] || [];
+            // Пульт втулкореза читает задачи с фильтром по своему станку: задачу без втулкореза не увидит никто.
+            if (!cutter && !have.length) {
+                skipped.push({ positionId: j.positionId, reason: 'втулкорез не подобран (втулка «' + (j.sleeve || 'не указана') + '»)' });
+                return;
+            }
             var touched = have.filter(function(x) { return x.touched; }), free = have.filter(function(x) { return !x.touched; });
             var target = rolls - touched.reduce(function(a, x) { return a + num(x.qty); }, 0);
             if (target <= 0) { skipped.push({ positionId: j.positionId, reason: 'задача на втулки уже начата, вся партия в работе' }); return; }
