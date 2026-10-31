@@ -13,7 +13,8 @@
 //   - минимальная партия (`labelMinBatch`): этикеток с одного мастер-рулона длиной
 //     LABEL_MASTER_ROLL_M; меньше — предупреждение, не блокировка;
 //   - подтверждение ИТС (`labelItsCheck`): размер вне [LABEL_ITS_MIN_MM, LABEL_ITS_MAX_MM] →
-//     «Нужно подтверждение ИТС»; кнопка «Подтвердить ИТС» ставит «Подтверждено ИТС»;
+//     «Нужно подтверждение ИТС»; кнопка «Подтвердить ИТС» ставит «Подтверждено ИТС» —
+//     только ролям из LABEL_ITS_ROLES (пусто — «ИТС»), admin и владельцу базы (`canConfirmIts`);
 //   - потребность позиции (`labelPositionDemand`): этикеток, раппортов, метраж вырубки,
 //     мастер-рулонов, коэффициент использования сырья.
 //
@@ -43,7 +44,9 @@
     // id позиции в отчёте: колонка «<Имя>ID» рядом с «<Имя>» — грид её скрывает.
     var POSITION_ID_COLUMN = 'РулоновID';
     var RUNS_REPORT = 'die_runs';
-    var SETTINGS = { MR_LENGTH: 'LABEL_MASTER_ROLL_M', ITS_MIN: 'LABEL_ITS_MIN_MM', ITS_MAX: 'LABEL_ITS_MAX_MM' };
+    var SETTINGS = { MR_LENGTH: 'LABEL_MASTER_ROLL_M', ITS_MIN: 'LABEL_ITS_MIN_MM', ITS_MAX: 'LABEL_ITS_MAX_MM', ITS_ROLES: 'LABEL_ITS_ROLES' };
+    // Кто подтверждает ИТС, если настройка LABEL_ITS_ROLES пуста.
+    var ITS_ROLES_DEFAULT = 'ИТС';
     var MR_LENGTH_DEFAULT_M = 2000;
 
     // ── Чистые функции (покрыты experiments/atex-p2-5324-label-orders.test.js) ───
@@ -276,6 +279,31 @@
         });
     }
 
+    function normRole(s) {
+        return String(s == null ? '' : s).replace(/\s+/g, ' ').trim().toLowerCase();
+    }
+
+    // Право подтвердить или снять подтверждение ИТС. ctx — { role, user, db } вошедшего;
+    // rolesSetting — LABEL_ITS_ROLES: имена ролей через запятую или «;» (пусто — «ИТС»).
+    // Сверка по ИМЕНИ роли: id ролей у баз свои. admin и владелец базы — всегда: ядро
+    // пускает их в обход грантов (Check_Grant).
+    function canConfirmIts(ctx, rolesSetting) {
+        var role = normRole(ctx && ctx.role);
+        var user = normRole(ctx && ctx.user);
+        var db = normRole(ctx && ctx.db);
+        if (role === 'admin' || user === 'admin' || (user && db && user === db)) return true;
+        if (!role) return false;
+        var list = String(rolesSetting == null ? '' : rolesSetting).split(/[,;]/).map(normRole).filter(Boolean);
+        if (!list.length) list = [normRole(ITS_ROLES_DEFAULT)];
+        return list.indexOf(role) >= 0;
+    }
+
+    function itsRolesLabel(rolesSetting) {
+        var list = String(rolesSetting == null ? '' : rolesSetting).split(/[,;]/)
+            .map(function(x) { return x.trim(); }).filter(Boolean);
+        return (list.length ? list : [ITS_ROLES_DEFAULT]).join(', ');
+    }
+
     var core = {
         REPORT: REPORT,
         SETTINGS: SETTINGS,
@@ -291,7 +319,9 @@
         writeDiffers: writeDiffers,
         validatePositionForm: validatePositionForm,
         isoToRu: isoToRu,
-        ruToIso: ruToIso
+        ruToIso: ruToIso,
+        canConfirmIts: canConfirmIts,
+        itsRolesLabel: itsRolesLabel
     };
 
     // ── Рабочее место (браузер) ──────────────────────────────────────────────────
@@ -299,6 +329,7 @@
     function AtexLabelOrders(rootEl) {
         this.root = rootEl;
         this.db = rootEl.getAttribute('data-db') || '';
+        this.ctx = { role: rootEl.getAttribute('data-role') || '', user: rootEl.getAttribute('data-user') || '', db: this.db };
         this.tables = null;
         this.meta = null;
         this.rows = [];          // позиции (positionFromRow)
@@ -430,7 +461,7 @@
 
     AtexLabelOrders.prototype.loadSettings = function() {
         var self = this;
-        var empty = { mrLength: '', itsMin: '', itsMax: '' };
+        var empty = { mrLength: '', itsMin: '', itsMax: '', itsRoles: '' };
         if (!this.settingsTable) return Promise.resolve(empty);
         var typeReq = findReq(this.settingsTable, 'Тип');
         var valReq = findReq(this.settingsTable, 'Значение');
@@ -441,7 +472,8 @@
             return {
                 mrLength: settingValue(recs, SETTINGS.MR_LENGTH, self.db),
                 itsMin: settingValue(recs, SETTINGS.ITS_MIN, self.db),
-                itsMax: settingValue(recs, SETTINGS.ITS_MAX, self.db)
+                itsMax: settingValue(recs, SETTINGS.ITS_MAX, self.db),
+                itsRoles: settingValue(recs, SETTINGS.ITS_ROLES, self.db)
             };
         });
     };
@@ -574,6 +606,9 @@
             row('Подтверждение ИТС', plan.its.needed
                 ? (p.itsConfirmed ? '<span class="atex-lo-badge is-ok">подтверждено</span>' : '<span class="atex-lo-badge is-warn">нужно</span>') + '<small>' + esc(plan.its.reason) + '</small>'
                 : (plan.its.configured ? 'не нужно' : '<span class="atex-lo-muted">пороги не заданы (' + SETTINGS.ITS_MIN + ', ' + SETTINGS.ITS_MAX + ')</span>'));
+        if (plan.its.needed && !this.canIts()) {
+            html += '<div class="atex-lo-note">Подтверждает ИТС роль: ' + esc(this.itsRolesText()) + ' (настройка ' + SETTINGS.ITS_ROLES + ').</div>';
+        }
 
         if (plan.demand.ok) {
             html += '<h3 class="atex-lo-sub">Потребность позиции</h3>' +
@@ -587,7 +622,7 @@
             '<button class="atex-lo-btn atex-lo-btn-primary" type="button" data-lo-action="pick">Подобрать нож</button>' +
             '<button class="atex-lo-btn" type="button" data-lo-action="manual">Выбрать нож вручную</button>' +
             (plan.die.pick === lp.DIE_PICK.MANUAL ? '<button class="atex-lo-btn" type="button" data-lo-action="auto">Вернуть автоподбор</button>' : '') +
-            (plan.its.needed ? '<button class="atex-lo-btn" type="button" data-lo-action="its">' + (p.itsConfirmed ? 'Снять подтверждение ИТС' : 'Подтвердить ИТС') + '</button>' : '') +
+            (plan.its.needed && this.canIts() ? '<button class="atex-lo-btn" type="button" data-lo-action="its">' + (p.itsConfirmed ? 'Снять подтверждение ИТС' : 'Подтвердить ИТС') + '</button>' : '') +
             '<button class="atex-lo-btn" type="button" data-lo-action="edit">Изменить</button>' +
             '</div>';
         el.innerHTML = html;
@@ -661,9 +696,21 @@
         });
     };
 
+    AtexLabelOrders.prototype.canIts = function() {
+        return canConfirmIts(this.ctx, this.settings && this.settings.itsRoles);
+    };
+
+    AtexLabelOrders.prototype.itsRolesText = function() {
+        return itsRolesLabel(this.settings && this.settings.itsRoles);
+    };
+
     AtexLabelOrders.prototype.toggleIts = function(p) {
         var self = this;
         if (!p) return Promise.resolve();
+        if (!this.canIts()) {
+            this.message('Подтверждать ИТС может только роль: ' + itsRolesLabel(this.settings && this.settings.itsRoles) + '.', 'warn');
+            return Promise.resolve();
+        }
         var text = p.itsConfirmed ? 'Снять подтверждение ИТС у позиции заказа ' + p.orderNo + '? Позиция вернётся в блокировку.'
             : 'Подтвердить ИТС: этикетка ' + p.width + ' × ' + p.length + ' мм (заказ ' + p.orderNo + ') может идти в производство?';
         return this.confirm(text).then(function(yes) {

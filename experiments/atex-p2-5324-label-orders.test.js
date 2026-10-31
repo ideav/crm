@@ -237,4 +237,47 @@ var DIES = [
     assert(LO.bool('X') && !LO.bool('') && !LO.bool('0'), 'BOOLEAN Интеграма: «X» — да');
 })();
 
-console.log('\n' + passed + '/' + total + ' проверок пройдено.');
+// ── 7. «Подтвердить ИТС» — только роли из LABEL_ITS_ROLES (комментарий владельца в PR #5329) ──
+(function() {
+    var LO;
+    try { LO = require('../download/atex-p2/js/label-orders.js').core; } catch (e) { LO = null; }
+    if (!LO) return Promise.resolve();
+    assert(typeof LO.canConfirmIts === 'function', 'canConfirmIts экспортирована');
+    if (typeof LO.canConfirmIts !== 'function') return Promise.resolve();
+    var c = LO.canConfirmIts;
+    assert(c({ role: 'ИТС', user: 'ivanov', db: 'ateh1' }, '') === true, 'роль «ИТС» подтверждает (настройка пуста — по умолчанию «ИТС»)');
+    assert(c({ role: 'Менеджер', user: 'petrova', db: 'ateh1' }, '') === false, 'Менеджер не подтверждает');
+    assert(c({ role: 'Менеджер', user: 'petrova', db: 'ateh1' }, 'ИТС, Менеджер') === true, 'роль из списка настройки подтверждает');
+    assert(c({ role: '  итс ', user: 'x', db: 'ateh1' }, 'Главный технолог;ИТС') === true, 'сравнение без регистра и пробелов, разделитель «;» тоже');
+    assert(c({ role: 'ИТС', user: 'x', db: 'ateh1' }, 'Главный технолог') === false, 'настройка задана — «ИТС» по умолчанию не добавляется');
+    assert(c({ role: 'admin', user: 'x', db: 'ateh1' }, '') === true && c({ role: 'Менеджер', user: 'ateh1', db: 'ateh1' }, '') === true,
+        'admin и владелец базы подтверждают всегда (ядро пускает их в обход грантов)');
+    assert(c({ role: '', user: '', db: 'ateh1' }, '') === false, 'роль не определена — нельзя');
+    var html = fs.readFileSync(path.join(__dirname, '../templates/atex-p2/label-orders.html'), 'utf8');
+    assert(html.indexOf('data-role="{_global_.role}"') >= 0 && html.indexOf('data-user="{_global_.user}"') >= 0, 'шаблон передаёт роль и пользователя');
+    // Без права toggleIts ничего не пишет и не спрашивает подтверждения — даже если кнопку вызвали в обход разметки.
+    var M = require('../download/atex-p2/js/label-orders.js');
+    var posted = 0, asked = 0, said = '';
+    var fake = {
+        settings: { itsRoles: '' }, ctx: { role: 'Менеджер', user: 'petrova', db: 'ateh1' },
+        tables: { position: { reqs: { itsConfirmed: '999' } } },
+        canIts: M.AtexLabelOrders.prototype.canIts,
+        confirm: function() { asked++; return Promise.resolve(true); },
+        post: function() { posted++; return Promise.resolve({}); },
+        reload: function() { return Promise.resolve(); },
+        message: function(t) { said = t; }
+    };
+    var pos = { id: '488', orderNo: '3259', width: 18, length: 18, itsConfirmed: false };
+    return Promise.resolve(M.AtexLabelOrders.prototype.toggleIts.call(fake, pos)).then(function() {
+        assert(posted === 0 && asked === 0 && /ИТС/.test(said), 'Менеджер: toggleIts не пишет, объясняет, чья кнопка', said);
+        fake.ctx = { role: 'ИТС', user: 'ivanov', db: 'ateh1' };
+        return M.AtexLabelOrders.prototype.toggleIts.call(fake, pos);
+    }).then(function() {
+        assert(posted === 1 && asked === 1, 'роль ИТС: toggleIts спрашивает и пишет');
+    });
+})().then(function() {
+    console.log('\n' + passed + '/' + total + ' проверок пройдено.');
+}, function(err) {
+    assert(false, 'блок 7 упал', err && err.message);
+    console.log('\n' + passed + '/' + total + ' проверок пройдено.');
+});
