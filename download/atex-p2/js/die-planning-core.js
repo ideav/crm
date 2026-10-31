@@ -149,7 +149,18 @@
             return { ok: false, reason: 'вал ' + (job.cylinder || job.cylinderId) + ' не в «Допустимых валах» станка' };
         if (job.materialId && (machine.stopMaterials || []).indexOf(String(job.materialId)) >= 0)
             return { ok: false, reason: 'сырьё «' + (job.material || job.materialId) + '» в стоп-листе станка' };
+        // Туррель: центрифуга роняет втулку на бок и выравнивает для подачи в жёлоб — нужна ширина ≥ 2× диаметра.
+        // Задание, записанное на станок диспетчером, остаётся допустимым (ручное решение).
+        if (machine.turret && !turretFits(job) && String(job.machineId || '') !== String(machine.id)) {
+            var d = sleeveDiameterMm(job.sleeve);
+            return { ok: false, reason: 'туррель: ширина втулки ' + (num(job.sleeveWidth) || '—') + ' мм меньше 2× диаметра' + (d ? ' (' + 2 * d + ' мм)' : ' (диаметр втулки не указан)') };
+        }
         return { ok: true };
+    }
+    // Задание подходит туррели: ширина втулки ≥ 2× её диаметра (диаметр — из названия втулки).
+    function turretFits(job) {
+        var d = sleeveDiameterMm(job && job.sleeve), w = num(job && job.sleeveWidth);
+        return d > 0 && w >= 2 * d;
     }
 
     // ── Календарь ───────────────────────────────────────────────────────────
@@ -278,14 +289,23 @@
         });
         cands.sort(compareJobs);
         cands.forEach(function(j) {
-            var best = null, reasons = [];
+            var best = null, turret = null, reasons = [];
+            // записанное диспетчером на туррель задание, которое ей не подходит, со станка не снимается
+            var pinned = order.filter(function(id) { return st[id].machine.turret && String(j.machineId || '') === String(id) && !turretFits(j); })[0];
             order.forEach(function(id, idx) {
+                if (pinned && id !== pinned) return;
                 var x = st[id], chk = machineAllows(x.machine, j);
                 if (!chk.ok) { reasons.push((x.machine.name || id) + ': ' + chk.reason); return; }
                 var t = place(x.cursor, x.prev, j);
                 var better = !best || t.item.end < best.t.item.end || (t.item.end === best.t.item.end && t.item.setup < best.t.item.setup);
                 if (better) best = { id: id, t: t };
+                if (x.machine.turret && (!turret || t.item.end < turret.t.item.end)) turret = { id: id, t: t };
             });
+            // подходящее туррели — на туррель, если там оно не уходит в просрочку (или и так опаздывает везде)
+            if (turret && best && turret.id !== best.id && turretFits(j)) {
+                var due = num(j.due);
+                if (!(due > 0) || turret.t.item.end <= due || best.t.item.end > due) best = turret;
+            }
             if (!best) { unplaced.push({ jobId: j.id, reasons: reasons.length ? reasons : ['нет станков'] }); return; }
             var x = st[best.id];
             x.seq.push(j); x.cursor = best.t.cursor; x.prev = j;
@@ -462,6 +482,38 @@
         return { day: day, capacity: s.dayCapacityMin, rows: rows };
     }
 
+    // Очередь колонками «станок × день»: колонка у каждого станка справочника (и без заданий),
+    // в колонке — дни горизонта; в дне — задания дня по порядку, сумма минут и ёмкость смены.
+    // Задание, перешедшее на следующий день, там — продолжение без наладки. Выполненные не показываются.
+    function queueGrid(planMachines, machines, days, settings) {
+        var s = withDefaults(settings);
+        var columns = (machines || []).map(function(m) {
+            var byDay = {};
+            (days || []).forEach(function(d) { byDay[d] = { day: d, capacity: s.dayCapacityMin, minutes: 0, items: [] }; });
+            (((planMachines || {})[m.id] || { items: [] }).items).forEach(function(it) {
+                if (it.done) return;
+                var firstDay = null;
+                (it.segments || []).forEach(function(g) { if (firstDay == null || g.day < firstDay) firstDay = g.day; });
+                var per = {};
+                (it.segments || []).forEach(function(g) {
+                    if (!byDay[g.day]) return;
+                    var p = per[g.day] = per[g.day] || { setup: 0, run: 0, from: g.from };
+                    if (/^setup/.test(g.kind)) p.setup += g.minutes; else p.run += g.minutes;
+                    if (g.from < p.from) p.from = g.from;
+                });
+                Object.keys(per).forEach(function(k) {
+                    var d = byDay[k], p = per[k], cont = Number(k) !== firstDay;
+                    d.items.push({ jobId: it.jobId, from: p.from, setup: p.setup, run: p.run, minutes: p.setup + p.run,
+                        setupKind: p.setup > 0 ? it.setupKind : 'none', continuation: cont, fixed: !!it.fixed, late: !!it.late, start: it.start });
+                    d.minutes += p.setup + p.run;
+                });
+            });
+            return { machineId: m.id, name: m.name || m.id, active: m.active !== false, status: m.status || '',
+                days: (days || []).map(function(d) { var x = byDay[d]; x.items.sort(function(a, b) { return a.from - b.from; }); return x; }) };
+        });
+        return { columns: columns, capacity: s.dayCapacityMin };
+    }
+
     // ── Формирование заданий ────────────────────────────────────────────────
 
     // positions — LO.positionFromRow; dies — LO.buildDies (+ cylinderId); jobs — buildJobs.
@@ -577,11 +629,14 @@
         return (i >= 0 ? s.slice(i + 1) : s).split(',').map(function(x) { return x.trim(); }).filter(Boolean);
     }
     var INACTIVE_RE = /останов|ремонт|не работ|выведен|неисправ/i;
-    function machinesFromRecords(recs, t) {
-        var r = (t.machine && t.machine.reqs) || {};
+    // opts.turretReq — id реквизита «Туррель» станка (BOOLEAN), если он есть в базе.
+    function machinesFromRecords(recs, t, opts) {
+        var r = (t.machine && t.machine.reqs) || {}, tr = opts && opts.turretReq;
         return (recs || []).map(function(m) {
             var status = String((m.reqs || {})[r.status] || '');
-            return { id: m.id, name: m.val, cylinders: refIds(m, r.cylinders), stopMaterials: refIds(m, r.stopMaterials), status: status, active: !INACTIVE_RE.test(status) };
+            var tv = tr ? String((m.reqs || {})[tr] == null ? '' : (m.reqs || {})[tr]).trim().toLowerCase() : '';
+            return { id: m.id, name: m.val, cylinders: refIds(m, r.cylinders), stopMaterials: refIds(m, r.stopMaterials), status: status, active: !INACTIVE_RE.test(status),
+                turret: tv !== '' && tv !== '0' && tv !== 'нет' && tv !== 'false' };
         }).sort(function(a, b) { return (num(a.id) - num(b.id)); });
     }
     // Ножи для подбора и планирования: LO.buildDies + вал (id), формат, марка.
@@ -628,7 +683,7 @@
             dueEnd: dueEnd, buildJobs: buildJobs, setupKind: setupKind, setupMinutes: setupMinutes, runMinutes: runMinutes,
             machineAllows: machineAllows, createCalendar: createCalendar, orderQueue: orderQueue, compareJobs: compareJobs,
             jobFlags: jobFlags, openMetersByDie: openMetersByDie, coverJobs: coverJobs, planReservations: planReservations,
-            toolLoad: toolLoad, ganttDay: ganttDay, formJobs: formJobs, jobCreateFields: jobCreateFields, jobPlanFields: jobPlanFields,
+            toolLoad: toolLoad, ganttDay: ganttDay, queueGrid: queueGrid, turretFits: turretFits, formJobs: formJobs, jobCreateFields: jobCreateFields, jobPlanFields: jobPlanFields,
             sleeveDiameterMm: sleeveDiameterMm, pickCutter: pickCutter, sleevePlan: sleevePlan,
             sleeveCreateFields: sleeveCreateFields, sleeveUpdateFields: sleeveUpdateFields,
             refIds: refIds, machinesFromRecords: machinesFromRecords, buildDieIndex: buildDieIndex, dieInfo: dieInfo, resolveSleeveTask: resolveSleeveTask
