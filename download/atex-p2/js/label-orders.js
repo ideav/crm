@@ -40,6 +40,8 @@
     var lp = LP ? LP.core : null;
 
     var REPORT = 'label_positions';
+    // id позиции в отчёте: колонка «<Имя>ID» рядом с «<Имя>» — грид её скрывает.
+    var POSITION_ID_COLUMN = 'РулоновID';
     var RUNS_REPORT = 'die_runs';
     var SETTINGS = { MR_LENGTH: 'LABEL_MASTER_ROLL_M', ITS_MIN: 'LABEL_ITS_MIN_MM', ITS_MAX: 'LABEL_ITS_MAX_MM' };
     var MR_LENGTH_DEFAULT_M = 2000;
@@ -159,12 +161,12 @@
     // Строка отчёта label_positions → позиция для подбора.
     function positionFromRow(row, materials) {
         var x = row || {};
-        var mat = (materials || {})[String(x.material_id || '')] || null;
+        var mat = (materials || {})[String(x['СырьёID'] || '')] || null;
         var kt = String(x['Тип ножей'] || '').trim();
         var parsed = kt ? lp.parseKnifeType(kt) : null;
         return {
-            id: String(x.position_id || ''),
-            orderId: String(x.order_id || ''),
+            id: String(x['РулоновID'] || ''),
+            orderId: String(x['ЗаказID'] || ''),
             orderNo: x['Заказ'] || '',
             client: x['Клиент'] || '',
             width: x['Ширина, мм'],
@@ -172,19 +174,19 @@
             orderStreams: x['Ручьёв'],
             labelsPerRoll: x['Шт в рулоне'],
             rolls: x['Рулонов'],
-            materialId: String(x.material_id || ''),
+            materialId: String(x['СырьёID'] || ''),
             material: x['Сырьё'] || '',
             base: mat ? mat.base : '',
             knifeType: kt,
             knifeStreams: parsed && parsed.ok ? parsed.streams : null,
             pick: String(x['Подбор ножа'] || '').trim(),
-            dieId: String(x.die_id || ''),
+            dieId: String(x['НожID'] || ''),
             dieNo: x['Нож'] || '',
             minBatch: x['Мин. партия'],
             itsNeeded: bool(x['ИТС нужен']),
             itsConfirmed: bool(x['ИТС подтв.']),
             sleeveWidth: x['Втулка, мм'] || '',
-            sleeveId: String(x.sleeve_id || ''),
+            sleeveId: String(x['Диаметр втулкиID'] || ''),
             winding: String(x['Намотка'] || '').trim(),
             due: x['Срок'] || '',
             status: x['Статус'] || ''
@@ -405,16 +407,18 @@
         }
         var self = this;
         this.grid = new Grid('atex-lo-grid', {
-            apiUrl: '/' + this.db + '/report/' + REPORT,
+            // ?JSON — формат columns/data, который грид читает у отчёта (как templates/report.html).
+            apiUrl: '/' + this.db + '/report/' + REPORT + '?JSON',
             dataSource: 'report',
             pageSize: 50,
+            title: 'Позиции этикетки',
             cookiePrefix: 'atex-label-orders',
             instanceName: 'atexLabelOrdersTable',
             onCellClick: function(row) {
                 var g = self.grid;
                 var idx = -1;
                 (g.columns || []).forEach(function(c, i) {
-                    if ([c.name, c.val, c.id, c.label].indexOf('position_id') !== -1) idx = i;
+                    if ([c.name, c.val, c.label].indexOf(POSITION_ID_COLUMN) !== -1) idx = i;
                 });
                 var id = idx >= 0 && g.data[row] ? g.data[row][idx] : '';
                 if (id && typeof id === 'object') id = id.value != null ? id.value : id.val;
@@ -747,8 +751,8 @@
                 field('newOrderNo', 'Номер нового заказа', text('newOrderNo', '')) +
                 field('clientId', 'Клиент нового заказа', '<select name="clientId">' + options(this.clients, '', null, '—') + '</select>')) +
             field('knifeType', 'Тип ножей (1С)', text('knifeType', e.knifeType) + '<button class="atex-lo-btn" type="button" data-lo-action="form-parse">Размер из типа</button>', 'например «85 х 38 (80)»') +
-            field('width', 'Ширина этикетки, мм', text('width', e.width, ' inputmode="decimal"')) +
-            field('length', 'Длина этикетки, мм', text('length', e.length, ' inputmode="decimal"')) +
+            field('width', 'Ширина этикетки, мм', text('labelWidth', e.width, ' inputmode="decimal"')) +
+            field('length', 'Длина этикетки, мм', text('labelLength', e.length, ' inputmode="decimal"')) +
             field('orderStreams', 'Ручьёв в заказе', text('orderStreams', e.orderStreams || '1', ' inputmode="numeric"'), 'нож подбирается с числом ручьёв, кратным этому') +
             field('labelsPerRoll', 'Этикеток в рулоне', text('labelsPerRoll', e.labelsPerRoll, ' inputmode="numeric"')) +
             field('rolls', 'Рулонов', text('rolls', e.rolls, ' inputmode="numeric"')) +
@@ -766,6 +770,10 @@
         var form = this.$('atex-lo-form');
         var out = {};
         Array.prototype.forEach.call(form.elements, function(el) { if (el.name) out[el.name] = String(el.value || '').trim(); });
+        // Поля размера названы labelWidth/labelLength: имя «length» у поля формы перекрыто
+        // свойством HTMLFormElement.length (число полей).
+        out.width = out.labelWidth || '';
+        out.length = out.labelLength || '';
         if (this.formPosition) out.orderId = this.formPosition.orderId;
         return out;
     };
@@ -775,8 +783,8 @@
         var r = lp.parseKnifeType(form.elements.knifeType.value);
         this.showFormErrors(r.ok ? {} : { knifeType: r.error });
         if (!r.ok) return;
-        form.elements.width.value = r.width;
-        form.elements.length.value = r.length;
+        form.elements.labelWidth.value = r.width;
+        form.elements.labelLength.value = r.length;
     };
 
     AtexLabelOrders.prototype.showFormErrors = function(err) {

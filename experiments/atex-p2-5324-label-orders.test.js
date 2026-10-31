@@ -203,9 +203,9 @@ var DIES = [
     if (!LO) return;
     var materials = { '177': { name: '0043 SG/HM/YG', base: 'Бумага' } };
     var row = {
-        position_id: '488', order_id: '437', 'Заказ': '3259', material_id: '177', 'Сырьё': '0043 SG/HM/YG',
+        'РулоновID': '488', 'ЗаказID': '437', 'Заказ': '3259', 'СырьёID': '177', 'Сырьё': '0043 SG/HM/YG',
         'Ширина, мм': '148.00', 'Длина, мм': '210.00', 'Ручьёв': '', 'Шт в рулоне': '900', 'Рулонов': '900',
-        'Тип ножей': '148 х 210 (80)', 'Подбор ножа': '', die_id: '', 'Мин. партия': '', 'ИТС нужен': '', 'ИТС подтв.': '', 'Втулка, мм': ''
+        'Тип ножей': '148 х 210 (80)', 'Подбор ножа': '', 'НожID': '', 'Мин. партия': '', 'ИТС нужен': '', 'ИТС подтв.': '', 'Втулка, мм': ''
     };
     var pos = LO.positionFromRow(row, materials);
     assert(pos.id === '488' && pos.base === 'Бумага' && pos.knifeStreams === null, 'основа позиции — из её сырья; ручьёв в «Типе ножей» нет', JSON.stringify(pos));
@@ -216,7 +216,7 @@ var DIES = [
         plan.write.minBatch === String(Math.floor(2000000 / 666.75) * 3 * 2), 'в позицию пишется нож, «подобран», мин. партия, ИТС не нужен', JSON.stringify(plan.write));
     assert(plan.write.sleeveWidth === '80', 'ширины втулки в позиции нет — берётся из ножа');
     assert(LO.writeDiffers(pos, plan.write) === true, 'записанное отличается от расчёта — нужно записать');
-    var written = LO.positionFromRow(Object.assign({}, row, { 'Подбор ножа': 'подобран', die_id: '2', 'Мин. партия': plan.write.minBatch, 'Втулка, мм': '80.00' }), materials);
+    var written = LO.positionFromRow(Object.assign({}, row, { 'Подбор ножа': 'подобран', 'НожID': '2', 'Мин. партия': plan.write.minBatch, 'Втулка, мм': '80.00' }), materials);
     assert(LO.writeDiffers(written, LO.planPosition(written, dies, { mrLength: '2000', itsMin: '20', itsMax: '250' }).write) === false,
         'после записи повторный подбор ничего не меняет');
 
