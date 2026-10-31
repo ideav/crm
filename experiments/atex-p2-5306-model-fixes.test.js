@@ -1,7 +1,7 @@
 // ideav/crm#5306 — доработки модели данных этикетки после #5305.
 //
 //   1. «Вид движения пробега» — справочник, а не свободный текст: пробег ножа = сумма
-//      движений после последней «заточки», «начальный остаток» у ножа ровно один и
+//      всех движений за жизнь ножа (ножи не затачиваются, #5323), «начальный остаток» у ножа ровно один и
 //      повторный импорт его перезаписывает;
 //   2. раппорт хранится только у вала (зубья × 3.175 мм); пара «зубья ↔ раппорт» вала и
 //      раппорт ножа из базы 1С против раппорта его вала проверяются;
@@ -63,21 +63,21 @@ function field(t, name) { return ((t && t.fields) || []).filter(function(f) { re
     var runs = [
         { id: 'a', date: 100, kind: 'начальный остаток', meters: 12000 },
         { id: 'b', date: 200, kind: '71:вырубка', meters: 500 },
-        { id: 'c', date: 300, kind: 'Заточка', meters: 0 },
+        { id: 'c', date: 300, kind: 'ВЫРУБКА', meters: 1000 },
         { id: 'd', date: 400, kind: ' вырубка ', meters: 300 },
         { id: 'e', date: 500, kind: 'вырубка', meters: 200 }
     ];
     var r = LP.dieMileage(runs);
-    assert(r.meters === 500 && r.errors.length === 0, 'после заточки считаются только последующие вырубки: 300 + 200 = 500',
+    assert(r.meters === 14000 && r.errors.length === 0, 'пробег — начальный остаток + все вырубки: 12000 + 500 + 1000 + 300 + 200 = 14000',
         '(получено ' + JSON.stringify(r) + ')');
     var shuffled = [runs[4], runs[2], runs[0], runs[3], runs[1]];
-    assert(LP.dieMileage(shuffled).meters === 500, 'порядок записей в ответе не важен — отсечка по дате');
-    var noSharp = LP.dieMileage(runs.slice(0, 2));
-    assert(noSharp.meters === 12500, 'без заточки: начальный остаток + вырубки = 12500', '(получено ' + noSharp.meters + ')');
+    assert(LP.dieMileage(shuffled).meters === 14000, 'порядок записей в ответе не важен');
+    var head = LP.dieMileage(runs.slice(0, 2));
+    assert(head.meters === 12500, 'начальный остаток + вырубка = 12500', '(получено ' + head.meters + ')');
     var typo = LP.dieMileage(runs.concat([{ id: 'f', date: 600, kind: 'вырубкаа', meters: 999 }]));
-    assert(typo.meters === 500 && typo.errors.length === 1 && /вырубкаа/.test(typo.errors[0]),
+    assert(typo.meters === 14000 && typo.errors.length === 1 && /вырубкаа/.test(typo.errors[0]),
         'неизвестный вид движения не попадает в сумму и называется', '(получено ' + JSON.stringify(typo) + ')');
-    assert(LP.runKindOf('12:Начальный остаток') === K.INITIAL && LP.runKindOf('заточка') === K.SHARPEN && LP.runKindOf('x') === '',
+    assert(LP.runKindOf('12:Начальный остаток') === K.INITIAL && LP.runKindOf(' Вырубка ') === K.CUT && LP.runKindOf('заточка') === '' && LP.runKindOf('x') === '',
         'вид движения: подпись или «id:подпись», регистр и пробелы не важны');
 
     // «Начальный остаток» — одна запись на нож; повторный импорт её перезаписывает.

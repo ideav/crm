@@ -3,14 +3,14 @@
 // Справочник ножей и валов — компонент integram-table над таблицами «Нож» и «Вал»
 // (поиск, фильтры, правка, «+ запись», экспорт). Рядом с гридом — то, чего в таблице нет:
 //   - пробег ножей: отчёт `die_runs` (все движения пробега одной выборкой) →
-//     `dieMileageIndex` из label-production.js: сумма движений после последней «заточки»;
-//   - показатели: ножей всего / рабочих / у порога / на заточке / списано;
-//   - карточка ножа: пробег, история движений с «Накоплено», кнопки смены состояния
-//     (`dieStateActions`); выход из «Заточки» в работу или резерв пишет движение «заточка»;
+//     `dieMileageIndex` из label-production.js: сумма движений за всю жизнь ножа;
+//   - ресурс ножа: у его марки (справочник «Марка ножа», «Ресурс, м»), без марки — настройка
+//     DIE_RESOURCE_DEFAULT_M таблицы «Настройка»; ресурса нет нигде — «у ресурса» не считается;
+//   - показатели: ножей всего / рабочих / у ресурса / резерв, экспертиза / списано;
+//   - карточка ножа: марка, пробег и % ресурса, история движений с «Накоплено», кнопки смены
+//     состояния (`dieStateActions`). Ножи не затачиваются: выработавший ресурс нож списывается;
 //   - валы: раппорт, станки, на которые вал встаёт («Допустимые валы» станка; пусто — любой
 //     вал), число ножей на валу.
-// Порог заточки — настройка DIE_SHARPEN_THRESHOLD_M таблицы «Настройка»; без неё «у порога»
-// не считается. Время движения — серверное (заголовок Date ответа), не часы устройства.
 //
 // Таблицы и реквизиты резолвятся по именам из /metadata (resolveProductionTables), id в коде нет.
 
@@ -34,7 +34,7 @@
         (typeof require === 'function' ? require('./label-production.js') : null);
     var lp = LP ? LP.core : null;
 
-    var THRESHOLD_KEY = 'DIE_SHARPEN_THRESHOLD_M';
+    var RESOURCE_KEY = 'DIE_RESOURCE_DEFAULT_M';
     var RUNS_REPORT = 'die_runs';
 
     // ── Чистые функции (покрыты experiments/atex-p2-5314-dies.test.js) ──────────
@@ -81,12 +81,23 @@
         return best == null ? '' : best;
     }
 
+    // Справочник «Марка ножа» → { id марки: ресурс (строка, «» — не задан) }.
+    function brandResources(brandRecs, brandTable) {
+        var col = brandTable && brandTable.reqs ? brandTable.reqs.resource : '';
+        var out = {};
+        (brandRecs || []).forEach(function(b) { out[b.id] = reqVal(b, col).trim(); });
+        return out;
+    }
+
     // Строки ножей для показателей и карточки.
-    // t — resolveProductionTables(...).tables; mileage — dieMileageIndex(...).
-    function buildDieRows(dieRecs, t, mileage, threshold) {
+    // t — resolveProductionTables(...).tables; mileage — dieMileageIndex(...);
+    // brands — brandResources(...); defaultResource — настройка DIE_RESOURCE_DEFAULT_M.
+    function buildDieRows(dieRecs, t, mileage, brands, defaultResource) {
         var r = (t.die && t.die.reqs) || {};
         return (dieRecs || []).map(function(rec) {
-            var m = (mileage || {})[rec.id] || { meters: 0, sharpenings: 0, runs: 0, errors: [] };
+            var m = (mileage || {})[rec.id] || { meters: 0, runs: 0, errors: [] };
+            var brandId = refIds(rec, r.brand)[0] || '';
+            var res = lp.dieResource(brandId ? (brands || {})[brandId] : '', defaultResource);
             return {
                 id: rec.id,
                 no: rec.val,
@@ -96,31 +107,33 @@
                 cylinderId: refIds(rec, r.cylinder)[0] || '',
                 cylinder: reqVal(rec, r.cylinder),
                 base: reqVal(rec, r.base),
+                brandId: brandId,
+                brand: reqVal(rec, r.brand),
+                resource: res.meters,
+                resourceSource: res.source,
                 stateId: refIds(rec, r.state)[0] || '',
                 state: lp.dieStateOf(reqVal(rec, r.state)),
                 stateRaw: reqVal(rec, r.state),
                 meters: m.meters,
-                sharpenings: m.sharpenings,
                 runs: m.runs,
                 errors: m.errors,
-                wear: lp.dieWearLevel(m.meters, threshold)
+                wear: lp.dieWearLevel(m.meters, res.meters)
             };
         });
     }
 
     function dieKpi(rows) {
         var S = lp.DIE_STATE;
-        var k = { total: 0, working: 0, reserve: 0, expertise: 0, sharpening: 0, writtenOff: 0, noState: 0, near: 0, over: 0 };
+        var k = { total: 0, working: 0, reserve: 0, expertise: 0, writtenOff: 0, noState: 0, near: 0, over: 0 };
         (rows || []).forEach(function(d) {
             k.total++;
             if (d.state === S.WORKING) k.working++;
             else if (d.state === S.RESERVE) k.reserve++;
             else if (d.state === S.EXPERTISE) k.expertise++;
-            else if (d.state === S.SHARPENING) k.sharpening++;
             else if (d.state === S.WRITTEN_OFF) k.writtenOff++;
             else k.noState++;
-            // У порога считаются ножи, которые ещё режут: на заточке и списанные — уже нет.
-            if (d.state !== S.SHARPENING && d.state !== S.WRITTEN_OFF) {
+            // У ресурса считаются ножи, которые ещё режут: списанные — уже нет.
+            if (d.state !== S.WRITTEN_OFF) {
                 if (d.wear === 'near') k.near++;
                 else if (d.wear === 'over') k.over++;
             }
@@ -128,11 +141,11 @@
         return k;
     }
 
-    // Ножи у порога (near/over), кроме тех, что уже на заточке или списаны; больший пробег — выше.
+    // Ножи у ресурса (near/over), кроме списанных; больший пробег — выше.
     function wearList(rows) {
         var S = lp.DIE_STATE;
         return (rows || []).filter(function(d) {
-            return (d.wear === 'near' || d.wear === 'over') && d.state !== S.SHARPENING && d.state !== S.WRITTEN_OFF;
+            return (d.wear === 'near' || d.wear === 'over') && d.state !== S.WRITTEN_OFF;
         }).sort(function(a, b) { return b.meters - a.meters; });
     }
 
@@ -160,13 +173,6 @@
         }).sort(function(a, b) { return num(a.teeth) - num(b.teeth); });
     }
 
-    // Unix-секунды из заголовка Date ответа сервера; нет заголовка — NaN (часы
-    // планшета не подставляем).
-    function serverUnix(dateHeader) {
-        var t = Date.parse(String(dateHeader || ''));
-        return isFinite(t) ? Math.floor(t / 1000) : NaN;
-    }
-
     function fmtMeters(m) {
         return String(Math.round(Number(m) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ') + ' м';
     }
@@ -187,16 +193,16 @@
     }
 
     var core = {
-        THRESHOLD_KEY: THRESHOLD_KEY,
+        RESOURCE_KEY: RESOURCE_KEY,
         RUNS_REPORT: RUNS_REPORT,
         kvRecords: kvRecords,
         refIds: refIds,
         settingValue: settingValue,
+        brandResources: brandResources,
         buildDieRows: buildDieRows,
         dieKpi: dieKpi,
         wearList: wearList,
         cylinderRows: cylinderRows,
-        serverUnix: serverUnix,
         fmtMeters: fmtMeters,
         fmtRunDate: fmtRunDate
     };
@@ -206,14 +212,13 @@
     function AtexDies(rootEl) {
         this.root = rootEl;
         this.db = rootEl.getAttribute('data-db') || '';
-        this.userId = rootEl.getAttribute('data-user-id') || '';
         this.tables = null;
         this.settingsTable = null;
         this.dieRows = [];
         this.runRows = [];
         this.states = {};       // подпись состояния → id записи справочника
-        this.runKinds = {};     // вид движения → id записи справочника
-        this.threshold = '';
+        this.brands = {};       // id марки → ресурс, м
+        this.defaultResource = '';
         this.selectedId = '';
         this.busy = false;
     }
@@ -244,15 +249,6 @@
                 if (result && (result.error || result.err)) throw new Error(result.error || result.err);
                 return result;
             });
-        });
-    };
-
-    // Серверное «сейчас»: заголовок Date ответа на лёгкий GET.
-    AtexDies.prototype.serverNow = function() {
-        return fetch(this.url('xsrf?JSON'), { credentials: 'same-origin', cache: 'no-store' }).then(function(resp) {
-            var t = serverUnix(resp.headers.get('Date'));
-            if (!isFinite(t)) throw new Error('сервер не прислал время (заголовок Date) — движение не записано');
-            return t;
         });
     };
 
@@ -287,10 +283,10 @@
         var self = this;
         return this.getJson('metadata').then(function(meta) {
             var res = lp.resolveProductionTables(meta, lp.PRODUCT_KIND.LABEL);
-            var need = ['die', 'dieRun', 'dieState', 'runKind', 'cylinder', 'machine'];
+            var need = ['die', 'dieRun', 'dieState', 'dieBrand', 'cylinder', 'machine'];
             var lost = need.filter(function(k) { return !res.tables[k]; });
             if (lost.length) throw new Error('в базе нет таблиц: ' + lost.map(function(k) { return lp.PRODUCTION_CONFIGS[lp.PRODUCT_KIND.LABEL].tables[k].name; }).join(', '));
-            var dieMissing = res.missing.filter(function(m) { return /^(Нож|Движение пробега|Вал|Станок высечки) →/.test(m); });
+            var dieMissing = res.missing.filter(function(m) { return /^(Нож|Марка ножа|Движение пробега|Вал|Станок высечки) →/.test(m); });
             if (dieMissing.length) console.warn('[dies] нет колонок: ' + dieMissing.join('; '));
             self.tables = res.tables;
             self.settingsTable = (meta || []).filter(function(t) { return String(t.val).trim() === 'Настройка'; })[0] || null;
@@ -338,7 +334,7 @@
             var recs = kvRecords(json).map(function(r) {
                 return { key: r.val, type: typeReq ? reqVal(r, typeReq.id) : '', value: valReq ? reqVal(r, valReq.id) : '' };
             });
-            return settingValue(recs, THRESHOLD_KEY, self.db);
+            return settingValue(recs, RESOURCE_KEY, self.db);
         });
     };
 
@@ -351,7 +347,7 @@
             this.getJson('object/' + t.cylinder.id + '/?JSON_KV&LIMIT=0,1000'),
             this.getJson('object/' + t.machine.id + '/?JSON_KV&LIMIT=0,100'),
             this.getJson('object/' + t.dieState.id + '/?JSON_KV&LIMIT=0,100'),
-            this.getJson('object/' + t.runKind.id + '/?JSON_KV&LIMIT=0,100'),
+            this.getJson('object/' + t.dieBrand.id + '/?JSON_KV&LIMIT=0,100'),
             this.loadSettings()
         ]).then(function(res) {
             var dies = kvRecords(res[0]);
@@ -365,11 +361,10 @@
             }
             self.states = {};
             kvRecords(res[4]).forEach(function(s) { self.states[lp.dieStateOf(s.val) || s.val] = s.id; });
-            self.runKinds = {};
-            kvRecords(res[5]).forEach(function(k) { self.runKinds[lp.runKindOf(k.val) || k.val] = k.id; });
-            self.threshold = res[6] || '';
+            self.brands = brandResources(kvRecords(res[5]), t.dieBrand);
+            self.defaultResource = res[6] || '';
             var mileage = lp.dieMileageIndex(self.runRows);
-            self.dieRows = buildDieRows(dies, t, mileage, self.threshold);
+            self.dieRows = buildDieRows(dies, t, mileage, self.brands, self.defaultResource);
             self.cylRows = cylinderRows(kvRecords(res[2]), kvRecords(res[3]), self.dieRows, t);
             self.renderKpi();
             self.renderWear();
@@ -391,18 +386,23 @@
         });
     };
 
+    // Подсказка о ресурсе по умолчанию: откуда берётся ресурс ножа без марки.
+    AtexDies.prototype.defaultResourceText = function() {
+        var d = lp.parseSettingNumber(this.defaultResource);
+        return d > 0 ? 'ресурс по умолчанию ' + fmtMeters(d) : 'ресурс по умолчанию не задан (настройка ' + RESOURCE_KEY + ')';
+    };
+
     AtexDies.prototype.renderKpi = function() {
         var k = dieKpi(this.dieRows);
-        var thr = lp.parseSettingNumber(this.threshold);
+        var withResource = this.dieRows.some(function(d) { return d.resource > 0; });
         var tile = function(label, value, cls, title) {
             return '<div class="atex-dies-kpi-tile' + (cls ? ' ' + cls : '') + '"' + (title ? ' title="' + esc(title) + '"' : '') +
                 '><div class="atex-dies-kpi-value">' + esc(value) + '</div><div class="atex-dies-kpi-label">' + esc(label) + '</div></div>';
         };
         var html = tile('ножей всего', k.total) +
             tile('рабочих', k.working, 'is-ok') +
-            tile('у порога / за порогом', thr > 0 ? (k.near + ' / ' + k.over) : '—', (k.near + k.over) ? 'is-warn' : '',
-                thr > 0 ? 'Порог заточки ' + fmtMeters(thr) + '; «у порога» — от 90 %' : 'Порог заточки не задан: настройка ' + THRESHOLD_KEY) +
-            tile('на заточке', k.sharpening) +
+            tile('у ресурса / выработан', withResource ? (k.near + ' / ' + k.over) : '—', (k.near + k.over) ? 'is-warn' : '',
+                'Ресурс — у марки ножа; без марки — ' + this.defaultResourceText() + '. «У ресурса» — от 90 %, «выработан» — от 100 %: нож пора списать') +
             tile('резерв / экспертиза', k.reserve + ' / ' + k.expertise) +
             tile('списано', k.writtenOff, 'is-muted');
         if (k.noState) html += tile('без состояния', k.noState, 'is-warn', 'Состояние не задано (в базе ножей «нет данных»)');
@@ -411,18 +411,18 @@
 
     AtexDies.prototype.renderWear = function() {
         var el = this.$('atex-dies-wear');
-        var thr = lp.parseSettingNumber(this.threshold);
-        if (!(thr > 0)) {
-            el.innerHTML = '<div class="atex-dies-empty">Порог заточки не задан. Добавьте в «Настройку» строку ' +
-                esc(THRESHOLD_KEY) + ' со значением в метрах.</div>';
+        if (!this.dieRows.some(function(d) { return d.resource > 0; })) {
+            el.innerHTML = '<div class="atex-dies-empty">Ресурс ножей не задан: заполните «Ресурс, м» у марок ножей ' +
+                'или добавьте в «Настройку» строку ' + esc(RESOURCE_KEY) + ' со значением в метрах.</div>';
             return;
         }
         var list = wearList(this.dieRows);
-        if (!list.length) { el.innerHTML = '<div class="atex-dies-empty">Нет ножей у порога ' + esc(fmtMeters(thr)) + '.</div>'; return; }
-        el.innerHTML = '<table class="atex-dies-table"><thead><tr><th>Нож</th><th>Этикетка</th><th>Вал</th><th class="num">Пробег</th><th class="num">%</th></tr></thead><tbody>' +
+        if (!list.length) { el.innerHTML = '<div class="atex-dies-empty">Нет ножей у ресурса.</div>'; return; }
+        el.innerHTML = '<table class="atex-dies-table"><thead><tr><th>Нож</th><th>Этикетка</th><th>Марка</th><th class="num">Пробег</th><th class="num">Ресурс</th><th class="num">%</th></tr></thead><tbody>' +
             list.map(function(d) {
                 return '<tr class="is-' + d.wear + '" data-die-id="' + esc(d.id) + '"><td>' + esc(d.no) + '</td><td>' + esc(num(d.width) + '×' + num(d.length)) +
-                    '</td><td>' + esc(d.cylinder) + '</td><td class="num">' + esc(fmtMeters(d.meters)) + '</td><td class="num">' + Math.round(d.meters / thr * 100) + '</td></tr>';
+                    '</td><td>' + esc(d.brand || '—') + '</td><td class="num">' + esc(fmtMeters(d.meters)) + '</td><td class="num">' + esc(fmtMeters(d.resource)) +
+                    '</td><td class="num">' + Math.round(d.meters / d.resource * 100) + '</td></tr>';
             }).join('') + '</tbody></table>';
     };
 
@@ -452,7 +452,6 @@
         var el = this.$('atex-dies-card');
         var d = this.currentDie();
         if (!d) { el.innerHTML = '<div class="atex-dies-empty">Нож не найден — обновите данные.</div>'; return; }
-        var thr = lp.parseSettingNumber(this.threshold);
         var runs = this.runRows.filter(function(r) { return String(r.die_id) === d.id; }).map(function(r) {
             return { id: r.run_id, date: r.run_date, kind: r.run_kind, meters: r.meters, job: r.job_id, operator: r.operator };
         });
@@ -464,10 +463,13 @@
             '<div class="atex-dies-card-meta">' +
             '<span class="atex-dies-state" data-state="' + esc(d.state || 'none') + '">' + esc(d.state || (d.stateRaw ? d.stateRaw : 'состояние не задано')) + '</span>' +
             '<span>' + esc(num(d.width) + '×' + num(d.length) + ' мм') + (d.streams ? ', ручьёв ' + esc(d.streams) : '') + '</span>' +
-            (d.cylinder ? '<span>вал ' + esc(d.cylinder) + '</span>' : '') + (d.base ? '<span>' + esc(d.base) + '</span>' : '') + '</div>' +
-            '<div class="atex-dies-card-mileage"><div><b>' + esc(fmtMeters(d.meters)) + '</b> после ' + (d.sharpenings ? 'последней заточки' : 'начала учёта') + '</div>' +
-            (thr > 0 ? '<div class="is-' + d.wear + '">' + Math.round(d.meters / thr * 100) + ' % порога ' + esc(fmtMeters(thr)) + '</div>' : '') +
-            '<div>заточек: ' + d.sharpenings + ', движений: ' + d.runs + '</div></div>';
+            (d.cylinder ? '<span>вал ' + esc(d.cylinder) + '</span>' : '') + (d.base ? '<span>' + esc(d.base) + '</span>' : '') +
+            '<span>' + (d.brand ? 'марка ' + esc(d.brand) : 'марка не задана') + '</span></div>' +
+            '<div class="atex-dies-card-mileage"><div><b>' + esc(fmtMeters(d.meters)) + '</b> пробег</div>' +
+            (d.resource > 0 ? '<div class="is-' + d.wear + '">' + Math.round(d.meters / d.resource * 100) + ' % ресурса ' + esc(fmtMeters(d.resource)) +
+                (d.resourceSource === 'default' ? ' (по умолчанию)' : '') + (d.wear === 'over' ? ' — ресурс выработан, нож пора списать' : '') + '</div>'
+                : '<div>ресурс не задан: ни у марки, ни настройкой ' + esc(RESOURCE_KEY) + '</div>') +
+            '<div>движений: ' + d.runs + '</div></div>';
         if (d.errors && d.errors.length) html += '<div class="atex-dies-message is-error">' + esc(d.errors.join('; ')) + '</div>';
         html += '<div class="atex-dies-card-actions">' + (actions.length ? actions.map(function(a) {
             return '<button class="atex-dies-btn' + (a.action === lp.DIE_ACTION.WRITE_OFF ? ' atex-dies-btn-danger' : '') + '" type="button" data-die-action="' + esc(a.action) + '">' + esc(a.label) + '</button>';
@@ -476,7 +478,7 @@
         html += history.length ? '<div class="atex-dies-history"><table class="atex-dies-table"><thead><tr><th>Дата</th><th>Вид</th><th>Задание</th><th>Оператор</th><th class="num">Метры</th><th class="num">Накоплено</th></tr></thead><tbody>' +
             history.map(function(h) {
                 var x = extra[h.id] || {};
-                return '<tr' + (h.kind === lp.RUN_KIND.SHARPEN ? ' class="is-sharpen"' : '') + '><td>' + esc(fmtRunDate(h.date)) + '</td><td>' + esc(h.kind) + '</td><td>' +
+                return '<tr><td>' + esc(fmtRunDate(h.date)) + '</td><td>' + esc(h.kind) + '</td><td>' +
                     esc(x.job || '') + '</td><td>' + esc(x.operator || '') + '</td><td class="num">' + esc(fmtMeters(h.meters)) + '</td><td class="num">' + esc(fmtMeters(h.accumulated)) + '</td></tr>';
             }).join('') + '</tbody></table></div>' : '<div class="atex-dies-empty">Движений пробега нет.</div>';
         el.innerHTML = html;
@@ -510,38 +512,20 @@
         var step = lp.dieStateAction(d.state, action);
         if (!step.ok) { this.message(step.error, 'error'); return; }
         var text = 'Нож № ' + d.no + ': «' + (d.state || 'без состояния') + '» → «' + step.state + '».';
-        if (step.run) text += ' Будет записано движение «' + step.run + '»: счёт пробега начнётся заново (сейчас ' + fmtMeters(d.meters) + '), история сохранится.';
+        if (step.state === lp.DIE_STATE.WRITTEN_OFF) text += ' Списанный нож утилизируется, вернуть его в работу нельзя.';
         this.confirm(text).then(function(yes) { if (yes) return self.applyAction(d, step); });
     };
 
-    // Сначала движение «заточка», потом состояние: если упадёт смена состояния, нож остаётся
-    // на заточке с уже записанной отсечкой; повтор кнопки добавит вторую отсечку в 0 м —
-    // пробег от неё не меняется. Обратный порядок при сбое дал бы рабочий нож без отсечки.
     AtexDies.prototype.applyAction = function(d, step) {
         var self = this;
         var t = this.tables;
         var stateId = this.states[step.state];
         if (!stateId) { this.message('В справочнике «Состояние ножа» нет записи «' + step.state + '»', 'error'); return Promise.resolve(); }
         this.busy = true;
-        var chain = Promise.resolve();
-        if (step.run) {
-            var kindId = this.runKinds[step.run];
-            if (!kindId) { this.busy = false; this.message('В справочнике «Вид движения пробега» нет записи «' + step.run + '»', 'error'); return Promise.resolve(); }
-            chain = this.serverNow().then(function(now) {
-                var p = {};
-                p['t' + t.dieRun.id] = String(now);
-                if (t.dieRun.reqs.kind) p['t' + t.dieRun.reqs.kind] = kindId;
-                if (t.dieRun.reqs.meters) p['t' + t.dieRun.reqs.meters] = '0';
-                if (t.dieRun.reqs.operator && self.userId) p['t' + t.dieRun.reqs.operator] = self.userId;
-                return self.post('_m_new/' + t.dieRun.id + '?JSON&up=' + encodeURIComponent(d.id), p);
-            });
-        }
-        return chain.then(function() {
-            var p = {};
-            p['t' + t.die.reqs.state] = stateId;
-            return self.post('_m_set/' + encodeURIComponent(d.id) + '?JSON', p);
-        }).then(function() {
-            self.message('Нож № ' + d.no + ': состояние «' + step.state + '»' + (step.run ? ', записана заточка' : ''), 'ok');
+        var p = {};
+        p['t' + t.die.reqs.state] = stateId;
+        return this.post('_m_set/' + encodeURIComponent(d.id) + '?JSON', p).then(function() {
+            self.message('Нож № ' + d.no + ': состояние «' + step.state + '»', 'ok');
             return self.reload(true);
         }).catch(function(err) {
             console.error('[dies] ❌ смена состояния', err);
