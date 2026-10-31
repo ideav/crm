@@ -1,0 +1,56 @@
+<!-- Рабочее место atex «Импорт из 1С» (роли Администратор, Диспетчер). -->
+<!-- Решение ideav/crm#5308 (Фаза 2, шаг 2). См. docs/atex_workplaces.md §3.22 -->
+<!-- и docs/WORKSPACE_DEVELOPMENT_GUIDE.md. URL: /atex/label-import -->
+<link rel="stylesheet" href="/download/{_global_.z}/css/atex-brand.css?{_global_.version}.3">
+<link rel="stylesheet" href="/download/{_global_.z}/css/label-import.css?{_global_.version}.1">
+<script src="/js/xlsx0.18.5.full.min.js?{_global_.version}" defer></script>
+<script src="/download/{_global_.z}/js/label-production.js?{_global_.version}.27" defer></script>
+<script src="/download/{_global_.z}/js/label-import-core.js?{_global_.version}.2" defer></script>
+<script src="/download/{_global_.z}/js/label-import.js?{_global_.version}.1" defer></script>
+
+<div id="atex-limp-app" class="atex-limp atex-brand"
+     data-db="{_global_.z}"
+     data-xsrf="{_global_.xsrf}">
+    <div class="atex-limp-toolbar">
+        <div class="atex-limp-tabs" role="tablist">
+            <button class="atex-limp-tab is-active" type="button" data-tab="orders" role="tab">Заказы этикетки</button>
+            <button class="atex-limp-tab" type="button" data-tab="knives" role="tab">База ножей</button>
+        </div>
+        <div class="atex-limp-actions">
+            <label class="atex-limp-btn">
+                <i class="pi pi-upload"></i><span>Выбрать файл .xlsx</span>
+                <input id="atex-limp-file" type="file" accept=".xlsx,.xlsm,.xls" hidden>
+            </label>
+            <span id="atex-limp-file-name" class="atex-limp-file"></span>
+            <button id="atex-limp-write" class="atex-limp-btn atex-limp-btn-primary" type="button" disabled>
+                <i class="pi pi-check"></i><span>Записать</span>
+            </button>
+        </div>
+    </div>
+
+    <div id="atex-limp-hint" class="atex-limp-hint"></div>
+    <div id="atex-limp-message" class="atex-limp-message" hidden></div>
+    <div id="atex-limp-progress" class="atex-limp-progress" hidden><div class="atex-limp-progress-bar"></div><span></span></div>
+
+    <div id="atex-limp-kpi" class="atex-limp-kpi"></div>
+    <div class="atex-limp-table-wrap">
+        <table class="atex-limp-table">
+            <thead>
+                <tr><th>Строка</th><th>Ключ</th><th>В файле</th><th>Что будет</th><th>Изменения, предупреждения, ошибки</th></tr>
+            </thead>
+            <tbody id="atex-limp-rows">
+                <tr><td colspan="5" class="atex-limp-empty">Выберите выгрузку 1С — здесь появится предпросмотр. Без «Записать» в базу ничего не пишется.</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div id="atex-limp-modal" class="atex-limp-modal" hidden>
+        <div class="atex-limp-modal-box" role="dialog" aria-modal="true">
+            <div id="atex-limp-modal-text" class="atex-limp-modal-text"></div>
+            <div class="atex-limp-modal-actions">
+                <button id="atex-limp-modal-cancel" class="atex-limp-btn" type="button">Отмена</button>
+                <button id="atex-limp-modal-ok" class="atex-limp-btn atex-limp-btn-primary" type="button">Подтвердить</button>
+            </div>
+        </div>
+    </div>
+</div>
