@@ -1,0 +1,169 @@
+/* Рабочее место «Импорт из 1С» (ideav/crm#5308). */
+.atex-limp {
+    --atex-limp-border: var(--border-color, #e5e7eb);
+    --atex-limp-panel: var(--bg-secondary, #ffffff);
+    --atex-limp-muted: var(--text-secondary, #6b7280);
+    --atex-limp-ok: #15803d;
+    --atex-limp-ok-bg: #dcfce7;
+    --atex-limp-upd-bg: #e0f2fe;
+    --atex-limp-upd: #075985;
+    --atex-limp-warn-bg: #fef3c7;
+    --atex-limp-warn: #92400e;
+    --atex-limp-err-bg: #fee2e2;
+    --atex-limp-err: #b91c1c;
+    height: 100%;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow: auto;
+    background: var(--bg-primary, #f8fafc);
+    color: var(--text-primary, #111827);
+    box-sizing: border-box;
+}
+
+[data-theme="dark"] .atex-limp {
+    --atex-limp-ok: #4ade80;
+    --atex-limp-ok-bg: rgba(74, 222, 128, 0.14);
+    --atex-limp-upd-bg: rgba(56, 189, 248, 0.14);
+    --atex-limp-upd: #7dd3fc;
+    --atex-limp-warn-bg: rgba(251, 191, 36, 0.16);
+    --atex-limp-warn: #fcd34d;
+    --atex-limp-err-bg: rgba(248, 113, 113, 0.16);
+    --atex-limp-err: #fca5a5;
+}
+
+.atex-limp * { box-sizing: border-box; }
+
+.atex-limp-toolbar,
+.atex-limp-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.atex-limp-toolbar { justify-content: space-between; }
+
+.atex-limp-tabs { display: flex; gap: 4px; }
+
+.atex-limp-tab,
+.atex-limp-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border: 1px solid var(--atex-limp-border);
+    border-radius: 7px;
+    background: var(--atex-limp-panel);
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+.atex-limp-btn[disabled] { opacity: 0.5; cursor: default; }
+
+.atex-limp-tab.is-active,
+.atex-limp-btn-primary {
+    background: var(--atex-navy, #134174);
+    border-color: var(--atex-navy, #134174);
+    color: var(--atex-on-navy, #ffffff);
+}
+
+.atex-limp-file { color: var(--atex-limp-muted); font-size: 13px; }
+.atex-limp-hint { color: var(--atex-limp-muted); font-size: 13px; }
+
+.atex-limp-message {
+    padding: 8px 12px;
+    border-radius: 7px;
+    background: var(--atex-limp-upd-bg);
+}
+.atex-limp-message.is-error { background: var(--atex-limp-err-bg); color: var(--atex-limp-err); }
+.atex-limp-message.is-ok { background: var(--atex-limp-ok-bg); color: var(--atex-limp-ok); }
+
+.atex-limp-progress {
+    position: relative;
+    height: 22px;
+    border: 1px solid var(--atex-limp-border);
+    border-radius: 7px;
+    background: var(--atex-limp-panel);
+    overflow: hidden;
+}
+.atex-limp-progress-bar { height: 100%; width: 0; background: var(--atex-limp-upd-bg); transition: width 0.2s; }
+.atex-limp-progress span { position: absolute; inset: 0; display: flex; align-items: center; padding: 0 10px; font-size: 13px; }
+
+.atex-limp-kpi {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 8px;
+}
+.atex-limp-tile {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    padding: 8px 12px;
+    border: 1px solid var(--atex-limp-border);
+    border-radius: 8px;
+    background: var(--atex-limp-panel);
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+.atex-limp-tile.is-static { cursor: default; }
+.atex-limp-tile b { font-size: 20px; }
+.atex-limp-tile span { font-size: 12px; color: var(--atex-limp-muted); }
+.atex-limp-tile.is-active { outline: 2px solid var(--atex-navy, #134174); }
+.atex-limp-tile.is-new b { color: var(--atex-limp-ok); }
+.atex-limp-tile.is-update b { color: var(--atex-limp-upd); }
+.atex-limp-tile.is-error b { color: var(--atex-limp-err); }
+.atex-limp-tile.is-warn b { color: var(--atex-limp-warn); }
+
+.atex-limp-table-wrap {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    border: 1px solid var(--atex-limp-border);
+    border-radius: 8px;
+    background: var(--atex-limp-panel);
+}
+.atex-limp-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.atex-limp-table th,
+.atex-limp-table td {
+    padding: 5px 8px;
+    border-bottom: 1px solid var(--atex-limp-border);
+    text-align: left;
+    vertical-align: top;
+}
+.atex-limp-table th { position: sticky; top: 0; background: var(--atex-limp-panel); z-index: 1; }
+.atex-limp-table td:first-child { white-space: nowrap; color: var(--atex-limp-muted); }
+.atex-limp-empty { color: var(--atex-limp-muted); text-align: center; padding: 18px; }
+
+.atex-limp-badge { display: inline-block; padding: 1px 8px; border-radius: 10px; white-space: nowrap; font-size: 12px; }
+.atex-limp-badge.is-new { background: var(--atex-limp-ok-bg); color: var(--atex-limp-ok); }
+.atex-limp-badge.is-update { background: var(--atex-limp-upd-bg); color: var(--atex-limp-upd); }
+.atex-limp-badge.is-same { color: var(--atex-limp-muted); border: 1px solid var(--atex-limp-border); }
+.atex-limp-badge.is-error { background: var(--atex-limp-err-bg); color: var(--atex-limp-err); }
+
+.atex-limp-err { color: var(--atex-limp-err); }
+.atex-limp-warn { color: var(--atex-limp-warn); }
+
+.atex-limp-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(15, 23, 42, 0.45);
+}
+.atex-limp-modal[hidden] { display: none; }
+.atex-limp-modal-box {
+    max-width: 520px;
+    margin: 16px;
+    padding: 16px;
+    border-radius: 10px;
+    background: var(--atex-limp-panel);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+}
+.atex-limp-modal-text { margin-bottom: 14px; line-height: 1.45; }
+.atex-limp-modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
