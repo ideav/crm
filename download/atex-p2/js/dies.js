@@ -31,7 +31,7 @@
     'use strict';
 
     var LP = (root && root.AtexLabelProduction) ||
-        (typeof require === 'function' ? require('./label-production.js') : null);
+        (typeof require === 'function' ? require('../../atex/js/label-production.js') : null);
     var lp = LP ? LP.core : null;
 
     var RESOURCE_KEY = 'DIE_RESOURCE_DEFAULT_M';
