@@ -412,14 +412,15 @@
         if (!s.groups.length) return '<div class="atex-dp-empty">Запланированных заданий с форматом ножа нет — потребности в МР нет.</div>';
         var rows = s.groups.map(function(g) {
             return '<tr class="' + (g.deficit > 0 ? 'is-deficit' : '') + '"><td class="num">' + g.min + '–' + (g.min + s.settings.tolerance) + '</td><td>' + esc(g.material) + '</td>' +
-                '<td class="num">' + fmtNum(g.meters) + '</td><td class="num">' + (g.reserved ? fmtNum(g.reserved) : '—') + '</td><td class="num">' + (g.stock ? fmtNum(g.stock) : '—') + '</td><td class="num">' + (g.planned ? fmtNum(g.planned) : '—') + '</td>' +
+                '<td class="num">' + fmtNum(g.meters) + '</td><td class="num">' + (g.reserved ? fmtNum(g.reserved) : '—') + '</td>' +
+                '<td class="num">' + (g.stock ? fmtNum(g.stock) : '—') + '</td><td class="num">' + (g.whole ? fmtNum(g.whole) : '—') + '</td><td class="num">' + (g.leftover ? fmtNum(g.leftover) : '—') + '</td>' +
+                '<td class="num">' + (g.planned ? fmtNum(g.planned) : '—') + '</td>' +
                 '<td class="num">' + (g.deficit > 0 ? '<b>' + fmtNum(g.deficit) + '</b>' : '—') + '</td>' +
-                '<td class="num">' + (g.opened ? fmtNum(g.opened) : '—') + '</td>' +
                 '<td class="num">' + esc(g.due > 0 ? fmtDate(g.due) : '—') + (g.late ? ' <span class="atex-dp-badge is-bad">резка позже</span>' : '') + '</td>' +
                 '<td>' + g.jobs.map(esc).join(', ') + '</td></tr>';
         });
-        return '<table class="atex-dp-table"><thead><tr><th class="num">Формат, мм</th><th>Сырьё</th><th class="num">Нужно, м</th><th class="num">В резерве, м</th><th class="num">Целые на складе, м</th><th class="num">В резке, м</th><th class="num">Дефицит, м</th><th class="num" title="Свободные початые рулоны подходящего формата. В покрытие не идут: их резервируют вручную на складе мастер-рулонов">Початые, м</th><th class="num">К дате</th><th>Задания</th></tr></thead><tbody>' +
-            rows.join('') + '</tbody></table><p class="atex-dp-muted">Нужно — метраж запланированных заданий за вычетом уже вырубленного. Покрытие идёт по сроку заданий: сначала рулоны в резерве задания, затем свободные целые рулоны склада (рулон целиком — одному заданию, как у «Зарезервировать МР»), затем рулоны открытых заданий первичной резки. Дефицит здесь, блокировка «нет МР нужного формата» и «Зарезервировать МР» считаются одинаково. Початые свободные рулоны показаны справочно: в покрытие они не идут, их резервируют вручную.</p>';
+        return '<table class="atex-dp-table"><thead><tr><th class="num">Формат, мм</th><th>Сырьё</th><th class="num">Нужно, м</th><th class="num">В резерве, м</th><th class="num">Со склада, м</th><th class="num" title="Свободные целые рулоны — их берёт «Зарезервировать МР»">из них целых, м</th><th class="num" title="Свободные початые рулоны и метры рулона сверх потребности задания, за которым он стоит. «Зарезервировать МР» их не берёт — резерв вручную на складе мастер-рулонов">из них остатков, м</th><th class="num">В резке, м</th><th class="num">Дефицит, м</th><th class="num">К дате</th><th>Задания</th></tr></thead><tbody>' +
+            rows.join('') + '</tbody></table><p class="atex-dp-muted">Нужно — метраж запланированных заданий за вычетом уже вырубленного. Покрытие идёт по сроку заданий: сначала рулоны в резерве задания, затем склад в метрах — сначала остатки (свободные початые рулоны и метры рулона сверх потребности задания, за которым он стоит), потом свободные целые рулоны, — затем рулоны открытых заданий первичной резки. Дефицит здесь и блокировка «нет МР нужного формата» считаются одинаково. «Зарезервировать МР» резервирует только целые рулоны, остатки резервируют вручную на складе мастер-рулонов.</p>';
     };
 
     AtexDiePlanningApp.prototype.ganttDays = function() {
@@ -698,9 +699,12 @@
                 listHtml(picks.map(function(p) { return 'задание ' + esc(p.taskId) + ': ' + p.rollIds.map(function(id) { return esc(rollById[id].no) + ' (' + rollById[id].format + ' мм)'; }).join(', '); }), 15)
                 : '<p>Подходящих свободных рулонов нет.</p>') +
             (short.length ? '<p class="atex-dp-muted">Целых рулонов на складе не хватает заданиям: ' + short.map(function(p) {
-                var cv = s.cover[p.taskId], q = cv && cv.planned > 0 ? ', из них в резке ожидается ' + fmtNum(cv.planned) + ' м' : '';
-                return esc(p.taskId) + ' (' + fmtNum(p.deficit) + ' м' + q + ')';
-            }).join(', ') + '. Счёт тот же, что во вкладке «Дефицит форматов».</p>' : '');
+                var cv = s.cover[p.taskId] || {}, parts = [];
+                if (cv.leftover > 0) parts.push('остатками покрыто ' + fmtNum(cv.leftover) + ' м — резерв вручную на складе МР');
+                if (cv.planned > 0) parts.push('в резке ожидается ' + fmtNum(cv.planned) + ' м');
+                parts.push(cv.deficit > 0 ? 'дефицит ' + fmtNum(cv.deficit) + ' м' : 'дефицита нет');
+                return esc(p.taskId) + ' (не хватает ' + fmtNum(p.deficit) + ' м: ' + parts.join(', ') + ')';
+            }).join('; ') + '. Покрытие считается так же, как во вкладке «Дефицит форматов».</p>' : '');
         this.openModal(html, 'Зарезервировать', picks.length ? function() {
             var steps = [];
             picks.forEach(function(p) {

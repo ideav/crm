@@ -394,101 +394,112 @@
 
     // ── Мастер-рулоны ───────────────────────────────────────────────────────
 
-    // Покрытие заданий — одна мера для блокировки «нет МР нужного формата», вкладки «Дефицит
-    // форматов» и «Зарезервировать МР» (правила склада, master-rolls-core.js):
-    //   нужно   = метраж задания − уже вырубленное (расход журнала по заданию);
-    //   резерв  = свои рулоны на складе: резерв у рулона на это задание или поле «Мастер-рулон» задания;
-    //   склад   = свободные ЦЕЛЫЕ рулоны (их берёт «Зарезервировать МР»), по сроку заданий;
-    //   в резке = очередь первичной резки; дефицит — остаток.
-    // Рулон в резерве другого открытого задания (или из него вырубает открытое задание) свободным не
-    // считается. Початые свободные рулоны в покрытие не идут: их резервируют вручную; их метраж
-    // подходящего формата — в поле opened (справочно).
+    // Покрытие заданий мастер-рулонами — одна мера для блокировки «нет МР нужного формата» и вкладки
+    // «Дефицит форматов»; «Зарезервировать МР» показывает тот же расчёт у заданий с нехваткой.
+    // Задания идут по план-старту:
+    //   нужно    = метраж задания − уже вырубленное (расход журнала по заданию);
+    //   резерв   = свои рулоны на складе: резерв у рулона на это задание или поле «Мастер-рулон» задания;
+    //   остатки  = метры, которые никому не нужны: свободные початые рулоны и у рулона, за которым стоит
+    //              другое открытое задание (резерв или вырубка), — его остаток сверх потребности этого
+    //              задания; остатки берутся первыми;
+    //   целые    = свободные целые рулоны склада (их берёт «Зарезервировать МР»);
+    //   в резке  = очередь первичной резки; дефицит — что не покрыто.
+    // Склад считается в метрах: один рулон может покрыть несколько заданий. Рулон за заданием, которого
+    // нет в списке заданий склада (потребность неизвестна), отдаёт 0 м.
     // rolls — рулоны склада МР ({ id, format, materialId, rest, status, reserveTaskId });
     // queue — источники JC.queueSupply; opts — { tasks: задания склада МР (MR.buildTasks), moves: журнал }.
     function jobDemand(jobs, rolls, tolerance, opts) {
-        var o = opts || {}, moves = o.moves || [], idx = {};
+        var o = opts || {}, moves = o.moves || [], idx = {}, byJob = {};
         (o.tasks || []).forEach(function(t) { idx[t.id] = t; });
         var list = (jobs || []).filter(function(j) { return num(j.minFormat) || num(j.usedFormat) || num(j.optFormat); })
             .sort(function(a, b) { return a.start - b.start || (num(a.id) - num(b.id)); });
-        var own = {}, owner = {};
-        list.forEach(function(j) { own[j.id] = true; });
-        (rolls || []).forEach(function(r) {
-            if (r.reserveTaskId && own[r.reserveTaskId]) owner[r.id] = String(r.reserveTaskId);
-        });
-        list.forEach(function(j) { if (j.masterRollId && !owner[j.masterRollId]) owner[j.masterRollId] = j.id; });
-        var heldByOther = function(r) {
-            if (owner[r.id]) return true;
-            if (r.reserveTaskId) { var rt = idx[r.reserveTaskId]; if (!rt || rt.open) return true; }
-            return MR.holder(r, idx, moves) !== '';
+        list.forEach(function(j) { byJob[j.id] = j; });
+        var stockRolls = (rolls || []).filter(function(r) { return MR.onStock(r); });
+        var consumed = function(id) {
+            var c = 0;
+            moves.forEach(function(m) { if (m.kind === MR.MOVE_KIND.OUT && String(m.taskId) === String(id)) c -= num(m.delta); });
+            return c;
         };
-        var free = [], opened = [];
-        (rolls || []).forEach(function(r) {
-            if (!MR.onStock(r) || heldByOther(r)) return;
-            if (norm(r.status) === MR.ROLL_STATUS.STOCK) free.push(r); else opened.push(r);
+        var needOf = function(id) { var j = byJob[id] || idx[id]; return j ? Math.max(0, round1(num(j.footage) - consumed(id))) : Infinity; };
+        // за кем стоит рулон: резерв (своё задание или открытое чужое; неизвестное — держит), поле
+        // «Мастер-рулон» задания, вырубка открытым заданием
+        var holderOf = {};
+        stockRolls.forEach(function(r) {
+            var rt = r.reserveTaskId ? String(r.reserveTaskId) : '';
+            if (rt && (byJob[rt] || !idx[rt] || idx[rt].open)) holderOf[r.id] = rt;
         });
+        list.forEach(function(j) { if (j.masterRollId && !holderOf[j.masterRollId]) holderOf[j.masterRollId] = j.id; });
+        stockRolls.forEach(function(r) { if (!holderOf[r.id]) { var h = MR.holder(r, idx, moves); if (h) holderOf[r.id] = String(h); } });
+        // потребность держателя ложится на его рулоны (старые первыми), остальное — остаток
+        var held = {}, spare = {}, ownCover = {};
+        stockRolls.forEach(function(r) { var h = holderOf[r.id]; if (h) (held[h] = held[h] || []).push(r); });
+        Object.keys(held).forEach(function(h) {
+            var left = needOf(h);
+            held[h].sort(function(a, b) { return num(a.id) - num(b.id); }).forEach(function(r) {
+                var use = Math.min(left, num(r.rest));
+                left -= use;
+                ownCover[h] = round1((ownCover[h] || 0) + use);
+                spare[r.id] = Math.max(0, round1(num(r.rest) - use));
+            });
+        });
+        var pool = [];
+        stockRolls.forEach(function(r) {
+            var whole = norm(r.status) === MR.ROLL_STATUS.STOCK;
+            if (holderOf[r.id]) { if (spare[r.id] > 0) pool.push({ id: String(r.id), materialId: String(r.materialId), format: num(r.format), left: spare[r.id], kind: 'leftover' }); }
+            else pool.push({ id: String(r.id), materialId: String(r.materialId), format: num(r.format), left: num(r.rest), kind: whole ? 'whole' : 'leftover' });
+        });
+        pool.sort(function(a, b) { return (a.kind === b.kind ? 0 : a.kind === 'leftover' ? -1 : 1) || a.format - b.format || num(a.id) - num(b.id); });
         var demand = list.map(function(j) {
             var min = num(j.minFormat) || num(j.usedFormat) || num(j.optFormat), range = JC.formatRange(min, j.optFormat, tolerance);
-            var consumed = 0;
-            moves.forEach(function(m) { if (m.kind === MR.MOVE_KIND.OUT && String(m.taskId) === String(j.id)) consumed -= num(m.delta); });
-            var need = Math.max(0, round1(num(j.footage) - consumed));
-            var reserved = round1((rolls || []).filter(function(r) { return owner[r.id] === j.id && MR.onStock(r); }).reduce(function(a, r) { return a + num(r.rest); }, 0));
+            var need = needOf(j.id), reserved = Math.min(need, ownCover[j.id] || 0);
             return { key: j.id, jobId: j.id, materialId: String(j.materialId), material: j.material, min: range.min, max: range.max,
-                need: need, reserved: Math.min(reserved, need), meters: Math.max(0, round1(need - reserved)), due: num(j.start) };
+                need: need, reserved: round1(reserved), meters: Math.max(0, round1(need - reserved)), due: num(j.start) };
         });
-        return { demand: demand, free: free, opened: opened };
+        return { demand: demand, pool: pool };
     }
 
-    // Склад — по правилу «Зарезервировать МР» (MR.autoPick): по сроку заданий, свободные целые рулоны
-    // в допуске формата, ближайший к мин. формату и старый первым, рулон целиком — одному заданию.
-    // Остаток — очередь первичной резки (JC.coverDemand).
+    // Склад в метрах (остатки, затем целые; формат в [мин. формат ножа, + допуск], как у резерва),
+    // затем очередь первичной резки (JC.coverDemand).
     function coverAll(jobs, rolls, queue, tolerance, opts) {
-        var d = jobDemand(jobs, rolls, tolerance, opts), taken = {};
-        var free = d.free.slice().sort(function(a, b) { return num(a.format) - num(b.format) || num(a.id) - num(b.id); });
+        var d = jobDemand(jobs, rolls, tolerance, opts);
         var rest = d.demand.map(function(g) {
-            var left = g.meters, stock = 0, hi = g.min + num(tolerance);
-            free.forEach(function(r) {
-                if (!(left > 0) || taken[r.id]) return;
-                var f = num(r.format);
-                if (String(r.materialId) !== g.materialId || f < g.min || f > hi) return;
-                taken[r.id] = true;
-                var m = Math.min(left, num(r.rest));
-                stock += m; left -= m;
+            var left = g.meters, got = { whole: 0, leftover: 0 }, hi = g.min + num(tolerance);
+            d.pool.forEach(function(s) {
+                if (!(left > 0) || !(s.left > 0)) return;
+                if (s.materialId !== g.materialId || s.format < g.min || s.format > hi) return;
+                var m = Math.min(left, s.left);
+                s.left -= m; left -= m; got[s.kind] += m;
             });
-            return Object.assign({}, g, { meters: Math.max(0, round1(left)), stockTaken: round1(stock) });
+            return Object.assign({}, g, { meters: Math.max(0, round1(left)), whole: round1(got.whole), leftover: round1(got.leftover) });
         });
-        var covered = JC.coverDemand(rest, [], queue || []);
-        return { demand: d, covered: covered.map(function(c) { return Object.assign(c, { stock: c.stockTaken }); }) };
+        var covered = JC.coverDemand(rest, [], queue || []).map(function(c) { return Object.assign(c, { stock: round1(c.whole + c.leftover) }); });
+        return { demand: d, covered: covered };
     }
 
-    // → { id задания: { need, reserved, stock, planned, deficit, late } }.
+    // → { id задания: { need, reserved, stock, whole, leftover, planned, deficit, late } }.
     function coverJobs(jobs, rolls, queue, tolerance, opts) {
-        var covered = coverAll(jobs, rolls, queue, tolerance, opts).covered;
         var out = {};
-        covered.forEach(function(g) { out[g.jobId] = { need: g.need, reserved: g.reserved, stock: g.stock, planned: g.planned, deficit: g.deficit, late: g.late }; });
+        coverAll(jobs, rolls, queue, tolerance, opts).covered.forEach(function(g) {
+            out[g.jobId] = { need: g.need, reserved: g.reserved, stock: g.stock, whole: g.whole, leftover: g.leftover, planned: g.planned, deficit: g.deficit, late: g.late };
+        });
         return out;
     }
 
     // Вкладка «Дефицит форматов»: та же мера, сложенная по сырью и диапазону формата.
-    // → [{ key, materialId, material, min, max, meters (нужно), reserved, stock, planned, deficit, opened, due, late, jobs }].
+    // → [{ key, materialId, material, min, max, meters (нужно), reserved, stock, whole, leftover, planned, deficit, due, late, jobs }].
     function coverGroups(jobs, rolls, queue, tolerance, opts) {
-        var all = coverAll(jobs, rolls, queue, tolerance, opts), d = all.demand, covered = all.covered;
         var by = {}, order = [];
-        covered.forEach(function(c) {
+        coverAll(jobs, rolls, queue, tolerance, opts).covered.forEach(function(c) {
             var key = c.materialId + '|' + c.min + '|' + c.max;
             var g = by[key];
-            if (!g) { g = by[key] = { key: key, materialId: c.materialId, material: c.material, min: c.min, max: c.max, meters: 0, reserved: 0, stock: 0, planned: 0, deficit: 0, opened: 0, due: 0, late: false, jobs: [] }; order.push(key); }
-            g.meters = round1(g.meters + c.need); g.reserved = round1(g.reserved + c.reserved); g.stock = round1(g.stock + c.stock);
-            g.planned = round1(g.planned + c.planned); g.deficit = round1(g.deficit + c.deficit);
+            if (!g) { g = by[key] = { key: key, materialId: c.materialId, material: c.material, min: c.min, max: c.max, meters: 0, reserved: 0, stock: 0, whole: 0, leftover: 0, planned: 0, deficit: 0, due: 0, late: false, jobs: [] }; order.push(key); }
+            ['reserved', 'stock', 'whole', 'leftover', 'planned', 'deficit'].forEach(function(k) { g[k] = round1(g[k] + c[k]); });
+            g.meters = round1(g.meters + c.need);
             if (c.late) g.late = true;
             if (c.due > 0 && (!g.due || c.due < g.due)) g.due = c.due;
             g.jobs.push(c.jobId);
         });
-        return order.map(function(k) {
-            var g = by[k];
-            g.opened = round1(d.opened.filter(function(r) { var f = num(r.format); return String(r.materialId) === g.materialId && f >= g.min && f <= g.max; })
-                .reduce(function(a, r) { return a + num(r.rest); }, 0));
-            return g;
-        });
+        return order.map(function(k) { return by[k]; });
     }
 
     // Резерв по заданиям (задания высечки в виде задач склада MR.buildTasks): рулоны подбираются

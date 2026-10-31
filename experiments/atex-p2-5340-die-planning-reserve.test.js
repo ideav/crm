@@ -46,8 +46,8 @@ var tasks14 = [task('1'), task('2')];
 var cov14 = safe(function() { return C.coverJobs(jobs14, rolls14, [], 15, { tasks: tasks14, moves: [] }); });
 assert(cov14['2'] && cov14['2'].deficit === 0 && cov14['2'].reserved === 1500,
     'D14: рулон в резерве задания 2 покрывает задание 2 (блокировки нет)', JSON.stringify(cov14));
-assert(cov14['1'] && cov14['1'].deficit === 1500,
-    'D14: чужой резерв не уходит заданию 1 с более ранним стартом', JSON.stringify(cov14['1']));
+assert(cov14['1'] && cov14['1'].deficit === 1000 && cov14['1'].leftover === 500,
+    'D14: заданию 1 с более ранним стартом достаётся только остаток рулона сверх потребности задания 2 (500 м)', JSON.stringify(cov14['1']));
 var flags14 = safe(function() { return C.jobFlags(jobs14[1], { cover: cov14 }); });
 assert(flags14.blocks && flags14.blocks.indexOf('нет МР нужного формата') < 0, 'D14: у задания с резервом нет блокировки «нет МР нужного формата»', JSON.stringify(flags14));
 var cov14b = safe(function() { return C.coverJobs([J(1, { start: 1, masterRollId: 'r9' })], [roll('r9')], [], 15, { tasks: [task('1')], moves: [] }); });
@@ -58,29 +58,36 @@ var cov14c = safe(function() {
 });
 assert(cov14c['1'] && cov14c['1'].deficit === 0 && cov14c['1'].need === 500, 'D14: уже вырубленное из потребности вычитается (как у склада МР)', JSON.stringify(cov14c));
 
-// ── D10. Одна мера ───────────────────────────────────────────────────────────
+// ── D10. Одна мера: остатки засчитываются, целые показаны отдельно ───────────
+// Решение владельца 31.10: остатки чужих рулонов засчитываются в покрытие. Склад — в метрах;
+// остатки (свободные початые и метры сверх потребности держателя рулона) берутся первыми.
 var jobs10 = [J(1, { start: 1, footage: 1500 }), J(2, { start: 2, footage: 1500 })];
 var tasks10 = [task('1'), task('2')];
 var rolls10 = [roll('r1'), roll('r2', { status: 'початый', rest: 1500 })];
 var cov10 = safe(function() { return C.coverJobs(jobs10, rolls10, [], 15, { tasks: tasks10, moves: [] }); });
-var res10 = C.planReservations(tasks10, rolls10, [], 15);
-assert(cov10['1'] && cov10['1'].deficit === 0 && cov10['2'] && cov10['2'].deficit === 1500,
-    'D10: початый свободный рулон в покрытие не идёт — блокировка у задания 2', JSON.stringify(cov10));
-var shortRes = res10.filter(function(p) { return p.deficit > 0; }).map(function(p) { return p.taskId; }).join();
-var shortCov = Object.keys(cov10 || {}).filter(function(k) { return cov10[k].deficit > 0; }).sort().join();
-assert(shortRes === shortCov && shortRes === '2', 'D10: дефицит у блокировки и у «Зарезервировать МР» — у одних и тех же заданий', shortRes + ' / ' + shortCov);
+assert(cov10['1'] && cov10['1'].deficit === 0 && cov10['1'].leftover === 1500 && cov10['2'] && cov10['2'].deficit === 0 && cov10['2'].whole === 1500,
+    'D10: початый свободный рулон засчитан первым (задание 1), целый — заданию 2; блокировок нет', JSON.stringify(cov10));
 var groups10 = safe(function() { return C.coverGroups(jobs10, rolls10, [], 15, { tasks: tasks10, moves: [] }); });
 var g10 = Array.isArray(groups10) ? groups10[0] : null;
-assert(g10 && g10.meters === 3000 && g10.stock === 1500 && g10.deficit === 1500 && g10.opened === 1500,
-    'D10: вкладка «Дефицит форматов»: нужно 3000, целых на складе 1500, дефицит 1500, початых 1500 отдельно', JSON.stringify(g10));
-var sumJobs = Object.keys(cov10 || {}).reduce(function(a, k) { return a + cov10[k].deficit; }, 0);
-assert(g10 && g10.deficit === sumJobs, 'D10: дефицит группы = сумма дефицитов её заданий', String(sumJobs));
+assert(g10 && g10.meters === 3000 && g10.stock === 3000 && g10.whole === 1500 && g10.leftover === 1500 && g10.deficit === 0,
+    'D10: вкладка «Дефицит форматов»: нужно 3000, со склада 3000, из них целых 1500 и остатков 1500', JSON.stringify(g10));
+var cov10s = safe(function() { return C.coverJobs(jobs10, [roll('r1')], [], 15, { tasks: tasks10, moves: [] }); });
+assert(cov10s['2'] && cov10s['2'].deficit === 1000, 'D10: один целый рулон 2000 м на два задания по 1500 — второму не хватает 1000 м (метры делятся)', JSON.stringify(cov10s));
+var sumJobs = Object.keys(cov10s || {}).reduce(function(a, k) { return a + cov10s[k].deficit; }, 0);
+var g10s = safe(function() { return C.coverGroups(jobs10, [roll('r1')], [], 15, { tasks: tasks10, moves: [] }); })[0];
+assert(g10s && g10s.deficit === sumJobs, 'D10: дефицит группы = сумма дефицитов её заданий', String(sumJobs));
 var groups10b = safe(function() { return C.coverGroups(jobs14, rolls14, [], 15, { tasks: tasks14, moves: [] }); });
-assert(Array.isArray(groups10b) && groups10b[0].reserved === 1500 && groups10b[0].deficit === 1500,
-    'D10: резерв показан в группе отдельно и в дефицит не попадает', JSON.stringify(groups10b));
-var rolls10c = [roll('r1', { reserveTaskId: '77' })];
-var cov10c = safe(function() { return C.coverJobs([J(1, { start: 1 })], rolls10c, [], 15, { tasks: [task('1'), task('77', { open: true })], moves: [] }); });
-assert(cov10c['1'] && cov10c['1'].deficit === 1500, 'D10: рулон в резерве другого открытого задания свободным не считается', JSON.stringify(cov10c));
+assert(Array.isArray(groups10b) && groups10b[0].reserved === 1500 && groups10b[0].leftover === 500 && groups10b[0].deficit === 1000,
+    'D10: резерв показан в группе отдельно, остаток рулона сверх резерва засчитан другому', JSON.stringify(groups10b));
+var cov10c = safe(function() { return C.coverJobs([J(1, { start: 1 })], [roll('r1', { reserveTaskId: '77' })], [], 15, { tasks: [task('1'), task('77', { open: true, footage: 1800 })], moves: [] }); });
+assert(cov10c['1'] && cov10c['1'].deficit === 1300 && cov10c['1'].leftover === 200, 'D10: от рулона в резерве другого открытого задания — только его остаток (2000 − 1800)', JSON.stringify(cov10c));
+var cov10d = safe(function() { return C.coverJobs([J(1, { start: 1 })], [roll('r1', { reserveTaskId: '99' })], [], 15, { tasks: [task('1')], moves: [] }); });
+assert(cov10d['1'] && cov10d['1'].deficit === 1500, 'D10: рулон в резерве задания, которого нет в списке (потребность неизвестна), остатка не даёт', JSON.stringify(cov10d));
+var cov10e = safe(function() {
+    return C.coverJobs([J(1, { start: 1 })], [roll('r1', { status: 'початый', rest: 1200 })], [], 15,
+        { tasks: [task('1'), task('5', { open: true, footage: 1000 })], moves: [{ kind: 'расход', taskId: '5', rollId: 'r1', delta: -300 }] });
+});
+assert(cov10e['1'] && cov10e['1'].leftover === 500 && cov10e['1'].deficit === 1000, 'D10: из рулона вырубает открытое задание 5 — засчитан остаток сверх его недовырубленного (1200 − 700)', JSON.stringify(cov10e));
 
 // ── D8. Гант и записанный план ───────────────────────────────────────────────
 var jobs8 = [
