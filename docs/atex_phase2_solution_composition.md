@@ -6,11 +6,24 @@
 **Макеты рабочих мест:** `download/atex/js/phase2-*.html` — статичные HTML с
 зашитыми данными, стиль в `download/atex/css/phase2-mockup.css`. Вход —
 `phase2-mockups.html`, на боевом сервере
-`https://ideav.ru/download/ateh/js/phase2-mockups.html`. Макеты лежат в каталогах
-`js` и `css`, потому что маппинги деплоя перечислены в конфиге рядом с
-`update.php` на сервере и из репозитория не обновляются: новый каталог
-потребовал бы ручной правки на бою, эти два уже выкладываются
-([`kb/deploy.md`](kb/deploy.md)).
+`https://ideav.ru/download/ateh/js/phase2-mockups.html`.
+
+**Код рабочих мест Фазы 2** — каталоги `download/atex-p2/js/`, `download/atex-p2/css/` и
+`templates/atex-p2/`. Маппинги `update.conf` (конфиг рядом с `update.php` на сервере,
+[`kb/deploy.md`](kb/deploy.md)) выкладывают их только в копию **ateh1**:
+
+| Каталог репозитория | Куда выкладывается |
+|---|---|
+| `download/atex-p2/js/*` | `download/ateh1/js/` |
+| `download/atex-p2/css/*` | `download/ateh1/css/` |
+| `templates/atex-p2/*` | `templates/custom/ateh1/` |
+
+Боевая база `ateh` эти каталоги не получает. Каталоги `download/atex/` и `templates/atex/`
+выкладываются на бой (`download/atex/js|css` — ещё и в ateh1), поэтому в них идут только
+файлы Фазы 1 и общие модули, без которых Фаза 1 работает
+(`download/atex/js/label-production.js`). Маска `*` берёт файлы без подкаталогов: новый
+подкаталог требует своей строки в `update.conf`. Разработка, данные и прогоны Фазы 2 — в базе
+ateh1 (`https://ideav.ru/ateh1`); перенос на бой — после приёмки (§10, шаг 11).
 
 Этот документ — **перечень того, из чего состоит приложение Фазы 2**: рабочие
 места, таблицы, отчёты, печатные формы, роли. По нему принимается готовность:
