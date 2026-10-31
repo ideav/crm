@@ -16,7 +16,9 @@ var fs = require('fs');
 var path = require('path');
 
 var ROOT = path.join(__dirname, '..');
-var TEMPLATES = ['templates/ru/main.html', 'templates/atex/main.html'];
+var TEMPLATES = ['templates/main.html', 'templates/ru/main.html', 'templates/atex/main.html'];
+// Общий шаблон (#5331) знает раскладку меню (#5221) и админский вид.
+var GENERIC = 'templates/main.html';
 
 var passed = 0;
 function assertEqual(actual, expected, name) {
@@ -77,9 +79,16 @@ function makeNode(tag) {
 function runHeadScripts(rendered, ctx) {
     var head = rendered.slice(0, rendered.indexOf('</head>'));
     var scripts = [];
-    var re = /<script(?![^>]*\ssrc=)[^>]*>([\s\S]*?)<\/script>/gi;
+    // Встроенные скрипты исполняем как есть; внешние из /js/ (app-view.js, #5221)
+    // берём из репозитория — правило меню опирается на них.
+    var re = /<script([^>]*)>([\s\S]*?)<\/script>/gi;
     var m;
-    while ((m = re.exec(head)) !== null) scripts.push(m[1]);
+    while ((m = re.exec(head)) !== null) {
+        var src = m[1].match(/\ssrc="\/(js\/[^"?]+)/);
+        // Браузерный модуль кладёт себя в window.<Имя>; в браузере это и глобал.
+        if (src) scripts.push(read(src[1]) + '\n;var AppView = window.AppView;');
+        else if (!/\ssrc=/.test(m[1])) scripts.push(m[2]);
+    }
     if (!scripts.length) throw new Error('в head нет встроенных скриптов');
 
     var appended = [];
@@ -88,7 +97,8 @@ function runHeadScripts(rendered, ctx) {
         body: null,
         documentElement: {
             style: { setProperty: function() {}, removeProperty: function() {} },
-            classList: { add: function() {}, remove: function() {} }
+            classList: { add: function() {}, remove: function() {} },
+            getAttribute: function() { return null; }
         },
         head: { appendChild: function(node) { appended.push(node); return node; } },
         createElement: makeNode,
@@ -112,8 +122,8 @@ function runHeadScripts(rendered, ctx) {
 function boot(tplRel, opts) {
     var rendered = render(read(tplRel), {
         z: 'testdb', xsrf: 'xsrf', id: '', token: 'tok', user_id: '1',
-        user: 'user', role: 'Диспетчер', role_id: '2',
-        action: opts.action, version: '1',
+        user: opts.user || 'user', role: opts.role || 'Диспетчер', role_id: opts.roleId || '2',
+        action: opts.action, version: '1', menu_layout: opts.layout || '',
         grants: Buffer.from('[]').toString('base64')
     }, opts.menu);
     return runHeadScripts(rendered, { pathname: opts.pathname });
@@ -122,6 +132,12 @@ function boot(tplRel, opts) {
 function hidesSidebar(result) {
     return result.styles.some(function(css) {
         return /\.app-sidebar[^{]*\{[^}]*display\s*:\s*none/i.test(css);
+    });
+}
+
+function hidesTopMenu(result) {
+    return result.styles.some(function(css) {
+        return /#app-topmenu[^{]*\{[^}]*display\s*:\s*none/i.test(css);
     });
 }
 
@@ -170,5 +186,32 @@ TEMPLATES.forEach(function(tpl) {
     assertEqual(blocks.length, 1, tpl + ': блок MyRoleMenu ровно один');
     assertTrue(src.indexOf('var menuData') < src.indexOf('<body'), tpl + ': menuData объявлен в head, до <body>');
 });
+
+// ── Общий шаблон: раскладка меню и вид (#5331) ──
+// База включила верхнее меню (#5221): при одном пункте не показываем и его,
+// и с корня уводим в пункт.
+['top', 'auto'].forEach(function(layout) {
+    var top = boot(GENERIC, { menu: ONE, action: '', pathname: '/testdb', layout: layout });
+    assertTrue(hidesTopMenu(top), GENERIC + ': раскладка ' + layout + ', один пункт — верхнее меню скрыто');
+    assertTrue(hidesSidebar(top), GENERIC + ': раскладка ' + layout + ', один пункт — левое меню и кнопка мобильного меню скрыты');
+    assertEqual(top.navigated, ['/testdb/packer'], GENERIC + ': раскладка ' + layout + ', один пункт — с корня переходим в пункт');
+    var topTwo = boot(GENERIC, { menu: TWO, action: '', pathname: '/testdb', layout: layout });
+    assertEqual(hidesTopMenu(topTwo), false, GENERIC + ': раскладка ' + layout + ', два пункта — верхнее меню на месте');
+});
+
+// Уже стоим на целевом пункте — второго перехода нет (защита от цикла).
+var onTarget = boot(GENERIC, { menu: ONE, action: '', pathname: '/testdb/packer' });
+assertEqual(onTarget.navigated, [], GENERIC + ': уже на целевом пункте — редиректа нет');
+
+// Гость (#5235) с одним пунктом — как обычный пользователь.
+var guest = boot(GENERIC, { menu: ONE, action: '', pathname: '/testdb', user: 'guest', role: 'guest', roleId: '3' });
+assertTrue(hidesSidebar(guest), GENERIC + ': гость, один пункт — меню скрыто');
+assertEqual(guest.navigated, ['/testdb/packer'], GENERIC + ': гость, один пункт — с корня переходим в пункт');
+
+// Админский вид (#5227): кнопка «Редактировать меню» есть только в левом меню —
+// прятать его нельзя, и с корня админа не уводим.
+var admin = boot(GENERIC, { menu: ONE, action: '', pathname: '/testdb', role: 'admin', roleId: '145' });
+assertEqual(hidesSidebar(admin), false, GENERIC + ': админ, один пункт — левое меню на месте');
+assertEqual(admin.navigated, [], GENERIC + ': админ, один пункт — с корня никуда не уводим');
 
 console.log('\n' + passed + ' проверок прошли');

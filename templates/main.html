@@ -175,6 +175,29 @@
     </script>
     <script>
         (function() {
+            // #4690, #5331: пункт меню всего один — меню (левое и верхнее) не показываем
+            // совсем, а с корня базы сразу уходим в этот единственный пункт. Решение
+            // принимается в head, до отрисовки body, — иначе меню мелькает.
+            // Админский вид правило не трогает: кнопка «Редактировать меню» живёт только
+            // в левом меню, спрятав его, админ не смог бы добавить второй пункт.
+            if (typeof menuData === 'undefined' || !Array.isArray(menuData)) return;
+            if (window.AppView && window.AppView.getView({ db: db, user: user, role: role, roleId: roleId, grants: grants }) === 'admin') return;
+            var items = menuData.filter(function(m) {
+                return m && m.menu_id && String(m.menu_id).charAt(0) !== '{';
+            });
+            if (items.length !== 1) return;
+            var href = String(items[0].href || '');
+            if (!href || href.charAt(0) === '{') return;
+            var css = document.createElement('style');
+            css.id = 'single-menu-style';
+            css.textContent = '.app-sidebar,#sidebar-backdrop,#mobile-sidebar-toggle,#app-topmenu{display:none!important;}';
+            document.head.appendChild(css);
+            var target = '/' + db + '/' + href;
+            if (action === '' && location.pathname !== target) location.replace(target);
+        })();
+    </script>
+    <script>
+        (function() {
             var dbName = '{_global_.z}' || 'default';
             var storageKey = 'appSidebarCollapsed_' + dbName;
             var cookieName = 'sidebarWidth_' + dbName;
