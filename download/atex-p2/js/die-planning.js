@@ -614,18 +614,24 @@
         var self = this, s = this.state;
         var f = C.formJobs({ positions: s.positions, dies: s.dies, jobs: s.jobs, settings: s.settings, mrLength: s.settings.mrLength, itsMin: s.settings.itsMin, itsMax: s.settings.itsMax });
         var skipped = f.skipped.filter(function(x) { return !/уже есть задание/.test(x.reason); });
+        var toPos = f.create.filter(function(x) { return x.positionWrite; }).length;
         var html = '<h3>Сформировать задания высечки</h3>' +
-            (f.create.length ? '<p>Будет создано заданий: <b>' + f.create.length + '</b> (по одному на позицию; нож подобран, ИТС не ждёт).</p>' +
-                listHtml(f.create.map(function(x) { return 'заказ ' + esc(x.orderNo) + ', нож ' + esc(x.dieNo) + ': ' + fmtNum(x.footage) + ' м, МР ' + x.pullsPlan + ', ' + x.duration + ' мин'; }), 15)
+            (f.create.length ? '<p>Будет создано заданий: <b>' + f.create.length + '</b> (по одному на позицию; нож подобран, ИТС не ждёт).' +
+                (toPos ? ' В позиции заказов, где подобранный нож ещё не записан (' + toPos + '), он будет записан вместе с «Подбором ножа», мин. партией и признаком ИТС — как это делает «Заказы этикетки».' : '') + '</p>' +
+                listHtml(f.create.map(function(x) { return 'заказ ' + esc(x.orderNo) + ', нож ' + esc(x.dieNo) + (x.positionWrite ? ' (запишется в позицию)' : '') + ': ' + fmtNum(x.footage) + ' м, МР ' + x.pullsPlan + ', ' + x.duration + ' мин'; }), 15)
                 : '<p>Позиций, готовых к планированию и без задания, нет.</p>') +
             (skipped.length ? '<p class="atex-dp-muted">Не идут в планирование (' + skipped.length + '):</p>' + listHtml(skipped.map(function(x) { return 'позиция ' + esc(x.positionId) + ' — ' + esc(x.reason); }), 8) : '');
         this.openModal(html, 'Создать', f.create.length ? function() {
             var t = s.tables, now = s.now;
-            self.run(f.create.map(function(p, i) {
-                return function() { return self.client.post('_m_new/' + t.dieJob.id + '?JSON&up=1', C.jobCreateFields(t, Object.assign({ start: now + i }, p))).then(function(res) {
+            // сначала нож — в позицию (источник истины), потом задание
+            var steps = [];
+            f.create.forEach(function(p, i) {
+                if (p.positionWrite && t.position) steps.push(function() { return self.client.post('_m_set/' + encodeURIComponent(p.positionId) + '?JSON', C.positionPickFields(t, p.positionWrite)); });
+                steps.push(function() { return self.client.post('_m_new/' + t.dieJob.id + '?JSON&up=1', C.jobCreateFields(t, Object.assign({ start: now + i }, p))).then(function(res) {
                     if (!(res && (res.id || res.obj))) throw new Error('сервер не вернул id задания для позиции ' + p.positionId);
-                }); };
-            }), 'Создано заданий: ' + f.create.length + '.');
+                }); });
+            });
+            self.run(steps, 'Создано заданий: ' + f.create.length + (toPos ? ', нож записан в позиций: ' + toPos : '') + '.');
         } : null);
     };
 

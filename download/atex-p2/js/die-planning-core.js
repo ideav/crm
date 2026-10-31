@@ -664,7 +664,11 @@
             if (!plan.flags.ready) { skipped.push({ positionId: pos.id, reason: plan.flags.blocks.join('; ') }); return; }
             if (!plan.demand.ok) { skipped.push({ positionId: pos.id, reason: plan.demand.error }); return; }
             var die = plan.die.die, meters = plan.demand.meters;
+            // нож подбирает планирование и пишет в позицию (источник истины — позиция, #5340 D9):
+            // те же поля, что пишет «Заказы этикетки», если записанное в позиции отличается
+            var positionWrite = LO.writeDiffers(pos, plan.write) ? Object.assign({}, plan.write) : null;
             create.push({
+                positionWrite: positionWrite,
                 positionId: pos.id, orderNo: pos.orderNo || '', dieId: String(die.id), dieNo: String(die.no || ''), cylinderId: String(die.cylinderId || ''),
                 footage: meters, pullsPlan: plan.demand.masterRolls || Math.ceil(meters / mrLength - 1e-9), duration: runMinutes(meters, s), rolls: num(pos.rolls),
                 warnings: plan.flags.warnings.slice()
@@ -673,6 +677,12 @@
         return { create: create, skipped: skipped };
     }
 
+    // Поля позиции («Заказанное количество») из LO.planPosition().write: нож, «Подбор ножа», мин. партия, ИТС.
+    function positionPickFields(t, write) {
+        var r = (t.position && t.position.reqs) || {}, f = {};
+        Object.keys(write || {}).forEach(function(k) { if (r[k]) f['t' + r[k]] = String(write[k] == null ? '' : write[k]); });
+        return f;
+    }
     function jobCreateFields(t, p) {
         var j = t.dieJob, r = j.reqs, f = {};
         f['t' + j.id] = String(p.start);
@@ -818,7 +828,7 @@
             dueEnd: dueEnd, buildJobs: buildJobs, setupKind: setupKind, setupMinutes: setupMinutes, runMinutes: runMinutes,
             machineAllows: machineAllows, createCalendar: createCalendar, orderQueue: orderQueue, compareJobs: compareJobs,
             jobFlags: jobFlags, openMetersByDie: openMetersByDie, coverJobs: coverJobs, planReservations: planReservations,
-            toolLoad: toolLoad, ganttDay: ganttDay, recordedPlan: recordedPlan, inScope: inScope, coverGroups: coverGroups, queueGrid: queueGrid, turretFits: turretFits, formJobs: formJobs, jobCreateFields: jobCreateFields, jobPlanFields: jobPlanFields,
+            toolLoad: toolLoad, ganttDay: ganttDay, recordedPlan: recordedPlan, inScope: inScope, coverGroups: coverGroups, positionPickFields: positionPickFields, queueGrid: queueGrid, turretFits: turretFits, formJobs: formJobs, jobCreateFields: jobCreateFields, jobPlanFields: jobPlanFields,
             sleeveDiameterMm: sleeveDiameterMm, pickCutter: pickCutter, sleevePlan: sleevePlan,
             sleeveCreateFields: sleeveCreateFields, sleeveUpdateFields: sleeveUpdateFields,
             refIds: refIds, machinesFromRecords: machinesFromRecords, buildDieIndex: buildDieIndex, dieInfo: dieInfo, resolveSleeveTask: resolveSleeveTask

@@ -118,4 +118,29 @@ assert(pick({ jobIds: [] }) === '', 'D11: отмеченных нет — нич
 assert(pick({ all: true }) === '1,2,3,4', 'D11: вся очередь — только явным выбором', pick({ all: true }));
 assert(pick({}) === '', 'D11: область не задана — ничего', pick({}));
 
+// ── D9. Нож позиции: подбирает планирование и записывает в позицию ───────────
+// Решение владельца (31.10): «Сформировать» подбирает нож сам и пишет его в позицию, источник
+// истины — позиция («Заказы этикетки» видят тот же нож).
+var LO = require('../download/atex-p2/js/label-orders.js').core;
+var mats = { m1: { name: 'M', base: 'Бумага' } };
+var dies9 = [{ id: 'k1', no: '111', width: 85, length: 38, base: 'Бумага', streams: 3, selectable: true, meters: 0, repeatMm: 666.75, labelsPerRepeat: 3, usedFormat: 305, sleeveWidth: 80, cylinderId: 'c1', state: 'Рабочий' }];
+function prow(id, o) {
+    return Object.assign({ 'РулоновID': id, 'ЗаказID': '1', 'Заказ': '77', 'СырьёID': 'm1', 'Сырьё': 'M', 'Ширина, мм': '85', 'Длина, мм': '38', 'Ручьёв': '',
+        'Шт в рулоне': '5000', 'Рулонов': '50', 'Тип ножей': '85 х 38 (80)', 'Подбор ножа': '', 'НожID': '', 'Срок': '10.11.2026', 'ИТС нужен': '', 'ИТС подтв.': '' }, o || {});
+}
+var pos9 = [prow('p1', { 'Подбор ножа': 'нет ножа' }), prow('p2')].map(function(r) { return LO.positionFromRow(r, mats); });
+var f9 = C.formJobs({ positions: pos9, dies: dies9, jobs: [], settings: S, itsMin: 20, itsMax: 250, mrLength: 2000 });
+var c9 = f9.create.filter(function(x) { return x.positionId === 'p1'; })[0];
+assert(c9 && c9.dieId === 'k1' && c9.positionWrite && c9.positionWrite.die === 'k1' && c9.positionWrite.diePick === 'подобран',
+    'D9: у позиции «нет ножа» планирование подобрало нож — он пишется в позицию («Подбор ножа» = подобран)', JSON.stringify(c9 && c9.positionWrite));
+// позиция с этим же ножом, уже записанным, — писать нечего
+var probe = LO.planPosition(pos9[1], dies9, { mrLength: 2000, itsMin: 20, itsMax: 250 }).write;
+var pos9b = [LO.positionFromRow(prow('p3', { 'НожID': 'k1', 'Нож': '111', 'Подбор ножа': 'подобран', 'Мин. партия': probe.minBatch, 'ИТС нужен': probe.itsNeeded, 'Втулка, мм': probe.sleeveWidth }), mats)];
+var f9b = C.formJobs({ positions: pos9b, dies: dies9, jobs: [], settings: S, itsMin: 20, itsMax: 250, mrLength: 2000 });
+assert(f9b.create.length === 1 && !f9b.create[0].positionWrite, 'D9: в позиции уже записан этот нож — позиция не переписывается', JSON.stringify(f9b.create[0] && f9b.create[0].positionWrite));
+var TP = { position: { id: '70', reqs: { die: '71', diePick: '72', minBatch: '73', itsNeeded: '74' } } };
+var pf9 = typeof C.positionPickFields === 'function' ? C.positionPickFields(TP, { die: 'k1', diePick: 'подобран', minBatch: '5000', itsNeeded: '' }) : null;
+assert(pf9 && pf9.t71 === 'k1' && pf9.t72 === 'подобран' && pf9.t73 === '5000' && pf9.t74 === '',
+    'D9: поля записи позиции — нож, «Подбор ножа», мин. партия, ИТС (как пишет «Заказы этикетки»)', JSON.stringify(pf9));
+
 console.log('\nИтого: ' + passed + ' из ' + total);
