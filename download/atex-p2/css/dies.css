@@ -1,0 +1,160 @@
+/* Рабочее место «Ножи и валы» (ideav/crm#5314). */
+.atex-dies {
+    --atex-dies-border: var(--border-color, #e5e7eb);
+    --atex-dies-panel: var(--bg-secondary, #ffffff);
+    --atex-dies-muted: var(--text-secondary, #6b7280);
+    --atex-dies-ok: #15803d;
+    --atex-dies-warn-bg: #fef3c7;
+    --atex-dies-warn: #92400e;
+    --atex-dies-over-bg: #fee2e2;
+    --atex-dies-over: #b91c1c;
+    --atex-dies-info-bg: #e0f2fe;
+    height: 100%;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow: auto;
+    background: var(--bg-primary, #f8fafc);
+    color: var(--text-primary, #111827);
+    box-sizing: border-box;
+}
+
+[data-theme="dark"] .atex-dies {
+    --atex-dies-ok: #4ade80;
+    --atex-dies-warn-bg: rgba(251, 191, 36, 0.16);
+    --atex-dies-warn: #fcd34d;
+    --atex-dies-over-bg: rgba(248, 113, 113, 0.16);
+    --atex-dies-over: #fca5a5;
+    --atex-dies-info-bg: rgba(56, 189, 248, 0.14);
+}
+
+.atex-dies * { box-sizing: border-box; }
+
+.atex-dies-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.atex-dies-tabs { display: flex; gap: 4px; }
+
+.atex-dies-tab,
+.atex-dies-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border: 1px solid var(--atex-dies-border);
+    border-radius: 7px;
+    background: var(--atex-dies-panel);
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+
+.atex-dies-tab.is-active,
+.atex-dies-btn-primary {
+    background: var(--atex-navy, #134174);
+    border-color: var(--atex-navy, #134174);
+    color: var(--atex-on-navy, #ffffff);
+}
+
+.atex-dies-btn-danger { color: var(--atex-dies-over); border-color: var(--atex-dies-over); }
+
+.atex-dies-message {
+    padding: 8px 12px;
+    border-radius: 7px;
+    background: var(--atex-dies-info-bg);
+}
+.atex-dies-message.is-error { background: var(--atex-dies-over-bg); color: var(--atex-dies-over); }
+.atex-dies-message.is-ok { color: var(--atex-dies-ok); }
+
+.atex-dies-kpi {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 8px;
+}
+
+.atex-dies-kpi-tile {
+    padding: 8px 12px;
+    border: 1px solid var(--atex-dies-border);
+    border-radius: 8px;
+    background: var(--atex-dies-panel);
+}
+.atex-dies-kpi-value { font-size: 1.4em; font-weight: 600; }
+.atex-dies-kpi-label { color: var(--atex-dies-muted); font-size: 0.85em; }
+.atex-dies-kpi-tile.is-ok .atex-dies-kpi-value { color: var(--atex-dies-ok); }
+.atex-dies-kpi-tile.is-warn { background: var(--atex-dies-warn-bg); }
+.atex-dies-kpi-tile.is-muted .atex-dies-kpi-value { color: var(--atex-dies-muted); }
+
+.atex-dies-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+    gap: 8px;
+    min-height: 0;
+}
+@media (max-width: 1100px) {
+    .atex-dies-layout { grid-template-columns: minmax(0, 1fr); }
+}
+
+.atex-dies-main { min-width: 0; }
+.atex-dies-side { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+
+.atex-dies-panel {
+    padding: 10px 12px;
+    border: 1px solid var(--atex-dies-border);
+    border-radius: 8px;
+    background: var(--atex-dies-panel);
+}
+.atex-dies-panel-title { margin: 0 0 8px; font-size: 1.05em; }
+.atex-dies-sub { margin: 12px 0 6px; font-size: 0.95em; }
+.atex-dies-empty, .atex-dies-muted { color: var(--atex-dies-muted); }
+
+.atex-dies-table { width: 100%; border-collapse: collapse; font-size: 0.9em; }
+.atex-dies-table th,
+.atex-dies-table td { padding: 4px 6px; border-bottom: 1px solid var(--atex-dies-border); text-align: left; white-space: nowrap; }
+.atex-dies-table .num { text-align: right; }
+.atex-dies-table tr[data-die-id] { cursor: pointer; }
+.atex-dies-table tr.is-near { background: var(--atex-dies-warn-bg); }
+.atex-dies-table tr.is-over { background: var(--atex-dies-over-bg); }
+
+.atex-dies-history { max-height: 360px; overflow: auto; }
+
+.atex-dies-card-meta { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
+.atex-dies-card-mileage { margin: 8px 0; display: grid; gap: 2px; }
+.atex-dies-card-mileage .is-near { color: var(--atex-dies-warn); }
+.atex-dies-card-mileage .is-over { color: var(--atex-dies-over); font-weight: 600; }
+.atex-dies-card-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.atex-dies-state {
+    padding: 2px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--atex-dies-border);
+    font-size: 0.85em;
+}
+.atex-dies-state[data-state="Рабочий"] { color: var(--atex-dies-ok); border-color: var(--atex-dies-ok); }
+.atex-dies-state[data-state="Списан"] { color: var(--atex-dies-muted); }
+.atex-dies-state[data-state="none"] { background: var(--atex-dies-warn-bg); }
+
+.atex-dies-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(15, 23, 42, 0.45);
+}
+.atex-dies-modal[hidden] { display: none; }
+.atex-dies-modal-box {
+    max-width: 480px;
+    width: calc(100% - 32px);
+    padding: 16px;
+    border-radius: 10px;
+    background: var(--atex-dies-panel);
+    color: inherit;
+}
+.atex-dies-modal-actions { margin-top: 14px; display: flex; justify-content: flex-end; gap: 8px; }

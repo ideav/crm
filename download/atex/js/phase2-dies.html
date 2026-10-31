@@ -12,13 +12,14 @@
 <body class="mk-page">
 
 <h1 class="mk-h1">Ножи и валы</h1>
-<p class="mk-sub">Роль: Технолог, Диспетчер · URL <code>/atex/dies</code> · таблицы: Нож, Вал, Движение пробега ⊂ Нож, Сырьё этикетки</p>
+<p class="mk-sub">Роль: Технолог, Диспетчер · URL <code>/atex/dies</code> · таблицы: Нож, Марка ножа, Вал, Движение пробега ⊂ Нож, Сырьё этикетки</p>
 
 <div class="mk-note">
     Справочник строится на компоненте <code>integram-table</code>: ~2 350 ножей, серверная
     фильтрация и постраничность. <b>Пробег — накопитель факта</b>: его двигает только пульт
     высечки при отметке съёма, руками поле не правится. У ножа лежит история движений
-    (вырубка / заточка / начальный остаток), поле «Пробег» — их сумма после последней заточки.
+    (вырубка / начальный остаток), поле «Пробег» — их сумма за всю жизнь ножа. Ресурс ножа
+    задаёт его марка (справочник «Марка ножа», поле «Ресурс, м»); выработавший ресурс нож списывается.
 </div>
 
 <div class="mk-tabs">
@@ -31,21 +32,21 @@
 
     <div class="mk-toolbar">
         <button class="mk-btn mk-btn-primary">+ Нож</button>
-        <button class="mk-btn">На заточку</button>
         <button class="mk-btn">Вернуть в работу</button>
         <button class="mk-btn">Списать</button>
         <input class="mk-input" placeholder="Размер этикетки, напр. 85 x 38" style="min-width:210px">
         <select class="mk-select"><option>Вал: все</option><option>96</option><option>106</option><option>120</option><option>132</option></select>
         <select class="mk-select"><option>Сырьё: все</option><option>Бумага</option><option>ПП</option></select>
-        <select class="mk-select"><option>Состояние: в работе</option><option>заточка</option><option>списан</option><option>все</option></select>
-        <label style="font-size:0.84rem;color:var(--atex-muted)"><input type="checkbox"> только у порога заточки</label>
+        <select class="mk-select"><option>Состояние: Рабочий</option><option>Резерв</option><option>На экспертизе</option><option>Списан</option><option>все</option></select>
+        <select class="mk-select"><option>Марка: все</option><option>AI(Standard)</option><option>BLACK TOP 3in1</option><option>BLACK TOP</option><option>GLUEX PLUS</option></select>
+        <label style="font-size:0.84rem;color:var(--atex-muted)"><input type="checkbox"> только у ресурса (от 90 %)</label>
     </div>
 
     <div class="mk-kpis">
         <div class="mk-kpi"><div class="mk-kpi-v">2 348</div><div class="mk-kpi-l">ножей всего</div></div>
-        <div class="mk-kpi"><div class="mk-kpi-v">1 972</div><div class="mk-kpi-l">в работе</div></div>
-        <div class="mk-kpi is-warn"><div class="mk-kpi-v">34</div><div class="mk-kpi-l">у порога заточки</div></div>
-        <div class="mk-kpi"><div class="mk-kpi-v">17</div><div class="mk-kpi-l">на заточке</div></div>
+        <div class="mk-kpi"><div class="mk-kpi-v">1 972</div><div class="mk-kpi-l">рабочих</div></div>
+        <div class="mk-kpi is-warn"><div class="mk-kpi-v">34</div><div class="mk-kpi-l">у ресурса (от 90 %)</div></div>
+        <div class="mk-kpi is-bad"><div class="mk-kpi-v">17</div><div class="mk-kpi-l">ресурс выработан</div></div>
         <div class="mk-kpi is-bad"><div class="mk-kpi-v">6</div><div class="mk-kpi-l">размеров заказа без ножа</div></div>
     </div>
 
@@ -56,7 +57,7 @@
             <th class="mk-num">М/э</th><th class="mk-num">Между</th><th class="mk-num">Кромка</th>
             <th class="mk-num">Вал</th><th class="mk-num">Раппорт</th><th>Сырьё</th>
             <th class="mk-num">Мин/Опт/Исп</th><th class="mk-num">Втулка</th>
-            <th class="mk-num">Коэф.</th><th class="mk-num">Пробег, м</th><th>Состояние</th>
+            <th class="mk-num">Коэф.</th><th>Марка (ресурс, м)</th><th class="mk-num">Пробег, м</th><th>Состояние</th>
         </tr>
         </thead>
         <tbody>
@@ -65,48 +66,48 @@
             <td class="mk-num">4.1</td><td class="mk-num">3.0</td><td class="mk-num">2.0</td>
             <td class="mk-num">106</td><td class="mk-num">336.6</td><td>Бумага</td>
             <td class="mk-num">265 / 270 / 270</td><td class="mk-num">80</td>
-            <td class="mk-num">0.944</td><td class="mk-num">412 300</td>
-            <td><span class="mk-badge mk-badge-ok">в работе</span></td>
+            <td class="mk-num">0.944</td><td>BLACK TOP 3in1 (490 000)</td><td class="mk-num">412 300</td>
+            <td><span class="mk-badge mk-badge-ok">Рабочий · 84 %</span></td>
         </tr>
         <tr>
             <td><b>1866</b></td><td>85 × 38</td><td class="mk-num">3</td><td class="mk-num">24</td>
             <td class="mk-num">4.1</td><td class="mk-num">3.0</td><td class="mk-num">2.0</td>
             <td class="mk-num">106</td><td class="mk-num">336.6</td><td>Бумага</td>
             <td class="mk-num">265 / 270 / 270</td><td class="mk-num">80</td>
-            <td class="mk-num">0.944</td><td class="mk-num">1 180 400</td>
-            <td><span class="mk-badge mk-badge-warn">порог заточки</span></td>
+            <td class="mk-num">0.944</td><td>BLACK TOP 3in1 (490 000)</td><td class="mk-num">481 200</td>
+            <td><span class="mk-badge mk-badge-warn">у ресурса · 98 %</span></td>
         </tr>
         <tr>
             <td><b>1583</b></td><td>58 × 40</td><td class="mk-num">4</td><td class="mk-num">28</td>
             <td class="mk-num">3.5</td><td class="mk-num">3.0</td><td class="mk-num">5.0</td>
             <td class="mk-num">96</td><td class="mk-num">304.8</td><td>ПП</td>
             <td class="mk-num">251 / 255 / 255</td><td class="mk-num">76</td>
-            <td class="mk-num">0.910</td><td class="mk-num">268 900</td>
-            <td><span class="mk-badge mk-badge-ok">в работе</span></td>
+            <td class="mk-num">0.910</td><td>BLACK TOP 3in1 (490 000)</td><td class="mk-num">268 900</td>
+            <td><span class="mk-badge mk-badge-ok">Рабочий · 55 %</span></td>
         </tr>
         <tr>
             <td><b>1902</b></td><td>30 × 20</td><td class="mk-num">8</td><td class="mk-num">104</td>
             <td class="mk-num">3.4</td><td class="mk-num">3.0</td><td class="mk-num">4.0</td>
             <td class="mk-num">96</td><td class="mk-num">304.8</td><td>Бумага</td>
             <td class="mk-num">269 / 270 / 270</td><td class="mk-num">76</td>
-            <td class="mk-num">0.889</td><td class="mk-num">93 500</td>
-            <td><span class="mk-badge mk-badge-ok">в работе</span></td>
+            <td class="mk-num">0.889</td><td>AI(Standard) (160 000)</td><td class="mk-num">93 500</td>
+            <td><span class="mk-badge mk-badge-ok">Рабочий · 58 %</span></td>
         </tr>
         <tr>
             <td><b>2104</b></td><td>100 × 150</td><td class="mk-num">3</td><td class="mk-num">6</td>
             <td class="mk-num">2.4</td><td class="mk-num">3.0</td><td class="mk-num">4.0</td>
             <td class="mk-num">96</td><td class="mk-num">304.8</td><td>ПП</td>
             <td class="mk-num">314 / 315 / 315</td><td class="mk-num">76</td>
-            <td class="mk-num">0.952</td><td class="mk-num">744 100</td>
-            <td><span class="mk-badge mk-badge-warn">на заточке до 18.09</span></td>
+            <td class="mk-num">0.952</td><td>GLUEX PLUS (по умолчанию 300 000)</td><td class="mk-num">306 400</td>
+            <td><span class="mk-badge mk-badge-bad">списан · ресурс 102 %</span></td>
         </tr>
         <tr>
             <td><b>1490</b></td><td>70 × 50</td><td class="mk-num">4</td><td class="mk-num">24</td>
             <td class="mk-num">3.8</td><td class="mk-num">3.0</td><td class="mk-num">4.0</td>
             <td class="mk-num">120</td><td class="mk-num">381.0</td><td>Бумага</td>
             <td class="mk-num">297 / 300 / 300</td><td class="mk-num">76</td>
-            <td class="mk-num">0.933</td><td class="mk-num">1 402 700</td>
-            <td><span class="mk-badge mk-badge-mute">списан</span></td>
+            <td class="mk-num">0.933</td><td>BLACK TOP 3in1 (490 000)</td><td class="mk-num">497 300</td>
+            <td><span class="mk-badge mk-badge-mute">Списан</span></td>
         </tr>
         </tbody>
     </table>
@@ -121,8 +122,8 @@
         <table class="mk-table">
             <thead><tr><th>Нож</th><th>Почему подходит</th><th class="mk-num">Пробег</th><th class="mk-num">Коэф.</th><th>Итог</th></tr></thead>
             <tbody>
-            <tr><td><b>1247</b></td><td>размер и сырьё совпали, состояние «в работе»</td><td class="mk-num">412 300</td><td class="mk-num">0.944</td><td><span class="mk-badge mk-badge-ok">выбран — меньший пробег</span></td></tr>
-            <tr><td>1866</td><td>размер и сырьё совпали</td><td class="mk-num">1 180 400</td><td class="mk-num">0.944</td><td><span class="mk-badge mk-badge-warn">у порога заточки</span></td></tr>
+            <tr><td><b>1247</b></td><td>размер и сырьё совпали, состояние «Рабочий»</td><td class="mk-num">412 300</td><td class="mk-num">0.944</td><td><span class="mk-badge mk-badge-ok">выбран — меньший пробег</span></td></tr>
+            <tr><td>1866</td><td>размер и сырьё совпали</td><td class="mk-num">481 200</td><td class="mk-num">0.944</td><td><span class="mk-badge mk-badge-warn">у ресурса, 98 %</span></td></tr>
             </tbody>
         </table>
         <p style="margin:8px 0 0;font-size:0.82rem;color:var(--atex-muted)">
@@ -160,10 +161,10 @@
 
 <div data-tab-body="mileage" style="display:none">
     <div class="mk-kpis">
-        <div class="mk-kpi"><div class="mk-kpi-v">412 300 м</div><div class="mk-kpi-l">пробег после последней заточки</div></div>
-        <div class="mk-kpi"><div class="mk-kpi-v">1 200 000 м</div><div class="mk-kpi-l">порог заточки (параметр)</div></div>
-        <div class="mk-kpi"><div class="mk-kpi-v">34 %</div><div class="mk-kpi-l">израсходовано ресурса</div></div>
-        <div class="mk-kpi"><div class="mk-kpi-v">2</div><div class="mk-kpi-l">заточек в истории</div></div>
+        <div class="mk-kpi"><div class="mk-kpi-v">412 300 м</div><div class="mk-kpi-l">пробег за всю жизнь ножа</div></div>
+        <div class="mk-kpi"><div class="mk-kpi-v">490 000 м</div><div class="mk-kpi-l">ресурс ножа (марка)</div></div>
+        <div class="mk-kpi"><div class="mk-kpi-v">84 %</div><div class="mk-kpi-l">израсходовано ресурса</div></div>
+        <div class="mk-kpi"><div class="mk-kpi-v">BLACK TOP 3in1</div><div class="mk-kpi-l">марка ножа</div></div>
     </div>
     <table class="mk-table">
         <thead><tr><th>Дата</th><th>Вид</th><th>Задание высечки</th><th>Оператор</th><th class="mk-num">Метры</th><th class="mk-num">Накоплено</th></tr></thead>
@@ -171,14 +172,14 @@
         <tr><td>16.09.2026 11:42</td><td><span class="mk-badge mk-badge-info">вырубка</span></td><td>ВЫС-1841 · заказ 2611 · съём 2</td><td>Ковалёв А.</td><td class="mk-num">2 000</td><td class="mk-num">412 300</td></tr>
         <tr><td>16.09.2026 10:30</td><td><span class="mk-badge mk-badge-info">вырубка</span></td><td>ВЫС-1841 · заказ 2611 · съём 1</td><td>Ковалёв А.</td><td class="mk-num">2 000</td><td class="mk-num">410 300</td></tr>
         <tr><td>12.09.2026 16:05</td><td><span class="mk-badge mk-badge-info">вырубка</span></td><td>ВЫС-1802 · заказ 2588</td><td>Ковалёв А.</td><td class="mk-num">6 300</td><td class="mk-num">408 300</td></tr>
-        <tr><td>28.08.2026 09:00</td><td><span class="mk-badge mk-badge-warn">заточка</span></td><td>—</td><td>Технолог</td><td class="mk-num">отсечка</td><td class="mk-num">0</td></tr>
+        <tr><td>20.08.2026 14:20</td><td><span class="mk-badge mk-badge-info">вырубка</span></td><td>ВЫС-1655 · заказ 2540</td><td>Ковалёв А.</td><td class="mk-num">84 000</td><td class="mk-num">402 000</td></tr>
         <tr><td>14.05.2026 12:00</td><td><span class="mk-badge mk-badge-mute">начальный остаток</span></td><td>импорт из 1С</td><td>Импорт</td><td class="mk-num">318 000</td><td class="mk-num">318 000</td></tr>
         </tbody>
     </table>
     <div class="mk-panel">
         <div class="mk-panel-title">Правило</div>
         <p style="margin:0;font-size:0.86rem;line-height:1.5">
-            Пробег изменяется <b>только движением</b>, привязанным к съёму или к заточке.
+            Пробег изменяется <b>только движением</b>, привязанным к съёму или к начальному остатку.
             Прямая правка поля запрещена — это кандидат в реестр инвариантов
             (<code>05-invariants.js</code>) вместе с §15 ТЗ. Повторный импорт той же выгрузки
             начальный остаток не удваивает: запись <i>начальный остаток</i> у ножа одна.

@@ -8,9 +8,10 @@
 //      «Заказанного количества» (1076): `рулон` или `этикетка`, пусто = `рулон`
 //      (позиции, заведённые до Фазы 2). Позиция `этикетка` не попадает в планирование
 //      резок Фазы 1, позиция `рулон` — в планирование высечки (§1.3 состава);
-//   3. сколько пробега у ножа: сумма движений «Движения пробега» после последней
-//      «заточки»; «начальный остаток» у ножа один, повторный импорт его перезаписывает
-//      (docs/atex_phase2_solution_composition.md §1.1);
+//   3. сколько пробега у ножа и каков его ресурс: пробег — сумма движений «Движения
+//      пробега» (вырубка + «начальный остаток»; остаток у ножа один, повторный импорт его
+//      перезаписывает); ресурс — у марки ножа (справочник «Марка ножа»), без марки —
+//      ресурс по умолчанию из настройки (docs/atex_phase2_solution_composition.md §1.1);
 //   4. согласован ли раппорт: раппорт — свойство вала (зубья × 3.175 мм), у ножа своего
 //      раппорта нет, раппорт ножа из базы 1С сверяется с раппортом его вала;
 //   5. что написано в «Типе ножей» выгрузки 1С: «85 х 38 (80)» — этикетка 85×38 мм,
@@ -56,6 +57,9 @@
             dieState: { name: 'Состояние ножа', reqs: { selectable: 'Нож подбирается' } },
             dieEventType: { name: 'Тип события высечки', reqs: {} },
             runKind: { name: 'Вид движения пробега', reqs: {} },
+            // Ресурс ножа — пробег, после которого нож перестаёт до конца пробивать
+            // этикетку и идёт в утилизацию. Определяется маркой (сталь, покрытие, закалка).
+            dieBrand: { name: 'Марка ножа', reqs: { resource: 'Ресурс, м' } },
             materialBase: { name: 'Основа сырья', reqs: {} },
             material: { name: 'Сырьё этикетки', reqs: {
                 base: 'Основа',
@@ -100,6 +104,7 @@
                 sleeveWidth: 'Ширина втулки, мм',
                 height: 'Высота ножа, мкм',
                 angle: 'Угол заточки',
+                brand: 'Марка ножа',
                 state: 'Состояние ножа',
                 runs: 'Движение пробега'
             } },
@@ -254,7 +259,7 @@
     }
 
     // Виды «Движения пробега» — записи справочника «Вид движения пробега».
-    var RUN_KIND = { CUT: 'вырубка', SHARPEN: 'заточка', INITIAL: 'начальный остаток' };
+    var RUN_KIND = { CUT: 'вырубка', INITIAL: 'начальный остаток' };
 
     // Вид движения по значению ссылки (подпись или «id:подпись») → RUN_KIND или «».
     function runKindOf(raw) {
@@ -263,25 +268,148 @@
         return '';
     }
 
-    // Пробег ножа по его движениям [{ id, date, kind, meters }]: сумма «вырубки» и
-    // «начального остатка» после последней «заточки» (заточка обнуляет счёт, история
-    // остаётся). → { meters, errors } — движение неизвестного вида в сумму не идёт и
-    // называется в errors.
-    function dieMileage(runs) {
-        var list = (runs || []).slice().sort(function(a, b) { return Number(a.date) - Number(b.date); });
-        var errors = [];
-        var start = 0;
-        list.forEach(function(r, i) {
-            var k = runKindOf(r.kind);
-            if (k === '') errors.push('движение ' + (r.id != null ? r.id : '?') + ': неизвестный вид «' + r.kind + '»');
-            else if (k === RUN_KIND.SHARPEN) start = i + 1;
+    // Дата движения → unix-секунды. object/ отдаёт DATETIME числом, report/ — строкой
+    // «ДД.ММ.ГГГГ ЧЧ:ММ:СС» (время сервера, Europe/Moscow, UTC+3 без перехода).
+    function runTime(v) {
+        var s = String(v == null ? '' : v).trim();
+        if (/^\d+(\.\d+)?$/.test(s)) return Number(s);
+        var m = /^(\d{1,2})\.(\d{1,2})\.(\d{4})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/.exec(s);
+        if (!m) return NaN;
+        return Date.UTC(+m[3], +m[2] - 1, +m[1], +(m[4] || 0) - 3, +(m[5] || 0), +(m[6] || 0)) / 1000;
+    }
+
+    // Движения по времени; при равном времени — по id (порядок записи).
+    function sortRuns(runs) {
+        return (runs || []).slice().sort(function(a, b) {
+            var d = (runTime(a.date) || 0) - (runTime(b.date) || 0);
+            return d !== 0 ? d : (Number(a.id) || 0) - (Number(b.id) || 0);
         });
+    }
+
+    function toMeters(v) {
+        return Number(String(v == null ? '' : v).replace(/\s+/g, '').replace(',', '.')) || 0;
+    }
+
+    // Пробег ножа по его движениям [{ id, date, kind, meters }]: сумма «вырубки» и
+    // «начального остатка» за всю жизнь ножа. → { meters, errors } — движение неизвестного
+    // вида в сумму не идёт и называется в errors.
+    function dieMileage(runs) {
+        var errors = [];
         var meters = 0;
-        for (var i = start; i < list.length; i++) {
-            var k = runKindOf(list[i].kind);
-            if (k === RUN_KIND.CUT || k === RUN_KIND.INITIAL) meters += Number(list[i].meters) || 0;
-        }
+        sortRuns(runs).forEach(function(r) {
+            if (runKindOf(r.kind) === '') errors.push('движение ' + (r.id != null ? r.id : '?') + ': неизвестный вид «' + r.kind + '»');
+            else meters += toMeters(r.meters);
+        });
         return { meters: meters, errors: errors };
+    }
+
+    // Пробег всех ножей по строкам отчёта движений (`die_runs`: die_id, run_id, run_date,
+    // run_kind, meters). → { die_id: { meters, runs, errors } }; нож без движений в индекс
+    // не попадает — его пробег 0.
+    function dieMileageIndex(rows) {
+        var byDie = {};
+        (rows || []).forEach(function(r) {
+            var id = String(r.die_id == null ? '' : r.die_id).trim();
+            if (id === '') return;
+            (byDie[id] = byDie[id] || []).push({ id: r.run_id, date: r.run_date, kind: r.run_kind, meters: r.meters });
+        });
+        var out = {};
+        Object.keys(byDie).forEach(function(id) {
+            var m = dieMileage(byDie[id]);
+            out[id] = { meters: m.meters, runs: byDie[id].length, errors: m.errors };
+        });
+        return out;
+    }
+
+    // История пробега ножа: движения по времени с «Накоплено» — пробегом после этого
+    // движения. → [{ id, date, kind, meters, accumulated }].
+    function dieRunHistory(runs) {
+        var acc = 0;
+        return sortRuns(runs).map(function(r) {
+            var k = runKindOf(r.kind);
+            if (k !== '') acc += toMeters(r.meters);
+            return { id: r.id, date: r.date, kind: k || String(r.kind == null ? '' : r.kind), meters: toMeters(r.meters), accumulated: acc };
+        });
+    }
+
+    // Число из настройки: «1 200 000», «1200000», «0,5». Пусто и мусор → NaN.
+    function parseSettingNumber(v) {
+        var s = String(v == null ? '' : v).replace(/[\s ]+/g, '').replace(',', '.');
+        return /^-?\d+(\.\d+)?$/.test(s) ? Number(s) : NaN;
+    }
+
+    // Ресурс ножа, м: ресурс его марки, а если марки нет или у марки ресурс не задан —
+    // ресурс по умолчанию (настройка DIE_RESOURCE_DEFAULT_M). → { meters, source }:
+    // source 'brand' | 'default'; ресурса нет нигде — { meters: NaN, source: '' }.
+    function dieResource(brandResource, defaultResource) {
+        var b = parseSettingNumber(brandResource);
+        if (b > 0) return { meters: b, source: 'brand' };
+        var d = parseSettingNumber(defaultResource);
+        if (d > 0) return { meters: d, source: 'default' };
+        return { meters: NaN, source: '' };
+    }
+
+    // Износ ножа против его ресурса: 'ok' — меньше 90 % ресурса, 'near' — от 90 %,
+    // 'over' — ресурс выработан, нож пора утилизировать; ресурса нет — '' (не определяется).
+    var DIE_WEAR_NEAR_SHARE = 0.9;
+    function dieWearLevel(meters, resource) {
+        var t = parseSettingNumber(resource);
+        if (!(t > 0)) return '';
+        var m = Number(meters) || 0;
+        if (m >= t) return 'over';
+        if (m >= t * DIE_WEAR_NEAR_SHARE) return 'near';
+        return 'ok';
+    }
+
+    // Состояния ножа — записи справочника «Состояние ножа» (начальные данные —
+    // docs/scripts/apply_label_schema_5301.py). Подбирается только «Рабочий».
+    var DIE_STATE = {
+        WORKING: 'Рабочий',
+        RESERVE: 'Резерв',
+        EXPERTISE: 'На экспертизе',
+        WRITTEN_OFF: 'Списан'
+    };
+
+    // Состояние по значению ссылки (подпись или «id:подпись») → DIE_STATE или «»
+    // (пусто или «нет данных» из базы ножей).
+    function dieStateOf(raw) {
+        var s = norm(String(raw == null ? '' : raw).replace(/^\s*\d+:/, '')).replace(/\s+/g, ' ');
+        for (var k in DIE_STATE) if (norm(DIE_STATE[k]) === s) return DIE_STATE[k];
+        return '';
+    }
+
+    // Кнопки карточки ножа: действие → состояние, в которое оно переводит.
+    var DIE_ACTION = { RETURN: 'return', RESERVE: 'reserve', EXPERTISE: 'expertise', WRITE_OFF: 'writeOff' };
+    var DIE_ACTION_TARGET = {};
+    DIE_ACTION_TARGET[DIE_ACTION.RETURN] = DIE_STATE.WORKING;
+    DIE_ACTION_TARGET[DIE_ACTION.RESERVE] = DIE_STATE.RESERVE;
+    DIE_ACTION_TARGET[DIE_ACTION.EXPERTISE] = DIE_STATE.EXPERTISE;
+    DIE_ACTION_TARGET[DIE_ACTION.WRITE_OFF] = DIE_STATE.WRITTEN_OFF;
+    var DIE_ACTION_LABEL = {};
+    DIE_ACTION_LABEL[DIE_ACTION.RETURN] = 'Вернуть в работу';
+    DIE_ACTION_LABEL[DIE_ACTION.RESERVE] = 'В резерв';
+    DIE_ACTION_LABEL[DIE_ACTION.EXPERTISE] = 'На экспертизу';
+    DIE_ACTION_LABEL[DIE_ACTION.WRITE_OFF] = 'Списать';
+
+    // Переход состояния ножа по кнопке. → { ok: true, state } | { ok: false, error }.
+    // Списанный нож утилизирован и из «Списан» не выходит.
+    function dieStateAction(state, action) {
+        var from = dieStateOf(state);
+        var to = DIE_ACTION_TARGET[action];
+        if (!to) return { ok: false, error: 'неизвестное действие «' + action + '»' };
+        if (from === DIE_STATE.WRITTEN_OFF) return { ok: false, error: 'нож списан — состояние не меняется' };
+        if (from === to) return { ok: false, error: 'нож уже в состоянии «' + to + '»' };
+        return { ok: true, state: to };
+    }
+
+    // Допустимые кнопки для состояния → [{ action, label, state }].
+    function dieStateActions(state) {
+        var out = [];
+        [DIE_ACTION.RETURN, DIE_ACTION.RESERVE, DIE_ACTION.EXPERTISE, DIE_ACTION.WRITE_OFF].forEach(function(a) {
+            var r = dieStateAction(state, a);
+            if (r.ok) out.push({ action: a, label: DIE_ACTION_LABEL[a], state: r.state });
+        });
+        return out;
     }
 
     // Что сделать с «начальным остатком» ножа при импорте пробега из 1С:
@@ -377,6 +505,17 @@
             RUN_KIND: RUN_KIND,
             runKindOf: runKindOf,
             dieMileage: dieMileage,
+            dieMileageIndex: dieMileageIndex,
+            dieRunHistory: dieRunHistory,
+            runTime: runTime,
+            parseSettingNumber: parseSettingNumber,
+            dieResource: dieResource,
+            dieWearLevel: dieWearLevel,
+            DIE_STATE: DIE_STATE,
+            DIE_ACTION: DIE_ACTION,
+            dieStateOf: dieStateOf,
+            dieStateAction: dieStateAction,
+            dieStateActions: dieStateActions,
             initialRunPlan: initialRunPlan,
             cylinderRepeatMm: cylinderRepeatMm,
             checkCylinderRepeat: checkCylinderRepeat,
