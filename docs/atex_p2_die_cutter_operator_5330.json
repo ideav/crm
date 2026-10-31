@@ -1,0 +1,35 @@
+{
+ "tables": [
+  {"name": "Планшет", "fields": [
+   {"name": "Станок высечки", "ref": "Станок высечки"}
+  ]}
+ ],
+ "roles": [
+  {"name": "Оператор", "grants": [
+   {"table": "Задание высечки", "level": "WRITE"},
+   {"table": "Событие смены высечки", "level": "WRITE"},
+   {"table": "Отметка чек-листа ИТС", "level": "WRITE"},
+   {"table": "Вызов ИТС", "level": "WRITE"},
+   {"table": "Партия ГП этикетки", "level": "WRITE"},
+   {"table": "Движение пробега", "level": "WRITE"},
+   {"table": "Мастер-рулон", "level": "READ"},
+   {"table": "Мастер-рулон", "field": "Остаток, м", "level": "WRITE"},
+   {"table": "Мастер-рулон", "field": "Статус мастер-рулона", "level": "WRITE"},
+   {"table": "Нож", "level": "READ"},
+   {"table": "Вал", "level": "READ"},
+   {"table": "Станок высечки", "level": "READ"},
+   {"table": "Тип события высечки", "level": "READ"},
+   {"table": "Вид движения пробега", "level": "READ"},
+   {"table": "Пункт чек-листа ИТС", "level": "READ"},
+   {"table": "Сырьё этикетки", "level": "READ"},
+   {"table": "Основа сырья", "level": "READ"},
+   {"table": "Вид продукции", "level": "READ"},
+   {"table": "Состояние ножа", "level": "READ"},
+   {"table": "Марка ножа", "level": "READ"},
+   {"table": "Партия джамбо", "level": "READ"},
+   {"table": "Задание первичной резки", "level": "READ"},
+   {"table": "Полоса раскроя", "level": "READ"},
+   {"table": "Обеспечение этикетки", "level": "READ"}
+  ]}
+ ]
+}

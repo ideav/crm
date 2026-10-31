@@ -1,0 +1,95 @@
+/* Рабочее место «Пульт высечки» (ideav/crm#5326). Планшет: крупные кнопки, без мелких целей. */
+.atex-dc {
+    --atex-dc-border: var(--border-color, #e5e7eb);
+    --atex-dc-panel: var(--bg-secondary, #ffffff);
+    --atex-dc-muted: var(--text-secondary, #6b7280);
+    --atex-dc-ok: #15803d;
+    --atex-dc-ok-bg: #dcfce7;
+    --atex-dc-warn: #92400e;
+    --atex-dc-warn-bg: #fef3c7;
+    --atex-dc-bad: #b91c1c;
+    --atex-dc-bad-bg: #fee2e2;
+    --atex-dc-info: #1d4ed8;
+    --atex-dc-info-bg: #dbeafe;
+    --atex-dc-pick-bg: #e8eef6;
+    --atex-dc-primary: #1d4ed8;
+    height: 100%;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow: auto;
+    padding: 8px;
+    background: var(--bg-primary, #f8fafc);
+    color: var(--text-primary, #111827);
+    box-sizing: border-box;
+}
+
+[data-theme="dark"] .atex-dc {
+    --atex-dc-ok: #4ade80;
+    --atex-dc-ok-bg: rgba(74, 222, 128, 0.14);
+    --atex-dc-warn: #fcd34d;
+    --atex-dc-warn-bg: rgba(251, 191, 36, 0.16);
+    --atex-dc-bad: #fca5a5;
+    --atex-dc-bad-bg: rgba(248, 113, 113, 0.16);
+    --atex-dc-info: #93c5fd;
+    --atex-dc-info-bg: rgba(96, 165, 250, 0.16);
+    --atex-dc-pick-bg: rgba(141, 169, 196, 0.2);
+    --atex-dc-primary: #60a5fa;
+}
+
+.atex-dc *, .atex-dc *::before, .atex-dc *::after { box-sizing: border-box; }
+.atex-dc-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.atex-dc-title { margin: 0 auto 0 0; font-size: 20px; }
+.atex-dc-muted { color: var(--atex-dc-muted); font-size: 13px; }
+.atex-dc-empty { padding: 16px; color: var(--atex-dc-muted); }
+
+.atex-dc-message { padding: 8px 12px; border-radius: 6px; background: var(--atex-dc-info-bg); color: var(--atex-dc-info); }
+.atex-dc-message.is-ok { background: var(--atex-dc-ok-bg); color: var(--atex-dc-ok); }
+.atex-dc-message.is-warn { background: var(--atex-dc-warn-bg); color: var(--atex-dc-warn); }
+.atex-dc-message.is-error { background: var(--atex-dc-bad-bg); color: var(--atex-dc-bad); }
+
+.atex-dc-pad { display: grid; grid-template-columns: minmax(220px, 300px) 1fr; gap: 8px; min-height: 0; flex: 1 1 auto; }
+@media (max-width: 760px) { .atex-dc-pad { grid-template-columns: 1fr; } }
+.atex-dc-panel { background: var(--atex-dc-panel); border: 1px solid var(--atex-dc-border); border-radius: 8px; padding: 10px; overflow: auto; min-width: 0; }
+.atex-dc-panel-title { margin: 12px 0 6px; font-size: 15px; }
+.atex-dc-sub { margin: 12px 0 4px; font-size: 13px; color: var(--atex-dc-muted); }
+
+.atex-dc-job { padding: 10px; border: 1px solid var(--atex-dc-border); border-radius: 6px; margin-bottom: 6px; cursor: pointer; }
+.atex-dc-job.is-picked { background: var(--atex-dc-pick-bg); border-color: var(--atex-dc-primary); }
+.atex-dc-job.is-done { opacity: 0.65; }
+.atex-dc-job-top { display: flex; justify-content: space-between; gap: 6px; }
+.atex-dc-job-no { font-weight: 600; }
+
+.atex-dc-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; }
+.atex-dc-order { font-size: 26px; font-weight: 700; }
+.atex-dc-pulls { font-size: 18px; }
+.atex-dc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 6px; margin: 10px 0; }
+.atex-dc-cell { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; border: 1px solid var(--atex-dc-border); border-radius: 6px; min-width: 0; overflow-wrap: anywhere; }
+.atex-dc-cols { display: grid; grid-template-columns: 1fr minmax(220px, 320px); gap: 12px; }
+@media (max-width: 960px) { .atex-dc-cols { grid-template-columns: 1fr; } }
+
+.atex-dc-badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; background: var(--atex-dc-pick-bg); }
+.atex-dc-badge.is-ok { background: var(--atex-dc-ok-bg); color: var(--atex-dc-ok); }
+.atex-dc-badge.is-info { background: var(--atex-dc-info-bg); color: var(--atex-dc-info); }
+
+.atex-dc-btn { min-height: 44px; padding: 8px 14px; border: 1px solid var(--atex-dc-border); border-radius: 6px; background: var(--atex-dc-panel); color: inherit; font-size: 15px; cursor: pointer; }
+.atex-dc-btn-lg { min-height: 56px; font-size: 17px; font-weight: 600; }
+.atex-dc-btn-primary { background: var(--atex-dc-primary); border-color: var(--atex-dc-primary); color: #fff; }
+.atex-dc-btn-ok { background: var(--atex-dc-ok-bg); border-color: var(--atex-dc-ok); color: var(--atex-dc-ok); }
+.atex-dc-btn-bad { background: var(--atex-dc-bad-bg); border-color: var(--atex-dc-bad); color: var(--atex-dc-bad); }
+
+.atex-dc-input { min-height: 40px; padding: 6px 8px; border: 1px solid var(--atex-dc-border); border-radius: 6px; background: var(--atex-dc-panel); color: inherit; font-size: 15px; max-width: 100%; }
+.atex-dc-label { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
+.atex-dc-check { display: flex; align-items: center; gap: 8px; min-height: 40px; }
+.atex-dc-check input { width: 22px; height: 22px; }
+
+.atex-dc-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.atex-dc-table th, .atex-dc-table td { padding: 6px; border-bottom: 1px solid var(--atex-dc-border); text-align: left; vertical-align: top; }
+.atex-dc-table .num { text-align: right; white-space: nowrap; }
+
+.atex-dc-modal { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.45); padding: 16px; }
+.atex-dc-modal[hidden] { display: none; }
+.atex-dc-modal-box { width: min(520px, 100%); max-height: 90vh; overflow: auto; background: var(--atex-dc-panel); border-radius: 8px; padding: 16px; }
+.atex-dc-modal-box h3 { margin-top: 0; }
+.atex-dc-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
