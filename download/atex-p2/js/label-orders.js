@@ -244,11 +244,23 @@
         return Object.keys(write).some(function(k) { return String(cur[k]) !== String(write[k]); });
     }
 
+    // Сохранение формы сбрасывает «Подтверждено ИТС», только если подтверждение стоит, а размер
+    // сменился (подтверждали другой размер). В остальных случаях поля в _m_set нет: у Менеджера на
+    // него грант READ, и ядро отбило бы весь запрос.
+    function itsResetOnSave(prev, f) {
+        if (!prev || !prev.itsConfirmed) return false;
+        return num(prev.width) !== num(f.width) || num(prev.length) !== num(f.length);
+    }
+
     // Поля формы позиции → { field: ошибка } (пусто — форма верна).
-    function validatePositionForm(f) {
+    // opts — { prev: позиция до правки, canIts: право подтверждать ИТС } (для правки позиции).
+    function validatePositionForm(f, opts) {
         var err = {};
         if (!(num(f.width) > 0)) err.width = 'ширина этикетки — число больше нуля';
         if (!(num(f.length) > 0)) err.length = 'длина этикетки — число больше нуля';
+        if (!err.width && !err.length && opts && !opts.canIts && itsResetOnSave(opts.prev, f)) {
+            err.width = 'размер подтверждён ИТС — изменить его может ' + (opts.itsRoles || ITS_ROLES_DEFAULT) + ' (или пусть сначала снимет подтверждение)';
+        }
         if (!(num(f.labelsPerRoll) > 0)) err.labelsPerRoll = 'этикеток в рулоне — больше нуля';
         if (!(num(f.rolls) > 0) || Math.round(num(f.rolls)) !== num(f.rolls)) err.rolls = 'рулонов — целое больше нуля';
         var st = String(f.orderStreams == null ? '' : f.orderStreams).trim();
@@ -318,6 +330,7 @@
         planPosition: planPosition,
         writeDiffers: writeDiffers,
         validatePositionForm: validatePositionForm,
+        itsResetOnSave: itsResetOnSave,
         isoToRu: isoToRu,
         ruToIso: ruToIso,
         canConfirmIts: canConfirmIts,
@@ -845,7 +858,7 @@
     AtexLabelOrders.prototype.saveForm = function() {
         var self = this;
         var f = this.formValues();
-        var err = validatePositionForm(f);
+        var err = validatePositionForm(f, { prev: this.formPosition, canIts: this.canIts(), itsRoles: this.itsRolesText() });
         this.showFormErrors(err);
         if (Object.keys(err).length) return Promise.resolve();
         var t = this.tables, r = t.position.reqs;
@@ -863,7 +876,7 @@
         if (f.winding && this.cols.winding) put(this.cols.winding.id, f.winding);
         if (f.due && this.cols.due) put(this.cols.due.id, isoToRu(f.due));
         // Размер поменялся — прежнее подтверждение ИТС было за другой размер.
-        if (p && (num(p.width) !== num(f.width) || num(p.length) !== num(f.length))) put(r.itsConfirmed, '');
+        if (itsResetOnSave(p, f)) put(r.itsConfirmed, '');
         this.busy = true;
         var orderPromise = f.orderId ? Promise.resolve(f.orderId) : this.createOrder(f.newOrderNo, f.clientId);
         return orderPromise.then(function(orderId) {

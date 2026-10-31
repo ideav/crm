@@ -256,6 +256,27 @@ var DIES = [
     assert(c({ role: '', user: '', db: 'ateh1' }, '') === false, 'роль не определена — нельзя');
     var html = fs.readFileSync(path.join(__dirname, '../templates/atex-p2/label-orders.html'), 'utf8');
     assert(html.indexOf('data-role="{_global_.role}"') >= 0 && html.indexOf('data-user="{_global_.user}"') >= 0, 'шаблон передаёт роль и пользователя');
+    // Форма позиции и грант READ на «Подтверждено ИТС» у Менеджера: поле уходит в _m_set только
+    // при сбросе подтверждения (иначе ядро отбивает весь запрос), сброс без права — ошибка размера.
+    assert(typeof LO.itsResetOnSave === 'function', 'itsResetOnSave экспортирована');
+    if (typeof LO.itsResetOnSave === 'function') {
+        var conf = { width: 18, length: 18, itsConfirmed: true };
+        var unconf = { width: 18, length: 18, itsConfirmed: false };
+        assert(LO.itsResetOnSave(conf, { width: '20', length: '18' }) === true, 'подтверждено и размер сменился — сбросить');
+        assert(LO.itsResetOnSave(conf, { width: '18,0', length: '18' }) === false, 'размер тот же («18,0») — не трогать');
+        assert(LO.itsResetOnSave(unconf, { width: '20', length: '18' }) === false, 'не подтверждено — поле не писать вовсе');
+        assert(LO.itsResetOnSave(null, { width: '20', length: '18' }) === false, 'новая позиция — поле не писать');
+    }
+    var formOk = { width: '20', length: '18', labelsPerRoll: '1000', rolls: '5', orderStreams: '', materialId: '177', orderId: '437', knifeType: '' };
+    var confPos = { width: 18, length: 18, itsConfirmed: true };
+    var e1 = LO.validatePositionForm(formOk, { prev: confPos, canIts: false });
+    assert(!!e1.width && /Диспетчер|LABEL_ITS_ROLES|ИТС/.test(e1.width), 'без права: смена подтверждённого размера — ошибка у поля размера', JSON.stringify(e1));
+    assert(Object.keys(LO.validatePositionForm(formOk, { prev: confPos, canIts: true })).length === 0, 'с правом: размер меняется, подтверждение сбросится');
+    assert(Object.keys(LO.validatePositionForm(formOk, { prev: { width: 18, length: 18, itsConfirmed: false }, canIts: false })).length === 0,
+        'без права, но подтверждения нет — размер меняется');
+    assert(Object.keys(LO.validatePositionForm(Object.assign({}, formOk, { width: '18' }), { prev: confPos, canIts: false })).length === 0,
+        'без права, размер прежний — остальные поля сохраняются');
+
     // Без права toggleIts ничего не пишет и не спрашивает подтверждения — даже если кнопку вызвали в обход разметки.
     var M = require('../download/atex-p2/js/label-orders.js');
     var posted = 0, asked = 0, said = '';
