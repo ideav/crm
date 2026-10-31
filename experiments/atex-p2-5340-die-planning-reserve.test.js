@@ -150,4 +150,19 @@ var pf9 = typeof C.positionPickFields === 'function' ? C.positionPickFields(TP, 
 assert(pf9 && pf9.t71 === 'k1' && pf9.t72 === 'подобран' && pf9.t73 === '5000' && pf9.t74 === '',
     'D9: поля записи позиции — нож, «Подбор ножа», мин. партия, ИТС (как пишет «Заказы этикетки»)', JSON.stringify(pf9));
 
+// ── D15. Загрузка ножей и валов не теряет не размещённые задания ─────────────
+// Задание с блокировкой «Упорядочить» не ставит в план («Не размещены»), но его нож и вал всё равно
+// понадобятся: в загрузке они есть, с пометкой «не размещено».
+var jobs15 = [J(1, { dieId: 'k1', dieNo: '111', cylinderId: 'c1', cylinder: '96', footage: 44 * 60 }),
+    J(2, { dieId: 'k2', dieNo: '222', cylinderId: 'c2', cylinder: '104', footage: 44 * 30, machineId: 'M1', start: MON })];
+var plan15 = C.orderQueue({ jobs: jobs15, machines: [M1], from: MON, settings: S, blocked: { '2': ['нет МР нужного формата'] } });
+var load15 = C.toolLoad({ plan: plan15, jobs: jobs15, from: MON, settings: S, dies: { k2: { mileage: 1000, resource: 10000 } } });
+var k15 = load15.knives.filter(function(k) { return k.dieId === 'k2'; })[0];
+assert(k15 && k15.jobs === 1 && k15.unplaced === 1 && k15.meters === 1320 && k15.mileageAfter === 2320,
+    'D15: нож не размещённого задания есть в загрузке (заданий 1, из них не размещено 1), метраж — в прогнозе пробега', JSON.stringify(k15));
+var c15 = load15.cylinders.filter(function(c) { return c.cylinderId === 'c2'; })[0];
+assert(c15 && c15.jobs === 1 && c15.unplaced === 1, 'D15: вал не размещённого задания есть в загрузке', JSON.stringify(c15));
+var k15a = load15.knives.filter(function(k) { return k.dieId === 'k1'; })[0];
+assert(k15a && k15a.unplaced === 0, 'D15: у размещённого — «не размещено» 0', JSON.stringify(k15a));
+
 console.log('\nИтого: ' + passed + ' из ' + total);

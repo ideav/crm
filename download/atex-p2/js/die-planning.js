@@ -476,12 +476,12 @@
         var L = C.toolLoad({ plan: plan, jobs: s.jobs, from: s.now, settings: s.settings, dies: s.dieInfo });
         var kn = L.knives.map(function(k) {
             var w = WEAR[k.level] || WEAR[''];
-            return '<tr><td>' + esc(k.dieNo || k.dieId) + '</td><td class="num">' + k.jobs + '</td><td class="num">' + fmtNum(k.minutes) + '</td><td class="num">' + fmtNum(k.meters) + '</td>' +
+            return '<tr><td>' + esc(k.dieNo || k.dieId) + '</td><td class="num">' + k.jobs + (k.unplaced ? ' <span class="atex-dp-badge is-warn" title="Не размещены «Упорядочить» (блокировка или нет станка) — нож им всё равно нужен">' + k.unplaced + ' не размещ.</span>' : '') + '</td><td class="num">' + fmtNum(k.minutes) + '</td><td class="num">' + fmtNum(k.meters) + '</td>' +
                 '<td class="num">' + fmtNum(k.mileage) + '</td><td class="num">' + fmtNum(k.mileageAfter) + '</td><td class="num">' + (k.resource ? fmtNum(k.resource) : '—') + '</td>' +
                 '<td><span class="atex-dp-badge ' + w[0] + '">' + w[1] + '</span></td></tr>';
         }).join('');
         var cy = L.cylinders.map(function(c) {
-            return '<tr><td>' + esc(c.cylinder || c.cylinderId) + '</td><td class="num">' + c.jobs + '</td><td class="num">' + fmtNum(c.minutes) + '</td><td class="num">' + c.changes + '</td></tr>';
+            return '<tr><td>' + esc(c.cylinder || c.cylinderId) + '</td><td class="num">' + c.jobs + (c.unplaced ? ' <span class="atex-dp-badge is-warn" title="Не размещены «Упорядочить» — вал им всё равно нужен">' + c.unplaced + ' не размещ.</span>' : '') + '</td><td class="num">' + fmtNum(c.minutes) + '</td><td class="num">' + c.changes + '</td></tr>';
         }).join('');
         return '<h3 class="atex-dp-h">Ножи <span class="atex-dp-muted">горизонт ' + s.settings.horizonDays + ' дн. с ' + esc(fmtDate(s.now)) + ' · ' + (this.plan ? 'по плану «Упорядочить» (не записан)' : 'по записанному плану') + '</span></h3>' +
             (kn ? '<table class="atex-dp-table"><thead><tr><th>Нож</th><th class="num">Заданий</th><th class="num">Минут</th><th class="num">Метров</th><th class="num">Пробег сейчас, м</th><th class="num">Пробег после плана, м</th><th class="num">Ресурс, м</th><th>Износ</th></tr></thead><tbody>' + kn + '</tbody></table>' : '<div class="atex-dp-empty">В горизонте плана заданий нет.</div>') +

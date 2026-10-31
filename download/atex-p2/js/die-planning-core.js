@@ -530,20 +530,29 @@
         var byJob = {};
         (inp.jobs || []).forEach(function(j) { byJob[j.id] = j; });
         var knives = {}, cyls = {};
+        function add(j, minutes, it, unplaced) {
+            var kk = j.dieId || ('№' + j.dieNo);
+            var k = knives[kk] || (knives[kk] = { dieId: j.dieId, dieNo: j.dieNo, jobs: 0, minutes: 0, meters: 0, planned: 0, unplaced: 0 });
+            k.jobs++; k.minutes += minutes; k.meters = round1(k.meters + num(j.footage));
+            if (!it || !it.fixed) k.planned = round1(k.planned + num(j.footage));
+            var ck = j.cylinderId || j.cylinder;
+            var c = cyls[ck] || (cyls[ck] = { cylinderId: j.cylinderId, cylinder: j.cylinder, jobs: 0, minutes: 0, changes: 0, unplaced: 0 });
+            c.jobs++; c.minutes += minutes;
+            if (it && it.setupKind === 'cylinder') c.changes++;
+            if (unplaced) { k.unplaced++; c.unplaced++; }
+        }
         Object.keys(inp.plan.machines).forEach(function(mid) {
             inp.plan.machines[mid].items.forEach(function(it) {
                 var j = byJob[it.jobId];
                 if (!j || it.done || it.start >= until) return;
-                var minutes = it.setup + it.run;
-                var kk = j.dieId || ('№' + j.dieNo);
-                var k = knives[kk] || (knives[kk] = { dieId: j.dieId, dieNo: j.dieNo, jobs: 0, minutes: 0, meters: 0, planned: 0 });
-                k.jobs++; k.minutes += minutes; k.meters = round1(k.meters + num(j.footage));
-                if (!it.fixed) k.planned = round1(k.planned + num(j.footage));
-                var ck = j.cylinderId || j.cylinder;
-                var c = cyls[ck] || (cyls[ck] = { cylinderId: j.cylinderId, cylinder: j.cylinder, jobs: 0, minutes: 0, changes: 0 });
-                c.jobs++; c.minutes += minutes;
-                if (it.setupKind === 'cylinder') c.changes++;
+                add(j, it.setup + it.run, it, false);
             });
+        });
+        // не размещённые «Упорядочить» (блокировка, нет станка) — нож и вал им всё равно нужны;
+        // минуты — только вырубка, без наладки и без дня
+        (inp.plan.unplaced || []).forEach(function(u) {
+            var j = byJob[u.jobId];
+            if (j) add(j, runMinutes(j.footage, s), null, true);
         });
         var dies = inp.dies || {};
         var kl = Object.keys(knives).map(function(k) {
