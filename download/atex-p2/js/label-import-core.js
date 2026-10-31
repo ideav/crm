@@ -346,7 +346,7 @@
             v.cylinder = String(teeth);
             var rep = cellNum(get('repeat'));
             if (rep != null && !isNaN(rep) && lp) {
-                var chk = lp.checkDieRepeat(rep, teeth);
+                var chk = lp.checkDieRepeat(fmtNum(rep), teeth);   // ячейка Excel: 419.00300000000004
                 if (!chk.ok) warnings.push(chk.error + ' — раппорт 1С не берётся, вал — по номеру');
             }
         }
