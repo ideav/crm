@@ -153,7 +153,8 @@
             var d = dieById[j.dieId];
             if (!j.cylinderId && d && d.cylinderId) { j.cylinderId = d.cylinderId; j.cylinder = String(d.cylinder || ''); j.cylinderMissing = true; }
         });
-        var machines = C.machinesFromRecords(r[6], t);
+        var machineTable = meta.filter(function(x) { return String(x.id) === String(t.machine.id); })[0];
+        var machines = C.machinesFromRecords(r[6], t, { turretReq: extra.sreq(machineTable, 'Туррель') });
         var diInfo = C.dieInfo(dies, brandRes, settings.dieResource);
         var rolls = mr.rolls.map(function(x) { return { id: x.id, no: x.no, format: x.format, materialId: x.materialId, rest: x.rest, status: x.status }; });
         var queue = jc && jc.openJobs ? JC.queueSupply(jc.openJobs, settings.mrLength) : [];
@@ -266,7 +267,7 @@
         html.push('<div class="atex-pp-tabs">' + grid.columns.map(function(c) {
             var n = c.days.filter(inRange).reduce(function(a, d) { return a + d.items.filter(function(i) { return !i.continuation; }).length; }, 0);
             return '<button class="atex-pp-tab' + (c.machineId === self.machineTab ? ' is-active' : '') + '" type="button" data-machine-tab="' + esc(c.machineId) + '" title="' + esc(c.name + self.machineHint(c.machineId)) + '">' +
-                '<span class="atex-pp-tab-label">' + esc(c.name) + '</span><span class="atex-pp-tab-count">' + n + '</span></button>';
+                '<span class="atex-pp-tab-label">' + esc(c.name) + (self.state.machines.some(function(x) { return x.id === c.machineId && x.turret; }) ? ' ⟳' : '') + '</span><span class="atex-pp-tab-count">' + n + '</span></button>';
         }).join('') + '</div>');
         html.push(this.qualityLine(grid));
         if (this.plan) html.push('<p class="atex-dp-muted">План не записан: изменятся ' + this.changedItems().length + ' заданий, изменённые подсвечены. «Применить» записывает план.</p>');
@@ -390,7 +391,7 @@
         if (!m) return '';
         var names = this.state.cylinderNames || {};
         var cyl = m.cylinders.length ? ' · валы ' + m.cylinders.map(function(c) { return names[c] || c; }).join(', ') : ' · любой вал';
-        return esc(cyl) + (m.stopMaterials.length ? ' · стоп-лист: ' + m.stopMaterials.length : '');
+        return esc(cyl) + (m.stopMaterials.length ? ' · стоп-лист: ' + m.stopMaterials.length : '') + (m.turret ? ' · туррель: втулка ≥ 2× диаметра' : '');
     };
 
     AtexDiePlanningApp.prototype.planMachineOf = function(jobId) {
