@@ -14,7 +14,7 @@
 //     LABEL_MASTER_ROLL_M; меньше — предупреждение, не блокировка;
 //   - подтверждение ИТС (`labelItsCheck`): размер вне [LABEL_ITS_MIN_MM, LABEL_ITS_MAX_MM] →
 //     «Нужно подтверждение ИТС»; кнопка «Подтвердить ИТС» ставит «Подтверждено ИТС» —
-//     только ролям из LABEL_ITS_ROLES (пусто — «ИТС»), admin и владельцу базы (`canConfirmIts`);
+//     только ролям из LABEL_ITS_ROLES (пусто — «Диспетчер»: ИТС — это он), admin и владельцу базы (`canConfirmIts`);
 //   - потребность позиции (`labelPositionDemand`): этикеток, раппортов, метраж вырубки,
 //     мастер-рулонов, коэффициент использования сырья.
 //
@@ -45,8 +45,8 @@
     var POSITION_ID_COLUMN = 'РулоновID';
     var RUNS_REPORT = 'die_runs';
     var SETTINGS = { MR_LENGTH: 'LABEL_MASTER_ROLL_M', ITS_MIN: 'LABEL_ITS_MIN_MM', ITS_MAX: 'LABEL_ITS_MAX_MM', ITS_ROLES: 'LABEL_ITS_ROLES' };
-    // Кто подтверждает ИТС, если настройка LABEL_ITS_ROLES пуста.
-    var ITS_ROLES_DEFAULT = 'ИТС';
+    // Кто подтверждает ИТС, если настройка LABEL_ITS_ROLES пуста: ИТС на производстве — Диспетчер.
+    var ITS_ROLES_DEFAULT = 'Диспетчер';
     var MR_LENGTH_DEFAULT_M = 2000;
 
     // ── Чистые функции (покрыты experiments/atex-p2-5324-label-orders.test.js) ───
@@ -284,7 +284,7 @@
     }
 
     // Право подтвердить или снять подтверждение ИТС. ctx — { role, user, db } вошедшего;
-    // rolesSetting — LABEL_ITS_ROLES: имена ролей через запятую или «;» (пусто — «ИТС»).
+    // rolesSetting — LABEL_ITS_ROLES: имена ролей через запятую или «;» (пусто — «Диспетчер»).
     // Сверка по ИМЕНИ роли: id ролей у баз свои. admin и владелец базы — всегда: ядро
     // пускает их в обход грантов (Check_Grant).
     function canConfirmIts(ctx, rolesSetting) {

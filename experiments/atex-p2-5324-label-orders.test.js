@@ -245,11 +245,12 @@ var DIES = [
     assert(typeof LO.canConfirmIts === 'function', 'canConfirmIts экспортирована');
     if (typeof LO.canConfirmIts !== 'function') return Promise.resolve();
     var c = LO.canConfirmIts;
-    assert(c({ role: 'ИТС', user: 'ivanov', db: 'ateh1' }, '') === true, 'роль «ИТС» подтверждает (настройка пуста — по умолчанию «ИТС»)');
+    assert(c({ role: 'Диспетчер', user: 'ivanov', db: 'ateh1' }, '') === true, 'ИТС — это Диспетчер: подтверждает при пустой настройке');
+    assert(c({ role: 'ИТС', user: 'ivanov', db: 'ateh1' }, '') === false, 'отдельной роли «ИТС» нет — по умолчанию она не пускается');
     assert(c({ role: 'Менеджер', user: 'petrova', db: 'ateh1' }, '') === false, 'Менеджер не подтверждает');
-    assert(c({ role: 'Менеджер', user: 'petrova', db: 'ateh1' }, 'ИТС, Менеджер') === true, 'роль из списка настройки подтверждает');
-    assert(c({ role: '  итс ', user: 'x', db: 'ateh1' }, 'Главный технолог;ИТС') === true, 'сравнение без регистра и пробелов, разделитель «;» тоже');
-    assert(c({ role: 'ИТС', user: 'x', db: 'ateh1' }, 'Главный технолог') === false, 'настройка задана — «ИТС» по умолчанию не добавляется');
+    assert(c({ role: 'Менеджер', user: 'petrova', db: 'ateh1' }, 'Диспетчер, Менеджер') === true, 'роль из списка настройки подтверждает');
+    assert(c({ role: '  диспетчер ', user: 'x', db: 'ateh1' }, 'Главный технолог;Диспетчер') === true, 'сравнение без регистра и пробелов, разделитель «;» тоже');
+    assert(c({ role: 'Диспетчер', user: 'x', db: 'ateh1' }, 'Главный технолог') === false, 'настройка задана — «Диспетчер» по умолчанию не добавляется');
     assert(c({ role: 'admin', user: 'x', db: 'ateh1' }, '') === true && c({ role: 'Менеджер', user: 'ateh1', db: 'ateh1' }, '') === true,
         'admin и владелец базы подтверждают всегда (ядро пускает их в обход грантов)');
     assert(c({ role: '', user: '', db: 'ateh1' }, '') === false, 'роль не определена — нельзя');
@@ -270,10 +271,10 @@ var DIES = [
     var pos = { id: '488', orderNo: '3259', width: 18, length: 18, itsConfirmed: false };
     return Promise.resolve(M.AtexLabelOrders.prototype.toggleIts.call(fake, pos)).then(function() {
         assert(posted === 0 && asked === 0 && /ИТС/.test(said), 'Менеджер: toggleIts не пишет, объясняет, чья кнопка', said);
-        fake.ctx = { role: 'ИТС', user: 'ivanov', db: 'ateh1' };
+        fake.ctx = { role: 'Диспетчер', user: 'ivanov', db: 'ateh1' };
         return M.AtexLabelOrders.prototype.toggleIts.call(fake, pos);
     }).then(function() {
-        assert(posted === 1 && asked === 1, 'роль ИТС: toggleIts спрашивает и пишет');
+        assert(posted === 1 && asked === 1, 'Диспетчер: toggleIts спрашивает и пишет');
     });
 })().then(function() {
     console.log('\n' + passed + '/' + total + ' проверок пройдено.');
