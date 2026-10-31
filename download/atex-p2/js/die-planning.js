@@ -69,6 +69,8 @@
         this.tab = 'queue';
         this.ganttDay = null;
         this.busy = false;
+        this.marked = {};
+        this.scopeKey = null;
     }
 
     AtexDiePlanningApp.prototype.$ = function(id) { return this.el.querySelector('#' + id); };
@@ -159,8 +161,10 @@
         var rolls = mr.rolls.map(function(x) { return { id: x.id, no: x.no, format: x.format, materialId: x.materialId, rest: x.rest, status: x.status }; });
         var queue = jc && jc.openJobs ? JC.queueSupply(jc.openJobs, settings.mrLength) : [];
         var openJobs = jobs.filter(function(j) { return C.isMovable(j); });
-        var cover = C.coverJobs(openJobs, rolls, queue, settings.tolerance);
-        var groups = JC.coverDemand(JC.demandGroups(rows, { tolerance: settings.tolerance }), JC.stockSupply(rolls), queue);
+        // одна мера с «Зарезервировать МР»: свой резерв у рулона, затем целые свободные рулоны, затем резка
+        var mrOpts = { tasks: mr.tasks, moves: mr.moves };
+        var cover = C.coverJobs(openJobs, mr.rolls, queue, settings.tolerance, mrOpts);
+        var groups = C.coverGroups(openJobs, mr.rolls, queue, settings.tolerance, mrOpts);
         var materials = LO.materialIndex(r[5], t);
         var positions = kvRep(r[1]).map(function(x) { return LO.positionFromRow(x, materials); });
         var cutters = r[9].map(function(x) {
@@ -270,6 +274,8 @@
                 '<span class="atex-pp-tab-label">' + esc(c.name) + (self.state.machines.some(function(x) { return x.id === c.machineId && x.turret; }) ? ' ⟳' : '') + '</span><span class="atex-pp-tab-count">' + n + '</span></button>';
         }).join('') + '</div>');
         html.push(this.qualityLine(grid));
+        var nMarked = Object.keys(this.marked).length;
+        if (nMarked) html.push('<p class="atex-dp-muted">Отмечено заданий: <b>' + nMarked + '</b>. <button class="atex-pp-btn" type="button" data-act="unmark">Снять отметки</button></p>');
         if (this.plan) html.push('<p class="atex-dp-muted">План не записан: изменятся ' + this.changedItems().length + ' заданий, изменённые подсвечены. «Применить» записывает план.</p>');
         var col = grid.columns.filter(function(c) { return c.machineId === self.machineTab; })[0];
         if (!col.active) html.push('<p class="atex-dp-muted">Станок: ' + esc(col.status) + '.</p>');
@@ -343,6 +349,7 @@
         var runFrom = it ? it.from + it.setup : 0;
         var time = it ? '⏱ ' + clock(runFrom) + ' – ' + clock(runFrom + it.run) + ' · ' + it.run + ' мин' : '⏱ ' + fmtNum(j.duration) + ' мин';
         out += '<div class="' + cls + '" data-job-id="' + esc(j.id) + '"><div class="atex-pp-cut-info">' +
+            (it && it.continuation ? '' : '<label class="atex-dp-mark" title="Отметить задание: «Применить» и «Задачи на втулки» можно выполнить только для отмеченных"><input type="checkbox" data-mark="' + esc(j.id) + '"' + (this.marked[j.id] ? ' checked' : '') + '></label>') +
             '<a class="atex-pp-cut-seq" href="/' + esc(this.db) + '/edit_obj/' + esc(j.id) + '" target="_blank" rel="noopener" title="Открыть карточку задания (id ' + esc(j.id) + ')">№ ' + esc(seq) + '</a>' +
             '<div class="atex-pp-cut-time">' + time + '</div>' +
             '<span class="atex-pp-cut-name">' + esc(j.orderNo ? 'заказ ' + j.orderNo : 'поз. ' + j.positionId) + '</span>' +
@@ -402,16 +409,18 @@
 
     AtexDiePlanningApp.prototype.renderDeficit = function() {
         var s = this.state;
-        if (!s.groups.length) return '<div class="atex-dp-empty">Заданий без мастер-рулона нет — потребности в МР нет.</div>';
+        if (!s.groups.length) return '<div class="atex-dp-empty">Запланированных заданий с форматом ножа нет — потребности в МР нет.</div>';
         var rows = s.groups.map(function(g) {
-            return '<tr class="' + (g.deficit > 0 ? 'is-deficit' : '') + '"><td class="num">' + g.min + '–' + g.max + '</td><td>' + esc(g.material) + '</td>' +
-                '<td class="num">' + fmtNum(g.meters) + '</td><td class="num">' + fmtNum(g.stock) + '</td><td class="num">' + fmtNum(g.planned) + '</td>' +
+            return '<tr class="' + (g.deficit > 0 ? 'is-deficit' : '') + '"><td class="num">' + g.min + '–' + (g.min + s.settings.tolerance) + '</td><td>' + esc(g.material) + '</td>' +
+                '<td class="num">' + fmtNum(g.meters) + '</td><td class="num">' + (g.reserved ? fmtNum(g.reserved) : '—') + '</td>' +
+                '<td class="num">' + (g.stock ? fmtNum(g.stock) : '—') + '</td><td class="num">' + (g.whole ? fmtNum(g.whole) : '—') + '</td><td class="num">' + (g.leftover ? fmtNum(g.leftover) : '—') + '</td>' +
+                '<td class="num">' + (g.planned ? fmtNum(g.planned) : '—') + '</td>' +
                 '<td class="num">' + (g.deficit > 0 ? '<b>' + fmtNum(g.deficit) + '</b>' : '—') + '</td>' +
                 '<td class="num">' + esc(g.due > 0 ? fmtDate(g.due) : '—') + (g.late ? ' <span class="atex-dp-badge is-bad">резка позже</span>' : '') + '</td>' +
                 '<td>' + g.jobs.map(esc).join(', ') + '</td></tr>';
         });
-        return '<table class="atex-dp-table"><thead><tr><th class="num">Формат, мм</th><th>Сырьё</th><th class="num">Нужно, м</th><th class="num">На складе, м</th><th class="num">В резке, м</th><th class="num">Дефицит, м</th><th class="num">К дате</th><th>Задания</th></tr></thead><tbody>' +
-            rows.join('') + '</tbody></table><p class="atex-dp-muted">Нужно — метраж заданий без мастер-рулона по сроку; на складе — рулоны подходящего сырья и формата; в резке — рулоны открытых заданий первичной резки. «К дате» — ближайший плановый старт группы. Расчёт — тот же, что у раскроя джамбо.</p>';
+        return '<table class="atex-dp-table"><thead><tr><th class="num">Формат, мм</th><th>Сырьё</th><th class="num">Нужно, м</th><th class="num">В резерве, м</th><th class="num">Со склада, м</th><th class="num" title="Свободные целые рулоны — их берёт «Зарезервировать МР»">из них целых, м</th><th class="num" title="Свободные початые рулоны и метры рулона сверх потребности задания, за которым он стоит. «Зарезервировать МР» их не берёт — резерв вручную на складе мастер-рулонов">из них остатков, м</th><th class="num">В резке, м</th><th class="num">Дефицит, м</th><th class="num">К дате</th><th>Задания</th></tr></thead><tbody>' +
+            rows.join('') + '</tbody></table><p class="atex-dp-muted">Нужно — метраж запланированных заданий за вычетом уже вырубленного. Покрытие идёт по сроку заданий: сначала рулоны в резерве задания, затем склад в метрах — сначала остатки (свободные початые рулоны и метры рулона сверх потребности задания, за которым он стоит), потом свободные целые рулоны, — затем рулоны открытых заданий первичной резки. Дефицит здесь и блокировка «нет МР нужного формата» считаются одинаково. «Зарезервировать МР» резервирует только целые рулоны, остатки резервируют вручную на складе мастер-рулонов.</p>';
     };
 
     AtexDiePlanningApp.prototype.ganttDays = function() {
@@ -427,6 +436,8 @@
         // без плана — Гант текущей записи: задания со станком, расчёт от их старта
         var source = this.plan || this.currentPlan();
         var g = C.ganttDay(source.machines, s.machines, this.ganttDay, s.settings);
+        var shifted = {};
+        Object.keys(source.machines).forEach(function(mid) { source.machines[mid].items.forEach(function(i) { if (i.shifted > 0) shifted[i.jobId] = i.shifted; }); });
         var opts = days.map(function(d) {
             var ts = cal.dayTs(d, 0);
             return '<option value="' + d + '"' + (d === this.ganttDay ? ' selected' : '') + '>' + WEEKDAYS[new Date((ts + 3 * 3600) * 1000).getUTCDay()] + ' ' + fmtDate(ts) + '</option>';
@@ -438,8 +449,10 @@
                 var cls = b.done ? 'is-done' : b.fixed ? 'is-fixed' : b.kind;
                 var j = s.jobById[b.jobId] || {};
                 var label = b.kind === 'run' ? esc(b.jobId) : b.kind === 'setup-cylinder' ? 'вал' : 'нож';
+                var sh = shifted[b.jobId];
                 var title = (b.kind === 'run' ? 'Вырубка' : b.kind === 'setup-cylinder' ? 'Смена вала' : 'Смена ножа') + ' · задание ' + b.jobId + ' · нож ' + (j.dieNo || '—') + ' · ' +
-                    fmtClock(s.settings.dayStartMin + b.from) + '–' + fmtClock(s.settings.dayStartMin + b.from + b.minutes) + ' · ' + fmtNum(b.minutes) + ' мин';
+                    fmtClock(s.settings.dayStartMin + b.from) + '–' + fmtClock(s.settings.dayStartMin + b.from + b.minutes) + ' · ' + fmtNum(b.minutes) + ' мин' +
+                    (sh ? ' · записанный старт ' + fmtTime(j.start) + ' занят предыдущим заданием, сдвиг ' + sh + ' мин' : '');
                 return '<div class="atex-dp-bar ' + cls + '" style="left:' + (b.from / g.capacity * 100) + '%;width:' + (b.minutes / g.capacity * 100) + '%" title="' + esc(title) + '">' + label + '</div>';
             }).join('');
             return '<div class="atex-dp-gantt-row"><div class="atex-dp-gantt-name">' + esc(r.name) + '<div class="atex-dp-muted">занято ' + fmtNum(r.used) + ' · свободно ' + fmtNum(r.free) + ' мин</div></div><div class="atex-dp-gantt-track">' + bars + '</div></div>';
@@ -447,32 +460,30 @@
         return '<div class="atex-dp-filters"><label>День <select class="atex-dp-input" data-gantt-day>' + opts + '</select></label>' +
             '<span class="atex-dp-legend"><i class="atex-dp-bar setup-cylinder"></i>смена вала <i class="atex-dp-bar setup-knife"></i>смена ножа <i class="atex-dp-bar run"></i>вырубка <i class="atex-dp-bar is-fixed"></i>начато / стоит <i class="atex-dp-bar is-free"></i>свободно</span></div>' +
             '<div class="atex-dp-gantt"><div class="atex-dp-gantt-row"><div class="atex-dp-gantt-name"></div><div class="atex-dp-gantt-track atex-dp-gantt-scale">' + hours.join('') + '</div></div>' + rows + '</div>' +
-            '<p class="atex-dp-muted">' + (this.plan ? 'Показан план (не записан).' : 'Показан записанный план: задания со станком, считая от их плановых стартов.') + ' Смена с ' + fmtClock(s.settings.dayStartMin) + ', ' + s.settings.dayCapacityMin + ' мин.</p>';
+            '<p class="atex-dp-muted">' + (this.plan ? 'Показан план (не записан).' : 'Показан записанный план: задания, записанные на станок, от их плановых стартов; если старт занят предыдущим заданием, задание идёт за ним.') + ' Выполненные задания и задания без станка не показываются. Смена с ' + fmtClock(s.settings.dayStartMin) + ', ' + s.settings.dayCapacityMin + ' мин.</p>';
     };
 
-    // Записанное положение дел в виде плана (для Ганта и загрузки без «Упорядочить»).
+    // Записанный план (для очереди, Ганта и загрузки без «Упорядочить»): задания, записанные на
+    // станок, без выполненных; пересечения записанных стартов — подряд.
     AtexDiePlanningApp.prototype.currentPlan = function() {
         var s = this.state;
-        if (this.cur) return this.cur;
-        var jobs = s.jobs.map(function(j) { return Object.assign({}, j, { status: j.machineId && C.isMovable(j) ? 'В работе' : j.status }); });
-        this.cur = C.orderQueue({ jobs: jobs, machines: s.machines, from: 0, settings: s.settings });
+        if (!this.cur) this.cur = C.recordedPlan(s.jobs, s.machines, s.settings, s.now);
         return this.cur;
     };
 
     AtexDiePlanningApp.prototype.renderLoad = function() {
-        var s = this.state, plan = this.plan;
-        if (!plan) return '<div class="atex-dp-empty">Нажмите «Упорядочить» — загрузка считается по плану на ' + s.settings.horizonDays + ' дн.</div>';
+        var s = this.state, plan = this.plan || this.currentPlan();
         var L = C.toolLoad({ plan: plan, jobs: s.jobs, from: s.now, settings: s.settings, dies: s.dieInfo });
         var kn = L.knives.map(function(k) {
             var w = WEAR[k.level] || WEAR[''];
-            return '<tr><td>' + esc(k.dieNo || k.dieId) + '</td><td class="num">' + k.jobs + '</td><td class="num">' + fmtNum(k.minutes) + '</td><td class="num">' + fmtNum(k.meters) + '</td>' +
+            return '<tr><td>' + esc(k.dieNo || k.dieId) + '</td><td class="num">' + k.jobs + (k.unplaced ? ' <span class="atex-dp-badge is-warn" title="Не размещены «Упорядочить» (блокировка или нет станка) — нож им всё равно нужен">' + k.unplaced + ' не размещ.</span>' : '') + '</td><td class="num">' + fmtNum(k.minutes) + '</td><td class="num">' + fmtNum(k.meters) + '</td>' +
                 '<td class="num">' + fmtNum(k.mileage) + '</td><td class="num">' + fmtNum(k.mileageAfter) + '</td><td class="num">' + (k.resource ? fmtNum(k.resource) : '—') + '</td>' +
                 '<td><span class="atex-dp-badge ' + w[0] + '">' + w[1] + '</span></td></tr>';
         }).join('');
         var cy = L.cylinders.map(function(c) {
-            return '<tr><td>' + esc(c.cylinder || c.cylinderId) + '</td><td class="num">' + c.jobs + '</td><td class="num">' + fmtNum(c.minutes) + '</td><td class="num">' + c.changes + '</td></tr>';
+            return '<tr><td>' + esc(c.cylinder || c.cylinderId) + '</td><td class="num">' + c.jobs + (c.unplaced ? ' <span class="atex-dp-badge is-warn" title="Не размещены «Упорядочить» — вал им всё равно нужен">' + c.unplaced + ' не размещ.</span>' : '') + '</td><td class="num">' + fmtNum(c.minutes) + '</td><td class="num">' + c.changes + '</td></tr>';
         }).join('');
-        return '<h3 class="atex-dp-h">Ножи <span class="atex-dp-muted">горизонт ' + s.settings.horizonDays + ' дн. с ' + esc(fmtDate(s.now)) + '</span></h3>' +
+        return '<h3 class="atex-dp-h">Ножи <span class="atex-dp-muted">горизонт ' + s.settings.horizonDays + ' дн. с ' + esc(fmtDate(s.now)) + ' · ' + (this.plan ? 'по плану «Упорядочить» (не записан)' : 'по записанному плану') + '</span></h3>' +
             (kn ? '<table class="atex-dp-table"><thead><tr><th>Нож</th><th class="num">Заданий</th><th class="num">Минут</th><th class="num">Метров</th><th class="num">Пробег сейчас, м</th><th class="num">Пробег после плана, м</th><th class="num">Ресурс, м</th><th>Износ</th></tr></thead><tbody>' + kn + '</tbody></table>' : '<div class="atex-dp-empty">В горизонте плана заданий нет.</div>') +
             '<h3 class="atex-dp-h">Валы</h3>' +
             (cy ? '<table class="atex-dp-table"><thead><tr><th>Вал</th><th class="num">Заданий</th><th class="num">Минут (с наладкой)</th><th class="num">Смен вала</th></tr></thead><tbody>' + cy + '</tbody></table>' : '<div class="atex-dp-empty">Нет данных.</div>');
@@ -487,6 +498,7 @@
         if (mt && this.el.contains(mt)) { this.machineTab = mt.getAttribute('data-machine-tab'); this.render(); return; }
         var nav = e.target.closest('[data-range]');
         if (nav && this.el.contains(nav)) { this.shiftRange(parseInt(nav.getAttribute('data-range'), 10)); return; }
+        if (e.target.closest('.atex-dp-mark')) return;   // отметка — в onChange, карточку не выбирает
         var card = e.target.closest('[data-job-id]');
         if (card && this.el.contains(card) && !e.target.closest('a')) { this.selected = card.getAttribute('data-job-id'); this.render(); return; }
         var b = e.target.closest('[data-act]');
@@ -499,8 +511,16 @@
         else if (act === 'apply') this.openApply();
         else if (act === 'reserve') this.openReserve();
         else if (act === 'sleeves') this.openSleeves();
+        else if (act === 'unmark') { this.marked = {}; this.render(); }
     };
     AtexDiePlanningApp.prototype.onChange = function(e) {
+        if (e.target.hasAttribute && e.target.hasAttribute('data-mark')) {
+            var id = e.target.getAttribute('data-mark');
+            if (e.target.checked) this.marked[id] = true; else delete this.marked[id];
+            this.render();
+            return;
+        }
+        if (e.target.hasAttribute && e.target.hasAttribute('data-scope')) { this.scopeKey = e.target.getAttribute('data-scope'); if (this.redrawScope) this.redrawScope(); return; }
         if (e.target.hasAttribute && e.target.hasAttribute('data-gantt-day')) { this.ganttDay = parseInt(e.target.value, 10); this.render(); return; }
         if (e.target.hasAttribute && (e.target.hasAttribute('data-range-from') || e.target.hasAttribute('data-range-to')) && e.target.value) {
             var p = e.target.value.split('-'), cal = C.createCalendar(this.state.settings);
@@ -530,7 +550,40 @@
         this.modalOk = onOk;
         this.$('atex-dp-modal').hidden = false;
     };
-    AtexDiePlanningApp.prototype.closeModal = function() { this.$('atex-dp-modal').hidden = true; this.modalOk = null; };
+    AtexDiePlanningApp.prototype.closeModal = function() { this.$('atex-dp-modal').hidden = true; this.modalOk = null; this.redrawScope = null; };
+
+    // Область записи (#5340): станок вкладки за период, станок за весь горизонт, все станки за период,
+    // отмеченные задания, вся очередь. По умолчанию — отмеченные, если они есть, иначе станок за период.
+    // items — [{ jobId, machineId, start, … }].
+    AtexDiePlanningApp.prototype.scopeOptions = function(items) {
+        var s = this.state, cal = C.createCalendar(s.settings), opts = [];
+        var m = s.machines.filter(function(x) { return x.id === this.machineTab; }, this)[0];
+        var hasRange = this.rangeFrom != null && this.rangeTo != null;
+        var period = hasRange ? fmtDate(cal.dayTs(this.rangeFrom, 0)) + (this.rangeTo !== this.rangeFrom ? '–' + fmtDate(cal.dayTs(this.rangeTo, 0)) : '') : '';
+        if (m && hasRange) opts.push({ key: 'tab-range', label: 'Станок «' + m.name + '», ' + period, scope: { machineId: m.id, fromDay: this.rangeFrom, toDay: this.rangeTo } });
+        if (m) opts.push({ key: 'tab', label: 'Станок «' + m.name + '», весь горизонт', scope: { machineId: m.id } });
+        if (hasRange) opts.push({ key: 'range', label: 'Все станки, ' + period, scope: { fromDay: this.rangeFrom, toDay: this.rangeTo } });
+        opts.push({ key: 'marked', label: 'Отмеченные задания', scope: { jobIds: Object.keys(this.marked) } });
+        opts.push({ key: 'all', label: 'Вся очередь', scope: { all: true } });
+        opts.forEach(function(o) { o.items = C.inScope(items, o.scope, s.settings); });
+        return opts;
+    };
+
+    // cfg — { title, items, body(items) → html, okText, onOk(items) }.
+    AtexDiePlanningApp.prototype.openScoped = function(cfg) {
+        var self = this, opts = this.scopeOptions(cfg.items);
+        var dflt = Object.keys(this.marked).length ? 'marked' : opts[0].key;
+        if (!this.scopeKey || !opts.some(function(o) { return o.key === self.scopeKey; }) || (this.scopeKey === 'marked' && !Object.keys(this.marked).length)) this.scopeKey = dflt;
+        this.redrawScope = function draw() {
+            var cur = opts.filter(function(o) { return o.key === self.scopeKey; })[0];
+            var html = '<h3>' + esc(cfg.title) + '</h3><div class="atex-dp-scope"><span class="atex-dp-muted">Для чего:</span>' + opts.map(function(o) {
+                return '<label><input type="radio" name="atex-dp-scope" data-scope="' + o.key + '"' + (o.key === cur.key ? ' checked' : '') + '> ' + esc(o.label) + ' <span class="atex-dp-muted">(' + o.items.length + ')</span></label>';
+            }).join('') + '</div>' + cfg.body(cur.items);
+            self.openModal(html, cfg.okText, cur.items.length ? function() { cfg.onOk(cur.items); } : null);
+            self.redrawScope = draw;
+        };
+        this.redrawScope();
+    };
 
     // Первая колонка записи (план-старт, дата задачи) меняется только через _m_save, _m_set её не пишет.
     // Последовательная запись: ошибка останавливает цепочку, записанное остаётся и видно после перечитки.
@@ -562,18 +615,24 @@
         var self = this, s = this.state;
         var f = C.formJobs({ positions: s.positions, dies: s.dies, jobs: s.jobs, settings: s.settings, mrLength: s.settings.mrLength, itsMin: s.settings.itsMin, itsMax: s.settings.itsMax });
         var skipped = f.skipped.filter(function(x) { return !/уже есть задание/.test(x.reason); });
+        var toPos = f.create.filter(function(x) { return x.positionWrite; }).length;
         var html = '<h3>Сформировать задания высечки</h3>' +
-            (f.create.length ? '<p>Будет создано заданий: <b>' + f.create.length + '</b> (по одному на позицию; нож подобран, ИТС не ждёт).</p>' +
-                listHtml(f.create.map(function(x) { return 'заказ ' + esc(x.orderNo) + ', нож ' + esc(x.dieNo) + ': ' + fmtNum(x.footage) + ' м, МР ' + x.pullsPlan + ', ' + x.duration + ' мин'; }), 15)
+            (f.create.length ? '<p>Будет создано заданий: <b>' + f.create.length + '</b> (по одному на позицию; нож подобран, ИТС не ждёт).' +
+                (toPos ? ' В позиции заказов, где подобранный нож ещё не записан (' + toPos + '), он будет записан вместе с «Подбором ножа», мин. партией и признаком ИТС — как это делает «Заказы этикетки».' : '') + '</p>' +
+                listHtml(f.create.map(function(x) { return 'заказ ' + esc(x.orderNo) + ', нож ' + esc(x.dieNo) + (x.positionWrite ? ' (запишется в позицию)' : '') + ': ' + fmtNum(x.footage) + ' м, МР ' + x.pullsPlan + ', ' + x.duration + ' мин'; }), 15)
                 : '<p>Позиций, готовых к планированию и без задания, нет.</p>') +
             (skipped.length ? '<p class="atex-dp-muted">Не идут в планирование (' + skipped.length + '):</p>' + listHtml(skipped.map(function(x) { return 'позиция ' + esc(x.positionId) + ' — ' + esc(x.reason); }), 8) : '');
         this.openModal(html, 'Создать', f.create.length ? function() {
             var t = s.tables, now = s.now;
-            self.run(f.create.map(function(p, i) {
-                return function() { return self.client.post('_m_new/' + t.dieJob.id + '?JSON&up=1', C.jobCreateFields(t, Object.assign({ start: now + i }, p))).then(function(res) {
+            // сначала нож — в позицию (источник истины), потом задание
+            var steps = [];
+            f.create.forEach(function(p, i) {
+                if (p.positionWrite && t.position) steps.push(function() { return self.client.post('_m_set/' + encodeURIComponent(p.positionId) + '?JSON', C.positionPickFields(t, p.positionWrite)); });
+                steps.push(function() { return self.client.post('_m_new/' + t.dieJob.id + '?JSON&up=1', C.jobCreateFields(t, Object.assign({ start: now + i }, p))).then(function(res) {
                     if (!(res && (res.id || res.obj))) throw new Error('сервер не вернул id задания для позиции ' + p.positionId);
-                }); };
-            }), 'Создано заданий: ' + f.create.length + '.');
+                }); });
+            });
+            self.run(steps, 'Создано заданий: ' + f.create.length + (toPos ? ', нож записан в позиций: ' + toPos : '') + '.');
         } : null);
     };
 
@@ -588,7 +647,8 @@
         this.plan.firstDay = first == null ? null : cal.dayOf(first);
         this.tab = 'queue';
         var n = this.changedItems().length;
-        this.message('План построен: заданий ' + this.plan.summary.jobs + ', изменится ' + n + ', не размещено ' + this.plan.unplaced.length + ', просрочек ' + this.plan.summary.late + '. Проверьте и нажмите «Применить».', this.plan.unplaced.length || this.plan.summary.late ? 'warn' : 'ok');
+        this.message('План построен: заданий ' + this.plan.summary.jobs + ', изменится ' + n + ', не размещено ' + this.plan.unplaced.length + ', просрочек ' + this.plan.summary.late + '. ' +
+            (n ? 'Проверьте и нажмите «Применить».' : 'Записанный план совпадает с расчётным — записывать нечего.'), this.plan.unplaced.length || this.plan.summary.late ? 'warn' : 'ok');
         this.render();
     };
 
@@ -608,13 +668,22 @@
     AtexDiePlanningApp.prototype.openApply = function() {
         var self = this, s = this.state, list = this.changedItems();
         if (!list.length) { this.message('Записанный план совпадает с расчётным — писать нечего.', 'ok'); return; }
-        var html = '<h3>Применить план</h3><p>Будет записано заданий: <b>' + list.length + '</b> — план-старт, станок, вал, наладка и длительность. Начатые и выполненные задания не меняются.</p>' +
-            listHtml(list.map(function(x) { return 'задание ' + esc(x.job.id) + ' → ' + esc(x.machine.name) + ', ' + esc(fmtTime(x.item.start)) + ', наладка ' + x.item.setup + ' мин, ' + x.item.run + ' мин'; }), 12);
-        this.openModal(html, 'Записать план', function() {
-            var t = s.tables;
-            self.run(list.map(function(x) {
-                return function() { return self.client.post('_m_save/' + encodeURIComponent(x.job.id) + '?JSON', C.jobPlanFields(t, { start: x.item.start, machineId: x.machine.id, cylinderId: x.job.cylinderId, setup: x.item.setup, duration: x.item.run })); };
-            }), 'План записан: ' + list.length + ' заданий.');
+        // область — по месту задания в новом плане (станок и день плана)
+        var items = list.map(function(x) { return { jobId: x.job.id, machineId: x.machine.id, start: x.item.start, x: x }; });
+        this.openScoped({
+            title: 'Применить план', items: items, okText: 'Записать план',
+            body: function(sub) {
+                if (!sub.length) return '<p>В выбранной области изменений нет.</p>';
+                return '<p>Будет записано заданий: <b>' + sub.length + '</b> из ' + list.length + ' изменённых — план-старт, станок, вал, наладка и длительность. Начатые и выполненные задания не меняются, задания вне области остаются как записаны.</p>' +
+                    listHtml(sub.map(function(i) { var x = i.x; return 'задание ' + esc(x.job.id) + ' → ' + esc(x.machine.name) + ', ' + esc(fmtTime(x.item.start)) + ', наладка ' + x.item.setup + ' мин, ' + x.item.run + ' мин'; }), 12);
+            },
+            onOk: function(sub) {
+                var t = s.tables;
+                self.run(sub.map(function(i) {
+                    var x = i.x;
+                    return function() { return self.client.post('_m_save/' + encodeURIComponent(x.job.id) + '?JSON', C.jobPlanFields(t, { start: x.item.start, machineId: x.machine.id, cylinderId: x.job.cylinderId, setup: x.item.setup, duration: x.item.run })); };
+                }), 'План записан: ' + sub.length + ' заданий.');
+            }
         });
     };
 
@@ -629,7 +698,13 @@
             (picks.length ? '<p>Подобрано целых рулонов со склада: <b>' + picks.reduce(function(a, p) { return a + p.rollIds.length; }, 0) + '</b> для заданий: ' + picks.length + '. Правила — как у склада мастер-рулонов: только целые рулоны, формат в допуске ' + tol + ' мм.</p>' +
                 listHtml(picks.map(function(p) { return 'задание ' + esc(p.taskId) + ': ' + p.rollIds.map(function(id) { return esc(rollById[id].no) + ' (' + rollById[id].format + ' мм)'; }).join(', '); }), 15)
                 : '<p>Подходящих свободных рулонов нет.</p>') +
-            (short.length ? '<p class="atex-dp-muted">Дефицит остаётся у заданий: ' + short.map(function(p) { return esc(p.taskId) + ' (' + fmtNum(p.deficit) + ' м)'; }).join(', ') + '.</p>' : '');
+            (short.length ? '<p class="atex-dp-muted">Целых рулонов на складе не хватает заданиям: ' + short.map(function(p) {
+                var cv = s.cover[p.taskId] || {}, parts = [];
+                if (cv.leftover > 0) parts.push('остатками покрыто ' + fmtNum(cv.leftover) + ' м — резерв вручную на складе МР');
+                if (cv.planned > 0) parts.push('в резке ожидается ' + fmtNum(cv.planned) + ' м');
+                parts.push(cv.deficit > 0 ? 'дефицит ' + fmtNum(cv.deficit) + ' м' : 'дефицита нет');
+                return esc(p.taskId) + ' (не хватает ' + fmtNum(p.deficit) + ' м: ' + parts.join(', ') + ')';
+            }).join('; ') + '. Покрытие считается так же, как во вкладке «Дефицит форматов».</p>' : '');
         this.openModal(html, 'Зарезервировать', picks.length ? function() {
             var steps = [];
             picks.forEach(function(p) {
@@ -646,20 +721,28 @@
         var self = this, s = this.state;
         if (!s.sleeveTable || !s.sleeveTable.reqs.qty) { this.message('В базе нет таблицы «Задача на втулки» с колонкой «Кол-во».', 'error'); return; }
         if (!s.sleeveReport) { this.message('Не прочитан отчёт die_planning_sleeves — задачи могли бы задублироваться, запись остановлена.', 'error'); return; }
-        var sp = C.sleevePlan({ jobs: s.jobs, tasks: s.sleeveTasks, cutters: s.cutters });
-        var html = '<h3>Задачи на втулки</h3>' +
-            (sp.ops.length ? '<p>Создать: <b>' + sp.ops.filter(function(o) { return o.op === 'create'; }).length + '</b>, привести к плану: <b>' + sp.ops.filter(function(o) { return o.op === 'update'; }).length + '</b>. Количество — рулоны позиции, дата — план-старт задания высечки.</p>' +
-                listHtml(sp.ops.map(function(o) { var c = s.cutters.filter(function(x) { return x.id === o.cutterId; })[0]; return (o.op === 'create' ? 'новая' : 'задача ' + esc(o.taskId)) + ': позиция ' + esc(o.positionId) + ', ' + o.qty + ' шт, ' + esc(c ? c.name : 'втулкорез не подобран') + ', ' + esc(fmtTime(o.start)); }), 15)
-                : '<p>Все задачи на втулки уже соответствуют плану.</p>') +
-            (sp.skipped.length ? '<p class="atex-dp-muted">Пропущено: ' + sp.skipped.map(function(x) { return 'позиция ' + esc(x.positionId) + ' — ' + esc(x.reason); }).join('; ') + '.</p>' : '') +
-            (sp.warnings.length ? '<p class="atex-dp-muted">' + sp.warnings.map(esc).join('<br>') + '</p>' : '');
-        this.openModal(html, 'Записать', sp.ops.length ? function() {
-            var t = { sleeveTask: s.sleeveTable };
-            self.run(sp.ops.map(function(o) {
-                if (o.op === 'create') return function() { return self.client.post('_m_new/' + t.sleeveTask.id + '?JSON&up=' + encodeURIComponent(o.positionId), C.sleeveCreateFields(t, o)); };
-                return function() { return self.client.post('_m_save/' + encodeURIComponent(o.taskId) + '?JSON', C.sleeveUpdateFields(t, o)); };
-            }), 'Задачи на втулки записаны: ' + sp.ops.length + '.');
-        } : null);
+        // область — по записанному станку и план-старту задания (задачи на втулки берут записанный старт)
+        var items = s.jobs.filter(function(j) { return !C.isFinal(j); }).map(function(j) { return { jobId: j.id, machineId: j.machineId, start: j.start }; });
+        var planFor = function(sub) { return C.sleevePlan({ jobs: sub.map(function(i) { return s.jobById[i.jobId]; }), tasks: s.sleeveTasks, cutters: s.cutters }); };
+        this.openScoped({
+            title: 'Задачи на втулки', items: items, okText: 'Записать',
+            body: function(sub) {
+                var sp = planFor(sub);
+                return (sp.ops.length ? '<p>Создать: <b>' + sp.ops.filter(function(o) { return o.op === 'create'; }).length + '</b>, привести к плану: <b>' + sp.ops.filter(function(o) { return o.op === 'update'; }).length + '</b>. Количество — рулоны позиции, дата — план-старт задания высечки. Задачи заданий вне области не меняются.</p>' +
+                        listHtml(sp.ops.map(function(o) { var c = s.cutters.filter(function(x) { return x.id === o.cutterId; })[0]; return (o.op === 'create' ? 'новая' : 'задача ' + esc(o.taskId)) + ': позиция ' + esc(o.positionId) + ', ' + o.qty + ' шт, ' + esc(c ? c.name : 'втулкорез не подобран') + ', ' + esc(fmtTime(o.start)); }), 15)
+                        : '<p>' + (sub.length ? 'В выбранной области задачи на втулки уже соответствуют плану.' : 'В выбранной области заданий нет.') + '</p>') +
+                    (sp.skipped.length ? '<p class="atex-dp-muted">Пропущено: ' + sp.skipped.map(function(x) { return 'позиция ' + esc(x.positionId) + ' — ' + esc(x.reason); }).join('; ') + '.</p>' : '') +
+                    (sp.warnings.length ? '<p class="atex-dp-muted">' + sp.warnings.map(esc).join('<br>') + '</p>' : '');
+            },
+            onOk: function(sub) {
+                var sp = planFor(sub), t = { sleeveTask: s.sleeveTable };
+                if (!sp.ops.length) { self.closeModal(); self.message('Задачи на втулки в выбранной области уже соответствуют плану.', 'ok'); return; }
+                self.run(sp.ops.map(function(o) {
+                    if (o.op === 'create') return function() { return self.client.post('_m_new/' + t.sleeveTask.id + '?JSON&up=' + encodeURIComponent(o.positionId), C.sleeveCreateFields(t, o)); };
+                    return function() { return self.client.post('_m_save/' + encodeURIComponent(o.taskId) + '?JSON', C.sleeveUpdateFields(t, o)); };
+                }), 'Задачи на втулки записаны: ' + sp.ops.length + '.');
+            }
+        });
     };
 
     return { AtexDiePlanningApp: AtexDiePlanningApp, fmtTime: fmtTime, fmtNum: fmtNum };

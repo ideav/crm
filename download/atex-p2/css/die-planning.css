@@ -144,3 +144,8 @@
 .atex-pp-cut[data-job-id] { cursor: pointer; }
 .atex-dp-side-table th { width: 40%; white-space: nowrap; }
 .atex-dp-quality { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; margin: 6px 0 10px; padding: 6px 10px; border: 1px solid rgba(128, 128, 128, .3); border-radius: 6px; font-size: 13px; }
+/* Отметка задания и область записи «Применить» / «Задачи на втулки» (#5340) */
+.atex-dp-mark { display: inline-flex; align-items: center; margin-right: 6px; cursor: pointer; }
+.atex-dp-mark input { width: 16px; height: 16px; margin: 0; cursor: pointer; }
+.atex-dp-scope { display: flex; flex-direction: column; gap: 4px; margin: 0 0 10px; padding: 8px 10px; border: 1px solid var(--pp-border, #e5e7eb); border-radius: 8px; font-size: 0.9rem; }
+.atex-dp-scope label { display: flex; align-items: center; gap: 6px; cursor: pointer; }

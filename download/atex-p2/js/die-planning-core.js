@@ -394,20 +394,112 @@
 
     // ── Мастер-рулоны ───────────────────────────────────────────────────────
 
-    // Покрытие каждого задания: склад, затем очередь первичной резки (по сроку заданий).
-    // rolls — [{ id, format, materialId, rest, status }]; queue — источники JC.queueSupply.
-    // → { id задания: { stock, planned, deficit, late } }.
-    function coverJobs(jobs, rolls, queue, tolerance) {
+    // Покрытие заданий мастер-рулонами — одна мера для блокировки «нет МР нужного формата» и вкладки
+    // «Дефицит форматов»; «Зарезервировать МР» показывает тот же расчёт у заданий с нехваткой.
+    // Задания идут по план-старту:
+    //   нужно    = метраж задания − уже вырубленное (расход журнала по заданию);
+    //   резерв   = свои рулоны на складе: резерв у рулона на это задание или поле «Мастер-рулон» задания;
+    //   остатки  = метры, которые никому не нужны: свободные початые рулоны и у рулона, за которым стоит
+    //              другое открытое задание (резерв или вырубка), — его остаток сверх потребности этого
+    //              задания; остатки берутся первыми;
+    //   целые    = свободные целые рулоны склада (их берёт «Зарезервировать МР»);
+    //   в резке  = очередь первичной резки; дефицит — что не покрыто.
+    // Склад считается в метрах: один рулон может покрыть несколько заданий. Рулон за заданием, которого
+    // нет в списке заданий склада (потребность неизвестна), отдаёт 0 м.
+    // rolls — рулоны склада МР ({ id, format, materialId, rest, status, reserveTaskId });
+    // queue — источники JC.queueSupply; opts — { tasks: задания склада МР (MR.buildTasks), moves: журнал }.
+    function jobDemand(jobs, rolls, tolerance, opts) {
+        var o = opts || {}, moves = o.moves || [], idx = {}, byJob = {};
+        (o.tasks || []).forEach(function(t) { idx[t.id] = t; });
         var list = (jobs || []).filter(function(j) { return num(j.minFormat) || num(j.usedFormat) || num(j.optFormat); })
             .sort(function(a, b) { return a.start - b.start || (num(a.id) - num(b.id)); });
-        var groups = list.map(function(j) {
-            var min = num(j.minFormat) || num(j.usedFormat) || num(j.optFormat), range = JC.formatRange(min, j.optFormat, tolerance);
-            return { key: j.id, jobId: j.id, materialId: String(j.materialId), material: j.material, min: range.min, max: range.max, meters: num(j.footage), due: num(j.start) };
+        list.forEach(function(j) { byJob[j.id] = j; });
+        var stockRolls = (rolls || []).filter(function(r) { return MR.onStock(r); });
+        var consumed = function(id) {
+            var c = 0;
+            moves.forEach(function(m) { if (m.kind === MR.MOVE_KIND.OUT && String(m.taskId) === String(id)) c -= num(m.delta); });
+            return c;
+        };
+        var needOf = function(id) { var j = byJob[id] || idx[id]; return j ? Math.max(0, round1(num(j.footage) - consumed(id))) : Infinity; };
+        // за кем стоит рулон: резерв (своё задание или открытое чужое; неизвестное — держит), поле
+        // «Мастер-рулон» задания, вырубка открытым заданием
+        var holderOf = {};
+        stockRolls.forEach(function(r) {
+            var rt = r.reserveTaskId ? String(r.reserveTaskId) : '';
+            if (rt && (byJob[rt] || !idx[rt] || idx[rt].open)) holderOf[r.id] = rt;
         });
-        var covered = JC.coverDemand(groups, JC.stockSupply(rolls), queue || []);
+        list.forEach(function(j) { if (j.masterRollId && !holderOf[j.masterRollId]) holderOf[j.masterRollId] = j.id; });
+        stockRolls.forEach(function(r) { if (!holderOf[r.id]) { var h = MR.holder(r, idx, moves); if (h) holderOf[r.id] = String(h); } });
+        // потребность держателя ложится на его рулоны (старые первыми), остальное — остаток
+        var held = {}, spare = {}, ownCover = {};
+        stockRolls.forEach(function(r) { var h = holderOf[r.id]; if (h) (held[h] = held[h] || []).push(r); });
+        Object.keys(held).forEach(function(h) {
+            var left = needOf(h);
+            held[h].sort(function(a, b) { return num(a.id) - num(b.id); }).forEach(function(r) {
+                var use = Math.min(left, num(r.rest));
+                left -= use;
+                ownCover[h] = round1((ownCover[h] || 0) + use);
+                spare[r.id] = Math.max(0, round1(num(r.rest) - use));
+            });
+        });
+        var pool = [];
+        stockRolls.forEach(function(r) {
+            var whole = norm(r.status) === MR.ROLL_STATUS.STOCK;
+            if (holderOf[r.id]) { if (spare[r.id] > 0) pool.push({ id: String(r.id), materialId: String(r.materialId), format: num(r.format), left: spare[r.id], kind: 'leftover' }); }
+            else pool.push({ id: String(r.id), materialId: String(r.materialId), format: num(r.format), left: num(r.rest), kind: whole ? 'whole' : 'leftover' });
+        });
+        pool.sort(function(a, b) { return (a.kind === b.kind ? 0 : a.kind === 'leftover' ? -1 : 1) || a.format - b.format || num(a.id) - num(b.id); });
+        var demand = list.map(function(j) {
+            var min = num(j.minFormat) || num(j.usedFormat) || num(j.optFormat), range = JC.formatRange(min, j.optFormat, tolerance);
+            var need = needOf(j.id), reserved = Math.min(need, ownCover[j.id] || 0);
+            return { key: j.id, jobId: j.id, materialId: String(j.materialId), material: j.material, min: range.min, max: range.max,
+                need: need, reserved: round1(reserved), meters: Math.max(0, round1(need - reserved)), due: num(j.start) };
+        });
+        return { demand: demand, pool: pool };
+    }
+
+    // Склад в метрах (остатки, затем целые; формат в [мин. формат ножа, + допуск], как у резерва),
+    // затем очередь первичной резки (JC.coverDemand).
+    function coverAll(jobs, rolls, queue, tolerance, opts) {
+        var d = jobDemand(jobs, rolls, tolerance, opts);
+        var rest = d.demand.map(function(g) {
+            var left = g.meters, got = { whole: 0, leftover: 0 }, hi = g.min + num(tolerance);
+            d.pool.forEach(function(s) {
+                if (!(left > 0) || !(s.left > 0)) return;
+                if (s.materialId !== g.materialId || s.format < g.min || s.format > hi) return;
+                var m = Math.min(left, s.left);
+                s.left -= m; left -= m; got[s.kind] += m;
+            });
+            return Object.assign({}, g, { meters: Math.max(0, round1(left)), whole: round1(got.whole), leftover: round1(got.leftover) });
+        });
+        var covered = JC.coverDemand(rest, [], queue || []).map(function(c) { return Object.assign(c, { stock: round1(c.whole + c.leftover) }); });
+        return { demand: d, covered: covered };
+    }
+
+    // → { id задания: { need, reserved, stock, whole, leftover, planned, deficit, late } }.
+    function coverJobs(jobs, rolls, queue, tolerance, opts) {
         var out = {};
-        covered.forEach(function(g) { out[g.jobId] = { stock: g.stock, planned: g.planned, deficit: g.deficit, late: g.late }; });
+        coverAll(jobs, rolls, queue, tolerance, opts).covered.forEach(function(g) {
+            out[g.jobId] = { need: g.need, reserved: g.reserved, stock: g.stock, whole: g.whole, leftover: g.leftover, planned: g.planned, deficit: g.deficit, late: g.late };
+        });
         return out;
+    }
+
+    // Вкладка «Дефицит форматов»: та же мера, сложенная по сырью и диапазону формата.
+    // → [{ key, materialId, material, min, max, meters (нужно), reserved, stock, whole, leftover, planned, deficit, due, late, jobs }].
+    function coverGroups(jobs, rolls, queue, tolerance, opts) {
+        var by = {}, order = [];
+        coverAll(jobs, rolls, queue, tolerance, opts).covered.forEach(function(c) {
+            var key = c.materialId + '|' + c.min + '|' + c.max;
+            var g = by[key];
+            if (!g) { g = by[key] = { key: key, materialId: c.materialId, material: c.material, min: c.min, max: c.max, meters: 0, reserved: 0, stock: 0, whole: 0, leftover: 0, planned: 0, deficit: 0, due: 0, late: false, jobs: [] }; order.push(key); }
+            ['reserved', 'stock', 'whole', 'leftover', 'planned', 'deficit'].forEach(function(k) { g[k] = round1(g[k] + c[k]); });
+            g.meters = round1(g.meters + c.need);
+            if (c.late) g.late = true;
+            if (c.due > 0 && (!g.due || c.due < g.due)) g.due = c.due;
+            g.jobs.push(c.jobId);
+        });
+        return order.map(function(k) { return by[k]; });
     }
 
     // Резерв по заданиям (задания высечки в виде задач склада MR.buildTasks): рулоны подбираются
@@ -438,20 +530,29 @@
         var byJob = {};
         (inp.jobs || []).forEach(function(j) { byJob[j.id] = j; });
         var knives = {}, cyls = {};
+        function add(j, minutes, it, unplaced) {
+            var kk = j.dieId || ('№' + j.dieNo);
+            var k = knives[kk] || (knives[kk] = { dieId: j.dieId, dieNo: j.dieNo, jobs: 0, minutes: 0, meters: 0, planned: 0, unplaced: 0 });
+            k.jobs++; k.minutes += minutes; k.meters = round1(k.meters + num(j.footage));
+            if (!it || !it.fixed) k.planned = round1(k.planned + num(j.footage));
+            var ck = j.cylinderId || j.cylinder;
+            var c = cyls[ck] || (cyls[ck] = { cylinderId: j.cylinderId, cylinder: j.cylinder, jobs: 0, minutes: 0, changes: 0, unplaced: 0 });
+            c.jobs++; c.minutes += minutes;
+            if (it && it.setupKind === 'cylinder') c.changes++;
+            if (unplaced) { k.unplaced++; c.unplaced++; }
+        }
         Object.keys(inp.plan.machines).forEach(function(mid) {
             inp.plan.machines[mid].items.forEach(function(it) {
                 var j = byJob[it.jobId];
                 if (!j || it.done || it.start >= until) return;
-                var minutes = it.setup + it.run;
-                var kk = j.dieId || ('№' + j.dieNo);
-                var k = knives[kk] || (knives[kk] = { dieId: j.dieId, dieNo: j.dieNo, jobs: 0, minutes: 0, meters: 0, planned: 0 });
-                k.jobs++; k.minutes += minutes; k.meters = round1(k.meters + num(j.footage));
-                if (!it.fixed) k.planned = round1(k.planned + num(j.footage));
-                var ck = j.cylinderId || j.cylinder;
-                var c = cyls[ck] || (cyls[ck] = { cylinderId: j.cylinderId, cylinder: j.cylinder, jobs: 0, minutes: 0, changes: 0 });
-                c.jobs++; c.minutes += minutes;
-                if (it.setupKind === 'cylinder') c.changes++;
+                add(j, it.setup + it.run, it, false);
             });
+        });
+        // не размещённые «Упорядочить» (блокировка, нет станка) — нож и вал им всё равно нужны;
+        // минуты — только вырубка, без наладки и без дня
+        (inp.plan.unplaced || []).forEach(function(u) {
+            var j = byJob[u.jobId];
+            if (j) add(j, runMinutes(j.footage, s), null, true);
         });
         var dies = inp.dies || {};
         var kl = Object.keys(knives).map(function(k) {
@@ -464,12 +565,66 @@
         return { knives: kl, cylinders: cl, until: until };
     }
 
+    // Записанный план (без «Упорядочить»): у каждого станка — записанные на него задания, кроме
+    // выполненных и отменённых, по записанному старту, с записанной наладкой и длительностью.
+    // Станок делает одно задание за раз: задание не начинается раньше конца предыдущего, записанные
+    // пересечения раскладываются подряд (item.shifted — сдвиг от записанного старта, мин).
+    // Задание без старта идёт за предыдущим или с from. Задания без станка в план не входят.
+    function recordedPlan(jobs, machines, settings, from) {
+        var s = withDefaults(settings), cal = createCalendar(s), out = {}, summary = { jobs: 0, late: 0, setupMinutes: 0, cylinderChanges: 0 };
+        (machines || []).forEach(function(m) {
+            var list = (jobs || []).filter(function(j) { return !isFinal(j) && String(j.machineId || '') === String(m.id); })
+                .sort(function(a, b) { return (num(a.start) || Infinity) - (num(b.start) || Infinity) || (num(a.id) - num(b.id)); });
+            var cur = null, items = [];
+            list.forEach(function(j) {
+                var setup = num(j.setup), run = num(j.duration) > 0 ? num(j.duration) : runMinutes(j.footage, s);
+                var kind = setup <= 0 ? 'none' : setup >= s.cylinderChange ? 'cylinder' : 'knife';
+                var c = num(j.start) > 0 ? cal.cursorAt(num(j.start)) : (cur || cal.cursorAt(num(from)));
+                if (cur && curKey(cur) > curKey(c)) c = cur;
+                var segs = [];
+                if (setup > 0) { var a = cal.advance(c, setup, 'setup-' + kind); segs = segs.concat(a.segments); c = a.cursor; }
+                if (run > 0 || !segs.length) { var b = cal.advance(c, run, 'run'); segs = segs.concat(b.segments); c = b.cursor; }
+                cur = c;
+                tagSegs(segs, j.id);
+                var last = segs[segs.length - 1];
+                var item = { jobId: j.id, machineId: m.id, start: segs[0].start, end: last.end, setup: setup, setupKind: kind, run: run,
+                    due: j.due || 0, late: j.due > 0 && last.end > j.due, fixed: isStarted(j), segments: segs,
+                    shifted: num(j.start) > 0 ? Math.max(0, Math.round((segs[0].start - num(j.start)) / 60)) : 0 };
+                items.push(item);
+                summary.jobs++; summary.setupMinutes += setup;
+                if (item.late) summary.late++;
+                if (kind === 'cylinder') summary.cylinderChanges++;
+            });
+            out[m.id] = { items: items };
+        });
+        return { machines: out, unplaced: [], summary: summary, from: from };
+    }
+    function tagSegs(segs, jobId) { segs.forEach(function(g) { g.jobId = jobId; }); return segs; }
+
+    // Область записи «Применить» / «Задачи на втулки»: items — [{ jobId, machineId, start }];
+    // scope — { all } | { machineId?, fromDay?, toDay? } | { jobIds }. Пустая область — ничего.
+    function inScope(items, scope, settings) {
+        var sc = scope || {}, cal = createCalendar(withDefaults(settings));
+        if (sc.all) return (items || []).slice();
+        if (Array.isArray(sc.jobIds)) return (items || []).filter(function(i) { return sc.jobIds.indexOf(String(i.jobId)) >= 0; });
+        if (!sc.machineId && sc.fromDay == null && sc.toDay == null) return [];
+        return (items || []).filter(function(i) {
+            if (sc.machineId && String(i.machineId) !== String(sc.machineId)) return false;
+            var d = cal.dayOf(num(i.start));
+            if (sc.fromDay != null && d < sc.fromDay) return false;
+            if (sc.toDay != null && d > sc.toDay) return false;
+            return true;
+        });
+    }
+
     // Полосы дня по станкам: наладка вала, наладка ножа, вырубка; занято и свободно.
+    // Выполненные задания не рисуются.
     function ganttDay(planMachines, machines, day, settings) {
         var s = withDefaults(settings), rows = [];
         (machines || []).forEach(function(m) {
             var bars = [], used = 0;
             ((planMachines[m.id] || { items: [] }).items).forEach(function(it) {
+                if (it.done) return;
                 it.segments.forEach(function(g) {
                     if (g.day !== day || !(g.minutes > 0)) return;
                     bars.push({ jobId: it.jobId, kind: it.fixed && g.kind === 'run' ? 'run' : g.kind, from: g.from, minutes: g.minutes, fixed: it.fixed, done: !!it.done });
@@ -529,7 +684,11 @@
             if (!plan.flags.ready) { skipped.push({ positionId: pos.id, reason: plan.flags.blocks.join('; ') }); return; }
             if (!plan.demand.ok) { skipped.push({ positionId: pos.id, reason: plan.demand.error }); return; }
             var die = plan.die.die, meters = plan.demand.meters;
+            // нож подбирает планирование и пишет в позицию (источник истины — позиция, #5340 D9):
+            // те же поля, что пишет «Заказы этикетки», если записанное в позиции отличается
+            var positionWrite = LO.writeDiffers(pos, plan.write) ? Object.assign({}, plan.write) : null;
             create.push({
+                positionWrite: positionWrite,
                 positionId: pos.id, orderNo: pos.orderNo || '', dieId: String(die.id), dieNo: String(die.no || ''), cylinderId: String(die.cylinderId || ''),
                 footage: meters, pullsPlan: plan.demand.masterRolls || Math.ceil(meters / mrLength - 1e-9), duration: runMinutes(meters, s), rolls: num(pos.rolls),
                 warnings: plan.flags.warnings.slice()
@@ -538,6 +697,12 @@
         return { create: create, skipped: skipped };
     }
 
+    // Поля позиции («Заказанное количество») из LO.planPosition().write: нож, «Подбор ножа», мин. партия, ИТС.
+    function positionPickFields(t, write) {
+        var r = (t.position && t.position.reqs) || {}, f = {};
+        Object.keys(write || {}).forEach(function(k) { if (r[k]) f['t' + r[k]] = String(write[k] == null ? '' : write[k]); });
+        return f;
+    }
     function jobCreateFields(t, p) {
         var j = t.dieJob, r = j.reqs, f = {};
         f['t' + j.id] = String(p.start);
@@ -683,7 +848,7 @@
             dueEnd: dueEnd, buildJobs: buildJobs, setupKind: setupKind, setupMinutes: setupMinutes, runMinutes: runMinutes,
             machineAllows: machineAllows, createCalendar: createCalendar, orderQueue: orderQueue, compareJobs: compareJobs,
             jobFlags: jobFlags, openMetersByDie: openMetersByDie, coverJobs: coverJobs, planReservations: planReservations,
-            toolLoad: toolLoad, ganttDay: ganttDay, queueGrid: queueGrid, turretFits: turretFits, formJobs: formJobs, jobCreateFields: jobCreateFields, jobPlanFields: jobPlanFields,
+            toolLoad: toolLoad, ganttDay: ganttDay, recordedPlan: recordedPlan, inScope: inScope, coverGroups: coverGroups, positionPickFields: positionPickFields, queueGrid: queueGrid, turretFits: turretFits, formJobs: formJobs, jobCreateFields: jobCreateFields, jobPlanFields: jobPlanFields,
             sleeveDiameterMm: sleeveDiameterMm, pickCutter: pickCutter, sleevePlan: sleevePlan,
             sleeveCreateFields: sleeveCreateFields, sleeveUpdateFields: sleeveUpdateFields,
             refIds: refIds, machinesFromRecords: machinesFromRecords, buildDieIndex: buildDieIndex, dieInfo: dieInfo, resolveSleeveTask: resolveSleeveTask
