@@ -277,10 +277,13 @@
         });
     }
 
-    // Валы для смены: допустимые для станка (пусто = любой), кроме текущего.
+    // Валы для смены: допустимые для станка (пусто = любой), не больше его «Макс. вала», кроме текущего.
     function compatibleCylinders(job, cylinders, machine) {
         var allowed = machine && machine.cylinderIds && machine.cylinderIds.length ? machine.cylinderIds : null;
-        return (cylinders || []).filter(function(c) { return c.id !== job.cylinderId && (!allowed || allowed.indexOf(c.id) >= 0); });
+        var max = num(machine && machine.maxCylinder);
+        return (cylinders || []).filter(function(c) {
+            return c.id !== job.cylinderId && (!allowed || allowed.indexOf(c.id) >= 0) && !(max > 0 && num(c.val) > max);
+        });
     }
 
     function changeNote(from, to) { return (from || '—') + ' → ' + (to || '—'); }
@@ -575,6 +578,9 @@
                 c.serverNow()
             ]).then(function(r) {
                 var mr = t.machine.reqs, dr = t.die.reqs, gr = t.finishedBatch.reqs;
+                var machineMeta = (meta || []).filter(function(x) { return String(x.id) === String(t.machine.id); })[0];
+                var maxReq = ((machineMeta && machineMeta.reqs) || []).filter(function(x) { return String(x.val).trim() === 'Макс. вал'; })[0];
+                maxReq = maxReq ? String(maxReq.id) : '';
                 var ic = its.tables.itsCall;
                 self.state = {
                     tables: t,
@@ -582,7 +588,7 @@
                     missing: res.missing.filter(function(m) { return /^(Задание высечки|Событие смены высечки|Движение пробега|Нож|Партия ГП этикетки|Мастер-рулон) →/.test(m); }).concat(its.missing),
                     jobs: jobsFromReport(r[0]),
                     runs: runsFromReport(r[1]),
-                    machines: r[2].map(function(m) { return { id: m.id, val: m.val, cylinderIds: refIds(m, mr.cylinders) }; }),
+                    machines: r[2].map(function(m) { return { id: m.id, val: m.val, cylinderIds: refIds(m, mr.cylinders), maxCylinder: maxReq ? num(reqVal(m, maxReq)) : 0 }; }),
                     dies: r[3].map(function(d) { return { id: d.id, val: d.val, width: num(reqVal(d, dr.labelWidth)), length: num(reqVal(d, dr.labelLength)), state: reqVal(d, dr.state), cylinderId: refId(d, dr.cylinder) }; }),
                     cylinders: r[4].map(function(x) { return { id: x.id, val: x.val }; }),
                     gps: r[5].map(function(g) { return { id: g.id, val: g.val, jobId: refId(g, gr.job) }; }),

@@ -36,6 +36,7 @@
 
     var RESOURCE_KEY = 'DIE_RESOURCE_DEFAULT_M';
     var RUNS_REPORT = 'die_runs';
+    var MAX_CYLINDER = 'Макс. вал';   // реквизит станка высечки: наибольший вал, зубьев (#5344)
 
     // ── Чистые функции (покрыты experiments/atex-p2-5314-dies.test.js) ──────────
 
@@ -150,14 +151,16 @@
     }
 
     // Валы: раппорт, станки, на которые вал встаёт, ножей на валу (всего / рабочих).
-    // Станок с пустыми «Допустимыми валами» принимает любой вал.
-    function cylinderRows(cylRecs, machineRecs, dieRows, t) {
+    // Станок с пустыми «Допустимыми валами» принимает любой вал; вал больше «Макс. вала» станка
+    // (maxReq — id реквизита, если он есть в базе) на станок не встаёт.
+    function cylinderRows(cylRecs, machineRecs, dieRows, t, maxReq) {
         var cr = (t.cylinder && t.cylinder.reqs) || {};
         var mr = (t.machine && t.machine.reqs) || {};
         var S = lp.DIE_STATE;
         return (cylRecs || []).map(function(c) {
             var machines = (machineRecs || []).filter(function(m) {
-                var allowed = refIds(m, mr.cylinders);
+                var allowed = refIds(m, mr.cylinders), max = maxReq ? num(reqVal(m, maxReq)) : 0;
+                if (max > 0 && num(c.val) > max) return false;
                 return allowed.length === 0 || allowed.indexOf(c.id) !== -1;
             }).map(function(m) { return m.val; });
             var dies = (dieRows || []).filter(function(d) { return d.cylinderId === c.id; });
@@ -289,6 +292,9 @@
             var dieMissing = res.missing.filter(function(m) { return /^(Нож|Марка ножа|Движение пробега|Вал|Станок высечки) →/.test(m); });
             if (dieMissing.length) console.warn('[dies] нет колонок: ' + dieMissing.join('; '));
             self.tables = res.tables;
+            var machineMeta = (meta || []).filter(function(x) { return String(x.id) === String(res.tables.machine.id); })[0];
+            var maxReq = ((machineMeta && machineMeta.reqs) || []).filter(function(x) { return String(x.val).trim() === MAX_CYLINDER; })[0];
+            self.maxCylinderReq = maxReq ? String(maxReq.id) : '';
             self.settingsTable = (meta || []).filter(function(t) { return String(t.val).trim() === 'Настройка'; })[0] || null;
             self.mountGrids();
             return self.reload(false);
@@ -365,7 +371,7 @@
             self.defaultResource = res[6] || '';
             var mileage = lp.dieMileageIndex(self.runRows);
             self.dieRows = buildDieRows(dies, t, mileage, self.brands, self.defaultResource);
-            self.cylRows = cylinderRows(kvRecords(res[2]), kvRecords(res[3]), self.dieRows, t);
+            self.cylRows = cylinderRows(kvRecords(res[2]), kvRecords(res[3]), self.dieRows, t, self.maxCylinderReq);
             self.renderKpi();
             self.renderWear();
             self.renderCylinders();
