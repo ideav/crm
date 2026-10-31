@@ -10,7 +10,12 @@
 //   - «Брак» — событие «Брак» с фото и примечанием;
 //   - «Чек-лист ИТС» — отметки пунктов справочника «Пункт чек-листа ИТС» в задании;
 //   - «Вызов ИТС» — запись «Вызов ИТС» (станок, задание, оператор, причина, статус «открыт»);
-//   - «Готово» — статус задания «Выполнено».
+//   - «Готово» — статус задания «Выполнено»;
+//   - «Открыть смену» / «Закрыть смену» — события «Начало смены»/«Конец смены» станка (#5330);
+//     при закрытой смене задания видно, но пишущих кнопок нет;
+//   - «Наладка» / «Наладка завершена» — наладка задания событиями; её начинают и смена ножа
+//     или вала, минуты пишутся в «Наладка завершена», незакрытую наладку закрывает съём (#5330).
+// «Событие смены высечки» — самостоятельная таблица со ссылками на задание и станок.
 // Пробег меняется только движением, привязанным к съёму (§1.1 состава решения). Счётчик
 // съёмов — движения «вырубка» задания (отчёт die_cutter_runs): если запись оборвалась,
 // следующее действие дописывает недостающие партии ГП, остаток рулона и «Съёмов факт», а
@@ -38,7 +43,15 @@
 
     var JOB_STATUS = { PLANNED: 'Запланировано', RUNNING: 'В работе', DONE: 'Выполнено' };
     var CALL_STATUS = { OPEN: 'открыт', TAKEN: 'принят', CLOSED: 'закрыт' };
-    var EVENT = { CYLINDER: 'Смена вала', DIE: 'Смена ножа', ROLL: 'Смена мастер-рулона', SCRAP: 'Брак', IDLE: 'Простой' };
+    var EVENT = {
+        CYLINDER: 'Смена вала', DIE: 'Смена ножа', ROLL: 'Смена мастер-рулона', SCRAP: 'Брак', IDLE: 'Простой',
+        // #5330: смена станка — как «Начало смены»/«Конец смены» Фазы 1; наладка — событиями.
+        SHIFT_START: 'Начало смены', SHIFT_END: 'Конец смены', SETUP: 'Наладка', SETUP_DONE: 'Наладка завершена'
+    };
+    // Наладку начинают смена оснастки и кнопка «Наладка», заканчивает «Наладка завершена».
+    var SETUP_STARTS = [EVENT.DIE, EVENT.CYLINDER, EVENT.SETUP];
+    // Действия пульта, которые пишут данные: при закрытой смене их нет (#5330).
+    var WRITE_ACTIONS = ['pull', 'pulls', 'sync', 'die', 'cylinder', 'setup', 'setupDone', 'scrap', 'checklist', 'call', 'done'];
     var GP_STATUS_NEW = 'к упаковке';
     var ROLL_STATUS = { OPENED: 'початый', USED: 'израсходован' };
     var DIE_STATE_OFF = ['списан'];
@@ -297,6 +310,75 @@
             .sort(function(a, b) { return b.date - a.date; });
     }
 
+    function isType(e, label) { return norm(e && e.type) === norm(label); }
+
+    // Хронология событий: время, при равном — id записи.
+    function byTime(a, b) { return a.date - b.date || Number(a.id) - Number(b.id); }
+
+    // Смена станка (#5330, как hasOpenShift Фазы 1): открыта, если последнее из событий
+    // «Начало смены»/«Конец смены» этого станка — «Начало смены». День и оператор не важны:
+    // смена принадлежит станку. events — [{ id, date, type, machineId }].
+    function shiftState(events, machineId) {
+        var mine = (events || []).filter(function(e) {
+            return machineId && e.machineId === machineId && (isType(e, EVENT.SHIFT_START) || isType(e, EVENT.SHIFT_END));
+        }).sort(byTime);
+        var last = mine[mine.length - 1];
+        var open = !!last && isType(last, EVENT.SHIFT_START);
+        return { open: open, since: open ? last.date : 0 };
+    }
+
+    // Наладка задания (#5330): начинается сменой ножа/вала или «Наладкой», заканчивается
+    // «Наладкой завершена»; повторная смена оснастки во время наладки её начало не сдвигает.
+    // Факт — сумма минут «Наладка завершена» задания. events — [{ id, date, type, jobId, minutes }].
+    function setupState(events, jobId) {
+        var open = false, since = 0, fact = 0;
+        (events || []).filter(function(e) { return jobId && e.jobId === jobId; }).sort(byTime).forEach(function(e) {
+            if (isType(e, EVENT.SETUP_DONE)) { open = false; since = 0; fact += num(e.minutes); return; }
+            if (!open && SETUP_STARTS.some(function(t) { return isType(e, t); })) { open = true; since = e.date; }
+        });
+        return { open: open, since: since, fact: round1(fact) };
+    }
+
+    // Минуты наладки по серверному времени, целые (поле NUMBER — целое, как «Наладка, мин»);
+    // время назад — ноль.
+    function setupMinutes(since, now) {
+        return Math.max(0, Math.round((num(now) - num(since)) / 60));
+    }
+
+    // Незакрытую наладку закрывает первый съём: → { minutes, notes } или null.
+    function setupCloseOnPull(events, jobId, now) {
+        var st = setupState(events, jobId);
+        if (!st.open) return null;
+        return { minutes: setupMinutes(st.since, now), notes: 'закрыта съёмом' };
+    }
+
+    // Кнопки задания. o — { done, shiftOpen, setupOpen, stale (хвосты съёмов) }.
+    // Смена закрыта — задание видно, но пишущих действий нет.
+    function jobActions(o) {
+        if (!o || !o.shiftOpen) return ['refresh'];
+        var acts = [];
+        if (!o.done) acts.push('pull', 'pulls', 'die', 'cylinder', o.setupOpen ? 'setupDone' : 'setup', 'scrap');
+        if (o.stale) acts.push('sync');
+        acts.push('checklist', 'call');
+        if (!o.done) acts.push('done');
+        acts.push('refresh');
+        return acts;
+    }
+
+    // Поля записи «Событие смены высечки» (_m_new, up=1). t — { id, reqs } таблицы событий;
+    // o — { now, typeId, userId, notes, jobId, machineId, minutes }.
+    function eventParams(t, o) {
+        var r = (t && t.reqs) || {}, p = {};
+        p['t' + t.id] = String(o.now);
+        if (r.type && o.typeId) p['t' + r.type] = String(o.typeId);
+        if (r.operator && o.userId) p['t' + r.operator] = String(o.userId);
+        if (r.notes && o.notes) p['t' + r.notes] = String(o.notes);
+        if (r.job && o.jobId) p['t' + r.job] = String(o.jobId);
+        if (r.machine && o.machineId) p['t' + r.machine] = String(o.machineId);
+        if (r.setupMinutes && o.minutes != null) p['t' + r.setupMinutes] = String(o.minutes);
+        return p;
+    }
+
     // Начало суток по Москве (UTC+3) для серверного unix-времени.
     function moscowDayStart(unix) {
         var t = num(unix) + 3 * 3600;
@@ -439,6 +521,10 @@
             if (!a || self.busy) return;
             var act = a.getAttribute('data-act');
             var h = {
+                shiftOpen: function() { self.writeShift(true); },
+                shiftClose: function() { self.writeShift(false); },
+                setup: function() { self.startSetup(); },
+                setupDone: function() { self.finishSetup(); },
                 pull: function() { self.askPull(1); },
                 pulls: function() { self.askPull(0); },
                 sync: function() { self.writePulls(self.current(), 0, 0); },
@@ -505,7 +591,7 @@
                     calls: ic ? r[9].map(function(x) { return { id: x.id, date: num(x.val), machineId: refId(x, ic.reqs.machine), status: reqVal(x, ic.reqs.status), reason: reqVal(x, ic.reqs.reason) }; }) : [],
                     now: r[10],
                     dayStart: moscowDayStart(r[10]),
-                    events: [], marks: []
+                    events: [], shiftEvents: [], marks: []
                 };
                 if (self.state.missing.length) self.message('Проверьте схему: ' + self.state.missing.join('; '), 'warn');
                 var fromPad = padMachineId(self.state.machines, window.atexPad, window.AtexPadGuard);
@@ -548,18 +634,34 @@
         return this.state ? this.state.jobs.filter(function(j) { return j.id === id; })[0] || null : null;
     };
 
-    // События смены и отметки чек-листа выбранного задания — подчинённые записи (F_U).
+    // #5330: «Событие смены высечки» — самостоятельная таблица. События задания — по ссылке
+    // «Задание высечки», смена станка — «Начало смены»/«Конец смены» по ссылке «Станок высечки».
+    // Отметки чек-листа — подчинённые заданию записи (F_U).
     AtexDieCutter.prototype.loadJob = function() {
         var self = this, s = this.state, j = this.current();
-        if (!s || !j) return Promise.resolve();
-        var c = this.client;
-        var sub = function(tid) { return tid ? c.getJson('object/' + tid + '/?JSON_KV&LIMIT=0,1000&F_U=' + encodeURIComponent(j.id)).then(kvRecords) : Promise.resolve([]); };
-        var er = s.tables.dieEvent.reqs, cm = s.its.checkMark;
-        return Promise.all([sub(s.tables.dieEvent.id), sub(cm && cm.id)]).then(function(r) {
-            s.events = r[0].map(function(e) { return { id: e.id, date: num(e.val), type: reqVal(e, er.type), operator: reqVal(e, er.operator), notes: reqVal(e, er.notes), photo: reqVal(e, er.photo) }; })
-                .sort(function(a, b) { return b.date - a.date; });
-            s.marks = cm ? r[1].map(function(m) { return { id: m.id, date: num(m.val), itemId: refId(m, cm.reqs.item), operator: reqVal(m, cm.reqs.operator) }; }) : [];
-        }).catch(function(err) { self.message('События задания не прочитаны: ' + err.message, 'error'); });
+        if (!s) return Promise.resolve();
+        var c = this.client, t = s.tables.dieEvent, er = t.reqs, cm = s.its.checkMark;
+        // Фильтр по ссылке — по id записи: `F_{реквизит}=@{id}` (без `@` сравнивается подпись).
+        var list = function(q) { return c.getJson('object/' + t.id + '/?JSON_KV&LIMIT=0,100000' + q).then(kvRecords); };
+        var toEvent = function(e) {
+            return { id: e.id, date: num(e.val), type: reqVal(e, er.type), operator: reqVal(e, er.operator), notes: reqVal(e, er.notes),
+                photo: reqVal(e, er.photo), jobId: refId(e, er.job), machineId: refId(e, er.machine), minutes: num(reqVal(e, er.setupMinutes)) };
+        };
+        var shiftTypes = [EVENT.SHIFT_START, EVENT.SHIFT_END].map(function(l) { return self.refByLabel(s.eventTypes, l); }).filter(Boolean);
+        var shift = this.machineId && er.machine && er.type
+            ? Promise.all(shiftTypes.map(function(tid) { return list('&F_' + er.machine + '=@' + encodeURIComponent(self.machineId) + '&F_' + er.type + '=@' + encodeURIComponent(tid)); }))
+            : Promise.resolve([]);
+        var jobEvents = j && er.job ? list('&F_' + er.job + '=@' + encodeURIComponent(j.id)) : Promise.resolve([]);
+        var marks = j && cm ? c.getJson('object/' + cm.id + '/?JSON_KV&LIMIT=0,1000&F_U=' + encodeURIComponent(j.id)).then(kvRecords) : Promise.resolve([]);
+        return Promise.all([shift, jobEvents, marks]).then(function(r) {
+            s.shiftEvents = [].concat.apply([], r[0]).map(toEvent);
+            s.events = r[1].map(toEvent).sort(function(a, b) { return b.date - a.date || Number(b.id) - Number(a.id); });
+            s.marks = cm ? r[2].map(function(m) { return { id: m.id, date: num(m.val), itemId: refId(m, cm.reqs.item), operator: reqVal(m, cm.reqs.operator) }; }) : [];
+        }).catch(function(err) { self.message('События не прочитаны: ' + err.message, 'error'); });
+    };
+
+    AtexDieCutter.prototype.shift = function() {
+        return shiftState(this.state ? this.state.shiftEvents : [], this.machineId);
     };
 
     AtexDieCutter.prototype.render = function() {
@@ -567,6 +669,13 @@
         var self = this;
         this.$('atex-dc-machines').innerHTML = '<label class="atex-dc-muted" for="atex-dc-machine">Станок</label> <select id="atex-dc-machine" class="atex-dc-input"><option value="">— выберите станок —</option>' +
             this.state.machines.map(function(m) { return '<option value="' + esc(m.id) + '"' + (m.id === self.machineId ? ' selected' : '') + '>' + esc(m.val) + '</option>'; }).join('') + '</select>';
+        if (this.machineId) {
+            var sh = this.shift();
+            this.$('atex-dc-machines').innerHTML += ' <span class="atex-dc-badge' + (sh.open ? ' is-ok' : '') + '">' +
+                esc(sh.open ? 'Смена открыта с ' + fmtTime(sh.since, true) : 'Смена закрыта') + '</span> ' +
+                '<button class="atex-dc-btn' + (sh.open ? '' : ' atex-dc-btn-primary') + '" type="button" data-act="' + (sh.open ? 'shiftClose' : 'shiftOpen') + '">' +
+                (sh.open ? 'Закрыть смену' : 'Открыть смену') + '</button>';
+        }
         this.renderList();
         this.renderJob();
     };
@@ -598,6 +707,9 @@
         var mile = j.dieId ? dieMileageNow(j.dieId, s.runs, s.dayStart) : null;
         var cl = checklist(s.checkItems, s.marks);
         var calls = openCalls(s.calls, this.machineId);
+        var setup = setupState(s.events, j.id);
+        var acts = jobActions({ done: done, shiftOpen: this.shift().open, setupOpen: setup.open, stale: !!(pr.gpMissing.length || pr.factStale) });
+        var has = function(a) { return acts.indexOf(a) >= 0; };
         var html = '<div class="atex-dc-head"><div class="atex-dc-order">' + esc(j.order ? 'Заказ ' + j.order : 'Задание ' + j.id) + '</div>' +
             '<div class="atex-dc-pulls">' + (done || pr.complete ? 'Съёмов <b>' + pr.done + '</b>' : 'Съём <b>' + (pr.done + 1) + '</b>') + ' из ' + pr.plan + '</div>' +
             '<span class="atex-dc-badge' + (done ? ' is-ok' : '') + '">' + esc(j.status || JOB_STATUS.PLANNED) + '</span></div>';
@@ -609,18 +721,20 @@
             cell('Мастер-рулон', (j.roll || '—') + (j.rollFormat ? ' · ' + j.rollFormat + ' мм' : '')) +
             cell('Остаток рулона', rest == null ? (j.rollRest || '—') : fmtNum(rest) + ' м') +
             cell('Метраж задания', fmtNum(j.footage) + ' м · съём ' + metersPerPull(j) + ' м') +
-            cell('Наладка', j.setup ? j.setup + ' мин' : '—') + '</div>';
+            cell('Наладка', (j.setup ? 'план ' + j.setup + ' мин' : 'план —') + ' · факт ' + setup.fact + ' мин' + (setup.open ? ' · идёт с ' + fmtTime(setup.since) : '')) + '</div>';
+        if (!this.shift().open) html += '<div class="atex-dc-message is-warn">Смена закрыта — откройте смену, чтобы работать с заданием.</div>';
         if (pr.gpMissing.length || pr.factStale) {
             html += '<div class="atex-dc-message is-warn">Съёмы записаны не до конца (' + (pr.gpMissing.length ? 'партий ГП не хватает: ' + pr.gpMissing.length : '«Съёмов факт» отстаёт') +
-                '). <button class="atex-dc-btn" type="button" data-act="sync">Дописать</button></div>';
+                ').' + (has('sync') ? ' <button class="atex-dc-btn" type="button" data-act="sync">Дописать</button>' : '') + '</div>';
         }
-        html += '<div class="atex-dc-toolbar">';
-        if (!done) {
-            html += btn('pull', 'Съём выполнен', 'atex-dc-btn-ok atex-dc-btn-lg') + btn('pulls', 'Съёмы пачкой', 'atex-dc-btn-lg') +
-                btn('die', '🔪 Смена ножа', '') + btn('cylinder', '🔩 Смена вала', '') + btn('scrap', 'Брак', 'atex-dc-btn-bad');
-        }
-        html += btn('checklist', 'Чек-лист ИТС' + (cl.rows.length ? ' (' + cl.rows.filter(function(r) { return r.checked; }).length + '/' + cl.rows.length + ')' : ''), '') +
-            btn('call', '📣 Вызов ИТС', '') + (done ? '' : btn('done', 'Готово', 'atex-dc-btn-primary')) + btn('refresh', 'Обновить', '') + '</div>';
+        var LABELS = {
+            pull: ['Съём выполнен', 'atex-dc-btn-ok atex-dc-btn-lg'], pulls: ['Съёмы пачкой', 'atex-dc-btn-lg'],
+            die: ['🔪 Смена ножа', ''], cylinder: ['🔩 Смена вала', ''], setup: ['🛠 Наладка', ''],
+            setupDone: ['✅ Наладка завершена', 'atex-dc-btn-primary'], scrap: ['Брак', 'atex-dc-btn-bad'],
+            checklist: ['Чек-лист ИТС' + (cl.rows.length ? ' (' + cl.rows.filter(function(r) { return r.checked; }).length + '/' + cl.rows.length + ')' : ''), ''],
+            call: ['📣 Вызов ИТС', ''], done: ['Готово', 'atex-dc-btn-primary'], refresh: ['Обновить', '']
+        };
+        html += '<div class="atex-dc-toolbar">' + acts.filter(function(a) { return LABELS[a] && a !== 'sync'; }).map(function(a) { return btn(a, LABELS[a][0], LABELS[a][1]); }).join('') + '</div>';
         if (calls.length) {
             html += '<div class="atex-dc-message is-warn">Вызов ИТС: ' + calls.map(function(c) { return esc(fmtTime(c.date) + ' · ' + c.status + (c.reason ? ' · ' + c.reason : '')); }).join('; ') + '</div>';
         }
@@ -710,7 +824,9 @@
         var made = 0;
         return this.run(function() {
             return self.client.serverNow().then(function(now) {
-                var chain = Promise.resolve();
+                // #5330: незакрытую наладку закрывает первый съём.
+                var close = n > 0 ? setupCloseOnPull(s.events, j.id, now) : null;
+                var chain = close ? self.writeEvent(j, EVENT.SETUP_DONE, close.minutes + ' мин · ' + close.notes, null, close.minutes) : Promise.resolve();
                 var kind = self.refByLabel(s.runKinds, lp.RUN_KIND.CUT);
                 if (plan.runs.length && !kind) throw new Error('в справочнике «Вид движения пробега» нет «' + lp.RUN_KIND.CUT + '»');
                 plan.runs.forEach(function(m) {
@@ -754,20 +870,48 @@
         });
     };
 
-    AtexDieCutter.prototype.writeEvent = function(j, typeLabel, notes, file) {
+    // Событие смены высечки — корневая запись (up=1) со ссылками на задание (j; у событий смены
+    // станка его нет) и станок. minutes — только у «Наладка завершена».
+    AtexDieCutter.prototype.writeEvent = function(j, typeLabel, notes, file, minutes) {
         var s = this.state, t = s.tables, self = this;
         var typeId = this.refByLabel(s.eventTypes, typeLabel);
         if (!typeId) return Promise.reject(new Error('в справочнике «Тип события высечки» нет «' + typeLabel + '»'));
         return this.client.serverNow().then(function(now) {
-            var r = t.dieEvent.reqs, p = {};
-            p['t' + t.dieEvent.id] = String(now);
-            if (r.type) p['t' + r.type] = typeId;
-            if (r.operator && self.userId) p['t' + r.operator] = self.userId;
-            if (r.notes && notes) p['t' + r.notes] = notes;
-            return self.client.create(t.dieEvent.id, j.id, p);
+            var p = eventParams(t.dieEvent, { now: now, typeId: typeId, userId: self.userId, notes: notes,
+                jobId: j ? j.id : '', machineId: (j && j.machineId) || self.machineId, minutes: minutes });
+            return self.client.create(t.dieEvent.id, 1, p);
         }).then(function(id) {
             if (!file || !t.dieEvent.reqs.photo) return id;
             return self.client.postFile('_m_set/' + id + '?JSON', 't' + t.dieEvent.reqs.photo, file).then(function() { return id; });
+        });
+    };
+
+    // #5330: «Открыть смену» / «Закрыть смену» — событие станка без задания.
+    AtexDieCutter.prototype.writeShift = function(open) {
+        var self = this;
+        if (!this.machineId) { this.message('Выберите станок.', 'warn'); return; }
+        this.run(function() { return self.writeEvent(null, open ? EVENT.SHIFT_START : EVENT.SHIFT_END, ''); },
+            open ? 'Смена открыта.' : 'Смена закрыта.');
+    };
+
+    // #5330: «Наладка» без смены оснастки.
+    AtexDieCutter.prototype.startSetup = function() {
+        var self = this, j = this.current();
+        if (!j) return;
+        this.run(function() { return self.writeEvent(j, EVENT.SETUP, ''); }, 'Наладка начата.');
+    };
+
+    // #5330: «Наладка завершена» — минуты от начала наладки по серверному времени.
+    AtexDieCutter.prototype.finishSetup = function() {
+        var self = this, j = this.current();
+        if (!j) return;
+        var st = setupState(this.state.events, j.id);
+        if (!st.open) return;
+        this.run(function() {
+            return self.client.serverNow().then(function(now) {
+                var minutes = setupMinutes(st.since, now);
+                return self.writeEvent(j, EVENT.SETUP_DONE, minutes + ' мин', null, minutes).then(function() { return 'Наладка завершена: ' + minutes + ' мин.'; });
+            });
         });
     };
 
@@ -931,6 +1075,13 @@
             runsFromReport: runsFromReport,
             machineQueue: machineQueue,
             padMachineId: padMachineId,
+            shiftState: shiftState,
+            setupState: setupState,
+            setupMinutes: setupMinutes,
+            setupCloseOnPull: setupCloseOnPull,
+            jobActions: jobActions,
+            eventParams: eventParams,
+            WRITE_ACTIONS: WRITE_ACTIONS,
             metersPerPull: metersPerPull,
             gpName: gpName,
             rollRest: rollRest,
