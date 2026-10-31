@@ -1,0 +1,46 @@
+<!-- Рабочее место atex «Заказы этикетки» (роль Менеджер). -->
+<!-- Решение ideav/crm#5324 (Фаза 2, шаг 4). См. docs/atex_workplaces.md и -->
+<!-- docs/WORKSPACE_DEVELOPMENT_GUIDE.md. URL: /ateh1/label-orders -->
+<link rel="stylesheet" href="/css/integram-table.css?{_global_.version}.1">
+<link rel="stylesheet" href="/download/{_global_.z}/css/atex-brand.css?{_global_.version}.3">
+<link rel="stylesheet" href="/download/{_global_.z}/css/label-orders.css?{_global_.version}.1">
+<script src="/js/integram-table.js?{_global_.version}.1" defer></script>
+<script src="/download/{_global_.z}/js/label-production.js?{_global_.version}.27" defer></script>
+<script src="/download/{_global_.z}/js/label-orders.js?{_global_.version}.7" defer></script>
+
+<div id="atex-lo-app" class="atex-lo atex-brand"
+     data-db="{_global_.z}"
+     data-role="{_global_.role}"
+     data-user="{_global_.user}"
+     data-xsrf="{_global_.xsrf}">
+    <div class="atex-lo-toolbar">
+        <div class="atex-lo-toolbar-title">Заказы этикетки</div>
+        <button class="atex-lo-btn atex-lo-btn-primary" type="button" data-lo-action="new"><i class="pi pi-plus"></i><span>Позиция</span></button>
+        <button class="atex-lo-btn" type="button" data-lo-action="pick-all" title="Пересчитать подбор ножа, мин. партию и ИТС во всех позициях; ручной выбор сохраняется">
+            <i class="pi pi-sync"></i><span>Подобрать всем</span>
+        </button>
+        <button class="atex-lo-btn" type="button" data-lo-action="refresh" title="Перечитать позиции, ножи и настройки">
+            <i class="pi pi-refresh"></i><span>Обновить</span>
+        </button>
+    </div>
+
+    <div id="atex-lo-message" class="atex-lo-message" hidden></div>
+    <div id="atex-lo-kpi" class="atex-lo-kpi"></div>
+
+    <div class="atex-lo-layout">
+        <div class="atex-lo-main">
+            <div id="atex-lo-grid" class="atex-lo-grid"></div>
+        </div>
+        <aside class="atex-lo-side">
+            <section id="atex-lo-card" class="atex-lo-panel">
+                <div class="atex-lo-empty">Выберите позицию в таблице — здесь появятся подобранный нож, минимальная партия, ИТС и потребность.</div>
+            </section>
+        </aside>
+    </div>
+
+    <div id="atex-lo-modal" class="atex-lo-modal" hidden>
+        <div class="atex-lo-modal-box" role="dialog" aria-modal="true">
+            <div id="atex-lo-modal-body"></div>
+        </div>
+    </div>
+</div>

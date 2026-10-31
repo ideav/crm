@@ -21,7 +21,13 @@
       {"name": "Длина этикетки, мм", "type": "SIGNED"},
       {"name": "Этикеток в рулоне", "type": "NUMBER"},
       {"name": "Тип ножей", "type": "SHORT"},
-      {"name": "Ширина втулки, мм"}
+      {"name": "Ширина втулки, мм"},
+      {"name": "Ручьёв в заказе", "type": "NUMBER"},
+      {"name": "Нож", "ref": "Нож"},
+      {"name": "Подбор ножа", "type": "SHORT"},
+      {"name": "Мин. партия, шт", "type": "NUMBER"},
+      {"name": "Нужно подтверждение ИТС", "type": "BOOLEAN"},
+      {"name": "Подтверждено ИТС", "type": "BOOLEAN"}
      ],
      "children": [
       {"name": "Обеспечение этикетки", "type": "NUMBER", "fields": [
@@ -33,6 +39,7 @@
     {"name": "Сырьё этикетки", "unique": true, "fields": [
       {"name": "Основа", "ref": "Основа сырья"},
       {"name": "Клей", "type": "SHORT"},
+      {"name": "Тип подложки", "type": "SHORT"},
       {"name": "Толщина подложки, мкм", "type": "NUMBER"},
       {"name": "Ширина джамбо, мм", "type": "NUMBER"},
       {"name": "Длина джамбо, м", "type": "NUMBER"}

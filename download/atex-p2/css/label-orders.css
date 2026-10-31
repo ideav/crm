@@ -1,0 +1,110 @@
+/* Рабочее место «Заказы этикетки» (ideav/crm#5324). */
+.atex-lo {
+    --atex-lo-border: var(--border-color, #e5e7eb);
+    --atex-lo-panel: var(--bg-secondary, #ffffff);
+    --atex-lo-muted: var(--text-secondary, #6b7280);
+    --atex-lo-ok: #15803d;
+    --atex-lo-ok-bg: #dcfce7;
+    --atex-lo-warn-bg: #fef3c7;
+    --atex-lo-warn: #92400e;
+    --atex-lo-bad-bg: #fee2e2;
+    --atex-lo-bad: #b91c1c;
+    height: 100%;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow: auto;
+    padding: 8px;
+    background: var(--bg-primary, #f8fafc);
+    color: var(--text-primary, #111827);
+    box-sizing: border-box;
+}
+
+[data-theme="dark"] .atex-lo {
+    --atex-lo-ok: #4ade80;
+    --atex-lo-ok-bg: rgba(74, 222, 128, 0.14);
+    --atex-lo-warn-bg: rgba(251, 191, 36, 0.16);
+    --atex-lo-warn: #fcd34d;
+    --atex-lo-bad-bg: rgba(248, 113, 113, 0.16);
+    --atex-lo-bad: #fca5a5;
+}
+
+.atex-lo * { box-sizing: border-box; }
+
+.atex-lo-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.atex-lo-toolbar-title { font-weight: 600; margin-right: auto; }
+
+.atex-lo-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 12px; border: 1px solid var(--atex-lo-border); border-radius: 6px;
+    background: var(--atex-lo-panel); color: inherit; font: inherit; cursor: pointer;
+}
+.atex-lo-btn:hover { border-color: var(--atex-navy-l, #3b82f6); }
+.atex-lo-btn-primary { background: var(--atex-navy, #1e3a8a); border-color: var(--atex-navy, #1e3a8a); color: var(--atex-on-navy, #fff); }
+
+.atex-lo-message { padding: 8px 12px; border-radius: 6px; background: var(--atex-lo-panel); border: 1px solid var(--atex-lo-border); }
+.atex-lo-message.is-error { background: var(--atex-lo-bad-bg); color: var(--atex-lo-bad); border-color: transparent; }
+.atex-lo-message.is-warn { background: var(--atex-lo-warn-bg); color: var(--atex-lo-warn); border-color: transparent; }
+.atex-lo-message.is-ok { background: var(--atex-lo-ok-bg); color: var(--atex-lo-ok); border-color: transparent; }
+
+.atex-lo-kpi { display: flex; flex-wrap: wrap; gap: 8px; }
+.atex-lo-kpi-tile { min-width: 120px; padding: 8px 12px; border: 1px solid var(--atex-lo-border); border-radius: 8px; background: var(--atex-lo-panel); }
+.atex-lo-kpi-value { font-size: 20px; font-weight: 600; }
+.atex-lo-kpi-label { font-size: 12px; color: var(--atex-lo-muted); }
+.atex-lo-kpi-tile.is-ok .atex-lo-kpi-value { color: var(--atex-lo-ok); }
+.atex-lo-kpi-tile.is-warn { background: var(--atex-lo-warn-bg); }
+.atex-lo-kpi-tile.is-bad { background: var(--atex-lo-bad-bg); }
+.atex-lo-kpi-tile.is-bad .atex-lo-kpi-value { color: var(--atex-lo-bad); }
+
+.atex-lo-layout { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 8px; flex: 1; min-height: 0; }
+.atex-lo-main { min-width: 0; min-height: 0; }
+.atex-lo-grid { min-height: 300px; }
+.atex-lo-side { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.atex-lo-panel { padding: 12px; border: 1px solid var(--atex-lo-border); border-radius: 8px; background: var(--atex-lo-panel); }
+.atex-lo-panel-title { margin: 0 0 8px; font-size: 15px; }
+.atex-lo-sub { margin: 12px 0 4px; font-size: 13px; color: var(--atex-lo-muted); text-transform: uppercase; letter-spacing: .03em; }
+.atex-lo-empty, .atex-lo-muted { color: var(--atex-lo-muted); }
+.atex-lo-note { margin-top: 6px; font-size: 12px; color: var(--atex-lo-muted); }
+.atex-lo-note.is-warn { color: var(--atex-lo-warn); }
+
+.atex-lo-kv { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; border-bottom: 1px dashed var(--atex-lo-border); font-size: 13px; }
+.atex-lo-kv > span { color: var(--atex-lo-muted); }
+.atex-lo-kv > b { font-weight: 500; text-align: right; }
+.atex-lo-kv small { display: block; font-weight: 400; color: var(--atex-lo-muted); }
+
+.atex-lo-flags { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
+.atex-lo-badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 500; }
+.atex-lo-badge.is-ok { background: var(--atex-lo-ok-bg); color: var(--atex-lo-ok); }
+.atex-lo-badge.is-warn { background: var(--atex-lo-warn-bg); color: var(--atex-lo-warn); }
+.atex-lo-badge.is-bad { background: var(--atex-lo-bad-bg); color: var(--atex-lo-bad); }
+
+.atex-lo-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+
+.atex-lo-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.atex-lo-table th, .atex-lo-table td { padding: 4px 6px; border-bottom: 1px solid var(--atex-lo-border); text-align: left; }
+.atex-lo-table .num { text-align: right; }
+.atex-lo-table tr.is-muted td { color: var(--atex-lo-muted); }
+
+.atex-lo-modal { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; background: rgba(15, 23, 42, 0.45); }
+.atex-lo-modal[hidden] { display: none; }
+.atex-lo-modal-box { width: min(720px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; padding: 16px; border-radius: 10px; background: var(--atex-lo-panel); color: var(--text-primary, #111827); }
+.atex-lo-modal-text { margin-bottom: 12px; }
+.atex-lo-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+
+.atex-lo-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; }
+.atex-lo-field { display: flex; flex-direction: column; gap: 2px; font-size: 13px; }
+.atex-lo-field > span { color: var(--atex-lo-muted); }
+.atex-lo-field input, .atex-lo-field select { padding: 6px 8px; border: 1px solid var(--atex-lo-border); border-radius: 6px; font: inherit; background: var(--bg-primary, #fff); color: inherit; min-width: 0; }
+.atex-lo-field[data-field="knifeType"] { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px; }
+.atex-lo-field[data-field="knifeType"] > span { flex-basis: 100%; }
+.atex-lo-field[data-field="knifeType"] input { flex: 1; }
+.atex-lo-field small { color: var(--atex-lo-muted); font-size: 11px; flex-basis: 100%; }
+.atex-lo-field-error { color: var(--atex-lo-bad); font-style: normal; font-size: 12px; flex-basis: 100%; }
+.atex-lo-field-error:empty { display: none; }
+.atex-lo-field.has-error input, .atex-lo-field.has-error select { border-color: var(--atex-lo-bad); }
+
+@media (max-width: 900px) {
+    .atex-lo-layout { grid-template-columns: 1fr; }
+    .atex-lo-form { grid-template-columns: 1fr; }
+}

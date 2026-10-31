@@ -16,7 +16,9 @@
 //      раппорта нет, раппорт ножа из базы 1С сверяется с раппортом его вала;
 //   5. что написано в «Типе ножей» выгрузки 1С: «85 х 38 (80)» — этикетка 85×38 мм,
 //      втулка 80 мм; «18 х 18 (80)15 ручъев» — ещё и число ручьёв; «D х 40 (76)» —
-//      круглая этикетка диаметром 40 мм.
+//      круглая этикетка диаметром 40 мм;
+//   6. какой нож у позиции заказа этикетки, какая у неё минимальная партия и нужно ли
+//      подтверждение ИТС (ideav/crm#5324; правила — docs/atex_phase2_labels_tz.md §5.1).
 //
 // Структура таблиц описана в docs/atex_phase2_schema.json (накат —
 // docs/scripts/apply_label_schema_5301.py); конфигурация ниже называет те же имена,
@@ -50,7 +52,15 @@
                 labelsPerRoll: 'Этикеток в рулоне',
                 knifeType: 'Тип ножей',
                 sleeveWidth: 'Ширина втулки, мм',
-                supply: 'Обеспечение этикетки'
+                supply: 'Обеспечение этикетки',
+                // Рабочее место «Заказы этикетки» (ideav/crm#5324): ручьёв в рулоне заказа,
+                // подобранный нож и как он выбран (DIE_PICK), минимальная партия, ИТС.
+                orderStreams: 'Ручьёв в заказе',
+                die: 'Нож',
+                diePick: 'Подбор ножа',
+                minBatch: 'Мин. партия, шт',
+                itsNeeded: 'Нужно подтверждение ИТС',
+                itsConfirmed: 'Подтверждено ИТС'
             } },
             sleeveTask: { name: 'Задача на втулки', reqs: {} },
             productKind: { name: 'Вид продукции', reqs: {} },
@@ -64,6 +74,7 @@
             material: { name: 'Сырьё этикетки', reqs: {
                 base: 'Основа',
                 glue: 'Клей',
+                linerType: 'Тип подложки',
                 linerThickness: 'Толщина подложки, мкм',
                 jumboWidth: 'Ширина джамбо, мм',
                 jumboLength: 'Длина джамбо, м'
@@ -495,6 +506,159 @@
         return { ok: true, width: width, length: length, sleeveWidth: sleeveWidth, streams: streams, round: round };
     }
 
+    // ── Позиция заказа этикетки: подбор ножа, минимальная партия, ИТС (ideav/crm#5324) ──
+
+    // Как у позиции выбран нож — значение реквизита «Подбор ножа».
+    var DIE_PICK = { FOUND: 'подобран', MANUAL: 'вручную', NONE: 'нет ножа' };
+
+    var SIZE_TOLERANCE_MM = 0.05;   // размеры в 1С — до десятых мм («102 х 120,5»)
+
+    function numOrNaN(v) {
+        var s = String(v == null ? '' : v).trim();
+        return s === '' ? NaN : toNumLoose(s);
+    }
+
+    function refLabel(raw) {
+        return norm(String(raw == null ? '' : raw).replace(/^\s*\d+:/, ''));
+    }
+
+    function fmtMm(v) {
+        return String(v).replace('.', ',');
+    }
+
+    // Автоподбор ножа под позицию.
+    //   pos  — { width, length, base, orderStreams, knifeStreams }: размер этикетки, основа
+    //          сырья позиции, ручьёв в рулоне заказа (пусто = 1), ручьёв из «Типа ножей» 1С
+    //          (null — не указано);
+    //   dies — [{ id, no, width, length, base, streams, selectable, meters }]: selectable —
+    //          состояние ножа с «Нож подбирается», meters — пробег.
+    // Нож подходит, если размер совпал точно (без поворота), основа та же, состояние
+    // подбирается, ручьёв ножа кратно ручьям заказа и равно ручьям «Типа ножей», если они
+    // указаны. Из подходящих — наименьший пробег, при равенстве — меньший номер.
+    // → { ok: true, die, candidates } | { ok: false, die: null, candidates: [], reason }:
+    // reason называет первое невыполненное условие.
+    function pickDie(pos, dies) {
+        var p = pos || {};
+        var w = numOrNaN(p.width), l = numOrNaN(p.length);
+        var none = function(reason) { return { ok: false, die: null, candidates: [], reason: reason }; };
+        if (!(w > 0) || !(l > 0)) return none('размер этикетки не задан');
+        var size = fmtMm(w) + '×' + fmtMm(l);
+        var base = refLabel(p.base);
+        var orderStreams = numOrNaN(p.orderStreams);
+        if (!(orderStreams > 0)) orderStreams = 1;
+        var knifeStreams = p.knifeStreams == null || String(p.knifeStreams).trim() === '' ? null : numOrNaN(p.knifeStreams);
+
+        var bySize = (dies || []).filter(function(d) {
+            return Math.abs(numOrNaN(d.width) - w) <= SIZE_TOLERANCE_MM && Math.abs(numOrNaN(d.length) - l) <= SIZE_TOLERANCE_MM;
+        });
+        if (!bySize.length) return none('нет ножа ' + size);
+        if (base === '') return none('у сырья позиции не задана основа — нож ' + size + ' не подобрать');
+        var byBase = bySize.filter(function(d) { return refLabel(d.base) === base; });
+        if (!byBase.length) return none('нож ' + size + ' есть только на другой основе (нужна «' + base + '»)');
+        var bySel = byBase.filter(function(d) { return d.selectable === true; });
+        if (!bySel.length) return none('нож ' + size + ' есть, но ни один не в состоянии, в котором нож подбирается');
+        var byStreams = bySel.filter(function(d) {
+            var s = numOrNaN(d.streams);
+            return s > 0 && s % orderStreams === 0 && (knifeStreams === null || s === knifeStreams);
+        });
+        if (!byStreams.length) {
+            return none('нож ' + size + ' есть, но ручьёв ножа (' + bySel.map(function(d) { return d.streams; }).join(', ') + ') не кратно ' +
+                orderStreams + ' ручьям заказа' + (knifeStreams !== null ? ' или не равно ' + knifeStreams + ' из «Типа ножей»' : ''));
+        }
+        var sorted = byStreams.slice().sort(function(a, b) {
+            var ma = Number(a.meters) || 0, mb = Number(b.meters) || 0;
+            if (ma !== mb) return ma - mb;
+            return String(a.no).localeCompare(String(b.no), 'ru', { numeric: true });
+        });
+        return { ok: true, die: sorted[0], candidates: sorted };
+    }
+
+    // Нож позиции с учётом ручного выбора: pos.pick = DIE_PICK.MANUAL и pos.dieId — нож
+    // выбран вручную и держится, даже если автоподбор дал бы другой; выбранного ножа нет в
+    // списке — «нет ножа», другим не подменяется. Иначе — pickDie.
+    // → { ok, pick, die, candidates, reason }.
+    function positionDie(pos, dies) {
+        var p = pos || {};
+        if (p.pick === DIE_PICK.MANUAL && p.dieId != null && String(p.dieId) !== '') {
+            var id = String(p.dieId);
+            var d = (dies || []).filter(function(x) { return String(x.id) === id; })[0];
+            if (!d) return { ok: false, pick: DIE_PICK.NONE, die: null, candidates: [], reason: 'выбранного вручную ножа ' + id + ' нет в базе' };
+            return { ok: true, pick: DIE_PICK.MANUAL, die: d, candidates: [d] };
+        }
+        var r = pickDie(p, dies);
+        return { ok: r.ok, pick: r.ok ? DIE_PICK.FOUND : DIE_PICK.NONE, die: r.die, candidates: r.candidates, reason: r.reason };
+    }
+
+    // Минимальная партия — этикеток с одного мастер-рулона через нож:
+    // floor(длина МР, мм / раппорт, мм) × этикеток на раппорте × ручьёв ножа.
+    // die — { repeatMm, labelsPerRepeat, streams }; mrLengthM — длина МР, м (настройка).
+    // → { ok: true, labels, repeats } | { ok: false, error }.
+    function labelMinBatch(die, mrLengthM) {
+        if (!die) return { ok: false, error: 'нож не подобран' };
+        var rep = numOrNaN(die.repeatMm), per = numOrNaN(die.labelsPerRepeat), st = numOrNaN(die.streams);
+        var len = numOrNaN(mrLengthM);
+        if (!(rep > 0)) return { ok: false, error: 'у ножа нет раппорта (вал не задан)' };
+        if (!(per > 0)) return { ok: false, error: 'у ножа не задано «Этикеток на раппорте»' };
+        if (!(st > 0)) return { ok: false, error: 'у ножа не задано «Ручьёв»' };
+        if (!(len > 0)) return { ok: false, error: 'длина мастер-рулона не задана' };
+        var repeats = Math.floor(len * 1000 / rep + 1e-9);
+        return { ok: true, repeats: repeats, labels: repeats * per * st };
+    }
+
+    // Подтверждение ИТС по размеру: ширина или длина этикетки вне [minMm, maxMm] (границы
+    // включительно; пустой порог не проверяется). Оба порога пусты — configured: false.
+    // → { needed, configured, reason }.
+    function labelItsCheck(width, length, minMm, maxMm) {
+        var lo = numOrNaN(minMm), hi = numOrNaN(maxMm);
+        var configured = lo > 0 || hi > 0;
+        var w = numOrNaN(width), l = numOrNaN(length);
+        var out = [];
+        [['ширина', w], ['длина', l]].forEach(function(x) {
+            if (!(x[1] > 0)) return;
+            if (lo > 0 && x[1] < lo) out.push(x[0] + ' ' + fmtMm(x[1]) + ' мм меньше ' + fmtMm(lo));
+            if (hi > 0 && x[1] > hi) out.push(x[0] + ' ' + fmtMm(x[1]) + ' мм больше ' + fmtMm(hi));
+        });
+        return { needed: out.length > 0, configured: configured, reason: out.join('; ') };
+    }
+
+    // Потребность позиции: этикеток = рулонов × этикеток в рулоне; раппортов =
+    // ceil(этикеток / (этикеток на раппорте × ручьёв ножа)); метраж вырубки = раппорты ×
+    // раппорт; мастер-рулонов = ceil(метраж / длина МР); коэффициент использования сырья =
+    // ширина этикетки × ручьёв ножа / исп. формат ножа (3 знака).
+    // → { ok: true, labels, repeats, meters, masterRolls, useRatio } | { ok: false, labels, error }.
+    function labelPositionDemand(pos, die, mrLengthM) {
+        var p = pos || {};
+        var labels = (numOrNaN(p.rolls) || 0) * (numOrNaN(p.labelsPerRoll) || 0);
+        if (!die) return { ok: false, labels: labels, error: 'нож не подобран' };
+        var rep = numOrNaN(die.repeatMm), per = numOrNaN(die.labelsPerRepeat), st = numOrNaN(die.streams);
+        if (!(rep > 0) || !(per > 0) || !(st > 0)) return { ok: false, labels: labels, error: 'у ножа не заданы раппорт, этикеток на раппорте или ручьи' };
+        var repeats = Math.ceil(labels / (per * st) - 1e-9);
+        var meters = Math.round(repeats * rep) / 1000;
+        var len = numOrNaN(mrLengthM);
+        var fmt = numOrNaN(die.usedFormat), w = numOrNaN(p.width);
+        return {
+            ok: true,
+            labels: labels,
+            repeats: repeats,
+            meters: meters,
+            masterRolls: len > 0 ? Math.ceil(meters / len - 1e-9) : null,
+            useRatio: fmt > 0 && w > 0 ? Math.round(w * st / fmt * 1000) / 1000 : null
+        };
+    }
+
+    // Что держит позицию: blocks — в планирование высечки не идёт (нет ножа; ИТС нужен и не
+    // подтверждён), warnings — видно менеджеру, но не держит (меньше минимальной партии).
+    // p — { pick, itsNeeded, itsConfirmed, labels, minBatch }. → { ready, blocks, warnings }.
+    function labelPositionFlags(p) {
+        var x = p || {};
+        var blocks = [], warnings = [];
+        if (x.pick !== DIE_PICK.FOUND && x.pick !== DIE_PICK.MANUAL) blocks.push(DIE_PICK.NONE);
+        if (x.itsNeeded === true && x.itsConfirmed !== true) blocks.push('ждёт подтверждения ИТС');
+        var labels = numOrNaN(x.labels), min = numOrNaN(x.minBatch);
+        if (min > 0 && labels >= 0 && labels < min) warnings.push('меньше минимальной партии (' + min + ' шт)');
+        return { ready: blocks.length === 0, blocks: blocks, warnings: warnings };
+    }
+
     return {
         PRODUCT_KIND: PRODUCT_KIND,
         core: {
@@ -523,7 +687,14 @@
             productKindOf: productKindOf,
             rowProductKind: rowProductKind,
             filterPositionRows: filterPositionRows,
-            parseKnifeType: parseKnifeType
+            parseKnifeType: parseKnifeType,
+            DIE_PICK: DIE_PICK,
+            pickDie: pickDie,
+            positionDie: positionDie,
+            labelMinBatch: labelMinBatch,
+            labelItsCheck: labelItsCheck,
+            labelPositionDemand: labelPositionDemand,
+            labelPositionFlags: labelPositionFlags
         }
     };
 });
