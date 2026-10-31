@@ -1,0 +1,60 @@
+<!-- Рабочее место atex «Планирование высечки» (роль Диспетчер, чтение — Руководитель). -->
+<!-- Решение ideav/crm#5320 (Фаза 2, шаг 7). См. docs/atex_workplaces.md (раздел «Планирование высечки») -->
+<!-- и docs/WORKSPACE_DEVELOPMENT_GUIDE.md. URL: /&lt;база&gt;/die-planning -->
+<link rel="stylesheet" href="/download/{_global_.z}/css/atex-brand.css?{_global_.version}.3">
+<link rel="stylesheet" href="/download/{_global_.z}/css/die-planning.css?{_global_.version}.1">
+<script src="/download/{_global_.z}/js/label-production.js?{_global_.version}.27" defer></script>
+<script src="/download/{_global_.z}/js/label-orders.js?{_global_.version}.7" defer></script>
+<script src="/download/{_global_.z}/js/jumbo-cut-map.js?{_global_.version}.1" defer></script>
+<script src="/download/{_global_.z}/js/master-rolls-core.js?{_global_.version}.1" defer></script>
+<script src="/download/{_global_.z}/js/die-planning-core.js?{_global_.version}.3" defer></script>
+<script src="/download/{_global_.z}/js/die-planning.js?{_global_.version}.2" defer></script>
+
+<div id="atex-dp-app" class="atex-dp atex-brand"
+     data-db="{_global_.z}"
+     data-xsrf="{_global_.xsrf}"
+     data-user-id="{_global_.user_id}">
+    <div class="atex-dp-toolbar">
+        <h1 class="atex-dp-title">Планирование высечки</h1>
+        <button class="atex-dp-btn" type="button" data-act="form" title="Создать задания высечки из позиций заказов этикетки: нож подобран, ИТС не ждёт, задания ещё нет">
+            <i class="pi pi-plus"></i><span>Сформировать задания</span>
+        </button>
+        <button class="atex-dp-btn" type="button" data-act="order" title="Построить очередь по станкам и дням (план не записывается)">
+            <i class="pi pi-sort-amount-down"></i><span>Упорядочить</span>
+        </button>
+        <button id="atex-dp-apply" class="atex-dp-btn atex-dp-btn-primary" type="button" data-act="apply" disabled title="Записать построенный план: старт, станок, вал, наладка, длительность">
+            <i class="pi pi-check"></i><span>Применить</span>
+        </button>
+        <button class="atex-dp-btn" type="button" data-act="reserve" title="Зарезервировать целые мастер-рулоны под задания по правилам склада">
+            <i class="pi pi-box"></i><span>Зарезервировать МР</span>
+        </button>
+        <button class="atex-dp-btn" type="button" data-act="sleeves" title="Создать задачи на втулки под позициями заданий">
+            <i class="pi pi-cog"></i><span>Задачи на втулки</span>
+        </button>
+        <button class="atex-dp-btn" type="button" data-act="refresh" title="Перечитать данные">
+            <i class="pi pi-refresh"></i><span>Обновить</span>
+        </button>
+    </div>
+
+    <div id="atex-dp-message" class="atex-dp-message" hidden></div>
+    <div id="atex-dp-kpi" class="atex-dp-kpi"></div>
+
+    <div class="atex-dp-tabs" role="tablist">
+        <button class="atex-dp-tab is-active" type="button" data-tab="queue">Очередь</button>
+        <button class="atex-dp-tab" type="button" data-tab="deficit">Дефицит форматов</button>
+        <button class="atex-dp-tab" type="button" data-tab="gantt">Гант</button>
+        <button class="atex-dp-tab" type="button" data-tab="load">Загрузка ножей и валов</button>
+    </div>
+    <section id="atex-dp-body" class="atex-dp-panel"></section>
+
+    <div id="atex-dp-modal" class="atex-dp-modal" hidden>
+        <div class="atex-dp-modal-box" role="dialog" aria-modal="true">
+            <div id="atex-dp-modal-text"></div>
+            <div id="atex-dp-modal-error" class="atex-dp-modal-error"></div>
+            <div class="atex-dp-modal-actions">
+                <button id="atex-dp-modal-cancel" class="atex-dp-btn" type="button">Закрыть</button>
+                <button id="atex-dp-modal-ok" class="atex-dp-btn atex-dp-btn-primary" type="button">Подтвердить</button>
+            </div>
+        </div>
+    </div>
+</div>
