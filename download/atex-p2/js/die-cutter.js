@@ -372,6 +372,42 @@
 
     var MACHINE_KEY = 'atex-dc-machine';
 
+    // Каркас пульта. Корень делит со сторожем планшета (pad-guard.js пишет в него свои
+    // экраны), поэтому каркас рисует start(), а не шаблон.
+    var SHELL = [
+        '<div class="atex-dc-toolbar">',
+        '<h1 class="atex-dc-title">Пульт высечки</h1>',
+        '<div id="atex-dc-machines"></div>',
+        '</div>',
+        '<div id="atex-dc-message" class="atex-dc-message" hidden></div>',
+        '<div class="atex-dc-pad">',
+        '<aside class="atex-dc-panel">',
+        '<h2 class="atex-dc-panel-title">Задания станка</h2>',
+        '<div id="atex-dc-list"></div>',
+        '</aside>',
+        '<section id="atex-dc-job" class="atex-dc-panel"></section>',
+        '</div>',
+        '<div id="atex-dc-modal" class="atex-dc-modal" hidden>',
+        '<div class="atex-dc-modal-box" role="dialog" aria-modal="true">',
+        '<div id="atex-dc-modal-text"></div>',
+        '<div class="atex-dc-modal-actions">',
+        '<button id="atex-dc-modal-cancel" class="atex-dc-btn" type="button">Отмена</button>',
+        '<button id="atex-dc-modal-ok" class="atex-dc-btn atex-dc-btn-primary" type="button">Подтвердить</button>',
+        '</div>',
+        '</div>',
+        '</div>'
+    ].join('');
+
+
+    // #5330: станок из настройки планшета (pad-guard.js, колонка «Станок высечки»),
+    // сведённый со справочником станков: ссылкой по id или по названию. Настройки нет
+    // или такого станка нет — пусто, остаётся выбор, запомненный на планшете.
+    function padMachineId(machines, pad, guard) {
+        var obj = pad && pad.config && pad.config.dieCutter;
+        if (!obj || !guard || typeof guard.matchPadObject !== 'function') return '';
+        return guard.matchPadObject((machines || []).map(function(m) { return { id: m.id, label: m.val }; }), obj);
+    }
+
     function AtexDieCutter(rootEl) {
         this.root = rootEl;
         this.client = new Client(rootEl.getAttribute('data-db') || '', rootEl.getAttribute('data-xsrf') || '');
@@ -395,6 +431,7 @@
 
     AtexDieCutter.prototype.start = function() {
         var self = this;
+        this.root.innerHTML = SHELL;
         this.root.addEventListener('click', function(e) {
             var j = e.target.closest('[data-job-id]');
             if (j) { self.selectedId = j.getAttribute('data-job-id'); self.loadJob().then(function() { self.render(); }); return; }
@@ -420,6 +457,7 @@
                 self.machineId = e.target.value;
                 self.selectedId = '';
                 try { window.localStorage.setItem(MACHINE_KEY, self.machineId); } catch (x) { /* хранилище недоступно */ }
+                self.storePadMachine();
                 self.pickCurrent();
                 self.loadJob().then(function() { self.render(); });
             }
@@ -470,6 +508,8 @@
                     events: [], marks: []
                 };
                 if (self.state.missing.length) self.message('Проверьте схему: ' + self.state.missing.join('; '), 'warn');
+                var fromPad = padMachineId(self.state.machines, window.atexPad, window.AtexPadGuard);
+                if (fromPad) self.machineId = fromPad;
                 if (!self.state.machines.some(function(m) { return m.id === self.machineId; })) self.machineId = '';
                 self.pickCurrent();
                 return self.loadJob();
@@ -477,6 +517,18 @@
         }).catch(function(err) {
             console.error('[die-cutter] ❌', err);
             self.message('Пульт не загрузился: ' + err.message, 'error');
+        });
+    };
+
+    // #5330: выбранный станок — в настройку планшета (её же читает pad-home.js). Прав на
+    // запись в «Планшет» нет (оператор) — сторож молча не пишет, выбор живёт в localStorage.
+    AtexDieCutter.prototype.storePadMachine = function() {
+        var pad = window.atexPad;
+        if (!pad || typeof pad.setObject !== 'function' || !this.machineId) return;
+        var id = this.machineId;
+        var m = (this.state ? this.state.machines : []).filter(function(x) { return x.id === id; })[0];
+        pad.setObject('dieCutter', { id: id, label: m ? m.val : '' }).catch(function(err) {
+            console.warn('[die-cutter] станок в «Планшет» не записан:', err && err.message);
         });
     };
 
@@ -878,6 +930,7 @@
             jobsFromReport: jobsFromReport,
             runsFromReport: runsFromReport,
             machineQueue: machineQueue,
+            padMachineId: padMachineId,
             metersPerPull: metersPerPull,
             gpName: gpName,
             rollRest: rollRest,

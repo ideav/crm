@@ -6,34 +6,17 @@
 <script src="/download/{_global_.z}/js/label-production.js?{_global_.version}.4" defer></script>
 <script src="/download/{_global_.z}/js/idle-logout.js?{_global_.version}.1"
         data-idle-root="atex-dc-app" defer></script>
-<script src="/download/{_global_.z}/js/die-cutter.js?{_global_.version}.3" defer></script>
+<!-- Скрипт пульта подключает сторож планшета pad-guard.js (#4666, #5330) — только после того, -->
+<!-- как планшет опознан в таблице «Планшет». Каркас пульта рисует сам die-cutter.js: сторож -->
+<!-- пишет свои экраны в этот же корень. -->
+<script src="/download/{_global_.z}/js/pad-guard.js?{_global_.version}.9"
+        data-pad-roles="1621"
+        data-pad-kind="dieCutter"
+        data-pad-root="atex-dc-app"
+        data-pad-app="/download/{_global_.z}/js/die-cutter.js?{_global_.version}.4" defer></script>
 
 <div id="atex-dc-app" class="atex-dc atex-brand"
      data-db="{_global_.z}"
      data-xsrf="{_global_.xsrf}"
-     data-user-id="{_global_.user_id}">
-    <div class="atex-dc-toolbar">
-        <h1 class="atex-dc-title">Пульт высечки</h1>
-        <div id="atex-dc-machines"></div>
-    </div>
-
-    <div id="atex-dc-message" class="atex-dc-message" hidden></div>
-
-    <div class="atex-dc-pad">
-        <aside class="atex-dc-panel">
-            <h2 class="atex-dc-panel-title">Задания станка</h2>
-            <div id="atex-dc-list"></div>
-        </aside>
-        <section id="atex-dc-job" class="atex-dc-panel"></section>
-    </div>
-
-    <div id="atex-dc-modal" class="atex-dc-modal" hidden>
-        <div class="atex-dc-modal-box" role="dialog" aria-modal="true">
-            <div id="atex-dc-modal-text"></div>
-            <div class="atex-dc-modal-actions">
-                <button id="atex-dc-modal-cancel" class="atex-dc-btn" type="button">Отмена</button>
-                <button id="atex-dc-modal-ok" class="atex-dc-btn atex-dc-btn-primary" type="button">Подтвердить</button>
-            </div>
-        </div>
-    </div>
-</div>
+     data-user="{_global_.user}"
+     data-user-id="{_global_.user_id}"></div>

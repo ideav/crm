@@ -45,6 +45,11 @@
  * ошибкой, код уходит в «Планшет-кандидат». Значение отдаёт шаблон main.html
  * (отчёт MyPads) в `window.atexUserPads`.
  *
+ * #5330: пульт высечки Фазы 2 (/{db}/die-cutter) — вид `dieCutter`, колонка «Станок
+ * высечки». Вид живёт, только если такая колонка есть в таблице «Планшет»: без неё
+ * настройка планшета разбирается в те же три объекта, что и раньше, ключа `dieCutter` в ней
+ * нет, и запись выбора объекта её не касается. Колонка заведена только в базе ateh1.
+ *
  * Чистая часть (разбор метаданных, строк, сборка запросов, генерация токена)
  * экспортируется через module.exports для тестов
  * (experiments/atex-pad-guard.test.js).
@@ -78,19 +83,21 @@
         slitter: 'Слиттер',
         cutter: 'Втулкорез',
         place: 'Упаковочное место',
+        dieCutter: 'Станок высечки',   // #5330: только там, где колонка есть (ateh1)
         workspace: 'Рабочее место'
     };
     // Объект настройки → рабочее место оператора (хвост URL `/{db}/{action}`).
-    var WORKSPACE_ACTION = { slitter: 'slitter', cutter: 'sleeve-cutter', place: 'packer' };
+    var WORKSPACE_ACTION = { slitter: 'slitter', cutter: 'sleeve-cutter', place: 'packer', dieCutter: 'die-cutter' };
     // Обратная карта: по рабочему месту — какой колонкой задан его объект.
-    var ACTION_KIND = { slitter: 'slitter', 'sleeve-cutter': 'cutter', packer: 'place' };
+    var ACTION_KIND = { slitter: 'slitter', 'sleeve-cutter': 'cutter', packer: 'place', 'die-cutter': 'dieCutter' };
     // Как в колонке «Рабочее место» может быть записано само рабочее место. Пусто —
     // не задано; неизвестное слово — тоже (тогда решает набор заполненных объектов).
     var WORKSPACE_ALIASES = {
         'slitter': 'slitter', 'слиттер': 'slitter', 'резка': 'slitter', 'пульт слиттера': 'slitter',
         'sleeve-cutter': 'sleeve-cutter', 'sleevecutter': 'sleeve-cutter', 'втулкорез': 'sleeve-cutter',
         'втулки': 'sleeve-cutter', 'пульт втулкореза': 'sleeve-cutter',
-        'packer': 'packer', 'упаковка': 'packer', 'упаковщик': 'packer', 'упаковочное место': 'packer'
+        'packer': 'packer', 'упаковка': 'packer', 'упаковщик': 'packer', 'упаковочное место': 'packer',
+        'die-cutter': 'die-cutter', 'высечка': 'die-cutter', 'пульт высечки': 'die-cutter'
     };
 
     // ── Чистые функции ──
@@ -193,7 +200,7 @@
         return !!(obj && (obj.id || obj.label));
     }
 
-    // Значение колонки «Рабочее место» → 'slitter' | 'sleeve-cutter' | 'packer' | ''.
+    // Значение колонки «Рабочее место» → 'slitter' | 'sleeve-cutter' | 'packer' | 'die-cutter' | ''.
     function normalizeWorkspace(value) {
         var s = parseRefValue(value).label.toLowerCase();
         return WORKSPACE_ALIASES[s] || '';
@@ -212,7 +219,7 @@
     }
 
     // #4868: отказ «планшету не назначен объект этого рабочего места». kind — колонка
-    // настройки ('slitter' | 'cutter' | 'place'); kind не задан или это не объект
+    // настройки ('slitter' | 'cutter' | 'place' | 'dieCutter'); kind не задан или это не объект
     // («Рабочее место» и прочее) — пульт не блокируем. Нет планшета — тоже: это другой
     // экран допуска. Объект задан (ссылка или подпись) — отказа нет.
     function missingObject(pad, kind) {
@@ -227,7 +234,8 @@
         };
     }
 
-    // Настройка планшета из строки JSON_OBJ.
+    // Настройка планшета из строки JSON_OBJ. Три объекта Фазы 1 есть в ней всегда
+    // (null — не задан); `dieCutter` (#5330) — только когда в таблице есть его колонка.
     function padConfigFromRow(table, cols) {
         var config = { slitter: null, cutter: null, place: null, workspace: '' };
         Object.keys(CONFIG_REQS).forEach(function(kind) {
@@ -584,7 +592,9 @@
             return post(ctx, '_m_set/' + pad.id + '?JSON', params, true).then(function() {
                 pad.config[kind] = { id: trimText(obj && obj.id), label: trimText(obj && obj.label) };
                 Object.keys(WORKSPACE_ACTION).forEach(function(other) {
-                    if (other !== kind) pad.config[other] = null;
+                    // #5330: обнуляем только известные настройке объекты — ключ `dieCutter`
+                    // не появляется там, где у таблицы нет его колонки.
+                    if (other !== kind && other in pad.config) pad.config[other] = null;
                 });
                 var wsReq = configReqId(ctx.table, 'workspace');
                 if (!wsReq) return { saved: true, reason: '' };
@@ -801,7 +811,7 @@
             role: root.role || '',
             // #4868: шаблон пульта объявляет, кому место разрешено (data-pad-roles —
             // id ролей, как PAD_ROLE_IDS в main.html) и какой объект планшета нужен
-            // этому пульту (data-pad-kind: slitter | cutter | place).
+            // этому пульту (data-pad-kind: slitter | cutter | place | dieCutter).
             allowedRoles: parseRoleIds(script.getAttribute('data-pad-roles')),
             kind: trimText(script.getAttribute('data-pad-kind')),
             table: null
