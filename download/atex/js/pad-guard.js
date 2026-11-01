@@ -384,14 +384,78 @@
             var row = list[i] || {};
             var cols = row.r || [];
             if (trimText(cols[0]) !== trimText(token)) continue;
-            return {
+            var found = {
                 id: String(row.i == null ? '' : row.i),
                 token: trimText(cols[0]),
                 name: trimText(cols[nameIdx > 0 ? nameIdx : 1]),
                 config: padConfigFromRow(table, cols)   // #4789: настройка планшета
             };
+            // #5339 D1: сколько значений пришло в строке — по нему видно, что метаданные
+            // неполны (не enumerable: на форму объекта и сравнения это не влияет).
+            Object.defineProperty(found, '_cols', { value: cols.length, enumerable: false });
+            return found;
         }
         return null;
+    }
+
+    // #5339 D1: «настройка не прочиталась» не то же, что «планшет не настроен». Текст
+    // проблемы, если метаданные или строка планшета прочитаны не целиком; пусто — данные
+    // целы, и пустая колонка значит именно «не заполнено».
+    //  - kind задан (сторож пульта): в метаданных нет колонки этого пульта;
+    //  - kind не задан (вход с корня): в метаданных нет ни одной колонки объекта;
+    //  - в строке больше значений, чем колонок в метаданных: метаданные неполны.
+    function configLoadProblem(table, pad, kind) {
+        if (!table) return 'метаданные таблицы «' + TABLE_NAME + '» не прочитаны';
+        if (kind && WORKSPACE_ACTION[kind]) {
+            if (!reqByName(table, CONFIG_REQS[kind]))
+                return 'в метаданных таблицы «' + TABLE_NAME + '» не найдена колонка «' + CONFIG_REQS[kind] + '»';
+        } else if (!Object.keys(WORKSPACE_ACTION).some(function(k) { return !!reqByName(table, CONFIG_REQS[k]); })) {
+            return 'в метаданных таблицы «' + TABLE_NAME + '» нет колонок настройки планшета';
+        }
+        var colCount = pad && pad._cols;
+        var reqCount = ((table && table.reqs) || []).length;
+        if (colCount > reqCount + 1)
+            return 'в строке планшета ' + colCount + ' значений, а в метаданных только ' + (reqCount + 1) + ' колонок';
+        return '';
+    }
+
+    // Ошибка загрузки настройки (не «не настроено»): экран с кнопкой «Повторить».
+    function loadError(message) {
+        var err = new Error(message);
+        err.loadError = true;
+        return err;
+    }
+
+    var RETRY_DELAYS = [300, 900];   // #5339 D1: два повтора с нарастающей паузой
+
+    // Забыть общий кеш GET этой базы: повтор должен сходить на сервер заново, а не
+    // получить тот же (возможно, неполный) ответ.
+    function forgetShared(doc, db) {
+        var store = doc && doc.__atexPadGets;
+        if (!store) return;
+        var prefix = encodeURIComponent(trimText(db)) + '/';
+        Object.keys(store).forEach(function(key) {
+            if (key.indexOf(prefix) === 0) delete store[key];
+        });
+    }
+
+    // #5339 D1: run() читает метаданные и планшет; сбой (сеть, не JSON, loadError) -
+    // повтор через паузу из delays, каждый раз с чистым кешем. fatal-ошибки (например,
+    // таблицы нет вовсе) не повторяются. Последняя ошибка уходит дальше.
+    function withRetry(doc, db, run, delays) {
+        var pauses = (delays || RETRY_DELAYS).slice();
+        var wait = (root && root.setTimeout) ? root.setTimeout.bind(root) : setTimeout;
+        function attempt() {
+            return Promise.resolve().then(run).catch(function(err) {
+                if (!pauses.length || (err && err.fatal)) throw err;
+                if (typeof console !== 'undefined' && console.warn)
+                    console.warn('[pad-guard] загрузка настройки планшета не удалась, повтор:', err && err.message ? err.message : err);
+                forgetShared(doc, db);
+                var pause = pauses.shift();
+                return new Promise(function(resolve) { wait(resolve, pause); }).then(attempt);
+            });
+        }
+        return attempt();
     }
 
     // Номер колонки «Наименование» в строке JSON_OBJ. Порядок значений тот же, что
@@ -514,6 +578,11 @@
             card.appendChild(el('div', { class: 'atex-pad-error', text: 'Код устройства не сгенерировать: браузер не умеет crypto.getRandomValues' }));
         }
         if (opts && opts.publishCode) showCandidate(ctx, card, padToken);
+        if (opts && typeof opts.retry === 'function') {   // #5339 D1
+            var retryBtn = el('button', { class: 'atex-pad-btn', type: 'button', text: 'Повторить' });
+            retryBtn.addEventListener('click', function() { opts.retry(); });
+            card.appendChild(retryBtn);
+        }
         if (canRegister(ctx.table, ctx) && !noRegister) {
             var input = el('input', {
                 class: 'atex-pad-input', id: 'atex-pad-name', type: 'text',
@@ -622,7 +691,12 @@
                 try { data = JSON.parse(text); }
                 catch (e) { throw new Error('Сервер вернул не JSON: ' + text.slice(0, 200)); }
                 var message = apiError(resp, data);
-                if (message) throw new Error(message);
+                if (message) {
+                    var failure = new Error(message);
+                    // #5339 D1: отказ сервера 4xx (нет прав и т.п.) повтором не лечится.
+                    failure.fatal = resp.status >= 400 && resp.status < 500;
+                    throw failure;
+                }
                 return data;
             });
         });
@@ -814,6 +888,7 @@
             // этому пульту (data-pad-kind: slitter | cutter | place | dieCutter).
             allowedRoles: parseRoleIds(script.getAttribute('data-pad-roles')),
             kind: trimText(script.getAttribute('data-pad-kind')),
+            retryDelays: root.atexPadRetryDelays,   // #5339 D1: паузы повторов (задают тесты)
             table: null
         };
         // #5046: устройство должно быть в «Планшетах» пользователя (значение даёт шаблон
@@ -831,43 +906,68 @@
                 { noRegister: true });
             return;
         }
-        showNote(container, 'Проверка устройства…', '');
+        // #5339 D1: чтение метаданных и планшета повторяется; сбой - экран ошибки с
+        // кнопкой «Повторить», а не «не настроено».
+        function start() {
+            showNote(container, 'Проверка устройства…', '');
+            withRetry(root.document, ctx.db, function() { return loadPad(); }, ctx.retryDelays)
+                .then(function(pad) { openPad(pad); })
+                .catch(function(err) {
+                    if (typeof console !== 'undefined' && console.error)
+                        console.error('[pad-guard] не удалось загрузить настройку планшета:', err);
+                    if (err && err.loadError)
+                        showBlocked(ctx, 'Не удалось загрузить настройку планшета',
+                            'Настройка не прочиталась (' + err.message + '). Это сбой загрузки, а не отсутствие настройки — нажмите «Повторить».',
+                            { noRegister: true, retry: start });
+                    else
+                        showBlocked(ctx, 'Проверка устройства недоступна', err.message, { retry: start });
+                });
+        }
 
-        sharedGet(ctx, 'metadata')
-            .then(function(metadata) {
+        function loadPad() {
+            return sharedGet(ctx, 'metadata').then(function(metadata) {
                 ctx.metadata = metadata;   // #4944: в них же таблица «Планшет-кандидат»
                 ctx.table = findTable(metadata);
-                if (!ctx.table)
-                    throw new Error('В базе нет таблицы «' + TABLE_NAME + '» — обратитесь к администратору');
+                if (!ctx.table) {
+                    var fatal = new Error('В базе нет таблицы «' + TABLE_NAME + '» — обратитесь к администратору');
+                    fatal.fatal = true;
+                    throw fatal;
+                }
                 var token = readToken(root.localStorage);
                 if (!isToken(token)) return null;
                 return sharedGet(ctx, buildLookupPath(ctx.table.id, token)).then(function(rows) {
-                    return padFromRows(rows, token, nameColIndex(ctx.table), ctx.table);
+                    var pad = padFromRows(rows, token, nameColIndex(ctx.table), ctx.table);
+                    if (pad && ctx.kind) {
+                        var problem = configLoadProblem(ctx.table, pad, ctx.kind);
+                        if (problem) throw loadError(problem);
+                    }
+                    return pad;
                 });
-            })
-            .then(function(pad) {
-                if (!pad) {
-                    showBlocked(ctx, 'Устройство не зарегистрировано',
-                        canRegister(ctx.table, ctx)
-                            ? 'Этот планшет не значится в таблице «' + TABLE_NAME + '». Дайте ему название и зарегистрируйте — рабочее место откроется сразу после этого.'
-                            : 'Этот планшет не значится в таблице «' + TABLE_NAME + '». Зарегистрировать его может сотрудник с правом записи в эту таблицу.',
-                        { publishCode: true });   // #4944: код уходит администратору сам
-                    return;
-                }
-                // #4868: планшету назначен объект ЭТОГО рабочего места? Не назначен —
-                // пульт не открывается: выбор объекта в пульте остался в прошлом, место
-                // задаётся настройкой планшета. Код планшета на экране — по нему запись находят.
-                var missing = missingObject(pad, ctx.kind);
-                if (missing) {
-                    showBlocked(ctx, missing.title, missing.text, { noRegister: true });
-                    return;
-                }
-                publishPad(ctx, pad);
-                loadApp(appSrc);
-            })
-            .catch(function(err) {
-                showBlocked(ctx, 'Проверка устройства недоступна', err.message);
             });
+        }
+
+        function openPad(pad) {
+            if (!pad) {
+                showBlocked(ctx, 'Устройство не зарегистрировано',
+                    canRegister(ctx.table, ctx)
+                        ? 'Этот планшет не значится в таблице «' + TABLE_NAME + '». Дайте ему название и зарегистрируйте — рабочее место откроется сразу после этого.'
+                        : 'Этот планшет не значится в таблице «' + TABLE_NAME + '». Зарегистрировать его может сотрудник с правом записи в эту таблицу.',
+                    { publishCode: true });   // #4944: код уходит администратору сам
+                return;
+            }
+            // #4868: планшету назначен объект ЭТОГО рабочего места? Не назначен -
+            // пульт не открывается: выбор объекта в пульте остался в прошлом, место
+            // задаётся настройкой планшета. Код планшета на экране - по нему запись находят.
+            var missing = missingObject(pad, ctx.kind);
+            if (missing) {
+                showBlocked(ctx, missing.title, missing.text, { noRegister: true });
+                return;
+            }
+            publishPad(ctx, pad);
+            loadApp(appSrc);
+        }
+
+        start();
     }
 
     return {
@@ -908,6 +1008,9 @@
         sharedGet: sharedGet,               // #5134: общая шина GET страницы
         sharedOnce: sharedOnce,             // #5134: тот же кеш со своим транспортом
         padFromRows: padFromRows,
+        configLoadProblem: configLoadProblem,   // #5339 D1
+        loadError: loadError,                   // #5339 D1
+        withRetry: withRetry,                   // #5339 D1: повтор чтения с чистым кешем
         registerParams: registerParams,
         apiError: apiError,
         readToken: readToken,

@@ -54,10 +54,10 @@ assertEqual(core.isTerminal('Пропущена'), true, 'isTerminal: Пропу
 assertEqual(core.isTerminal('Ожидает'), false, 'isTerminal: Ожидает → false');
 assertEqual(core.isTerminal('В работе'), false, 'isTerminal: В работе → false');
 
-// ── Дата/время: round-trip (TZ-независимо) ──
-var unixMorning = Math.floor(new Date(2026, 5, 1, 8, 30, 0).getTime() / 1000); // локально 2026-06-01 08:30
-assertEqual(core.unixToLocalIso(unixMorning), '2026-06-01', 'unixToLocalIso: Unix → локальная дата');
-assertEqual(core.unixToLocalTime(unixMorning), '08:30', 'unixToLocalTime: Unix → локальное HH:MM');
+// ── Дата/время: по Москве ──
+var unixMorning = Math.floor(Date.UTC(2026, 5, 1, 5, 30, 0) / 1000); // 2026-06-01 08:30 MSK
+assertEqual(core.unixToLocalIso(unixMorning), '2026-06-01', 'unixToLocalIso: Unix → дата по Москве');
+assertEqual(core.unixToLocalTime(unixMorning), '08:30', 'unixToLocalTime: Unix → HH:MM по Москве');
 assertEqual(core.unixToLocalIso(''), '', 'unixToLocalIso: пусто → ""');
 assertEqual(core.unixToLocalTime(0), '', 'unixToLocalTime: 0 → ""');
 
