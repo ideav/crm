@@ -704,6 +704,7 @@
         var self = this;
         var c = this.client;
         return c.getJson('metadata').then(function(meta) {
+            self.meta = meta;
             var res = lp.resolveProductionTables(meta, lp.PRODUCT_KIND.LABEL);
             var lost = NEED.filter(function(k) { return !res.tables[k]; });
             if (lost.length) throw new Error('в базе нет таблиц: ' + lost.map(function(k) { return lp.PRODUCTION_CONFIGS[lp.PRODUCT_KIND.LABEL].tables[k].name; }).join(', '));
@@ -971,7 +972,9 @@
         // Сообщение об успехе — после перечитывания данных: к этому моменту кнопки задания
         // уже обновлены («Наладка» → «Наладка завершена» без «Обновить», #5339).
         return Promise.resolve().then(work).then(function(text) {
-            result = { text: okText != null ? okText : String(text || ''), kind: 'ok' };
+            // Работа может вернуть { text, kind } — например, «Задание закрыто, но статусы не записаны» (#5358).
+            if (okText == null && text && typeof text === 'object') result = { text: String(text.text || ''), kind: text.kind || 'ok' };
+            else result = { text: okText != null ? okText : String(text || ''), kind: 'ok' };
         }).catch(function(err) {
             console.error('[die-cutter] ❌', err);
             result = { text: 'Не записано: ' + err.message, kind: 'error' };
@@ -1294,8 +1297,29 @@
                     var p = {};
                     p['t' + s.tables.dieJob.reqs.status] = JOB_STATUS.DONE;
                     return self.client.post('_m_set/' + encodeURIComponent(j.id) + '?JSON', p);
-                });
-            }, 'Задание закрыто.');
+                }).then(function() { return self.afterJobDone(j.id); });
+            });
+        });
+    };
+
+    // Задание стало «Выполнено» → статусы позиции и заказа этикетки (label-status-core.js, #5341/#5358).
+    // Ошибка здесь не откатывает закрытие задания: → { text, kind: 'ok' | 'warn' } для run().
+    AtexDieCutter.prototype.afterJobDone = function(jobId) {
+        var closed = 'Задание закрыто.';
+        var st = this.labelStatus || (root && root.AtexLabelStatus);
+        if (!st || typeof st.completeAfterJob !== 'function') {
+            return Promise.resolve({ text: closed + ' Статусы позиции и заказа не обновлены: не загружен label-status-core.js.', kind: 'warn' });
+        }
+        return Promise.resolve().then(function() { return st.completeAfterJob(this.client, this.meta, jobId); }.bind(this)).then(function(plan) {
+            plan = plan || {};
+            var n = (plan.positionsDone || []).length;
+            var text = closed + (n === 1 ? ' Позиция выполнена.' : n > 1 ? ' Позиции выполнены (' + n + ').' : '') + (plan.orderDone ? ' Заказ выполнен.' : '');
+            var skipped = plan.skipped || [];
+            if (skipped.length) return { text: text + ' Статусы обновлены не полностью: ' + skipped.join('; ') + '.', kind: 'warn' };
+            return { text: text, kind: 'ok' };
+        }, function(err) {
+            console.error('[die-cutter] статусы позиции/заказа', err);
+            return { text: closed + ' Статусы позиции и заказа не обновлены: ' + (err && err.message || err) + '.', kind: 'warn' };
         });
     };
 
