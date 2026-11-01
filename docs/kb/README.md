@@ -23,6 +23,7 @@
 | Запросы/отчёты: вызов `report/` | [queries.md](queries.md) | report, JSON_KV, FR_, TO_, SET-запрос, права как у хранимой процедуры |
 | Роли, права, меню | [roles.md](roles.md) | роль 42, юзер 18, меню 151, гранты 116/136, маска, объект FILE |
 | Файлы сервера `dir_admin` | [files.md](files.md) | dir_admin, del[], mkdir, touch, upload, gf, ?JSON=1, безопасность, задачи cron |
+| Шаблоны баз: фиксация, модерация, создание базы из шаблона | [db-templates.md](db-templates.md) | шаблон базы, _tpl_list, _tpl_publish, _tpl_status, реестр, registry.json, версия, модерация, INTEGRAM_TPL_MODERATORS, снимок, newDb, Tpl_deploy, ЛК, _new_db, template= |
 | Деплой: update.php, PR, worktree | [deploy.md](deploy.md) | update.php, update.conf, форк unidel2035, git worktree, ветки, шаблон базы, TEMPLATES, newDb |
 | Дэшборд / финмодель `dash` | [dashboard.md](dashboard.md) | Дэшборд 559, Лист, Панель, RG, Строка, Значение, period, RGtype, RGcolumns, Метка, формулы, словарь периодов |
 | Дэшборд: устройство кода и развитие | [dashboard-dev.md](dashboard-dev.md) | dash.js, dash-optimize.js, dash-import, конвейер загрузки, data-src, формулы, eval, правка ячеек, viz-настройки, плитки, opti, развитие дэшборда, подсветка влияющих ячеек |
