@@ -118,7 +118,9 @@
     }
     function isFilled(v) { return !(v === '' || v == null); }
 
-    // ── Дата/время: Unix ↔ локальная дата (конвенция cut-gantt.js — локальный TZ) ──
+    // ── Дата/время: Unix ↔ дата сервера (Europe/Moscow, UTC+3 без перехода на летнее) ──
+    // Время в рабочих местах только серверное, не часовой пояс браузера (#5339 D12).
+    var MSK_OFFSET_MS = 3 * 3600 * 1000;
 
     // Unix (сек или мс) → миллисекунды; 0/мусор → 0.
     function unixToMs(value) {
@@ -126,21 +128,23 @@
         if (!n) return 0;
         return n >= 1e12 ? n : n * 1000;
     }
+    // Момент в мс → Date, чьи getUTC* дают московские дата и время.
+    function mskDate(ms) { return new Date(ms + MSK_OFFSET_MS); }
     function localIsoFromMs(ms) {
-        var d = new Date(ms);
-        return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+        var d = mskDate(ms);
+        return d.getUTCFullYear() + '-' + pad2(d.getUTCMonth() + 1) + '-' + pad2(d.getUTCDate());
     }
-    // Unix → 'YYYY-MM-DD' по локальному времени; пусто → ''.
+    // Unix → 'YYYY-MM-DD' по московскому времени; пусто → ''.
     function unixToLocalIso(value) {
         var ms = unixToMs(value);
         return ms ? localIsoFromMs(ms) : '';
     }
-    // Unix → 'HH:MM' по локальному времени; пусто → ''.
+    // Unix → 'HH:MM' по московскому времени; пусто → ''.
     function unixToLocalTime(value) {
         var ms = unixToMs(value);
         if (!ms) return '';
-        var d = new Date(ms);
-        return pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+        var d = mskDate(ms);
+        return pad2(d.getUTCHours()) + ':' + pad2(d.getUTCMinutes());
     }
     function todayLocalIso() { return localIsoFromMs(Date.now()); }
 
@@ -148,13 +152,13 @@
         var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso == null ? '' : iso));
         return m ? { y: +m[1], mo: +m[2], d: +m[3] } : null;
     }
-    // Границы дня в Unix-секундах: [локальная полночь, следующая локальная полночь).
+    // Границы дня в Unix-секундах: [московская полночь, следующая московская полночь).
     // Используются как серверный фильтр отчёта по плановому старту (FR_/TO_).
     function dayBoundsUnix(iso) {
         var p = isoParts(iso);
         if (!p) return null;
-        var start = new Date(p.y, p.mo - 1, p.d, 0, 0, 0, 0).getTime();
-        var end = new Date(p.y, p.mo - 1, p.d + 1, 0, 0, 0, 0).getTime();
+        var start = Date.UTC(p.y, p.mo - 1, p.d) - MSK_OFFSET_MS;
+        var end = Date.UTC(p.y, p.mo - 1, p.d + 1) - MSK_OFFSET_MS;
         return { start: Math.floor(start / 1000), end: Math.floor(end / 1000) };
     }
     // 'YYYY-MM-DD' → 'DD.MM.YYYY' (для подписи); нераспознанное — как есть.
@@ -168,8 +172,8 @@
     function shiftIso(iso, days) {
         var p = isoParts(iso);
         if (!p) return '';
-        var d = new Date(p.y, p.mo - 1, p.d + (Number(days) || 0));
-        return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+        var d = new Date(Date.UTC(p.y, p.mo - 1, p.d + (Number(days) || 0)));
+        return d.getUTCFullYear() + '-' + pad2(d.getUTCMonth() + 1) + '-' + pad2(d.getUTCDate());
     }
 
     // #4861: короткие дни недели для заголовков дней окна (не Intl — одна и та же
@@ -184,7 +188,7 @@
         var label = pad2(p.d) + '.' + pad2(p.mo);
         if (iso === todayIso) return 'Сегодня, ' + label;
         if (iso === shiftIso(todayIso, -1)) return 'Вчера, ' + label;
-        return WEEKDAYS[new Date(p.y, p.mo - 1, p.d).getDay()] + ', ' + label;
+        return WEEKDAYS[new Date(Date.UTC(p.y, p.mo - 1, p.d)).getUTCDay()] + ', ' + label;
     }
 
     // #4798: подпись пульта в шапке страницы (.navbar-workspace) —

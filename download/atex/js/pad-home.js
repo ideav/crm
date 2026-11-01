@@ -147,7 +147,11 @@
                 catch (e) { throw new Error('Сервер вернул не JSON: ' + text.slice(0, 200)); }
                 var guard = root.AtexPadGuard;
                 var message = guard && guard.apiError ? guard.apiError(resp, data) : '';
-                if (message) throw new Error(message);
+                if (message) {
+                    var failure = new Error(message);
+                    failure.fatal = resp.status >= 400 && resp.status < 500;   // #5339 D1: 4xx повтором не лечится
+                    throw failure;
+                }
                 return data;
             });
         });
@@ -171,9 +175,16 @@
             var table = guard.findTable(metadata);
             if (!table) throw new Error('В базе нет таблицы «' + TABLE_NAME + '»');
             return sharedJson(ctx, guard, guard.buildLookupPath(table.id, token)).then(function(rows) {
+                var pad = guard.padFromRows(rows, token, guard.nameColIndex(table), table);
+                // #5339 D1: «не настроено» только когда данные прочитаны целиком; если колонок
+                // настройки в метаданных нет или они неполны - это сбой загрузки (повтор/ошибка).
+                if (pad && !guard.padWorkspace(pad).ok && guard.configLoadProblem) {
+                    var problem = guard.configLoadProblem(table, pad, '');
+                    if (problem) throw guard.loadError(problem);
+                }
                 return {
                     table: table, metadata: metadata,   // #4944: в них же «Планшет-кандидат»
-                    pad: guard.padFromRows(rows, token, guard.nameColIndex(table), table)
+                    pad: pad
                 };
             });
         });
@@ -215,7 +226,8 @@
             action: script.getAttribute('data-pad-action') || root.action || '',
             roleId: script.getAttribute('data-pad-role-id') || root.roleId || '',
             roles: parseRoles(script.getAttribute('data-pad-roles')),
-            css: script.getAttribute('data-pad-css') || ''
+            css: script.getAttribute('data-pad-css') || '',
+            retryDelays: root.atexPadRetryDelays   // #5339 D1: паузы повторов (задают тесты)
         };
         if (!shouldRedirect(ctx)) return;
         ensureStyles(ctx.css);
@@ -231,7 +243,8 @@
             return;
         }
 
-        loadPad(ctx, guard, token).then(function(res) {
+        var load = function() { return loadPad(ctx, guard, token); };
+        (guard.withRetry ? guard.withRetry(root.document, ctx.db, load, ctx.retryDelays) : load()).then(function(res) {
             if (!res.pad) {
                 announceCode(ctx, guard, token, res.metadata,
                     showScreen('Рабочее место не настроено', reasonText('no-pad'), token));
@@ -252,8 +265,17 @@
             root.location.replace(workspaceUrl(ctx.db, target.action));
         }).catch(function(err) {
             // Молча оставлять оператора на пустом корне нельзя — говорим, что случилось.
+            if (typeof console !== 'undefined' && console.error)
+                console.error('[pad-home] не удалось загрузить настройку планшета:', err);
             hideScreen();
-            showScreen('Рабочее место не открылось', err && err.message ? err.message : String(err), token);
+            var screen = showScreen(err && err.loadError ? 'Не удалось загрузить настройку планшета' : 'Рабочее место не открылось',
+                err && err.message ? err.message : String(err), token);
+            var card = screen && screen.childNodes[0];
+            if (card) {   // #5339 D1: «Повторить» - перезапуск входа
+                var btn = el('button', { class: 'atex-pad-btn', type: 'button', text: 'Повторить' });
+                btn.addEventListener('click', function() { boot(script); });
+                card.appendChild(btn);
+            }
         });
     }
 
