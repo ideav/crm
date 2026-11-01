@@ -43,7 +43,9 @@
 
     var HINTS = {
         orders: 'Выгрузка «Выгруженные заказы этикетка» (.xlsx). Ключ сверки — «Заказ клиента» + артикул: ' +
-            'существующая позиция обновляется, новая создаётся в заказе. Примечание и статус позиции пишутся только при создании.',
+            'существующая позиция обновляется, новая создаётся в заказе. Примечание и статус позиции пишутся только при создании. ' +
+            'Сырьё подбирается по обозначению в номенклатуре («П/Гл», «П/П») и клею, срок = дата поступления + ' + LI.DUE_DAYS_DEFAULT +
+            ' дн. (настройка ' + LI.DUE_DAYS_KEY + '); у существующей позиции они заполняются, только если пусты.',
         knives: 'Книга с листом «Ножи» (и «План» — оттуда берётся «Суммарный пробег ножа»). Ключ — «Номер ножа». ' +
             'Пробег пишется одной записью «начальный остаток»: повторный импорт её перезаписывает, вырубку не трогает. ' +
             'Пустое значение в файле поле не стирает; состояние ножа пишется только при создании.'
@@ -68,6 +70,24 @@
         return Promise.all(workers).then(function() { return out; });
     }
 
+    // Индикатор загрузки предпросмотра: полоса со счётчиком секунд (чтение базы ножей занимает 7-10 с).
+    function loadingHtml(text, seconds) {
+        return '<span class="atex-limp-spinner" aria-hidden="true"></span>' + esc(text) + (seconds > 0 ? ' · ' + seconds + ' с' : '');
+    }
+
+    // Предупреждения по типам: раскрываемый список со счётчиком (до `limit` строк в каждом типе).
+    function warningGroupsHtml(rows, limit) {
+        var groups = LI.groupWarnings(rows);
+        if (!groups.length) return '';
+        var max = limit || 100;
+        return '<div class="atex-limp-groups"><div class="atex-limp-groups-title">Предупреждения по типам (' + groups.length + ')</div>' +
+            groups.map(function(g) {
+                return '<details class="atex-limp-group"><summary><b>' + g.count + '</b> × ' + esc(g.type) + '</summary><ul>' +
+                    g.rows.slice(0, max).map(function(x) { return '<li>строка ' + x.row + (x.key ? ' (' + esc(x.key) + ')' : '') + ': ' + esc(x.text) + '</li>'; }).join('') +
+                    (g.rows.length > max ? '<li>… и ещё ' + (g.rows.length - max) + '</li>' : '') + '</ul></details>';
+            }).join('') + '</div>';
+    }
+
     function sheetGrid(XLSX, wb, name) {
         var ws = wb.Sheets[name];
         return ws ? XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' }) : null;
@@ -89,7 +109,25 @@
         this.plan = { orders: null, knives: null };
         this.filter = '';
         this.busy = false;
+        this.loading = '';
+        this.loadingSince = 0;
+        this.loadingTimer = null;
     }
+
+    // Начать/закончить показ индикатора загрузки в таблице предпросмотра.
+    AtexLabelImport.prototype.setLoading = function(text) {
+        var self = this;
+        this.loading = text || '';
+        this.loadingSince = text ? Date.now() : 0;
+        if (this.loadingTimer) { clearInterval(this.loadingTimer); this.loadingTimer = null; }
+        if (text) this.loadingTimer = setInterval(function() { self.renderLoading(); }, 500);
+        this.render();
+    };
+
+    AtexLabelImport.prototype.renderLoading = function() {
+        var el = this.$('atex-limp-loading');
+        if (el && this.loading) el.innerHTML = loadingHtml(this.loading, Math.floor((Date.now() - this.loadingSince) / 1000));
+    };
 
     AtexLabelImport.prototype.$ = function(id) { return document.getElementById(id); };
     AtexLabelImport.prototype.url = function(path) { return '/' + encodeURIComponent(this.db) + '/' + path; };
@@ -195,7 +233,7 @@
         if (this.busy) return;
         this.message('Читаю «' + file.name + '»…');
         this.plan[tab] = null;
-        this.render();
+        this.setLoading('Читаю «' + file.name + '»');
         return Promise.all([this.withXlsx(), file.arrayBuffer()]).then(function(r) {
             var XLSX = r[0];
             var wb = XLSX.read(new Uint8Array(r[1]), { type: 'array' });
@@ -213,12 +251,12 @@
             if (!parsed.ok) throw new Error(parsed.error);
             self.parsed[tab] = parsed;
             self.files[tab] = file.name;
+            self.setLoading('Сверяю с базой' + (tab === 'knives' ? ' (база ножей — до 10 с)' : ''));
             return self.replan(tab);
         }).catch(function(err) {
             console.error('[label-import] ❌', err);
             self.message('Файл не разобран: ' + err.message, 'error');
-            self.render();
-        });
+        }).then(function() { self.setLoading(''); });
     };
 
     AtexLabelImport.prototype.checkTables = function(tab) {
@@ -270,7 +308,7 @@
         var opt = function(key) { return self.tables[key] ? self.objects(key) : Promise.resolve([]); };
         return Promise.all([
             this.objects('order'), this.objects('client'), this.objects('article'), this.objects('productKind'),
-            opt('orderStatus'), opt('positionStatus'), opt('core'), opt('unit')
+            opt('orderStatus'), opt('positionStatus'), opt('core'), opt('unit'), opt('material'), opt('setting')
         ]).then(function(r) {
             var numbers = {};
             (parsed.items || []).forEach(function(i) { numbers[i.order] = true; });
@@ -280,7 +318,7 @@
                 lists.forEach(function(list, i) { (list || []).forEach(function(p) { p.up = hit[i].id; positions.push(p); }); });
                 return LI.orderContext(self.tables, {
                     orders: r[0], positions: positions, clients: r[1], articles: r[2], productKinds: r[3],
-                    orderStatuses: r[4], positionStatuses: r[5], cores: r[6], units: r[7]
+                    orderStatuses: r[4], positionStatuses: r[5], cores: r[6], units: r[7], materials: r[8], settings: r[9], db: self.db
                 });
             });
         });
@@ -373,7 +411,15 @@
             kpi.innerHTML = html;
         }
 
+        var groupsEl = this.$('atex-limp-groups');
+        if (groupsEl) groupsEl.innerHTML = plan ? warningGroupsHtml(plan.rows) : '';
+
         var body = this.$('atex-limp-rows');
+        if (!plan && this.loading) {
+            body.innerHTML = '<tr><td colspan="5" class="atex-limp-empty" id="atex-limp-loading">' +
+                loadingHtml(this.loading, Math.floor((Date.now() - this.loadingSince) / 1000)) + '</td></tr>';
+            return;
+        }
         if (!plan) {
             body.innerHTML = '<tr><td colspan="5" class="atex-limp-empty">Выберите выгрузку 1С — здесь появится предпросмотр. Без «Записать» в базу ничего не пишется.</td></tr>';
             return;
@@ -400,5 +446,5 @@
             (!rows.length ? '<tr><td colspan="5" class="atex-limp-empty">Нет строк.</td></tr>' : '');
     };
 
-    return { AtexLabelImport: AtexLabelImport, pool: pool };
+    return { AtexLabelImport: AtexLabelImport, pool: pool, loadingHtml: loadingHtml, warningGroupsHtml: warningGroupsHtml };
 });

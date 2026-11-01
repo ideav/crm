@@ -167,3 +167,18 @@
 }
 .atex-limp-modal-text { margin-bottom: 14px; line-height: 1.45; }
 .atex-limp-modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* Индикатор загрузки предпросмотра (#5341, I2) */
+.atex-limp-spinner {
+    display: inline-block; width: 14px; height: 14px; margin-right: 8px; vertical-align: -2px;
+    border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%;
+    animation: atex-limp-spin 0.8s linear infinite;
+}
+@keyframes atex-limp-spin { to { transform: rotate(360deg); } }
+
+/* Предупреждения по типам (#5341, I3) */
+.atex-limp-groups { margin: 8px 0; }
+.atex-limp-groups-title { font-weight: 600; margin-bottom: 4px; }
+.atex-limp-group { background: var(--atex-limp-warn-bg); color: var(--atex-limp-warn); border-radius: 6px; padding: 4px 10px; margin-bottom: 4px; }
+.atex-limp-group summary { cursor: pointer; }
+.atex-limp-group ul { margin: 6px 0 2px 18px; padding: 0; max-height: 240px; overflow: auto; font-size: 12px; }
