@@ -1,0 +1,24 @@
+<!-- Рабочее место atex «Упаковка этикетки» (Оператор на планшете упаковочного места). -->
+<!-- Решение ideav/crm#5348 (Фаза 2, шаг 10). См. docs/atex_workplaces.md §3.23 -->
+<!-- и docs/WORKSPACE_DEVELOPMENT_GUIDE.md. URL: /ateh1/label-packer -->
+<link rel="stylesheet" href="/download/{_global_.z}/css/atex-brand.css?{_global_.version}.3">
+<link rel="stylesheet" href="/download/{_global_.z}/css/label-packer.css?{_global_.version}.1">
+<script src="/download/{_global_.z}/js/idle-logout.js?{_global_.version}.1"
+        data-idle-root="atex-lp-app" defer></script>
+<!-- Подбор короба — чистые функции Фазы 1 (matchSize, boxesFor); сам файл не меняется. -->
+<script src="/download/{_global_.z}/js/packaging-size.js?{_global_.version}.2" defer></script>
+<script src="/download/{_global_.z}/js/label-packer-core.js?{_global_.version}.2" defer></script>
+<!-- Скрипт пульта подключает сторож планшета pad-guard.js (#4666): только после того, как -->
+<!-- планшет опознан в таблице «Планшет» и у него назначено упаковочное место (#4852). -->
+<!-- Каркас рисует сам label-packer.js: сторож пишет свои экраны в этот же корень. -->
+<script src="/download/{_global_.z}/js/pad-guard.js?{_global_.version}.9"
+        data-pad-roles="1621"
+        data-pad-kind="place"
+        data-pad-root="atex-lp-app"
+        data-pad-app="/download/{_global_.z}/js/label-packer.js?{_global_.version}.3" defer></script>
+
+<div id="atex-lp-app" class="atex-lp atex-brand"
+     data-db="{_global_.z}"
+     data-xsrf="{_global_.xsrf}"
+     data-user="{_global_.user}"
+     data-user-id="{_global_.user_id}"></div>

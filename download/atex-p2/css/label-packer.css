@@ -1,0 +1,79 @@
+/* Рабочее место «Упаковка этикетки» (ideav/crm#5348). Планшет: крупные кнопки. */
+.atex-lp {
+    --atex-lp-border: var(--border-color, #e5e7eb);
+    --atex-lp-panel: var(--bg-secondary, #ffffff);
+    --atex-lp-muted: var(--text-secondary, #6b7280);
+    --atex-lp-ok: #15803d;
+    --atex-lp-ok-bg: #dcfce7;
+    --atex-lp-warn: #92400e;
+    --atex-lp-warn-bg: #fef3c7;
+    --atex-lp-bad: #b91c1c;
+    --atex-lp-bad-bg: #fee2e2;
+    --atex-lp-info: #1d4ed8;
+    --atex-lp-info-bg: #dbeafe;
+    --atex-lp-primary: #1d4ed8;
+    height: 100%;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow: auto;
+    padding: 8px;
+    background: var(--bg-primary, #f8fafc);
+    color: var(--text-primary, #111827);
+    box-sizing: border-box;
+}
+
+[data-theme="dark"] .atex-lp {
+    --atex-lp-ok: #4ade80;
+    --atex-lp-ok-bg: rgba(74, 222, 128, 0.14);
+    --atex-lp-warn: #fcd34d;
+    --atex-lp-warn-bg: rgba(251, 191, 36, 0.16);
+    --atex-lp-bad: #fca5a5;
+    --atex-lp-bad-bg: rgba(248, 113, 113, 0.16);
+    --atex-lp-info: #93c5fd;
+    --atex-lp-info-bg: rgba(96, 165, 250, 0.16);
+    --atex-lp-primary: #60a5fa;
+}
+
+.atex-lp *, .atex-lp *::before, .atex-lp *::after { box-sizing: border-box; }
+.atex-lp-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.atex-lp-title { margin: 0 auto 0 0; font-size: 20px; }
+.atex-lp-muted { color: var(--atex-lp-muted); font-size: 13px; }
+.atex-lp-empty { padding: 16px; color: var(--atex-lp-muted); }
+.atex-lp-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; background: var(--atex-lp-info-bg); color: var(--atex-lp-info); font-size: 13px; }
+
+.atex-lp-message { padding: 8px 12px; border-radius: 6px; background: var(--atex-lp-info-bg); color: var(--atex-lp-info); }
+.atex-lp-message.is-ok { background: var(--atex-lp-ok-bg); color: var(--atex-lp-ok); }
+.atex-lp-message.is-warn { background: var(--atex-lp-warn-bg); color: var(--atex-lp-warn); }
+.atex-lp-message.is-error { background: var(--atex-lp-bad-bg); color: var(--atex-lp-bad); }
+.atex-lp-message[hidden] { display: none; }
+
+.atex-lp-list { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.atex-lp-order { background: var(--atex-lp-panel); border: 1px solid var(--atex-lp-border); border-radius: 8px; padding: 10px; }
+.atex-lp-order-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 6px; }
+.atex-lp-order-no { font-size: 18px; }
+.atex-lp-order-head .atex-lp-badge { margin-left: auto; }
+.atex-lp-card { display: flex; justify-content: space-between; gap: 12px; padding: 10px; border: 1px solid var(--atex-lp-border); border-radius: 6px; margin-top: 6px; background: var(--atex-lp-panel); }
+.atex-lp-card.is-done { opacity: 0.7; }
+.atex-lp-card-main { min-width: 0; }
+.atex-lp-card-qty { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: 0 0 auto; }
+.atex-lp-name { font-size: 16px; }
+.atex-lp-qty { font-size: 28px; font-weight: 700; line-height: 1; }
+.atex-lp-box { margin-top: 4px; font-weight: 600; color: var(--atex-lp-ok); }
+.atex-lp-done-head { margin-top: 4px; }
+
+.atex-lp-btn { min-height: 44px; padding: 8px 14px; border: 1px solid var(--atex-lp-border); border-radius: 6px; background: var(--atex-lp-panel); color: inherit; font-size: 15px; cursor: pointer; }
+.atex-lp-btn-lg { min-height: 56px; font-size: 17px; font-weight: 600; }
+.atex-lp-btn-primary { background: var(--atex-lp-primary); border-color: var(--atex-lp-primary); color: #fff; }
+
+.atex-lp-label { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; font-size: 14px; }
+.atex-lp-input { min-height: 44px; padding: 6px 10px; border: 1px solid var(--atex-lp-border); border-radius: 6px; font-size: 16px; background: var(--atex-lp-panel); color: inherit; }
+.atex-lp-nk { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 4px; }
+.atex-lp-nk .atex-lp-muted { grid-column: 1 / -1; }
+
+.atex-lp-modal { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; background: rgba(0, 0, 0, 0.45); padding: 16px; }
+.atex-lp-modal[hidden] { display: none; }
+.atex-lp-modal-box { width: min(520px, 100%); max-height: 90vh; overflow: auto; background: var(--atex-lp-panel); border-radius: 8px; padding: 16px; }
+.atex-lp-modal-box h3 { margin-top: 0; }
+.atex-lp-modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
