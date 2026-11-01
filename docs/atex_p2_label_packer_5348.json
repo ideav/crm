@@ -1,0 +1,12 @@
+{
+ "roles": [
+  {"name": "Оператор", "grants": [
+   {"table": "Партия ГП этикетки", "level": "WRITE"},
+   {"table": "Событие смены высечки", "level": "WRITE"},
+   {"table": "Задание высечки", "level": "READ"},
+   {"table": "Упаковочное место", "level": "READ"},
+   {"table": "Тип события высечки", "level": "READ"},
+   {"table": "Типоразмер", "level": "READ"}
+  ]}
+ ]
+}
