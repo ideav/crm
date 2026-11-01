@@ -142,8 +142,8 @@ function cut(id, jobId, meters, date, dieId) { return { id: id, date: date || NO
     ];
     assert(DC.compatibleDies(j, dies).map(function(d) { return d.id; }).join() === 'D2', 'ножи для смены: тот же размер, не текущий, не списанный');
     var cyl = [{ id: 'C96', val: '96' }, { id: 'C104', val: '104' }, { id: 'C116', val: '116' }];
-    assert(DC.compatibleCylinders(j, cyl, { cylinderIds: ['C96', 'C104'] }).map(function(c) { return c.id; }).join() === 'C104', 'валы: только допустимые для станка, кроме текущего');
-    assert(DC.compatibleCylinders(j, cyl, { cylinderIds: [] }).length === 2, 'у станка список валов пуст — встаёт любой вал');
+    assert(DC.compatibleCylinders(j, cyl, { maxCylinder: 104 }).map(function(c) { return c.id; }).join() === 'C104', 'валы: не больше «Макс. вала» станка, кроме текущего (#5366)');
+    assert(DC.compatibleCylinders(j, cyl, { maxCylinder: 0 }).length === 2, '«Макс. вал» не задан — встаёт любой вал');
     assert(DC.changeNote('1712', '1247') === '1712 → 1247', 'примечание смены — «старое → новое»');
 })();
 

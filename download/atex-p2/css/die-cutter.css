@@ -7,6 +7,9 @@
     --atex-dc-ok-bg: #dcfce7;
     --atex-dc-warn: #92400e;
     --atex-dc-warn-bg: #fef3c7;
+    --atex-dc-wear: #9a3412;
+    --atex-dc-wear-bg: #ffedd5;
+    --atex-dc-wear-edge: #f97316;
     --atex-dc-bad: #b91c1c;
     --atex-dc-bad-bg: #fee2e2;
     --atex-dc-info: #1d4ed8;
@@ -30,6 +33,9 @@
     --atex-dc-ok-bg: rgba(74, 222, 128, 0.14);
     --atex-dc-warn: #fcd34d;
     --atex-dc-warn-bg: rgba(251, 191, 36, 0.16);
+    --atex-dc-wear: #fdba74;
+    --atex-dc-wear-bg: rgba(249, 115, 22, 0.16);
+    --atex-dc-wear-edge: #fb923c;
     --atex-dc-bad: #fca5a5;
     --atex-dc-bad-bg: rgba(248, 113, 113, 0.16);
     --atex-dc-info: #93c5fd;
@@ -48,6 +54,10 @@
 .atex-dc-message.is-ok { background: var(--atex-dc-ok-bg); color: var(--atex-dc-ok); }
 .atex-dc-message.is-warn { background: var(--atex-dc-warn-bg); color: var(--atex-dc-warn); }
 .atex-dc-message.is-error { background: var(--atex-dc-bad-bg); color: var(--atex-dc-bad); }
+/* #5366: ресурс ножа — оранжевая плашка: заметно, но не тревога; «Скрыть» убирает её на заказ. */
+.atex-dc-message.atex-dc-wear { display: flex; align-items: center; gap: 12px; background: var(--atex-dc-wear-bg); color: var(--atex-dc-wear); border-left: 4px solid var(--atex-dc-wear-edge); font-weight: 600; }
+.atex-dc-wear > span { flex: 1 1 auto; }
+.atex-dc-wear > .atex-dc-btn { flex: 0 0 auto; }
 
 .atex-dc-pad { display: grid; grid-template-columns: minmax(220px, 300px) 1fr; gap: 8px; min-height: 0; flex: 1 1 auto; }
 @media (max-width: 760px) { .atex-dc-pad { grid-template-columns: 1fr; } }

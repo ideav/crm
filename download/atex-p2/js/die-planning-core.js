@@ -175,12 +175,10 @@
     }
     function jobRunMinutes(job, s) { return runMinutes(job.footage, s, rollLengthM(job)); }
 
-    // machine — { id, name, cylinders: [id вала], stopMaterials: [id сырья], active, turret, maxCylinder }.
+    // machine — { id, name, stopMaterials: [id сырья], active, turret, maxCylinder }.
+    // Валы станка задаёт одно число — «Макс. вал» (зубьев); списка допустимых валов нет (#5366).
     function machineAllows(machine, job) {
         if (machine.active === false) return { ok: false, reason: 'станок не работает' };
-        var cyl = machine.cylinders || [];
-        if (cyl.length && job.cylinderId && cyl.indexOf(String(job.cylinderId)) < 0)
-            return { ok: false, reason: 'вал ' + (job.cylinder || job.cylinderId) + ' не в «Допустимых валах» станка' };
         // «Макс. вал» станка (зубьев): вал больше на станок не встаёт; 0/пусто — не ограничен, вал без числа — не режется.
         var maxCyl = num(machine.maxCylinder), teeth = num(job.cylinder);
         if (maxCyl > 0 && teeth > maxCyl)
@@ -839,7 +837,7 @@
         return (recs || []).map(function(m) {
             var status = String((m.reqs || {})[r.status] || '');
             var tv = tr ? String((m.reqs || {})[tr] == null ? '' : (m.reqs || {})[tr]).trim().toLowerCase() : '';
-            return { id: m.id, name: m.val, cylinders: refIds(m, r.cylinders), stopMaterials: refIds(m, r.stopMaterials), status: status, active: !INACTIVE_RE.test(status),
+            return { id: m.id, name: m.val, stopMaterials: refIds(m, r.stopMaterials), status: status, active: !INACTIVE_RE.test(status),
                 turret: tv !== '' && tv !== '0' && tv !== 'нет' && tv !== 'false',
                 maxCylinder: mx ? num((m.reqs || {})[mx]) : 0 };
         }).sort(function(a, b) { return (num(a.id) - num(b.id)); });

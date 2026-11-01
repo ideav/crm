@@ -27,9 +27,9 @@ function J(id, o) {
         dieId: 'k' + id, dieNo: 'N' + id, cylinderId: 'c1', cylinder: '96', materialId: 'm1', material: 'M', footage: 44 * 60,
         duration: 0, setup: 0, due: 0, rolls: 1 }, o || {});
 }
-var M1 = { id: 'M1', name: '1 высечка', cylinders: [], stopMaterials: [] };
-var M2 = { id: 'M2', name: '2 высечка', cylinders: ['c9'], stopMaterials: [] };   // c1 не берёт — останется пустым
-var M5 = { id: 'M5', name: '5 высечка', cylinders: ['c9'], stopMaterials: [] };
+var M1 = { id: 'M1', name: '1 высечка', stopMaterials: [] };
+var M2 = { id: 'M2', name: '2 высечка', maxCylinder: 90, stopMaterials: [] };   // вал 96 не берёт — останется пустым
+var M5 = { id: 'M5', name: '5 высечка', maxCylinder: 90, stopMaterials: [] };
 var cal = C.createCalendar(S);
 var day0 = cal.dayOf(MON);
 var days = [day0, day0 + 1, day0 + 2];
