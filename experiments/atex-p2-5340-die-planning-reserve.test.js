@@ -136,14 +136,14 @@ function prow(id, o) {
         'Шт в рулоне': '5000', 'Рулонов': '50', 'Тип ножей': '85 х 38 (80)', 'Подбор ножа': '', 'НожID': '', 'Срок': '10.11.2026', 'ИТС нужен': '', 'ИТС подтв.': '' }, o || {});
 }
 var pos9 = [prow('p1', { 'Подбор ножа': 'нет ножа' }), prow('p2')].map(function(r) { return LO.positionFromRow(r, mats); });
-var f9 = C.formJobs({ positions: pos9, dies: dies9, jobs: [], settings: S, itsMin: 20, itsMax: 250, mrLength: 2000 });
+var f9 = C.formJobs({ positions: pos9, dies: dies9, jobs: [], settings: S, mrLength: 2000 });
 var c9 = f9.create.filter(function(x) { return x.positionId === 'p1'; })[0];
 assert(c9 && c9.dieId === 'k1' && c9.positionWrite && c9.positionWrite.die === 'k1' && c9.positionWrite.diePick === 'подобран',
     'D9: у позиции «нет ножа» планирование подобрало нож — он пишется в позицию («Подбор ножа» = подобран)', JSON.stringify(c9 && c9.positionWrite));
 // позиция с этим же ножом, уже записанным, — писать нечего
-var probe = LO.planPosition(pos9[1], dies9, { mrLength: 2000, itsMin: 20, itsMax: 250 }).write;
-var pos9b = [LO.positionFromRow(prow('p3', { 'НожID': 'k1', 'Нож': '111', 'Подбор ножа': 'подобран', 'Мин. партия': probe.minBatch, 'ИТС нужен': probe.itsNeeded, 'Втулка, мм': probe.sleeveWidth }), mats)];
-var f9b = C.formJobs({ positions: pos9b, dies: dies9, jobs: [], settings: S, itsMin: 20, itsMax: 250, mrLength: 2000 });
+var probe = LO.planPosition(pos9[1], dies9, { mrLength: 2000 }).write;
+var pos9b = [LO.positionFromRow(prow('p3', { 'НожID': 'k1', 'Нож': '111', 'Подбор ножа': 'подобран', 'Мин. партия': probe.minBatch, 'Втулка, мм': probe.sleeveWidth }), mats)];
+var f9b = C.formJobs({ positions: pos9b, dies: dies9, jobs: [], settings: S, mrLength: 2000 });
 assert(f9b.create.length === 1 && !f9b.create[0].positionWrite, 'D9: в позиции уже записан этот нож — позиция не переписывается', JSON.stringify(f9b.create[0] && f9b.create[0].positionWrite));
 var TP = { position: { id: '70', reqs: { die: '71', diePick: '72', minBatch: '73', itsNeeded: '74' } } };
 var pf9 = typeof C.positionPickFields === 'function' ? C.positionPickFields(TP, { die: 'k1', diePick: 'подобран', minBatch: '5000', itsNeeded: '' }) : null;
