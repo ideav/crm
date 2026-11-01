@@ -232,6 +232,27 @@
         return out;
     }
 
+    // Что записано в позиции и расходится с расчётом → { show, text }. Пока подбор пишется
+    // (`pending`) или позиция ещё не перечитана после записи, расхождения нет: карточка
+    // показывает расчёт, а не прежнее содержимое позиции (D13: «записано: ничего» рядом с баннером
+    // «нож подобран»).
+    function recordedNote(pos, plan, pending) {
+        var dieId = plan.die.ok ? String(plan.die.die.id) : '';
+        if (String(pos.dieId || '') === dieId && String(pos.pick || '') === String(plan.die.pick || '')) return { show: false, text: '' };
+        if (pending) return { show: true, text: 'Нож записывается в позицию…' };
+        var has = pos.pick || pos.dieNo;
+        return { show: true, text: 'В позиции записано: ' + (has ? (pos.pick || 'нож') + (pos.dieNo ? ' (№ ' + pos.dieNo + ')' : '') : 'нож не записан') + ' — нажмите «Подобрать нож».' };
+    }
+
+    // Подсказка к предупреждению «меньше минимальной партии»: что делать.
+    function minBatchAdvice(minLabels, mrLength) {
+        var mr = num(mrLength) > 0 ? num(mrLength) : MR_LENGTH_DEFAULT_M;
+        return 'Заказ меньше этикеток с одного мастер-рулона (' + mr + ' м)' + (num(minLabels) > 0 ? ': ' + fmtInt(num(minLabels)) + ' шт' : '') +
+            '. Запуск не блокируется, но высечка займёт целый мастер-рулон. Что сделать: ' +
+            'увеличить заказ до минимальной партии; объединить с другой позицией того же ножа и сырья; ' +
+            'либо согласовать с клиентом и запустить как есть (остаток мастер-рулона вернётся на склад).';
+    }
+
     // Отличается ли расчёт от записанного в позиции (чтобы не писать без нужды).
     function writeDiffers(pos, write) {
         var cur = {
@@ -329,6 +350,8 @@
         positionFromRow: positionFromRow,
         planPosition: planPosition,
         writeDiffers: writeDiffers,
+        recordedNote: recordedNote,
+        minBatchAdvice: minBatchAdvice,
         validatePositionForm: validatePositionForm,
         itsResetOnSave: itsResetOnSave,
         isoToRu: isoToRu,
@@ -356,6 +379,7 @@
         this.mileageOk = true;
         this.selectedId = '';
         this.busy = false;
+        this.picking = false;
     }
 
     AtexLabelOrders.prototype.$ = function(id) { return document.getElementById(id); };
@@ -586,7 +610,10 @@
         var html = '<h2 class="atex-lo-panel-title">Заказ ' + esc(p.orderNo) + (p.client ? ' · ' + esc(p.client) : '') + '</h2>' +
             '<div class="atex-lo-flags">' +
             plan.flags.blocks.map(function(b) { return '<span class="atex-lo-badge is-bad">' + esc(b) + '</span>'; }).join('') +
-            plan.flags.warnings.map(function(w) { return '<span class="atex-lo-badge is-warn">' + esc(w) + '</span>'; }).join('') +
+            plan.flags.warnings.map(function(w) {
+                var help = /меньше минимальной партии/.test(w) ? minBatchAdvice(plan.minBatch.ok ? plan.minBatch.labels : '', plan.mrLength) : '';
+                return '<span class="atex-lo-badge is-warn"' + (help ? ' title="' + esc(help) + '"' : '') + '>' + esc(w) + '</span>';
+            }).join('') +
             (plan.flags.ready ? '<span class="atex-lo-badge is-ok">готова к планированию</span>' : '') + '</div>' +
             row('Этикетка', esc(p.width + ' × ' + p.length + ' мм')) +
             row('Ручьёв в заказе', esc(p.orderStreams || '1')) +
@@ -610,9 +637,8 @@
         } else {
             html += '<div class="atex-lo-message is-error">' + esc(plan.die.reason || 'нож не подобран') + '</div>';
         }
-        if (p.dieId !== (d ? String(d.id) : '') || p.pick !== plan.die.pick) {
-            html += '<div class="atex-lo-note is-warn">В позиции записано: ' + esc(p.pick || 'ничего') + (p.dieNo ? ' (№ ' + esc(p.dieNo) + ')' : '') + ' — нажмите «Подобрать нож».</div>';
-        }
+        var rec = recordedNote(p, plan, this.picking);
+        if (rec.show) html += '<div class="atex-lo-note is-warn">' + esc(rec.text) + '</div>';
 
         html += '<h3 class="atex-lo-sub">Партия и ИТС</h3>' +
             row('Мин. партия', plan.minBatch.ok ? esc(fmtInt(plan.minBatch.labels) + ' шт (1 МР ' + plan.mrLength + ' м)') : '<span class="atex-lo-muted">' + esc(plan.minBatch.error) + '</span>') +
@@ -621,6 +647,10 @@
                 : (plan.its.configured ? 'не нужно' : '<span class="atex-lo-muted">пороги не заданы (' + SETTINGS.ITS_MIN + ', ' + SETTINGS.ITS_MAX + ')</span>'));
         if (plan.its.needed && !this.canIts()) {
             html += '<div class="atex-lo-note">Подтверждает ИТС роль: ' + esc(this.itsRolesText()) + ' (настройка ' + SETTINGS.ITS_ROLES + ').</div>';
+        }
+
+        if (plan.flags.warnings.some(function(w) { return /меньше минимальной партии/.test(w); })) {
+            html += '<div class="atex-lo-note is-warn">' + esc(minBatchAdvice(plan.minBatch.ok ? plan.minBatch.labels : '', plan.mrLength)) + '</div>';
         }
 
         if (plan.demand.ok) {
@@ -676,14 +706,18 @@
         else if (manualDieId) { pos.pick = lp.DIE_PICK.MANUAL; pos.dieId = String(manualDieId); }
         var plan = this.planOf(pos);
         this.busy = true;
+        this.picking = true;
         this.closeModal();
+        if (this.selectedId === p.id) this.renderCard();
         return this.post('_m_set/' + encodeURIComponent(p.id) + '?JSON', this.fieldsOf(plan.write)).then(function() {
-            self.message('Позиция заказа ' + p.orderNo + ': ' + (plan.die.ok ? 'нож № ' + plan.die.die.no + ' (' + plan.die.pick + ')' : 'нет ножа — ' + plan.die.reason), plan.die.ok ? 'ok' : 'warn');
-            return self.reload(true);
+            // Баннер — после перечитывания: до него карточка ещё показывает старое содержимое позиции.
+            return self.reload(true).then(function() {
+                self.message('Позиция заказа ' + p.orderNo + ': ' + (plan.die.ok ? 'нож № ' + plan.die.die.no + ' (' + plan.die.pick + ')' : 'нет ножа — ' + plan.die.reason), plan.die.ok ? 'ok' : 'warn');
+            });
         }).catch(function(err) {
             console.error('[label-orders] ❌ подбор', err);
             self.message('Не записано: ' + err.message, 'error');
-        }).then(function() { self.busy = false; });
+        }).then(function() { self.busy = false; self.picking = false; if (self.selectedId) self.renderCard(); });
     };
 
     AtexLabelOrders.prototype.pickAll = function() {
@@ -898,10 +932,11 @@
         }).then(function(posId) {
             self.closeModal();
             self.selectedId = posId;
+            self.picking = true;   // нож подбирается сразу после перечитывания: карточка не показывает «записано: ничего»
             return self.reload(true).then(function() {
                 var pos = self.current();
                 self.busy = false;
-                if (!pos) { self.message('Позиция сохранена, но не попала в отчёт «' + REPORT + '» — проверьте «Вид продукции».', 'warn'); return; }
+                if (!pos) { self.picking = false; self.message('Позиция сохранена, но не попала в отчёт «' + REPORT + '» — проверьте «Вид продукции».', 'warn'); return; }
                 return self.pickOne(pos, null);
             });
         }).catch(function(e) {
@@ -909,6 +944,7 @@
             self.showFormErrors({ knifeType: '' });
             self.message('Не сохранено: ' + e.message, 'error');
             self.busy = false;
+            self.picking = false;
         });
     };
 

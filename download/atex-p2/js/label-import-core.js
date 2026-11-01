@@ -60,8 +60,11 @@
             productKind: 'Вид продукции', article: 'Артикул', clientOrder: 'Заказ клиента',
             labelWidth: 'Ширина этикетки, мм', labelLength: 'Длина этикетки, мм', labelsPerRoll: 'Этикеток в рулоне',
             knifeType: 'Тип ножей', core: 'Диаметр втулки', winding: 'Тип намотки', unit: 'Ед.изм.',
-            status: ['Статус позиции', 'Статус'], note: 'Примечание'
-        } },
+            status: ['Статус позиции', 'Статус'], note: 'Примечание',
+            material: 'Сырьё этикетки', due: 'Срок изготовления'
+        }, optionalReqs: ['material', 'due'] },
+        material: { name: 'Сырьё этикетки', optional: true, reqs: { base: ['Основа сырья', 'Основа'], glue: 'Клей' }, optionalReqs: ['base', 'glue'] },
+        setting: { name: 'Настройка', optional: true, reqs: { type: 'Тип', value: 'Значение' }, optionalReqs: ['type', 'value'] },
         client: { name: 'Клиент', reqs: {} },
         article: { name: 'Артикул', reqs: {} },
         productKind: { name: 'Вид продукции', reqs: {} },
@@ -113,13 +116,14 @@
         Object.keys(IMPORT_TABLES).forEach(function(key) {
             var spec = IMPORT_TABLES[key];
             var t = findByNames(meta, spec.name);
-            if (!t) { missing.push(key); return; }
+            if (!t) { if (!spec.optional) missing.push(key); return; }
             var reqs = {}, reqNames = {};
             Object.keys(spec.reqs).forEach(function(rk) {
                 var r = findByNames(t.reqs, spec.reqs[rk]);
                 var first = Array.isArray(spec.reqs[rk]) ? spec.reqs[rk][0] : spec.reqs[rk];
                 reqNames[rk] = first;
-                if (r) reqs[rk] = String(r.id); else missing.push(key + '.' + rk);
+                if (r) reqs[rk] = String(r.id);
+                else if (!(spec.optionalReqs && spec.optionalReqs.indexOf(rk) >= 0)) missing.push(key + '.' + rk);
             });
             tables[key] = { id: String(t.id), name: spec.name, reqs: reqs, reqNames: reqNames };
         });
@@ -398,7 +402,12 @@
         if (!(width > 0) || !(length > 0) || !(perRoll > 0)) return null;
         var core = /вт\.?\s*(\d+)/i.exec(s);
         var winding = /намотка\s+внутрь/i.test(s) ? 'внутрь' : (/намотка\s+наруж/i.test(s) ? 'наружу' : '');
-        return { width: width, length: length, perRoll: perRoll, core: core ? core[1] : '', winding: winding };
+        // Сырьё — слово сразу за «шт.» («П/Гл», «П/П»), клей — по списку известных («каучук», «акрил»).
+        var mat = /шт\.?\s+(\S+)/i.exec(s);
+        var material = mat && !/^(намотка|вт\.?|каучук|акрил)/i.test(mat[1]) ? mat[1] : '';
+        var gl = /(каучук|акрил\S*|hot\s*melt)/i.exec(s);
+        return { width: width, length: length, perRoll: perRoll, core: core ? core[1] : '', winding: winding,
+            material: material, glue: gl ? gl[1] : '' };
     }
 
     // Лист заказов → { ok, error, items, duplicates, skipped }. Строки «Итого» и строки партнёра
@@ -631,8 +640,83 @@
         { key: 'productKind', kind: 'ref' }, { key: 'article', kind: 'ref' }, { key: 'clientOrder', kind: 'text' },
         { key: 'labelWidth', kind: 'num' }, { key: 'labelLength', kind: 'num' }, { key: 'labelsPerRoll', kind: 'int' },
         { key: 'knifeType', kind: 'text' }, { key: 'core', kind: 'ref' }, { key: 'winding', kind: 'text' },
-        { key: 'unit', kind: 'ref' }, { key: 'status', kind: 'ref', createOnly: true }, { key: 'note', kind: 'text', createOnly: true }
+        { key: 'unit', kind: 'ref' }, { key: 'status', kind: 'ref', createOnly: true }, { key: 'note', kind: 'text', createOnly: true },
+        // Сырьё и срок подбирает импорт, но выбор менеджера не затирает: у существующей позиции они пишутся, только если пусты.
+        { key: 'material', kind: 'ref', fillOnly: true }, { key: 'due', kind: 'text', fillOnly: true }
     ];
+
+    // Настройка «срок = поступление + N дней»: допущение тест-цикла (14), владелец подтвердит.
+    var DUE_DAYS_KEY = 'LABEL_DUE_DAYS';
+    var DUE_DAYS_DEFAULT = 14;
+
+    // Значение настройки по ключу: строки { key, type, value }; приоритет — тип = база, ATEH, любой.
+    function settingValue(recs, key, db) {
+        var dbKey = String(db || '').trim().toUpperCase();
+        var best = null, bestRank = 0;
+        (recs || []).forEach(function(r) {
+            if (String(r.key || '').replace(/^\ufeff/, '').trim() !== key) return;
+            var v = String(r.value == null ? '' : r.value).trim();
+            if (v === '') return;
+            var type = String(r.type || '').trim().toUpperCase();
+            var rank = dbKey && type === dbKey ? 3 : (type === 'ATEH' ? 2 : 1);
+            if (rank >= bestRank) { best = v; bestRank = rank; }
+        });
+        return best == null ? '' : best;
+    }
+
+    // «ДД.ММ.ГГГГ» + N дней → «ДД.ММ.ГГГГ»; '' — даты нет.
+    function addDays(ruDate, days) {
+        var m = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(String(ruDate || '').trim());
+        if (!m || !isFinite(days)) return '';
+        var d = new Date(Date.UTC(+m[3], +m[2] - 1, +m[1] + Math.round(days)));
+        return pad2(d.getUTCDate()) + '.' + pad2(d.getUTCMonth() + 1) + '.' + d.getUTCFullYear();
+    }
+
+    // Основа по обозначению сырья из номенклатуры 1С: «П/П» — полипропилен, «П/Гл», «П/М» (глянец, матовая) — бумага.
+    // Допущение тест-цикла (cycle.py); остальные обозначения не угадываются.
+    function baseHint(token) {
+        var t = norm(token);
+        if (/^п\/п$|^пп$/.test(t)) return 'пп';
+        if (/^п\/(гл|м|мат)$|^бумага$/.test(t)) return 'бумага';
+        return '';
+    }
+
+    // Сырьё позиции по обозначению и клею из номенклатуры. materials — [{ id, name, base, glue }].
+    // → { ok, id, name, base } | { ok:false, reason }
+    function matchMaterial(label, materials) {
+        var token = label && label.material ? String(label.material).trim() : '';
+        var glue = label && label.glue ? norm(label.glue) : '';
+        var list = materials || [];
+        if (!token) return { ok: false, reason: 'в номенклатуре 1С нет обозначения материала' };
+        if (!list.length) return { ok: false, reason: 'справочник «Сырьё этикетки» пуст' };
+        var exact = list.filter(function(m) { return norm(m.name) === norm(token) || (glue && norm(m.name) === norm(token + ' ' + glue)); });
+        if (exact.length === 1) return { ok: true, id: exact[0].id, name: exact[0].name, base: exact[0].base };
+        var hint = baseHint(token);
+        if (!hint) return { ok: false, reason: 'материал «' + token + '» из 1С не опознан' };
+        var cand = list.filter(function(m) { return norm(m.base) === hint; });
+        if (glue) cand = cand.filter(function(m) { return !m.glue || norm(m.glue) === glue; });
+        if (cand.length === 1) return { ok: true, id: cand[0].id, name: cand[0].name, base: cand[0].base };
+        return { ok: false, reason: cand.length
+            ? 'материалу «' + token + '» подходит несколько записей сырья (' + cand.map(function(m) { return m.name; }).join(', ') + ')'
+            : 'материалу «' + token + '» (основа «' + hint + '») нет сырья в справочнике' };
+    }
+
+    // Предупреждения по типам: текст без чисел и названий в «…» → { type, count, rows: [номер строки], samples: [текст] }.
+    function warningType(text) {
+        return String(text).replace(/«[^»]*»/g, '«…»').replace(/\d+(?:[.,]\d+)?/g, 'N').replace(/\s+/g, ' ').trim();
+    }
+    function groupWarnings(rows) {
+        var by = {}, order = [];
+        (rows || []).forEach(function(r) {
+            (r.warnings || []).forEach(function(w) {
+                var k = warningType(w);
+                if (!by[k]) { by[k] = { type: k, count: 0, rows: [], samples: [] }; order.push(k); }
+                by[k].count++;
+                by[k].rows.push({ row: r.row, key: r.key, text: w });
+            });
+        });
+        return order.map(function(k) { return by[k]; }).sort(function(a, b) { return b.count - a.count; });
+    }
     var ORDER_FIELDS = [
         { key: 'client', kind: 'ref' }, { key: 'created', kind: 'date', createOnly: true },
         { key: 'status', kind: 'ref', createOnly: true }, { key: 'note', kind: 'text', createOnly: true }
@@ -659,8 +743,23 @@
             var hit = (recs || []).filter(function(r) { return norm(r.val) === label; })[0];
             return hit ? hit.id : '';
         };
+        var materials = [];
+        if (tables.material) {
+            (d.materials || []).forEach(function(r) {
+                var baseCol = tables.material.reqs.base, glueCol = tables.material.reqs.glue;
+                materials.push({ id: r.id, name: r.val, base: baseCol ? reqText(r, baseCol) : '', glue: glueCol ? reqText(r, glueCol) : '' });
+            });
+        }
+        var dueDays = DUE_DAYS_DEFAULT;
+        if (tables.setting && tables.setting.reqs.value) {
+            var raw = settingValue((d.settings || []).map(function(r) {
+                return { key: r.val, type: tables.setting.reqs.type ? reqText(r, tables.setting.reqs.type) : '', value: reqText(r, tables.setting.reqs.value) };
+            }), DUE_DAYS_KEY, d.db);
+            var n = cellNum(raw);
+            if (n != null && !isNaN(n) && n >= 0) dueDays = Math.round(n);
+        }
         return {
-            tables: tables, orders: orders, dupInBase: dupInBase, positions: positions,
+            tables: tables, orders: orders, dupInBase: dupInBase, positions: positions, materials: materials, dueDays: dueDays,
             dict: {
                 client: dictByLabel(d.clients), article: dictByLabel(d.articles), productKind: dictByLabel(d.productKinds),
                 core: coreDict(d.cores), unit: dictByLabel(d.units)
@@ -721,6 +820,13 @@
             var comment = ok.map(function(x) { return x.item.comment; }).filter(Boolean)[0] || '';
             if (comment && t.order.reqs.note) target.note = comment;
             var orderChanges = [];
+            if (existing && partner && t.order.reqs.client) {
+                var curClient = (ctx.labels.client || {})[existing.values.client] || '';
+                if (curClient && norm(curClient) !== norm(partner)) {
+                    ok[0].row.warnings.push('номер заказа ' + g.order + ' уже есть в базе у клиента «' + curClient + '», в файле — «' + partner +
+                        '»: клиент заказа будет заменён; проверьте, что это тот же заказ, а не совпадение номера со старым');
+                }
+            }
             if (!existing) {
                 var on = { op: 'new', table: t.order.id, up: 1, ref: orderRef, group: group, fields: {} };
                 on.fields['t' + t.order.id] = g.order;
@@ -744,6 +850,7 @@
                 if (i === 0) row.changes = row.changes.concat(orderChanges);
                 var lab = item.label;
                 var pt = {}, plabels = {};
+                var matchRes = t.position.reqs.material ? matchMaterial(lab, ctx.materials) : null;
                 var put = function(k, v, label) { if (v == null || v === '' || !t.position.reqs[k]) return; pt[k] = v; plabels[k] = label != null ? label : v; };
                 put('productKind', kindId, lp ? lp.PRODUCT_KIND.LABEL : 'этикетка');
                 put('article', ensure('article', item.article), item.article);
@@ -757,6 +864,9 @@
                     else row.warnings.push('втулка «вт ' + lab.core + '» — в справочнике «Диаметр втулки» нет одной записи на ' + lab.core + ' мм, поле не заполняется');
                 }
                 put('winding', lab.winding);
+                var due = t.position.reqs.due ? addDays(item.received, ctx.dueDays) : '';
+                put('due', due);
+                if (matchRes && matchRes.ok) put('material', matchRes.id, matchRes.name);
                 if (item.unit) {
                     if (ctx.dict.unit[norm(item.unit)]) put('unit', ctx.dict.unit[norm(item.unit)], item.unit);
                     else row.warnings.push('единица «' + item.unit + '» — нет в справочнике «Ед.изм.»');
@@ -772,6 +882,12 @@
                     row.status = 'error'; counts.error++; return;
                 }
                 var pos = posList[0];
+                if (matchRes) {
+                    var hasMat = pos && pos.values.material;
+                    if (!hasMat && !matchRes.ok) row.warnings.push('позиция не готова к подбору ножа: нет сырья — ' + matchRes.reason + '; выберите сырьё в «Заказах этикетки»');
+                    else if (!hasMat && !matchRes.base) row.warnings.push('позиция не готова к подбору ножа: у сырья «' + matchRes.name + '» не задана основа');
+                }
+                if (t.position.reqs.due && !due && !(pos && pos.values.due)) row.warnings.push('нет даты поступления — срок изготовления не заполнен');
                 if (!pos) {
                     var pn = { op: 'new', table: t.position.id, up: existing ? existing.id : { ref: orderRef }, group: group, fields: {} };
                     pn.fields['t' + t.position.id] = rolls;
@@ -788,6 +904,7 @@
                     var ps = { op: 'set', id: pos.id, group: group, fields: {} };
                     POSITION_FIELDS.forEach(function(f) {
                         if (f.createOnly || !(f.key in pt)) return;
+                        if (f.fillOnly && pos.values[f.key]) return;
                         var want = pt[f.key];
                         if (typeof want !== 'object' && sameValue(f.kind, pos.values[f.key], want)) return;
                         ps.fields['t' + t.position.reqs[f.key]] = want;
@@ -892,6 +1009,13 @@
         excelDate: excelDate,
         findHeader: findHeader,
         parseNomenclature: parseNomenclature,
+        matchMaterial: matchMaterial,
+        addDays: addDays,
+        settingValue: settingValue,
+        groupWarnings: groupWarnings,
+        warningType: warningType,
+        DUE_DAYS_KEY: DUE_DAYS_KEY,
+        DUE_DAYS_DEFAULT: DUE_DAYS_DEFAULT,
         parseKnifeSheet: parseKnifeSheet,
         parseOrderSheet: parseOrderSheet,
         planMileage: planMileage,
