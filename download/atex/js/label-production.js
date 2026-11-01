@@ -18,7 +18,7 @@
 //      втулка 80 мм; «18 х 18 (80)15 ручъев» — ещё и число ручьёв; «D х 40 (76)» —
 //      круглая этикетка диаметром 40 мм;
 //   6. какой нож у позиции заказа этикетки, какая у неё минимальная партия и нужно ли
-//      подтверждение ИТС (ideav/crm#5324; правила — docs/atex_phase2_labels_tz.md §5.1).
+//      подтверждение ИТС (ставится вручную, #5318; ideav/crm#5324; правила — docs/atex_phase2_labels_tz.md §5.1).
 //
 // Структура таблиц описана в docs/atex_phase2_schema.json (накат —
 // docs/scripts/apply_label_schema_5301.py); конфигурация ниже называет те же имена,
@@ -605,22 +605,6 @@
         return { ok: true, repeats: repeats, labels: repeats * per * st };
     }
 
-    // Подтверждение ИТС по размеру: ширина или длина этикетки вне [minMm, maxMm] (границы
-    // включительно; пустой порог не проверяется). Оба порога пусты — configured: false.
-    // → { needed, configured, reason }.
-    function labelItsCheck(width, length, minMm, maxMm) {
-        var lo = numOrNaN(minMm), hi = numOrNaN(maxMm);
-        var configured = lo > 0 || hi > 0;
-        var w = numOrNaN(width), l = numOrNaN(length);
-        var out = [];
-        [['ширина', w], ['длина', l]].forEach(function(x) {
-            if (!(x[1] > 0)) return;
-            if (lo > 0 && x[1] < lo) out.push(x[0] + ' ' + fmtMm(x[1]) + ' мм меньше ' + fmtMm(lo));
-            if (hi > 0 && x[1] > hi) out.push(x[0] + ' ' + fmtMm(x[1]) + ' мм больше ' + fmtMm(hi));
-        });
-        return { needed: out.length > 0, configured: configured, reason: out.join('; ') };
-    }
-
     // Потребность позиции: этикеток = рулонов × этикеток в рулоне; раппортов =
     // ceil(этикеток / (этикеток на раппорте × ручьёв ножа)); метраж вырубки = раппорты ×
     // раппорт; мастер-рулонов = ceil(метраж / длина МР); коэффициент использования сырья =
@@ -646,8 +630,8 @@
         };
     }
 
-    // Что держит позицию: blocks — в планирование высечки не идёт (нет ножа; ИТС нужен и не
-    // подтверждён), warnings — видно менеджеру, но не держит (меньше минимальной партии).
+    // Что держит позицию: blocks — в планирование высечки не идёт (нет ножа; ИТС отмечен
+    // вручную как нужный и не подтверждён; автопризнака по размеру нет, #5318), warnings — видно менеджеру, но не держит (меньше минимальной партии).
     // p — { pick, itsNeeded, itsConfirmed, labels, minBatch }. → { ready, blocks, warnings }.
     function labelPositionFlags(p) {
         var x = p || {};
@@ -692,7 +676,6 @@
             pickDie: pickDie,
             positionDie: positionDie,
             labelMinBatch: labelMinBatch,
-            labelItsCheck: labelItsCheck,
             labelPositionDemand: labelPositionDemand,
             labelPositionFlags: labelPositionFlags
         }

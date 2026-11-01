@@ -260,7 +260,7 @@ if (C) (function() {
     }
     var positions = [prow('p1'), prow('p2', { 'Ширина, мм': '101', 'Длина, мм': '101', 'Тип ножей': '' }), prow('p3'), prow('p4', { 'Ширина, мм': '10', 'Длина, мм': '10', 'Тип ножей': '' })]
         .map(function(r) { return LO.positionFromRow(r, mats); });
-    var formed = C.formJobs({ positions: positions, dies: dies, jobs: [J(5, { positionId: 'p3' })], settings: S, itsMin: 20, itsMax: 250, mrLength: 2000 });
+    var formed = C.formJobs({ positions: positions, dies: dies, jobs: [J(5, { positionId: 'p3' })], settings: S, mrLength: 2000 });
     assert(formed.create.length === 1 && formed.create[0].positionId === 'p1', 'создаётся задание для позиции, у которой нож подобран, а задания нет', JSON.stringify(formed.create.map(function(x) { return x.positionId; })));
     var f1 = formed.create[0];
     assert(f1.dieId === 'k1' && f1.cylinderId === 'c1' && f1.footage > 0 && f1.pullsPlan >= 1 && f1.duration === C.runMinutes(f1.footage, S), 'метраж, съёмы (= число МР), длительность и вал из ножа', JSON.stringify(f1));
@@ -269,9 +269,9 @@ if (C) (function() {
     assert(/нет ножа/.test(sk.p2 || ''), 'позиция без ножа не создаёт задание', JSON.stringify(sk));
     assert(/уже есть задание/.test(sk.p3 || ''), 'одна позиция — одно задание: у p3 оно уже есть', JSON.stringify(sk));
     assert(/ИТС/.test(sk.p4 || '') || /нет ножа/.test(sk.p4 || ''), 'ждёт ИТС или без ножа — не идёт в планирование', JSON.stringify(sk));
-    var again = C.formJobs({ positions: positions, dies: dies, jobs: [J(5, { positionId: 'p3' }), J(6, { positionId: 'p1' })], settings: S, itsMin: 20, itsMax: 250, mrLength: 2000 });
+    var again = C.formJobs({ positions: positions, dies: dies, jobs: [J(5, { positionId: 'p3' }), J(6, { positionId: 'p1' })], settings: S, mrLength: 2000 });
     assert(again.create.length === 0, 'повторный запуск не дублирует задания');
-    var cancelled = C.formJobs({ positions: positions, dies: dies, jobs: [J(6, { positionId: 'p1', status: 'Отменено' })], settings: S, itsMin: 20, itsMax: 250, mrLength: 2000 });
+    var cancelled = C.formJobs({ positions: positions, dies: dies, jobs: [J(6, { positionId: 'p1', status: 'Отменено' })], settings: S, mrLength: 2000 });
     assert(cancelled.create.some(function(x) { return x.positionId === 'p1'; }), 'отменённое задание новому не мешает');
 
     // поля записи

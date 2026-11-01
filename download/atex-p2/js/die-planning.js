@@ -613,7 +613,7 @@
     // Сформировать задания из позиций.
     AtexDiePlanningApp.prototype.openForm = function() {
         var self = this, s = this.state;
-        var f = C.formJobs({ positions: s.positions, dies: s.dies, jobs: s.jobs, settings: s.settings, mrLength: s.settings.mrLength, itsMin: s.settings.itsMin, itsMax: s.settings.itsMax });
+        var f = C.formJobs({ positions: s.positions, dies: s.dies, jobs: s.jobs, settings: s.settings, mrLength: s.settings.mrLength });
         var skipped = f.skipped.filter(function(x) { return !/уже есть задание/.test(x.reason); });
         var toPos = f.create.filter(function(x) { return x.positionWrite; }).length;
         var html = '<h3>Сформировать задания высечки</h3>' +

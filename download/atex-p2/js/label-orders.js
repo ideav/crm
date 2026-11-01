@@ -12,8 +12,8 @@
 //     нож не найден — «Подбор ножа = нет ножа» и причина в карточке;
 //   - минимальная партия (`labelMinBatch`): этикеток с одного мастер-рулона длиной
 //     LABEL_MASTER_ROLL_M; меньше — предупреждение, не блокировка;
-//   - подтверждение ИТС (`labelItsCheck`): размер вне [LABEL_ITS_MIN_MM, LABEL_ITS_MAX_MM] →
-//     «Нужно подтверждение ИТС»; кнопка «Подтвердить ИТС» ставит «Подтверждено ИТС» —
+//   - подтверждение ИТС: признак «Нужно подтверждение ИТС» ставится ВРУЧНУЮ (решение владельца
+//     01.11.2026, #5318; автопризнак по размеру отключён); кнопка «Подтвердить ИТС» ставит «Подтверждено ИТС» —
 //     только ролям из LABEL_ITS_ROLES (пусто — «Диспетчер»: ИТС — это он), admin и владельцу базы (`canConfirmIts`);
 //   - потребность позиции (`labelPositionDemand`): этикеток, раппортов, метраж вырубки,
 //     мастер-рулонов, коэффициент использования сырья.
@@ -44,7 +44,7 @@
     // id позиции в отчёте: колонка «<Имя>ID» рядом с «<Имя>» — грид её скрывает.
     var POSITION_ID_COLUMN = 'РулоновID';
     var RUNS_REPORT = 'die_runs';
-    var SETTINGS = { MR_LENGTH: 'LABEL_MASTER_ROLL_M', ITS_MIN: 'LABEL_ITS_MIN_MM', ITS_MAX: 'LABEL_ITS_MAX_MM', ITS_ROLES: 'LABEL_ITS_ROLES' };
+    var SETTINGS = { MR_LENGTH: 'LABEL_MASTER_ROLL_M', ITS_ROLES: 'LABEL_ITS_ROLES' };
     // Кто подтверждает ИТС, если настройка LABEL_ITS_ROLES пуста: ИТС на производстве — Диспетчер.
     var ITS_ROLES_DEFAULT = 'Диспетчер';
     var MR_LENGTH_DEFAULT_M = 2000;
@@ -198,13 +198,13 @@
 
     // Расчёт позиции: нож, минимальная партия, ИТС, потребность, блокировки — и что записать
     // в позицию (`write`: ключ реквизита конфигурации → значение, «» — очистить).
-    // settings — { mrLength, itsMin, itsMax }.
+    // settings — { mrLength }. Признак «Нужно подтверждение ИТС» — ручной (pos.itsNeeded), не пересчитывается (#5318).
     function planPosition(pos, dies, settings) {
         var s = settings || {};
         var mrLength = num(s.mrLength) > 0 ? num(s.mrLength) : MR_LENGTH_DEFAULT_M;
         var dieRes = lp.positionDie(pos, dies);
         var min = dieRes.ok ? lp.labelMinBatch(dieRes.die, mrLength) : { ok: false, error: dieRes.reason };
-        var its = lp.labelItsCheck(pos.width, pos.length, s.itsMin, s.itsMax);
+        var its = { needed: pos.itsNeeded === true, reason: 'отмечено вручную' };
         var demand = lp.labelPositionDemand(pos, dieRes.ok ? dieRes.die : null, mrLength);
         var flags = lp.labelPositionFlags({
             pick: dieRes.pick,
@@ -223,8 +223,7 @@
             write: {
                 die: dieRes.ok ? String(dieRes.die.id) : '',
                 diePick: dieRes.pick,
-                minBatch: min.ok ? String(min.labels) : '',
-                itsNeeded: its.needed ? '1' : ''
+                minBatch: min.ok ? String(min.labels) : ''
             }
         };
         // Ширина втулки — из ножа, если в позиции её нет (её читает втулкорез).
@@ -259,7 +258,6 @@
             die: pos.dieId || '',
             diePick: pos.pick || '',
             minBatch: num(pos.minBatch) > 0 ? String(num(pos.minBatch)) : '',
-            itsNeeded: pos.itsNeeded ? '1' : '',
             sleeveWidth: num(pos.sleeveWidth) > 0 ? String(num(pos.sleeveWidth)) : ''
         };
         return Object.keys(write).some(function(k) { return String(cur[k]) !== String(write[k]); });
@@ -498,7 +496,7 @@
 
     AtexLabelOrders.prototype.loadSettings = function() {
         var self = this;
-        var empty = { mrLength: '', itsMin: '', itsMax: '', itsRoles: '' };
+        var empty = { mrLength: '', itsRoles: '' };
         if (!this.settingsTable) return Promise.resolve(empty);
         var typeReq = findReq(this.settingsTable, 'Тип');
         var valReq = findReq(this.settingsTable, 'Значение');
@@ -508,8 +506,6 @@
             });
             return {
                 mrLength: settingValue(recs, SETTINGS.MR_LENGTH, self.db),
-                itsMin: settingValue(recs, SETTINGS.ITS_MIN, self.db),
-                itsMax: settingValue(recs, SETTINGS.ITS_MAX, self.db),
                 itsRoles: settingValue(recs, SETTINGS.ITS_ROLES, self.db)
             };
         });
@@ -576,9 +572,7 @@
                 '><div class="atex-lo-kpi-value">' + esc(value) + '</div><div class="atex-lo-kpi-label">' + esc(label) + '</div></div>';
         };
         var s = this.settings;
-        var itsTitle = (num(s.itsMin) > 0 || num(s.itsMax) > 0)
-            ? 'Размер этикетки вне ' + (s.itsMin || '—') + '…' + (s.itsMax || '—') + ' мм (настройки ' + SETTINGS.ITS_MIN + ', ' + SETTINGS.ITS_MAX + ')'
-            : 'Пороги не заданы: настройки ' + SETTINGS.ITS_MIN + ', ' + SETTINGS.ITS_MAX;
+        var itsTitle = 'Признак «Нужно подтверждение ИТС» ставится вручную';
         this.$('atex-lo-kpi').innerHTML =
             tile('позиций этикетки', k.total) +
             tile('готовы к планированию', k.ready, 'is-ok') +
@@ -644,7 +638,7 @@
             row('Мин. партия', plan.minBatch.ok ? esc(fmtInt(plan.minBatch.labels) + ' шт (1 МР ' + plan.mrLength + ' м)') : '<span class="atex-lo-muted">' + esc(plan.minBatch.error) + '</span>') +
             row('Подтверждение ИТС', plan.its.needed
                 ? (p.itsConfirmed ? '<span class="atex-lo-badge is-ok">подтверждено</span>' : '<span class="atex-lo-badge is-warn">нужно</span>') + '<small>' + esc(plan.its.reason) + '</small>'
-                : (plan.its.configured ? 'не нужно' : '<span class="atex-lo-muted">пороги не заданы (' + SETTINGS.ITS_MIN + ', ' + SETTINGS.ITS_MAX + ')</span>'));
+                : 'не нужно');
         if (plan.its.needed && !this.canIts()) {
             html += '<div class="atex-lo-note">Подтверждает ИТС роль: ' + esc(this.itsRolesText()) + ' (настройка ' + SETTINGS.ITS_ROLES + ').</div>';
         }
@@ -665,6 +659,7 @@
             '<button class="atex-lo-btn atex-lo-btn-primary" type="button" data-lo-action="pick">Подобрать нож</button>' +
             '<button class="atex-lo-btn" type="button" data-lo-action="manual">Выбрать нож вручную</button>' +
             (plan.die.pick === lp.DIE_PICK.MANUAL ? '<button class="atex-lo-btn" type="button" data-lo-action="auto">Вернуть автоподбор</button>' : '') +
+            (this.canIts() ? '<button class="atex-lo-btn" type="button" data-lo-action="its-needed">' + (p.itsNeeded ? 'Снять отметку «нужен ИТС»' : 'Отметить: нужен ИТС') + '</button>' : '') +
             (plan.its.needed && this.canIts() ? '<button class="atex-lo-btn" type="button" data-lo-action="its">' + (p.itsConfirmed ? 'Снять подтверждение ИТС' : 'Подтвердить ИТС') + '</button>' : '') +
             '<button class="atex-lo-btn" type="button" data-lo-action="edit">Изменить</button>' +
             '</div>';
@@ -683,6 +678,7 @@
             case 'manual-choose': return this.pickOne(this.current(), el.getAttribute('data-die'));
             case 'auto': return this.pickOne(this.current(), '');
             case 'its': return this.toggleIts(this.current());
+            case 'its-needed': return this.toggleItsNeeded(this.current());
             case 'form-parse': return this.parseKnifeTypeIntoForm();
             case 'form-save': return this.saveForm();
             case 'modal-cancel': return this.closeModal();
@@ -749,6 +745,25 @@
 
     AtexLabelOrders.prototype.itsRolesText = function() {
         return itsRolesLabel(this.settings && this.settings.itsRoles);
+    };
+
+    // Ручная отметка «Нужно подтверждение ИТС» (#5318): ставит человек, размером не выводится.
+    AtexLabelOrders.prototype.toggleItsNeeded = function(p) {
+        var self = this;
+        if (!p) return Promise.resolve();
+        if (!this.canIts()) {
+            this.message('Отмечать ИТС может только роль: ' + itsRolesLabel(this.settings && this.settings.itsRoles) + '.', 'warn');
+            return Promise.resolve();
+        }
+        var reqId = this.tables.position.reqs.itsNeeded;
+        if (!reqId) { this.message('В позиции нет реквизита «Нужно подтверждение ИТС».', 'error'); return Promise.resolve(); }
+        var f = {};
+        f['t' + reqId] = p.itsNeeded ? '' : '1';
+        this.busy = true;
+        return this.post('_m_set/' + encodeURIComponent(p.id) + '?JSON', f).then(function() {
+            return self.reload(true);
+        }).catch(function(err) { self.message('Не записано: ' + err.message, 'error'); })
+            .then(function() { self.busy = false; });
     };
 
     AtexLabelOrders.prototype.toggleIts = function(p) {

@@ -122,18 +122,9 @@ var DIES = [
     assert(!noDie.ok, 'нет ножа — минимальная партия не считается');
 })();
 
-// ── 3. Подтверждение ИТС по размеру ──────────────────────────────────────────
+// ── 3. Подтверждение ИТС: ставится вручную, автопризнака по размеру нет (#5318) ─────
 (function() {
-    assert(fn('labelItsCheck'), 'labelItsCheck экспортирована');
-    if (!fn('labelItsCheck')) return;
-    assert(LP.labelItsCheck(148, 210, 20, 250).needed === false, '148×210 в [20, 250] — ИТС не нужен');
-    var small = LP.labelItsCheck(18, 18, 20, 250);
-    assert(small.needed === true && /18/.test(small.reason), '18×18 меньше 20 — нужно подтверждение ИТС', small.reason);
-    assert(LP.labelItsCheck(100, 300, 20, 250).needed === true, 'длина 300 больше 250 — нужно');
-    assert(LP.labelItsCheck(20, 250, 20, 250).needed === false, 'границы включительно');
-    assert(LP.labelItsCheck(18, 18, 20, '').needed === true, 'задан только минимум — проверяется минимум');
-    var off = LP.labelItsCheck(18, 18, '', '');
-    assert(off.needed === false && off.configured === false, 'пороги не заданы — не требуется, но configured=false (рабочее место скажет)');
+    assert(!fn('labelItsCheck'), 'автопризнак ИТС по размеру (labelItsCheck) удалён (решение владельца 01.11.2026, #5318)');
 })();
 
 // ── 2б. Потребность позиции ──────────────────────────────────────────────────
@@ -210,23 +201,31 @@ var DIES = [
     var pos = LO.positionFromRow(row, materials);
     assert(pos.id === '488' && pos.base === 'Бумага' && pos.knifeStreams === null, 'основа позиции — из её сырья; ручьёв в «Типе ножей» нет', JSON.stringify(pos));
     var dies = DIES.map(function(d) { return Object.assign({ repeatMm: 666.75, labelsPerRepeat: 3, usedFormat: 305, sleeveWidth: 80 }, d); });
-    var plan = LO.planPosition(pos, dies, { mrLength: '2000', itsMin: '20', itsMax: '250' });
+    var plan = LO.planPosition(pos, dies, { mrLength: '2000' });
     assert(plan.die.ok && plan.die.die.id === '2', 'подобран нож 2 (меньший пробег)');
-    assert(plan.write.die === '2' && plan.write.diePick === LP.DIE_PICK.FOUND && plan.write.itsNeeded === '' &&
-        plan.write.minBatch === String(Math.floor(2000000 / 666.75) * 3 * 2), 'в позицию пишется нож, «подобран», мин. партия, ИТС не нужен', JSON.stringify(plan.write));
+    assert(plan.write.die === '2' && plan.write.diePick === LP.DIE_PICK.FOUND && !('itsNeeded' in plan.write) &&
+        plan.write.minBatch === String(Math.floor(2000000 / 666.75) * 3 * 2), 'в позицию пишется нож, «подобран», мин. партия; признак ИТС не пишется (ручной)', JSON.stringify(plan.write));
     assert(plan.write.sleeveWidth === '80', 'ширины втулки в позиции нет — берётся из ножа');
     assert(LO.writeDiffers(pos, plan.write) === true, 'записанное отличается от расчёта — нужно записать');
     var written = LO.positionFromRow(Object.assign({}, row, { 'Подбор ножа': 'подобран', 'НожID': '2', 'Мин. партия': plan.write.minBatch, 'Втулка, мм': '80.00' }), materials);
-    assert(LO.writeDiffers(written, LO.planPosition(written, dies, { mrLength: '2000', itsMin: '20', itsMax: '250' }).write) === false,
+    assert(LO.writeDiffers(written, LO.planPosition(written, dies, { mrLength: '2000' }).write) === false,
         'после записи повторный подбор ничего не меняет');
 
-    var small = LO.positionFromRow(Object.assign({}, row, { 'Ширина, мм': '18', 'Длина, мм': '18', 'ИТС подтв.': 'X' }), materials);
+    var tiny = { 'Ширина, мм': '18', 'Длина, мм': '18' };
+    var small = LO.positionFromRow(Object.assign({}, row, tiny), materials);
+    // старые пороги (20…250) в настройках игнорируются: размер ИТС не определяет
     var sp = LO.planPosition(small, dies, { mrLength: '2000', itsMin: '20', itsMax: '250' });
-    assert(sp.write.itsNeeded === '1' && sp.die.die.id === '5' && sp.flags.ready === true,
-        '18×18: ИТС нужен и подтверждён («X»), нож 5 — позиция готова', JSON.stringify(sp.flags));
-    var unconfirmed = LO.positionFromRow(Object.assign({}, row, { 'Ширина, мм': '18', 'Длина, мм': '18' }), materials);
-    var up = LO.planPosition(unconfirmed, dies, { mrLength: '2000', itsMin: '20', itsMax: '250' });
-    assert(up.flags.ready === false && up.flags.blocks.length === 1 && /ИТС/.test(up.flags.blocks[0]), '18×18 без подтверждения ИТС — держит только ИТС');
+    assert(sp.its.needed === false && !('itsNeeded' in sp.write) && sp.flags.blocks.every(function(b) { return !/ИТС/.test(b); }),
+        '18×18 без ручной отметки: ИТС не нужен и не блокирует (размер ничего не решает)', JSON.stringify(sp.flags));
+    var manual = LO.positionFromRow(Object.assign({}, row, tiny, { 'ИТС нужен': 'X' }), materials);
+    var up = LO.planPosition(manual, dies, { mrLength: '2000', itsMin: '20', itsMax: '250' });
+    assert(up.its.needed === true && up.flags.ready === false && up.flags.blocks.some(function(b) { return /ИТС/.test(b); }),
+        '18×18 с ручной отметкой «ИТС нужен», не подтверждено — держит ИТС', JSON.stringify(up.flags));
+    var manualOk = LO.positionFromRow(Object.assign({}, row, tiny, { 'ИТС нужен': 'X', 'ИТС подтв.': 'X' }), materials);
+    var mp = LO.planPosition(manualOk, dies, { mrLength: '2000' });
+    assert(mp.flags.blocks.every(function(b) { return !/ИТС/.test(b); }), 'ручная отметка и подтверждение — ИТС не держит', JSON.stringify(mp.flags));
+    var big = LO.positionFromRow(Object.assign({}, row, { 'Ширина, мм': '148', 'Длина, мм': '210', 'ИТС нужен': 'X' }), materials);
+    assert(LO.planPosition(big, dies, { mrLength: '2000' }).its.needed === true, 'большая этикетка с ручной отметкой — ИТС нужен (отметка человека главнее размера)');
 
     var err = LO.validatePositionForm({ width: '0', length: 'abc', labelsPerRoll: '', rolls: '1.5', orderStreams: '0', materialId: '', orderId: '', newOrderNo: '', knifeType: '85 на 38' });
     assert(['width', 'length', 'labelsPerRoll', 'rolls', 'orderStreams', 'materialId', 'orderId', 'knifeType'].every(function(k) { return !!err[k]; }),

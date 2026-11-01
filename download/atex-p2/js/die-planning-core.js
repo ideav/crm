@@ -45,9 +45,7 @@
         horizonDays: ['DIE_HORIZON_DAYS', 14, false],
         mrLength: ['LABEL_MASTER_ROLL_M', 2000, false],
         tolerance: ['JUMBO_FORMAT_TOLERANCE_MM', 15, true],
-        dieResource: ['DIE_RESOURCE_DEFAULT_M', 300000, false],
-        itsMin: ['LABEL_ITS_MIN_MM', 0, true],
-        itsMax: ['LABEL_ITS_MAX_MM', 0, true]
+        dieResource: ['DIE_RESOURCE_DEFAULT_M', 300000, false]
     };
     var DEFAULTS = { tzOffsetMin: 180 };
     Object.keys(SETTING_KEYS).forEach(function(k) { DEFAULTS[k] = SETTING_KEYS[k][1]; });
@@ -715,7 +713,7 @@
     function formJobs(inp) {
         var s = withDefaults(inp.settings), create = [], skipped = [];
         var mrLength = num(inp.mrLength) > 0 ? num(inp.mrLength) : s.mrLength;
-        var lim = { mrLength: mrLength, itsMin: inp.itsMin != null ? inp.itsMin : s.itsMin, itsMax: inp.itsMax != null ? inp.itsMax : s.itsMax };
+        var lim = { mrLength: mrLength };
         var has = {};
         (inp.jobs || []).forEach(function(j) { if (norm(j.status) !== 'отменено' && j.positionId) has[j.positionId] = j.id; });
         (inp.positions || []).forEach(function(pos) {
