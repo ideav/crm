@@ -396,7 +396,7 @@
     AtexDiePlanningApp.prototype.machineHint = function(id) {
         var m = this.state.machines.filter(function(x) { return x.id === id; })[0];
         if (!m) return '';
-        return esc(m.maxCylinder > 0 ? ' · вал ≤ ' + m.maxCylinder : ' · любой вал') + (m.stopMaterials.length ? ' · стоп-лист: ' + m.stopMaterials.length : '') + (m.turret ? ' · туррель: втулка ≥ 2× диаметра' : '');
+        return esc(m.maxCylinder > 0 ? ' · вал ≤ ' + m.maxCylinder : ' · любой вал') + (m.stopMaterials.length ? ' · стоп-лист: ' + m.stopMaterials.length : '') + (m.turret ? ' · туррель: втулка ≥ 2× диаметра' + (this.state.settings && this.state.settings.turretLongM > 0 ? ', метраж ≥ ' + this.state.settings.turretLongM + ' м' : '') : '');
     };
 
     AtexDiePlanningApp.prototype.planMachineOf = function(jobId) {

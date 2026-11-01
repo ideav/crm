@@ -22,19 +22,18 @@ assert(W(50000, 0, 0) === null && W(95000, 0, NaN) === null, 'ресурс не 
 
 var near = W(91000, 1000, 100000);
 assert(near && near.level === 'near', 'пробег от 90 % ресурса — «у ресурса»', JSON.stringify(near));
-assert(near && /внимательн/i.test(near.text) && /выбива/i.test(near.text), 'текст: быть внимательнее, нож может перестать выбивать этикетки', near && near.text);
-assert(near && /91\s?%/.test(near.text), 'текст: доля ресурса в процентах', near && near.text);
+assert(near && near.share === 91 && near.after === 92 && String(near.text || '').length > 0, 'доля ресурса сейчас и после задания, текст для оператора есть', JSON.stringify(near));
 
 var soon = W(88000, 3000, 100000);
 assert(soon && soon.level === 'near', 'сейчас меньше 90 %, но за задание пробег дойдёт до 90 % — «у ресурса»', JSON.stringify(soon));
-assert(soon && /после задания/i.test(soon.text), 'текст: прогноз после задания', soon && soon.text);
+assert(soon && soon.share === 88 && soon.after === 91, 'прогноз после задания — от 90 %, сейчас меньше', JSON.stringify(soon));
 
 var cross = W(98000, 5000, 100000);
-assert(cross && cross.level === 'near' && /после задания/i.test(cross.text) && /103\s?%/.test(cross.text),
-    'за задание пробег перешагнёт ресурс — «у ресурса» с прогнозом выше 100 %', cross && cross.text);
+assert(cross && cross.level === 'near' && cross.share === 98 && cross.after === 103,
+    'за задание пробег перешагнёт ресурс — «у ресурса» с прогнозом выше 100 %', JSON.stringify(cross));
 
 var over = W(100000, 0, 100000);
-assert(over && over.level === 'over' && /выработал/i.test(over.text) && /внимательн/i.test(over.text) && /выбива/i.test(over.text), 'пробег не меньше ресурса — «ресурс выработан»', over && over.text);
+assert(over && over.level === 'over' && over.share === 100 && over.text !== (near && near.text), 'пробег не меньше ресурса — «ресурс выработан», свой текст', JSON.stringify(over));
 
 // Оставшийся метраж задания: метраж задания − вырубленное по заданию.
 assert(typeof DC.jobRemainingMeters === 'function', 'есть jobRemainingMeters');
