@@ -74,6 +74,10 @@
         Архив файлов базы: шаблоны в корне templates (подпапки, backups и logs не входят), фронт в корне download (js, css, conf, json, html) и подпапки download с загруженными файлами. Для получения архива <a href="/{_global_.z}/code_backup">нажмите здесь</a>.
         Файл будет также доступен в папке backups внутри <a href="/{_global_.z}/dir_admin/?templates=1">templates</a>; восстановить — значком «Восстановить файлы» у файла .code.zip.
     </div>
+    <p><a style="border-bottom: 1px dotted;" onclick="document.getElementById('db-template').style.display='block';">Шаблон базы</a></p>
+    <div id="db-template" class="alert alert-info mb-0" role="alert" style="display:none;">
+        Читаем шаблоны…
+    </div>
     <p><a style="border-bottom: 1px dotted;" onclick="document.getElementById('repo-update').style.display='block'; RepoUpdate.open();">Обновление из репозитория</a></p>
     <div id="repo-update" class="alert alert-info mb-0" role="alert" style="display:none;">
         Читаем репозиторий…
@@ -281,6 +285,15 @@
     window.addEventListener('load', function() {
         if (window.CodeRestore && document.view_dir)
             CodeRestore.init({ db: db, xsrf: document.view_dir._xsrf ? document.view_dir._xsrf.value : '' });
+    });
+</script>
+<!-- Шаблон базы (#5364): фиксация версии — снимок данных и файлов — и свои версии с модерацией -->
+<script src="/js/db-templates.js?5364" defer></script>
+<script>
+    window.addEventListener('load', function() {
+        var box = document.getElementById('db-template');
+        if (window.DbTemplates && document.view_dir && box)
+            DbTemplates.initDirAdmin({ db: db, xsrf: document.view_dir._xsrf ? document.view_dir._xsrf.value : '', box: box });
     });
 </script>
 <script>
