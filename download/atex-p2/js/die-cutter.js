@@ -6,7 +6,7 @@
 //     метры съёма, задание, оператор) и партия ГП этикетки в упаковку; затем остаток
 //     мастер-рулона и «Съёмов факт» задания. Первый съём ставит заданию «В работе»;
 //   - «Смена ножа» / «Смена вала» — событие смены высечки («старое → новое») и новая
-//     оснастка в задании; ножи — того же размера этикетки, валы — допустимые для станка;
+//     оснастка в задании; ножи — того же размера этикетки, валы — не больше «Макс. вала» станка;
 //   - «Брак» — событие «Брак» с фото и примечанием;
 //   - «Чек-лист ИТС» — отметки пунктов справочника «Пункт чек-листа ИТС» в задании;
 //   - «Вызов ИТС» — запись «Вызов ИТС» (станок, задание, оператор, причина, статус «открыт»);
@@ -64,6 +64,9 @@
     var GP_STATUS_NEW = 'к упаковке';
     var ROLL_STATUS = { OPENED: 'початый', USED: 'израсходован' };
     var DIE_STATE_OFF = ['списан'];
+    // Ресурс ножа без марки (настройка DIE_RESOURCE_DEFAULT_M; то же умолчание у планирования высечки).
+    var RESOURCE_KEY = 'DIE_RESOURCE_DEFAULT_M';
+    var RESOURCE_DEFAULT_M = 300000;
     var MAX_BATCH = 50;
 
     // Таблицы ИТС пульта (docs/atex_p2_die_cutter_schema_5326.json).
@@ -313,6 +316,68 @@
         return { meters: total.meters, today: round1(today), start: round1(total.meters - today), errors: total.errors };
     }
 
+    // Сколько метров задания ещё вырубить: метраж задания − движения «вырубка» по заданию.
+    function jobRemainingMeters(job, runs) {
+        var cut = 0;
+        cutRuns(runs, job && job.id).forEach(function(r) { cut += num(r.meters); });
+        return Math.max(0, round1(num(job && job.footage) - cut));
+    }
+
+    // #5366: у предела ресурса нож может перестать выбивать все этикетки — оператору
+    // предупреждение. meters — пробег сейчас, remaining — оставшийся метраж задания,
+    // resource — ресурс ножа, м. Уровни — dieWearLevel (от 90 % — «у ресурса», от 100 % —
+    // «выработан»); «у ресурса» ставится и тогда, когда до 90 % пробег дойдёт за это задание.
+    // → null | { level: 'near' | 'over', share (% сейчас), after (% после задания), text }.
+    function dieWearNotice(meters, remaining, resource) {
+        var res = num(resource);
+        if (!(res > 0)) return null;
+        var m = num(meters), end = m + Math.max(0, num(remaining));
+        var now = lp.dieWearLevel(m, res), then = lp.dieWearLevel(end, res);
+        var pct = function(x) { return Math.floor(x / res * 100); };
+        var head = 'пробег ' + fmtM(m) + ' м — ' + pct(m) + ' % ресурса (' + fmtM(res) + ' м)';
+        var after = end > m ? '; после задания станет ' + fmtM(end) + ' м — ' + pct(end) + ' %' : '';
+        if (now === 'over') {
+            return { level: 'over', share: pct(m), after: pct(end), text: 'Нож выработал ресурс: ' + head + after +
+                '. Будьте внимательнее: нож может выбивать не все этикетки — проверяйте вырубку на каждом съёме; если не выбивает — «Брак» и вызов ИТС.' };
+        }
+        if (now === 'near' || then === 'near' || then === 'over') {
+            return { level: 'near', share: pct(m), after: pct(end), text: 'Нож у предела ресурса: ' + head + after +
+                '. Будьте внимательнее: нож может перестать выбивать все этикетки — проверяйте вырубку на каждом съёме.' };
+        }
+        return null;
+    }
+
+    // Плашку ресурса оператор скрывает на заказ (владелец, #5366): ключ — заказ задания (без
+    // заказа — задание) и нож; другой заказ или смена ножа показывают плашку снова.
+    function wearHideKey(job) {
+        if (!job) return '';
+        return (job.order ? 'o' + job.order : 'j' + job.id) + ':' + (job.dieId || '');
+    }
+    var WEAR_HIDDEN_KEY = 'atex-dc-wear-hidden';
+    var WEAR_HIDDEN_MAX = 200;
+    function wearHidden() {
+        try { var a = JSON.parse(window.localStorage.getItem(WEAR_HIDDEN_KEY) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; }
+    }
+    function hideWear(job) {
+        var k = wearHideKey(job), a = wearHidden().filter(function(x) { return x !== k; });
+        a.push(k);
+        try { window.localStorage.setItem(WEAR_HIDDEN_KEY, JSON.stringify(a.slice(-WEAR_HIDDEN_MAX))); } catch (e) { /* хранилище недоступно */ }
+    }
+
+    // Значение настройки: строка с типом базы важнее строки «ATEH», та — важнее общей
+    // (порядок loadDaySettings планирования). recs — [{ key, type, value }].
+    function settingValue(recs, key, db) {
+        var dbKey = String(db || '').trim().toUpperCase(), best = '', rank = 0;
+        (recs || []).forEach(function(r) {
+            var v = String(r.value == null ? '' : r.value).trim();
+            if (String(r.key || '').replace(/^﻿/, '').trim() !== key || v === '') return;
+            var type = String(r.type || '').trim().toUpperCase();
+            var k = dbKey && type === dbKey ? 3 : (type === 'ATEH' ? 2 : 1);
+            if (k >= rank) { best = v; rank = k; }
+        });
+        return best;
+    }
+
     // Ножи для смены: того же размера этикетки, кроме текущего и списанных.
     // dies — [{ id, val, width, length, state, cylinderId }].
     function compatibleDies(job, dies) {
@@ -322,12 +387,11 @@
         });
     }
 
-    // Валы для смены: допустимые для станка (пусто = любой), не больше его «Макс. вала», кроме текущего.
+    // Валы для смены: не больше «Макс. вала» станка (пусто или 0 — любой), кроме текущего (#5366).
     function compatibleCylinders(job, cylinders, machine) {
-        var allowed = machine && machine.cylinderIds && machine.cylinderIds.length ? machine.cylinderIds : null;
         var max = num(machine && machine.maxCylinder);
         return (cylinders || []).filter(function(c) {
-            return c.id !== job.cylinderId && (!allowed || allowed.indexOf(c.id) >= 0) && !(max > 0 && num(c.val) > max);
+            return c.id !== job.cylinderId && !(max > 0 && num(c.val) > max);
         });
     }
 
@@ -676,7 +740,8 @@
                 checklist: function() { self.askChecklist(); },
                 call: function() { self.askCall(); },
                 done: function() { self.finish(); },
-                refresh: function() { self.message(''); self.reload(); }
+                refresh: function() { self.message(''); self.reload(); },
+                wearHide: function() { hideWear(self.current()); self.renderJob(); }
             }[act];
             if (h) h();
         });
@@ -721,9 +786,12 @@
                 report('die_cutter_jobs'), report('die_cutter_runs'), all(t.machine.id), all(t.die.id), all(t.cylinder.id),
                 all(t.finishedBatch.id), all(t.dieEventType.id), all(t.runKind.id),
                 all(its.tables.checkItem && its.tables.checkItem.id), all(its.tables.itsCall && its.tables.itsCall.id),
-                c.serverNow(), all(t.masterRoll && t.masterRoll.id)
+                c.serverNow(), all(t.masterRoll && t.masterRoll.id),
+                // #5366: ресурс ножа — марка и настройка; прав на чтение нет — ресурс по умолчанию.
+                all(t.dieBrand && t.dieBrand.id).catch(function() { return []; }),
+                self.loadSettings(meta).catch(function() { return []; })
             ]).then(function(r) {
-                var mr = t.machine.reqs, dr = t.die.reqs, gr = t.finishedBatch.reqs;
+                var dr = t.die.reqs, gr = t.finishedBatch.reqs;
                 // Колонки, которых нет в общем описании таблиц (label-production.js): ищутся по имени.
                 var extraReq = function(tb, name) {
                     var meta0 = tb ? (meta || []).filter(function(x) { return String(x.id) === String(tb.id); })[0] : null;
@@ -733,7 +801,14 @@
                 if (t.dieEvent) t.dieEvent.reqs.duration = extraReq(t.dieEvent, 'Длительность, мин');
                 if (t.masterRoll) t.masterRoll.reqs.reserveTask = extraReq(t.masterRoll, 'Задание высечки');
                 var rr = (t.masterRoll && t.masterRoll.reqs) || {}, cr = (t.cylinder && t.cylinder.reqs) || {};
-                var dies = r[3].map(function(d) { return { id: d.id, val: d.val, width: num(reqVal(d, dr.labelWidth)), length: num(reqVal(d, dr.labelLength)), state: reqVal(d, dr.state), cylinderId: refId(d, dr.cylinder), labelsPerRepeat: num(reqVal(d, dr.labelsPerRepeat)), minFormat: num(reqVal(d, dr.minFormat)) }; });
+                var brandCol = t.dieBrand && t.dieBrand.reqs ? t.dieBrand.reqs.resource : '';
+                var brandRes = {};
+                r[12].forEach(function(b) { brandRes[b.id] = reqVal(b, brandCol); });
+                var defaultRes = settingValue(r[13], RESOURCE_KEY, self.db) || RESOURCE_DEFAULT_M;
+                var dies = r[3].map(function(d) {
+                    var res = lp.dieResource(brandRes[refId(d, dr.brand)], defaultRes).meters;
+                    return { id: d.id, val: d.val, width: num(reqVal(d, dr.labelWidth)), length: num(reqVal(d, dr.labelLength)), state: reqVal(d, dr.state), cylinderId: refId(d, dr.cylinder), labelsPerRepeat: num(reqVal(d, dr.labelsPerRepeat)), minFormat: num(reqVal(d, dr.minFormat)), resource: isFinite(res) ? res : 0 };
+                });
                 var cylinders = r[4].map(function(x) { return { id: x.id, val: x.val, repeat: num(reqVal(x, cr.repeat)) }; });
                 var rolls = t.masterRoll ? r[11].map(function(m) {
                     return { id: m.id, no: m.val, format: num(reqVal(m, rr.format)), length: num(reqVal(m, rr.length)), rest: num(reqVal(m, rr.rest)),
@@ -753,7 +828,7 @@
                     jobs: jobs,
                     rolls: rolls,
                     runs: runsFromReport(r[1]),
-                    machines: r[2].map(function(m) { return { id: m.id, val: m.val, cylinderIds: refIds(m, mr.cylinders), maxCylinder: maxReq ? num(reqVal(m, maxReq)) : 0 }; }),
+                    machines: r[2].map(function(m) { return { id: m.id, val: m.val, maxCylinder: maxReq ? num(reqVal(m, maxReq)) : 0 }; }),
                     dies: dies,
                     cylinders: cylinders,
                     gps: r[5].map(function(g) { return { id: g.id, val: g.val, jobId: refId(g, gr.job) }; }),
@@ -774,6 +849,17 @@
         }).catch(function(err) {
             console.error('[die-cutter] ❌', err);
             self.message('Пульт не загрузился: ' + err.message, 'error');
+        });
+    };
+
+    // Записи «Настройки» → [{ key, type, value }] (колонки «Тип» и «Значение» — по имени).
+    AtexDieCutter.prototype.loadSettings = function(meta) {
+        var st = (meta || []).filter(function(x) { return String(x.val).trim() === 'Настройка'; })[0];
+        if (!st) return Promise.resolve([]);
+        var col = function(name) { var h = (st.reqs || []).filter(function(x) { return String(x.val).trim() === name; })[0]; return h ? String(h.id) : ''; };
+        var typeReq = col('Тип'), valReq = col('Значение');
+        return this.client.getJson('object/' + st.id + '/?JSON_KV&LIMIT=0,1000').then(function(json) {
+            return kvRecords(json).map(function(x) { return { key: x.val, type: typeReq ? reqVal(x, typeReq) : '', value: valReq ? reqVal(x, valReq) : '' }; });
         });
     };
 
@@ -902,6 +988,11 @@
         if (!done && !(num(j.rollLenM) > 0)) {
             html += '<div class="atex-dc-message is-warn">Рулоны партии ГП считаются по числу ручьёв: ' + esc(rollsPerPull(j, 0).warn) + '</div>';
         }
+        var die = j.dieId ? s.dies.filter(function(d) { return d.id === j.dieId; })[0] : null;
+        var wear = mile && die && !done && wearHidden().indexOf(wearHideKey(j)) < 0 ? dieWearNotice(mile.meters, jobRemainingMeters(j, s.runs), die.resource) : null;
+        // Оранжевая плашка на обоих уровнях: заметно, но не тревога (#5366).
+        if (wear) html += '<div class="atex-dc-message atex-dc-wear"><span>⚠ ' + esc(wear.text) + '</span>' +
+            '<button class="atex-dc-btn" type="button" data-act="wearHide" title="Скрыть для этого заказа">Скрыть</button></div>';
         if (!this.shift().open) html += '<div class="atex-dc-message is-warn">Смена закрыта — откройте смену, чтобы работать с заданием.</div>';
         if (pr.gpMissing.length || pr.factStale) {
             html += '<div class="atex-dc-message is-warn">Съёмы записаны не до конца (' + (pr.gpMissing.length ? 'партий ГП не хватает: ' + pr.gpMissing.length : '«Съёмов факт» отстаёт') +
@@ -927,7 +1018,8 @@
         html += mile ? '<table class="atex-dc-table">' +
             '<tr><td>На начало смены</td><td class="num">' + fmtM(mile.start) + ' м</td></tr>' +
             '<tr><td>Прибавили сегодня</td><td class="num">' + fmtM(mile.today) + ' м</td></tr>' +
-            '<tr><td>Сейчас</td><td class="num"><b>' + fmtM(mile.meters) + ' м</b></td></tr></table>' +
+            '<tr><td>Сейчас</td><td class="num"><b>' + fmtM(mile.meters) + ' м</b></td></tr>' +
+            (die && die.resource > 0 ? '<tr><td>Ресурс</td><td class="num">' + fmtM(die.resource) + ' м · ' + Math.floor(mile.meters / die.resource * 100) + ' %</td></tr>' : '') + '</table>' +
             (mile.errors.length ? '<div class="atex-dc-message is-warn">' + esc(mile.errors.join('; ')) + '</div>' : '')
             : '<div class="atex-dc-empty">Нож не указан.</div>';
         html += '</div></div>';
@@ -1390,6 +1482,10 @@
             takeoffPlan: takeoffPlan,
             dieMileageNow: dieMileageNow,
             compatibleDies: compatibleDies,
+            jobRemainingMeters: jobRemainingMeters,
+            dieWearNotice: dieWearNotice,
+            wearHideKey: wearHideKey,
+            settingValue: settingValue,
             compatibleCylinders: compatibleCylinders,
             changeNote: changeNote,
             checklist: checklist,

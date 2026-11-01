@@ -60,11 +60,11 @@ if (C) (function() {
         'вырубка: метры / скорость, вверх до минуты');
 
     // ── 2. Допустимость станка ───────────────────────────────────────────────
-    assert(C.machineAllows(M1, J(1)).ok, 'пустой список валов — станок берёт любой вал');
-    var onlyC9 = { id: 'X', cylinders: ['c9'], stopMaterials: [] };
-    var chk = C.machineAllows(onlyC9, J(1));
-    assert(!chk.ok && /вал/i.test(chk.reason), 'вала нет в «Допустимых валах» — станок не подходит, причина про вал', chk.reason);
-    assert(C.machineAllows(onlyC9, J(1, { cylinderId: 'c9' })).ok, 'вал в списке — подходит');
+    assert(C.machineAllows(M1, J(1)).ok, '«Макс. вал» не задан — станок берёт любой вал');
+    var upTo90 = { id: 'X', maxCylinder: 90, stopMaterials: [] };
+    var chk = C.machineAllows(upTo90, J(1));
+    assert(!chk.ok && /вал/i.test(chk.reason), 'вал больше «Макс. вала» станка — станок не подходит, причина про вал (#5366)', chk.reason);
+    assert(C.machineAllows(upTo90, J(1, { cylinderId: 'c9', cylinder: '90' })).ok, 'вал не больше «Макс. вала» — подходит');
     var stop = C.machineAllows({ id: 'Y', cylinders: [], stopMaterials: ['m1'] }, J(1));
     assert(!stop.ok && /сырь|стоп/i.test(stop.reason), 'сырьё в стоп-листе — не подходит', stop.reason);
 
@@ -166,9 +166,9 @@ if (C) (function() {
     var two2 = order([J(1), J(2)], [M1, M2]);
     assert(two2.machines.M1.items.length === 1 && two2.machines.M2.items.length === 1, 'два задания на два станка — по одному на станок (раньше заканчиваем)');
     assert(two2.machines.M2.items[0].start === MON, 'оба стартуют в 08:00');
-    var picky = order([J(1)], [{ id: 'M1', cylinders: ['c9'], stopMaterials: [] }, M2]);
+    var picky = order([J(1)], [{ id: 'M1', maxCylinder: 90, stopMaterials: [] }, M2]);
     assert(picky.machines.M2.items.length === 1 && !picky.machines.M1.items.length, 'вал не допущен на станке 1 — задание уходит на станок 2');
-    var none = order([J(1)], [{ id: 'M1', cylinders: ['c9'], stopMaterials: [] }]);
+    var none = order([J(1)], [{ id: 'M1', maxCylinder: 90, stopMaterials: [] }]);
     assert(none.unplaced.length === 1 && none.unplaced[0].jobId === '1' && /вал/i.test(none.unplaced[0].reasons.join(' ')), 'нет подходящего станка — не размещено, причина названа', JSON.stringify(none.unplaced));
     var blk = order([J(1), J(2)], [M1], { blocked: { '2': ['нет ножа'] } });
     assert(ids(blk.machines.M1.items) === '1' && blk.unplaced[0].jobId === '2' && blk.unplaced[0].reasons[0] === 'нет ножа', 'заблокированное задание в очередь не ставится');
