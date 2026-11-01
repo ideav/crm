@@ -1,8 +1,9 @@
 // Планирование высечки — ядро (ideav/crm#5320, Фаза 2 atex, шаг 7).
 //
 // Чистые функции рабочего места «Планирование высечки»; экран — die-planning.js.
-//   - нормы («Настройка», DIE_*): смена вала, смена ножа на том же валу, скорость вырубки,
-//     начало и ёмкость смены, горизонт плана; значения по умолчанию — в DEFAULTS;
+//   - нормы («Настройка», DIE_*): смена вала, смена ножа на том же валу, смена втулки при том же
+//     ноже, скорость вырубки (короткие ролики — своя), начало и ёмкость смены, горизонт плана;
+//     значения по умолчанию — в DEFAULTS (нормы — лист «План» заказчика, ideav/crm#5346);
 //   - календарь: рабочий день с DIE_DAY_START_MIN, ёмкость DIE_DAY_CAPACITY_MN, будни; задание,
 //     не поместившееся в день, продолжается на следующем рабочем дне без повторной наладки;
 //   - очередь по станкам: начатые задания неподвижны, остальные идут по сроку; к текущей группе
@@ -13,7 +14,7 @@
 //   - загрузка ножей и валов, полосы Ганта; формирование заданий из позиций заказов этикетки;
 //   - задачи на втулки под позицией (без дублей, не начатые приводятся к плану).
 // Таблицы и реквизиты — по именам из /metadata, id в коде нет.
-// Покрыто experiments/atex-p2-5320-die-planning.test.js.
+// Покрыто experiments/atex-p2-5320-die-planning.test.js, experiments/atex-p2-5346-die-setup-norms.test.js.
 
 (function(root, factory) {
     'use strict';
@@ -35,7 +36,10 @@
     var SETTING_KEYS = {
         cylinderChange: ['DIE_CYLINDER_CHANGE_MN', 90, true],
         knifeChange: ['DIE_KNIFE_CHANGE_MN', 20, true],
+        sleeveChange: ['DIE_SLEEVE_CHANGE_MN', 20, true],
         speed: ['DIE_SPEED_M_MIN', 44, false],
+        shortRollSpeed: ['DIE_SPEED_SHORT_M_MIN', 28, false],
+        shortRollM: ['DIE_SHORT_ROLL_M', 50, true],
         dayStartMin: ['DIE_DAY_START_MIN', 480, true],
         dayCapacityMin: ['DIE_DAY_CAPACITY_MN', 455, false],
         horizonDays: ['DIE_HORIZON_DAYS', 14, false],
@@ -127,19 +131,51 @@
         if (a.dieNo && b.dieNo) return String(a.dieNo) === String(b.dieNo);
         return false;
     }
-    // 'cylinder' — смена вала, 'knife' — смена ножа на том же валу, 'none'. Станок пуст — полная наладка.
+    // Втулка — диаметр сердечника (76/40/25): по id справочника, без id — по диаметру из названия.
+    // Втулка не указана у одного из заданий — смены втулки нет.
+    function differentSleeve(a, b) {
+        if (a.sleeveId && b.sleeveId) return String(a.sleeveId) !== String(b.sleeveId);
+        var da = sleeveDiameterMm(a.sleeve), db = sleeveDiameterMm(b.sleeve);
+        if (da > 0 && db > 0) return da !== db;
+        var na = norm(a.sleeve), nb = norm(b.sleeve);
+        return !!(na && nb && na !== nb);
+    }
+    // 'cylinder' — смена вала, 'knife' — смена ножа на том же валу, 'sleeve' — тот же вал и нож,
+    // другая втулка, 'none'. Станок пуст — полная наладка.
     function setupKind(prev, next) {
         if (!prev || !sameCylinder(prev, next)) return 'cylinder';
-        return sameKnife(prev, next) ? 'none' : 'knife';
+        if (!sameKnife(prev, next)) return 'knife';
+        return differentSleeve(prev, next) ? 'sleeve' : 'none';
+    }
+    function setupMinutesOfKind(kind, s) {
+        return kind === 'cylinder' ? s.cylinderChange : kind === 'knife' ? s.knifeChange : kind === 'sleeve' ? s.sleeveChange : 0;
     }
     function setupMinutes(prev, next, settings) {
-        var s = withDefaults(settings), k = setupKind(prev, next);
-        return k === 'cylinder' ? s.cylinderChange : k === 'knife' ? s.knifeChange : 0;
+        var s = withDefaults(settings);
+        return setupMinutesOfKind(setupKind(prev, next), s);
     }
-    function runMinutes(footage, settings) {
+    // Вид наладки по записанным минутам (задание уже стоит): самая дорогая норма, которой хватает.
+    function kindOfSetup(setup, s) {
+        if (!(setup > 0)) return 'none';
+        if (setup >= s.cylinderChange) return 'cylinder';
+        if (setup >= s.knifeChange) return 'knife';
+        return 'sleeve';
+    }
+    // Длина одного ролика, м: метраж × ручьи / рулонов (раппорт ножа уже включает зазор).
+    function rollLengthM(job) {
+        var f = num(job && job.footage), st = num(job && job.streams), r = num(job && job.rolls);
+        return f > 0 && st > 0 && r > 0 ? f * st / r : 0;
+    }
+    // Скорость вырубки: короткие ролики (< DIE_SHORT_ROLL_M) — DIE_SPEED_SHORT_M_MIN; порог 0 — одна скорость.
+    function speedFor(rollM, s) {
+        return s.shortRollM > 0 && rollM > 0 && rollM < s.shortRollM ? s.shortRollSpeed : s.speed;
+    }
+    // footage — метраж, м; rollM — длина ролика, м (необязательно; без неё — обычная скорость).
+    function runMinutes(footage, settings, rollM) {
         var s = withDefaults(settings), m = num(footage);
-        return m > 0 ? Math.ceil(m / s.speed - 1e-9) : 0;
+        return m > 0 ? Math.ceil(m / speedFor(num(rollM), s) - 1e-9) : 0;
     }
+    function jobRunMinutes(job, s) { return runMinutes(job.footage, s, rollLengthM(job)); }
 
     // machine — { id, name, cylinders: [id вала], stopMaterials: [id сырья], active, turret, maxCylinder }.
     function machineAllows(machine, job) {
@@ -242,7 +278,7 @@
 
         // Размещение задания после prev с курсора cur.
         function place(cur, prev, job) {
-            var kind = setupKind(prev, job), setup = setupMinutes(prev, job, s), run = runMinutes(job.footage, s), segs = [], c = cur;
+            var kind = setupKind(prev, job), setup = setupMinutes(prev, job, s), run = jobRunMinutes(job, s), segs = [], c = cur;
             if (setup > 0) { var a = cal.advance(c, setup, 'setup-' + kind); segs = segs.concat(a.segments); c = a.cursor; }
             if (run > 0 || !segs.length) { var b = cal.advance(c, run, 'run'); segs = segs.concat(b.segments); c = b.cursor; }
             tagSegs(segs, job.id);
@@ -251,8 +287,8 @@
         }
         // Задание, которое уже стоит: со своего старта и своей наладкой.
         function layoutFixed(job) {
-            var setup = num(job.setup), run = num(job.duration) > 0 ? num(job.duration) : runMinutes(job.footage, s);
-            var kind = setup <= 0 ? 'none' : setup >= s.cylinderChange ? 'cylinder' : 'knife';
+            var setup = num(job.setup), run = num(job.duration) > 0 ? num(job.duration) : jobRunMinutes(job, s);
+            var kind = kindOfSetup(setup, s);
             var c = cal.cursorAt(job.start), segs = [];
             if (setup > 0) { var a = cal.advance(c, setup, 'setup-' + kind); segs = segs.concat(a.segments); c = a.cursor; }
             var b = cal.advance(c, run, 'run'); segs = segs.concat(b.segments); c = b.cursor;
@@ -556,7 +592,7 @@
         // минуты — только вырубка, без наладки и без дня
         (inp.plan.unplaced || []).forEach(function(u) {
             var j = byJob[u.jobId];
-            if (j) add(j, runMinutes(j.footage, s), null, true);
+            if (j) add(j, jobRunMinutes(j, s), null, true);
         });
         var dies = inp.dies || {};
         var kl = Object.keys(knives).map(function(k) {
@@ -581,8 +617,8 @@
                 .sort(function(a, b) { return (num(a.start) || Infinity) - (num(b.start) || Infinity) || (num(a.id) - num(b.id)); });
             var cur = null, items = [];
             list.forEach(function(j) {
-                var setup = num(j.setup), run = num(j.duration) > 0 ? num(j.duration) : runMinutes(j.footage, s);
-                var kind = setup <= 0 ? 'none' : setup >= s.cylinderChange ? 'cylinder' : 'knife';
+                var setup = num(j.setup), run = num(j.duration) > 0 ? num(j.duration) : jobRunMinutes(j, s);
+                var kind = kindOfSetup(setup, s);
                 var c = num(j.start) > 0 ? cal.cursorAt(num(j.start)) : (cur || cal.cursorAt(num(from)));
                 if (cur && curKey(cur) > curKey(c)) c = cur;
                 var segs = [];
@@ -694,7 +730,7 @@
             create.push({
                 positionWrite: positionWrite,
                 positionId: pos.id, orderNo: pos.orderNo || '', dieId: String(die.id), dieNo: String(die.no || ''), cylinderId: String(die.cylinderId || ''),
-                footage: meters, pullsPlan: plan.demand.masterRolls || Math.ceil(meters / mrLength - 1e-9), duration: runMinutes(meters, s), rolls: num(pos.rolls),
+                footage: meters, pullsPlan: plan.demand.masterRolls || Math.ceil(meters / mrLength - 1e-9), duration: runMinutes(meters, s, rollLengthM({ footage: meters, streams: die.streams, rolls: pos.rolls })), rolls: num(pos.rolls),
                 warnings: plan.flags.warnings.slice()
             });
         });
@@ -851,7 +887,7 @@
         core: {
             JOB_STATUS: JOB_STATUS, DEFAULTS: DEFAULTS, SETTING_KEYS: SETTING_KEYS,
             num: num, norm: norm, readSettings: readSettings, isDone: isDone, isFinal: isFinal, isStarted: isStarted, isMovable: isMovable,
-            dueEnd: dueEnd, buildJobs: buildJobs, setupKind: setupKind, setupMinutes: setupMinutes, runMinutes: runMinutes,
+            dueEnd: dueEnd, buildJobs: buildJobs, setupKind: setupKind, setupMinutes: setupMinutes, runMinutes: runMinutes, rollLengthM: rollLengthM, kindOfSetup: kindOfSetup,
             machineAllows: machineAllows, createCalendar: createCalendar, orderQueue: orderQueue, compareJobs: compareJobs,
             jobFlags: jobFlags, openMetersByDie: openMetersByDie, coverJobs: coverJobs, planReservations: planReservations,
             toolLoad: toolLoad, ganttDay: ganttDay, recordedPlan: recordedPlan, inScope: inScope, coverGroups: coverGroups, positionPickFields: positionPickFields, queueGrid: queueGrid, turretFits: turretFits, formJobs: formJobs, jobCreateFields: jobCreateFields, jobPlanFields: jobPlanFields,

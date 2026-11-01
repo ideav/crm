@@ -58,7 +58,7 @@
     function fmtClock(min) { return pad(Math.floor(min / 60)) + ':' + pad(Math.round(min % 60)); }
 
     var WEAR = { ok: ['', 'в норме'], near: ['is-warn', 'от 90 % ресурса'], over: ['is-bad', 'ресурс выработан'], '': ['', 'ресурс не задан'] };
-    var SETUP_LABEL = { cylinder: 'смена вала', knife: 'смена ножа', none: '—' };
+    var SETUP_LABEL = { cylinder: 'смена вала', knife: 'смена ножа', sleeve: 'смена втулки', none: '—' };
 
     function AtexDiePlanningApp(el) {
         this.el = el;
@@ -305,14 +305,14 @@
 
     // «Качество плана» — как у Фазы 1: заданий, переналадки, смены вала / ножа, блокировки, просрочки.
     AtexDiePlanningApp.prototype.qualityLine = function(grid) {
-        var s = this.state, jobs = 0, cyl = 0, cylMin = 0, kn = 0, knMin = 0, late = 0, blocked = 0, warned = 0;
+        var s = this.state, jobs = 0, cyl = 0, cylMin = 0, kn = 0, knMin = 0, sl = 0, slMin = 0, late = 0, blocked = 0, warned = 0;
         grid.columns.forEach(function(c) {
             c.days.forEach(function(d) {
                 d.items.forEach(function(i) {
                     if (i.continuation) return;
                     jobs++;
                     if (i.late) late++;
-                    if (i.setupKind === 'cylinder') { cyl++; cylMin += i.setup; } else if (i.setupKind === 'knife') { kn++; knMin += i.setup; }
+                    if (i.setupKind === 'cylinder') { cyl++; cylMin += i.setup; } else if (i.setupKind === 'knife') { kn++; knMin += i.setup; } else if (i.setupKind === 'sleeve') { sl++; slMin += i.setup; }
                     var f = s.flags[i.jobId] || { blocks: [], warnings: [] };
                     if (f.blocks.length) blocked++;
                     if (f.warnings.length) warned++;
@@ -323,8 +323,8 @@
         var unplaced = this.plan ? this.plan.unplaced.length : s.jobs.filter(function(j) { return !C.isFinal(j) && !j.machineId; }).length;
         return '<div class="atex-pp-quality atex-dp-quality" title="За весь горизонт плана (' + s.settings.horizonDays + ' раб. дн.), по всем станкам.">' +
             '<span style="font-weight:600;">Качество плана</span><span style="opacity:.75;">всего заданий: ' + jobs + '</span>' +
-            '<span>переналадки: ' + (cyl + kn) + ' (' + (cylMin + knMin) + ' мин)</span>' +
-            '<span style="opacity:.85;">смены вала: ' + cyl + ' (' + cylMin + ' мин)</span><span style="opacity:.85;">смены ножа: ' + kn + ' (' + knMin + ' мин)</span>' +
+            '<span>переналадки: ' + (cyl + kn + sl) + ' (' + (cylMin + knMin + slMin) + ' мин)</span>' +
+            '<span style="opacity:.85;">смены вала: ' + cyl + ' (' + cylMin + ' мин)</span><span style="opacity:.85;">смены ножа: ' + kn + ' (' + knMin + ' мин)</span><span style="opacity:.85;">смены втулки: ' + sl + ' (' + slMin + ' мин)</span>' +
             (late ? '<span class="is-late">просрочек: ' + late + '</span>' : '<span style="opacity:.75;">просрочек: 0</span>') +
             (unplaced ? '<span class="is-late">без станка: ' + unplaced + '</span>' : '') +
             (blocked ? '<span class="is-late">с блокировками: ' + blocked + '</span>' : '') +
@@ -340,9 +340,9 @@
         var clock = function(min) { return fmtClock(s.settings.dayStartMin + min); };
         var f = s.flags[j.id] || { blocks: [], warnings: [] };
         if (it && it.setup > 0 && !it.continuation) {
-            var prevCyl = it.setupKind === 'cylinder' ? 'Смена вала → ' + (j.cylinder || '—') : 'Смена ножа → ' + (j.dieNo || '—');
+            var prevCyl = it.setupKind === 'cylinder' ? 'Смена вала → ' + (j.cylinder || '—') : it.setupKind === 'sleeve' ? 'Смена втулки → ' + (j.sleeve || '—') : 'Смена ножа → ' + (j.dieNo || '—');
             out += '<div class="atex-pp-cut is-setup"><div class="atex-pp-cut-info"><div class="atex-pp-cut-time">⏱ ' + clock(it.from) + ' – ' + clock(it.from + it.setup) + ' · ' + it.setup + ' мин</div>' +
-                '<span class="atex-pp-cut-name">' + (it.setupKind === 'cylinder' ? '🔩 ' : '🔪 ') + esc(prevCyl) + '</span></div></div>';
+                '<span class="atex-pp-cut-name">' + (it.setupKind === 'cylinder' ? '🔩 ' : it.setupKind === 'sleeve' ? '🧻 ' : '🔪 ') + esc(prevCyl) + '</span></div></div>';
         }
         var changed = this.plan && it && !it.continuation && (String(it.start) !== String(j.start) || String(this.planMachineOf(j.id)) !== String(j.machineId || ''));
         var cls = 'atex-pp-cut' + (it && it.fixed ? ' is-fixed' : '') + (f.blocks.length ? ' is-unreserved' : '') + (this.selected === j.id ? ' is-active' : '') + (changed ? ' atex-dp-changed' : '');
@@ -448,9 +448,9 @@
             var bars = r.bars.map(function(b) {
                 var cls = b.done ? 'is-done' : b.fixed ? 'is-fixed' : b.kind;
                 var j = s.jobById[b.jobId] || {};
-                var label = b.kind === 'run' ? esc(b.jobId) : b.kind === 'setup-cylinder' ? 'вал' : 'нож';
+                var label = b.kind === 'run' ? esc(b.jobId) : b.kind === 'setup-cylinder' ? 'вал' : b.kind === 'setup-sleeve' ? 'втулка' : 'нож';
                 var sh = shifted[b.jobId];
-                var title = (b.kind === 'run' ? 'Вырубка' : b.kind === 'setup-cylinder' ? 'Смена вала' : 'Смена ножа') + ' · задание ' + b.jobId + ' · нож ' + (j.dieNo || '—') + ' · ' +
+                var title = (b.kind === 'run' ? 'Вырубка' : b.kind === 'setup-cylinder' ? 'Смена вала' : b.kind === 'setup-sleeve' ? 'Смена втулки' : 'Смена ножа') + ' · задание ' + b.jobId + ' · нож ' + (j.dieNo || '—') + ' · ' +
                     fmtClock(s.settings.dayStartMin + b.from) + '–' + fmtClock(s.settings.dayStartMin + b.from + b.minutes) + ' · ' + fmtNum(b.minutes) + ' мин' +
                     (sh ? ' · записанный старт ' + fmtTime(j.start) + ' занят предыдущим заданием, сдвиг ' + sh + ' мин' : '');
                 return '<div class="atex-dp-bar ' + cls + '" style="left:' + (b.from / g.capacity * 100) + '%;width:' + (b.minutes / g.capacity * 100) + '%" title="' + esc(title) + '">' + label + '</div>';
@@ -458,7 +458,7 @@
             return '<div class="atex-dp-gantt-row"><div class="atex-dp-gantt-name">' + esc(r.name) + '<div class="atex-dp-muted">занято ' + fmtNum(r.used) + ' · свободно ' + fmtNum(r.free) + ' мин</div></div><div class="atex-dp-gantt-track">' + bars + '</div></div>';
         }).join('');
         return '<div class="atex-dp-filters"><label>День <select class="atex-dp-input" data-gantt-day>' + opts + '</select></label>' +
-            '<span class="atex-dp-legend"><i class="atex-dp-bar setup-cylinder"></i>смена вала <i class="atex-dp-bar setup-knife"></i>смена ножа <i class="atex-dp-bar run"></i>вырубка <i class="atex-dp-bar is-fixed"></i>начато / стоит <i class="atex-dp-bar is-free"></i>свободно</span></div>' +
+            '<span class="atex-dp-legend"><i class="atex-dp-bar setup-cylinder"></i>смена вала <i class="atex-dp-bar setup-knife"></i>смена ножа <i class="atex-dp-bar setup-sleeve"></i>смена втулки <i class="atex-dp-bar run"></i>вырубка <i class="atex-dp-bar is-fixed"></i>начато / стоит <i class="atex-dp-bar is-free"></i>свободно</span></div>' +
             '<div class="atex-dp-gantt"><div class="atex-dp-gantt-row"><div class="atex-dp-gantt-name"></div><div class="atex-dp-gantt-track atex-dp-gantt-scale">' + hours.join('') + '</div></div>' + rows + '</div>' +
             '<p class="atex-dp-muted">' + (this.plan ? 'Показан план (не записан).' : 'Показан записанный план: задания, записанные на станок, от их плановых стартов; если старт занят предыдущим заданием, задание идёт за ним.') + ' Выполненные задания и задания без станка не показываются. Смена с ' + fmtClock(s.settings.dayStartMin) + ', ' + s.settings.dayCapacityMin + ' мин.</p>';
     };

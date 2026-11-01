@@ -129,6 +129,7 @@
 .atex-dp-bar.run { background: #1d5596; }
 .atex-dp-bar.setup-cylinder { background: #c2410c; }
 .atex-dp-bar.setup-knife { background: #ca8a04; }
+.atex-dp-bar.setup-sleeve { background: #0f766e; }
 .atex-dp-bar.is-fixed { background: #134174; }
 .atex-dp-bar.is-done { background: #6b7280; }
 .atex-dp-legend { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 0.82rem; color: var(--atex-dp-muted); }
