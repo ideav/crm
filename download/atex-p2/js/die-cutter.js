@@ -15,6 +15,12 @@
 //     при закрытой смене задания видно, но пишущих кнопок нет;
 //   - «Наладка» / «Наладка завершена» — наладка задания событиями; её начинают и смена ножа
 //     или вала, минуты пишутся в «Наладка завершена», незакрытую наладку закрывает съём (#5330).
+//   - «Простой» — событие «Простой» с длительностью в минутах (числовое поле «Длительность, мин»);
+//   - «Смена мастер-рулона» — выбор следующего рулона: пишется в задание, резерв рулона и событие (#5339);
+//     без мастер-рулона съём не открывается молча: пульт берёт рулон, зарезервированный под задание
+//     (ссылка «Задание высечки» у рулона), иначе предлагает выбрать рулон или явно продолжить без него.
+//     Время на смену рулона не нормируется — входит в вырубку.
+// Партия ГП за съём: ручьи ножа × floor(метраж съёма / длина ролика) (#5339).
 // «Событие смены высечки» — самостоятельная таблица со ссылками на задание и станок.
 // Пробег меняется только движением, привязанным к съёму (§1.1 состава решения). Счётчик
 // съёмов — движения «вырубка» задания (отчёт die_cutter_runs): если запись оборвалась,
@@ -51,7 +57,10 @@
     // Наладку начинают смена оснастки и кнопка «Наладка», заканчивает «Наладка завершена».
     var SETUP_STARTS = [EVENT.DIE, EVENT.CYLINDER, EVENT.SETUP];
     // Действия пульта, которые пишут данные: при закрытой смене их нет (#5330).
-    var WRITE_ACTIONS = ['pull', 'pulls', 'sync', 'die', 'cylinder', 'setup', 'setupDone', 'scrap', 'checklist', 'call', 'done'];
+    var WRITE_ACTIONS = ['pull', 'pulls', 'sync', 'die', 'cylinder', 'roll', 'idle', 'setup', 'setupDone', 'scrap', 'checklist', 'call', 'done'];
+    // Допуск формата мастер-рулона над минимальным форматом ножа, мм (настройка JUMBO_FORMAT_TOLERANCE_MM склада).
+    var FORMAT_TOLERANCE_MM = 15;
+    var ROLL_OFF = ['израсходован', 'брак', 'списан'];
     var GP_STATUS_NEW = 'к упаковке';
     var ROLL_STATUS = { OPENED: 'початый', USED: 'израсходован' };
     var DIE_STATE_OFF = ['списан'];
@@ -233,6 +242,33 @@
         };
     }
 
+    // Длина одного ролика, м: этикеток в рулоне × шаг этикетки (раппорт вала / этикеток на раппорте) / 1000.
+    // Нет любого из трёх чисел — 0 (данных нет).
+    function rollLengthM(labelsPerRoll, repeatMm, labelsPerRepeat) {
+        var n = num(labelsPerRoll), r = num(repeatMm), p = num(labelsPerRepeat);
+        return n > 0 && r > 0 && p > 0 ? Math.round(n * (r / p) / 1000 * 100) / 100 : 0;
+    }
+
+    // Длина ролика задания: раппорт вала задания (нет — вала ножа), этикеток на раппорте — у ножа.
+    function jobRollLength(job, dies, cylinders) {
+        var die = (dies || []).filter(function(d) { return d.id === job.dieId; })[0];
+        var cylId = job.cylinderId || (die && die.cylinderId) || '';
+        var cyl = (cylinders || []).filter(function(c) { return c.id === cylId; })[0];
+        return rollLengthM(job.labelsPerRoll, cyl && cyl.repeat, die && die.labelsPerRepeat);
+    }
+
+    // Рулонов в партии ГП за съём метражом `meters`: ручьи × floor(метраж / длина ролика).
+    // Нет длины ролика или метраж меньше ролика — прежнее число (ручьи) и предупреждение.
+    function rollsPerPull(job, meters) {
+        var streams = job.streams > 0 ? job.streams : 1;
+        var len = num(job.rollLenM), m = num(meters);
+        if (!(len > 0)) return { rolls: streams, warn: 'нет данных для расчёта рулонов по метражу (раппорт вала, этикеток на раппорте или в рулоне) — в партию ГП записано по числу ручьёв' };
+        if (!(m > 0)) return { rolls: streams, warn: 'метраж съёма не задан — в партию ГП записано по числу ручьёв' };
+        var n = Math.floor(m / len + 1e-9);
+        if (n < 1) return { rolls: streams, warn: 'метраж съёма ' + fmtM(m) + ' м меньше ролика ' + fmtM(len) + ' м — в партию ГП записано по числу ручьёв' };
+        return { rolls: streams * n, warn: '' };
+    }
+
     // План записи n съёмов (n = 0 — только дописать хвосты).
     // → { ok, runs: [метры], gps: [{ k, name, rolls }], fact, status, rest } | { ok: false, error }.
     function takeoffPlan(job, jobs, runs, gps, n, meters) {
@@ -248,11 +284,20 @@
         var total = pr.done + n;
         var gpsNew = pr.gpMissing.slice();
         for (var k = pr.done + 1; k <= total; k++) gpsNew.push(k);
-        var rolls = job.streams > 0 ? job.streams : 1;
+        // Рулонов партии — от метража СВОЕГО съёма: записанные раньше — по их движению пробега.
+        var written = cutRuns(runs, job.id);
+        var warnings = [];
+        var gpList = gpsNew.map(function(k) {
+            var mk = k <= pr.done && written[k - 1] && written[k - 1].meters > 0 ? written[k - 1].meters : (m > 0 ? m : metersPerPull(job));
+            var rp = rollsPerPull(job, mk);
+            if (rp.warn && warnings.indexOf(rp.warn) < 0) warnings.push(rp.warn);
+            return { k: k, name: gpName(job.id, k), rolls: rp.rolls };
+        });
         return {
             ok: true,
             runs: runsNew,
-            gps: gpsNew.map(function(k) { return { k: k, name: gpName(job.id, k), rolls: rolls }; }),
+            gps: gpList,
+            warnings: warnings,
             fact: total,
             status: norm(job.status) === norm(JOB_STATUS.RUNNING) ? '' : JOB_STATUS.RUNNING,
             rest: n > 0 ? rollRest(job, m * n) : null
@@ -298,6 +343,73 @@
             return { id: it.id, name: it.val, checked: !!m, at: m ? m.date : 0, operator: m ? m.operator : '' };
         });
         return { rows: rows, complete: rows.length > 0 && rows.every(function(r) { return r.checked; }) };
+    }
+
+    // ── Мастер-рулон задания (#5339) ─────────────────────────────────────────
+
+    function rollUsable(r) {
+        return ROLL_OFF.indexOf(norm(r.status)) < 0 && num(r.rest) > 0;
+    }
+
+    // Задание без «Мастер-рулон» берёт рулон, зарезервированный под него (ссылка «Задание высечки»
+    // у рулона); при нескольких — младший по id. Остальные поля рулона берутся из него, rollSource
+    // = 'reserve' — при первой записи рулон запишется и в задание.
+    // rolls — [{ id, no, format, length, rest, status, reserveTaskId }].
+    function applyReservedRolls(jobs, rolls) {
+        return (jobs || []).map(function(j) {
+            if (j.rollId) return j;
+            var mine = (rolls || []).filter(function(r) { return r.reserveTaskId === j.id && rollUsable(r); })
+                .sort(function(a, b) { return num(a.id) - num(b.id); });
+            if (!mine.length) return j;
+            var r = mine[0], o = {};
+            Object.keys(j).forEach(function(k) { o[k] = j[k]; });
+            o.rollId = r.id; o.roll = r.no; o.rollLength = num(r.length); o.rollRest = String(r.rest); o.rollFormat = num(r.format);
+            o.rollSource = 'reserve';
+            return o;
+        });
+    }
+
+    function needsRoll(job) { return !job || !job.rollId; }
+
+    // Рулоны для выбора: свои резервы, затем свободные того же сырья и формата в [мин, мин + допуск] ножа
+    // (у ножа нет минимального формата — формат не фильтруется); чужие резервы, пустые, брак и текущий — нет.
+    function rollCandidates(job, rolls, die, tolerance) {
+        var min = num(die && die.minFormat), tol = tolerance == null ? FORMAT_TOLERANCE_MM : num(tolerance);
+        return (rolls || []).filter(function(r) {
+            if (r.id === job.rollId || !rollUsable(r)) return false;
+            if (r.reserveTaskId && r.reserveTaskId !== job.id) return false;
+            if (r.reserveTaskId === job.id) return true;
+            if (job.material && r.material && norm(job.material) !== norm(r.material)) return false;
+            return !(min > 0) || (num(r.format) >= min && num(r.format) <= min + tol);
+        }).sort(function(a, b) {
+            var ra = a.reserveTaskId === job.id ? 0 : 1, rb = b.reserveTaskId === job.id ? 0 : 1;
+            return ra - rb || num(a.format) - num(b.format) || num(a.id) - num(b.id);
+        });
+    }
+
+    // Поля записи выбора рулона: { job: поля задания, roll: поля рулона }.
+    function rollAssignFields(t, job, roll) {
+        var f = { job: {}, roll: {} };
+        var jr = (t.dieJob && t.dieJob.reqs) || {}, rr = (t.masterRoll && t.masterRoll.reqs) || {};
+        if (jr.masterRoll) f.job['t' + jr.masterRoll] = String(roll.id);
+        if (rr.reserveTask) f.roll['t' + rr.reserveTask] = String(job.id);
+        return f;
+    }
+
+    // Простой (#5339): минуты — целые, мусор и ноль → 0.
+    function idleMinutes(v) { return Math.max(0, Math.round(num(v))); }
+
+    // Простой задания — сумма «Длительности» событий «Простой». events — [{ jobId, type, duration }].
+    function idleState(events, jobId) {
+        var sum = 0;
+        (events || []).forEach(function(e) { if (jobId && e.jobId === jobId && isType(e, EVENT.IDLE)) sum += num(e.duration); });
+        return { minutes: sum };
+    }
+
+    // Строка «Партия ГП: N рул.» для окна съёма; предупреждение — если считать по метражу нечем.
+    function rollsInfo(job, meters) {
+        var rp = rollsPerPull(job, meters);
+        return 'Партия ГП на съём: ' + rp.rolls + ' рул.' + (rp.warn ? ' (' + rp.warn + ')' : '');
     }
 
     // Пункты, которые надо отметить: выбраны и ещё не отмечены.
@@ -360,7 +472,7 @@
     function jobActions(o) {
         if (!o || !o.shiftOpen) return ['refresh'];
         var acts = [];
-        if (!o.done) acts.push('pull', 'pulls', 'die', 'cylinder', o.setupOpen ? 'setupDone' : 'setup', 'scrap');
+        if (!o.done) acts.push('pull', 'pulls', 'die', 'cylinder', 'roll', o.setupOpen ? 'setupDone' : 'setup', 'idle', 'scrap');
         if (o.stale) acts.push('sync');
         acts.push('checklist', 'call');
         if (!o.done) acts.push('done');
@@ -369,7 +481,7 @@
     }
 
     // Поля записи «Событие смены высечки» (_m_new, up=1). t — { id, reqs } таблицы событий;
-    // o — { now, typeId, userId, notes, jobId, machineId, minutes }.
+    // o — { now, typeId, userId, notes, jobId, machineId, minutes (наладка), duration (простой) }.
     function eventParams(t, o) {
         var r = (t && t.reqs) || {}, p = {};
         p['t' + t.id] = String(o.now);
@@ -379,6 +491,7 @@
         if (r.job && o.jobId) p['t' + r.job] = String(o.jobId);
         if (r.machine && o.machineId) p['t' + r.machine] = String(o.machineId);
         if (r.setupMinutes && o.minutes != null) p['t' + r.setupMinutes] = String(o.minutes);
+        if (r.duration && o.duration != null) p['t' + r.duration] = String(o.duration);
         return p;
     }
 
@@ -397,6 +510,23 @@
 
     function fmtNum(n) {
         return String(Math.round(num(n))).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+    }
+
+    // Метраж в одном формате везде: пробел тысяч, до десятых через запятую («1 418», «1 418,5»).
+    function fmtM(n) {
+        var v = round1(num(n));
+        var parts = String(Math.abs(v)).split('.');
+        var whole = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+        return (v < 0 ? '-' : '') + whole + (parts[1] ? ',' + parts[1] : '');
+    }
+
+    // «Съём 3 из 5»; без «Съёмов план» — «Съём 3» (не «из 0»).
+    function pullsCaption(pr, done) {
+        var fin = done || pr.complete;
+        return (fin ? 'Съёмов <b>' + pr.done + '</b>' : 'Съём <b>' + (pr.done + 1) + '</b>') + (pr.plan > 0 ? ' из ' + pr.plan : '');
+    }
+    function pullsCount(pr) {
+        return 'съёмов ' + pr.done + (pr.plan > 0 ? ' из ' + pr.plan : '');
     }
 
     // ── Клиент Integram (браузер) ───────────────────────────────────────────
@@ -501,6 +631,7 @@
         this.machineId = '';
         this.selectedId = '';
         this.busy = false;
+        this.noRollOk = {};
         try { this.machineId = window.localStorage.getItem(MACHINE_KEY) || ''; } catch (e) { /* хранилище недоступно */ }
     }
 
@@ -533,6 +664,8 @@
                 sync: function() { self.writePulls(self.current(), 0, 0); },
                 die: function() { self.askChange('die'); },
                 cylinder: function() { self.askChange('cylinder'); },
+                roll: function() { self.askRoll(self.current(), null); },
+                idle: function() { self.askIdle(); },
                 scrap: function() { self.askScrap(); },
                 checklist: function() { self.askChecklist(); },
                 call: function() { self.askCall(); },
@@ -540,6 +673,12 @@
                 refresh: function() { self.message(''); self.reload(); }
             }[act];
             if (h) h();
+        });
+        // Число рулонов партии ГП пересчитывается при вводе метража съёма.
+        this.root.addEventListener('input', function(e) {
+            if (!e.target || e.target.getAttribute('data-f') !== 'm') return;
+            var info = self.root.querySelector('[data-f="rolls"]'), j = self.current();
+            if (info && j) info.textContent = rollsInfo(j, num(e.target.value));
         });
         this.root.addEventListener('change', function(e) {
             if (e.target && e.target.id === 'atex-dc-machine') {
@@ -575,9 +714,27 @@
                 report('die_cutter_jobs'), report('die_cutter_runs'), all(t.machine.id), all(t.die.id), all(t.cylinder.id),
                 all(t.finishedBatch.id), all(t.dieEventType.id), all(t.runKind.id),
                 all(its.tables.checkItem && its.tables.checkItem.id), all(its.tables.itsCall && its.tables.itsCall.id),
-                c.serverNow()
+                c.serverNow(), all(t.masterRoll && t.masterRoll.id)
             ]).then(function(r) {
                 var mr = t.machine.reqs, dr = t.die.reqs, gr = t.finishedBatch.reqs;
+                // Колонки, которых нет в общем описании таблиц (label-production.js): ищутся по имени.
+                var extraReq = function(tb, name) {
+                    var meta0 = tb ? (meta || []).filter(function(x) { return String(x.id) === String(tb.id); })[0] : null;
+                    var hit = meta0 ? findByName(meta0.reqs, name) : null;
+                    return hit ? String(hit.id) : '';
+                };
+                if (t.dieEvent) t.dieEvent.reqs.duration = extraReq(t.dieEvent, 'Длительность, мин');
+                if (t.masterRoll) t.masterRoll.reqs.reserveTask = extraReq(t.masterRoll, 'Задание высечки');
+                var rr = (t.masterRoll && t.masterRoll.reqs) || {}, cr = (t.cylinder && t.cylinder.reqs) || {};
+                var dies = r[3].map(function(d) { return { id: d.id, val: d.val, width: num(reqVal(d, dr.labelWidth)), length: num(reqVal(d, dr.labelLength)), state: reqVal(d, dr.state), cylinderId: refId(d, dr.cylinder), labelsPerRepeat: num(reqVal(d, dr.labelsPerRepeat)), minFormat: num(reqVal(d, dr.minFormat)) }; });
+                var cylinders = r[4].map(function(x) { return { id: x.id, val: x.val, repeat: num(reqVal(x, cr.repeat)) }; });
+                var rolls = t.masterRoll ? r[11].map(function(m) {
+                    return { id: m.id, no: m.val, format: num(reqVal(m, rr.format)), length: num(reqVal(m, rr.length)), rest: num(reqVal(m, rr.rest)),
+                        status: reqVal(m, rr.status), material: reqVal(m, rr.material), reserveTaskId: refId(m, rr.reserveTask) };
+                }) : [];
+                // #5339: рулон, зарезервированный под задание, — рулон задания; длина ролика — для рулонов партии ГП.
+                var jobs = applyReservedRolls(jobsFromReport(r[0]), rolls);
+                jobs.forEach(function(j) { j.rollLenM = jobRollLength(j, dies, cylinders); });
                 var machineMeta = (meta || []).filter(function(x) { return String(x.id) === String(t.machine.id); })[0];
                 var maxReq = ((machineMeta && machineMeta.reqs) || []).filter(function(x) { return String(x.val).trim() === 'Макс. вал'; })[0];
                 maxReq = maxReq ? String(maxReq.id) : '';
@@ -586,11 +743,12 @@
                     tables: t,
                     its: its.tables,
                     missing: res.missing.filter(function(m) { return /^(Задание высечки|Событие смены высечки|Движение пробега|Нож|Партия ГП этикетки|Мастер-рулон) →/.test(m); }).concat(its.missing),
-                    jobs: jobsFromReport(r[0]),
+                    jobs: jobs,
+                    rolls: rolls,
                     runs: runsFromReport(r[1]),
                     machines: r[2].map(function(m) { return { id: m.id, val: m.val, cylinderIds: refIds(m, mr.cylinders), maxCylinder: maxReq ? num(reqVal(m, maxReq)) : 0 }; }),
-                    dies: r[3].map(function(d) { return { id: d.id, val: d.val, width: num(reqVal(d, dr.labelWidth)), length: num(reqVal(d, dr.labelLength)), state: reqVal(d, dr.state), cylinderId: refId(d, dr.cylinder) }; }),
-                    cylinders: r[4].map(function(x) { return { id: x.id, val: x.val }; }),
+                    dies: dies,
+                    cylinders: cylinders,
                     gps: r[5].map(function(g) { return { id: g.id, val: g.val, jobId: refId(g, gr.job) }; }),
                     eventTypes: r[6], runKinds: r[7],
                     checkItems: r[8],
@@ -651,7 +809,7 @@
         var list = function(q) { return c.getJson('object/' + t.id + '/?JSON_KV&LIMIT=0,100000' + q).then(kvRecords); };
         var toEvent = function(e) {
             return { id: e.id, date: num(e.val), type: reqVal(e, er.type), operator: reqVal(e, er.operator), notes: reqVal(e, er.notes),
-                photo: reqVal(e, er.photo), jobId: refId(e, er.job), machineId: refId(e, er.machine), minutes: num(reqVal(e, er.setupMinutes)) };
+                photo: reqVal(e, er.photo), jobId: refId(e, er.job), machineId: refId(e, er.machine), minutes: num(reqVal(e, er.setupMinutes)), duration: num(reqVal(e, er.duration)) };
         };
         var shiftTypes = [EVENT.SHIFT_START, EVENT.SHIFT_END].map(function(l) { return self.refByLabel(s.eventTypes, l); }).filter(Boolean);
         var shift = this.machineId && er.machine && er.type
@@ -697,7 +855,7 @@
             return '<div class="atex-dc-job' + (j.id === self.selectedId ? ' is-picked' : '') + (isDone(j.status) ? ' is-done' : '') + '" data-job-id="' + esc(j.id) + '">' +
                 '<div class="atex-dc-job-top"><span class="atex-dc-job-no">' + esc(j.order ? 'Заказ ' + j.order : 'Задание ' + j.id) + '</span><span class="atex-dc-muted">' + esc(fmtTime(j.start, true)) + '</span></div>' +
                 '<div class="atex-dc-muted">' + esc(j.labelWidth + '×' + j.labelLength + ' мм · нож ' + (j.dieNo || '—') + ' · вал ' + (j.cylinder || '—')) + '</div>' +
-                '<div class="atex-dc-muted">съёмов ' + pr.done + ' из ' + pr.plan + tag + '</div></div>';
+                '<div class="atex-dc-muted">' + pullsCount(pr) + tag + '</div></div>';
         };
         el.innerHTML = (q.open.length ? q.open.map(card).join('') : '<div class="atex-dc-empty">Открытых заданий нет.</div>') +
             (q.doneToday.length ? '<h3 class="atex-dc-sub">Выполнено сегодня</h3>' + q.doneToday.map(card).join('') : '');
@@ -714,20 +872,29 @@
         var cl = checklist(s.checkItems, s.marks);
         var calls = openCalls(s.calls, this.machineId);
         var setup = setupState(s.events, j.id);
+        var idle = idleState(s.events, j.id);
         var acts = jobActions({ done: done, shiftOpen: this.shift().open, setupOpen: setup.open, stale: !!(pr.gpMissing.length || pr.factStale) });
         var has = function(a) { return acts.indexOf(a) >= 0; };
         var html = '<div class="atex-dc-head"><div class="atex-dc-order">' + esc(j.order ? 'Заказ ' + j.order : 'Задание ' + j.id) + '</div>' +
-            '<div class="atex-dc-pulls">' + (done || pr.complete ? 'Съёмов <b>' + pr.done + '</b>' : 'Съём <b>' + (pr.done + 1) + '</b>') + ' из ' + pr.plan + '</div>' +
+            '<div class="atex-dc-pulls">' + pullsCaption(pr, done) + '</div>' +
             '<span class="atex-dc-badge' + (done ? ' is-ok' : '') + '">' + esc(j.status || JOB_STATUS.PLANNED) + '</span></div>';
         html += '<div class="atex-dc-grid">' +
             cell('Этикетка', j.labelWidth + ' × ' + j.labelLength + ' мм' + (j.labelsPerRoll ? ' · ' + fmtNum(j.labelsPerRoll) + ' в рулоне' : '')) +
             cell('Нож', (j.dieNo || '—') + (j.streams ? ' · ' + j.streams + ' руч.' : '')) +
             cell('Вал', j.cylinder || '—') +
             cell('Сырьё', j.material || '—') +
-            cell('Мастер-рулон', (j.roll || '—') + (j.rollFormat ? ' · ' + j.rollFormat + ' мм' : '')) +
-            cell('Остаток рулона', rest == null ? (j.rollRest || '—') : fmtNum(rest) + ' м') +
-            cell('Метраж задания', fmtNum(j.footage) + ' м · съём ' + metersPerPull(j) + ' м') +
-            cell('Наладка', (j.setup ? 'план ' + j.setup + ' мин' : 'план —') + ' · факт ' + setup.fact + ' мин' + (setup.open ? ' · идёт с ' + fmtTime(setup.since) : '')) + '</div>';
+            cell('Мастер-рулон', needsRoll(j) ? 'не выбран' : (j.roll || '—') + (j.rollFormat ? ' · ' + j.rollFormat + ' мм' : '') + (j.rollSource === 'reserve' ? ' · резерв' : '')) +
+            cell('Остаток рулона', rest == null ? (String(j.rollRest).trim() === '' ? '—' : fmtM(j.rollRest) + ' м') : fmtM(rest) + ' м') +
+            cell('Метраж задания', fmtM(j.footage) + ' м · съём ' + fmtM(metersPerPull(j)) + ' м') +
+            cell('Наладка', (j.setup ? 'план ' + j.setup + ' мин' : 'план —') + ' · факт ' + setup.fact + ' мин' + (setup.open ? ' · идёт с ' + fmtTime(setup.since) : '')) +
+            (idle.minutes > 0 ? cell('Простой', idle.minutes + ' мин') : '') + '</div>';
+        if (needsRoll(j) && !done) {
+            html += '<div class="atex-dc-message is-warn">У задания нет мастер-рулона: ни в задании, ни в резерве рулона.' +
+                (has('roll') ? ' Нажмите «Выбрать мастер-рулон»; без рулона остаток не спишется.' : '') + '</div>';
+        }
+        if (!done && !(num(j.rollLenM) > 0)) {
+            html += '<div class="atex-dc-message is-warn">Рулоны партии ГП считаются по числу ручьёв: ' + esc(rollsPerPull(j, 0).warn) + '</div>';
+        }
         if (!this.shift().open) html += '<div class="atex-dc-message is-warn">Смена закрыта — откройте смену, чтобы работать с заданием.</div>';
         if (pr.gpMissing.length || pr.factStale) {
             html += '<div class="atex-dc-message is-warn">Съёмы записаны не до конца (' + (pr.gpMissing.length ? 'партий ГП не хватает: ' + pr.gpMissing.length : '«Съёмов факт» отстаёт') +
@@ -736,6 +903,7 @@
         var LABELS = {
             pull: ['Съём выполнен', 'atex-dc-btn-ok atex-dc-btn-lg'], pulls: ['Съёмы пачкой', 'atex-dc-btn-lg'],
             die: ['🔪 Смена ножа', ''], cylinder: ['🔩 Смена вала', ''], setup: ['🛠 Наладка', ''],
+            roll: [needsRoll(j) ? '🧻 Выбрать мастер-рулон' : '🧻 Смена мастер-рулона', needsRoll(j) ? 'atex-dc-btn-primary' : ''], idle: ['⏸ Простой', ''],
             setupDone: ['✅ Наладка завершена', 'atex-dc-btn-primary'], scrap: ['Брак', 'atex-dc-btn-bad'],
             checklist: ['Чек-лист ИТС' + (cl.rows.length ? ' (' + cl.rows.filter(function(r) { return r.checked; }).length + '/' + cl.rows.length + ')' : ''), ''],
             call: ['📣 Вызов ИТС', ''], done: ['Готово', 'atex-dc-btn-primary'], refresh: ['Обновить', '']
@@ -746,13 +914,13 @@
         }
         html += '<div class="atex-dc-cols"><div><h2 class="atex-dc-panel-title">События смены</h2>';
         html += s.events.length ? '<table class="atex-dc-table"><thead><tr><th>Время</th><th>Событие</th><th>Подробности</th></tr></thead><tbody>' +
-            s.events.map(function(e) { return '<tr><td>' + esc(fmtTime(e.date, true)) + '</td><td>' + esc(e.type) + '</td><td>' + esc(e.notes) + (e.photo ? ' 📷' : '') + '</td></tr>'; }).join('') + '</tbody></table>'
+            s.events.map(function(e) { return '<tr><td>' + esc(fmtTime(e.date, true)) + '</td><td>' + esc(e.type) + '</td><td>' + esc((isType(e, EVENT.IDLE) && e.duration > 0 ? e.duration + ' мин' + (e.notes ? ' · ' : '') : '') + e.notes) + (e.photo ? ' 📷' : '') + '</td></tr>'; }).join('') + '</tbody></table>'
             : '<div class="atex-dc-empty">Событий нет.</div>';
         html += '</div><div><h2 class="atex-dc-panel-title">Пробег ножа ' + esc(j.dieNo || '') + '</h2>';
         html += mile ? '<table class="atex-dc-table">' +
-            '<tr><td>На начало смены</td><td class="num">' + fmtNum(mile.start) + ' м</td></tr>' +
-            '<tr><td>Прибавили сегодня</td><td class="num">' + fmtNum(mile.today) + ' м</td></tr>' +
-            '<tr><td>Сейчас</td><td class="num"><b>' + fmtNum(mile.meters) + ' м</b></td></tr></table>' +
+            '<tr><td>На начало смены</td><td class="num">' + fmtM(mile.start) + ' м</td></tr>' +
+            '<tr><td>Прибавили сегодня</td><td class="num">' + fmtM(mile.today) + ' м</td></tr>' +
+            '<tr><td>Сейчас</td><td class="num"><b>' + fmtM(mile.meters) + ' м</b></td></tr></table>' +
             (mile.errors.length ? '<div class="atex-dc-message is-warn">' + esc(mile.errors.join('; ')) + '</div>' : '')
             : '<div class="atex-dc-empty">Нож не указан.</div>';
         html += '</div></div>';
@@ -791,13 +959,20 @@
     // okText — текст об успехе; без него текст возвращает сама работа (writePulls).
     AtexDieCutter.prototype.run = function(work, okText) {
         var self = this;
+        var result = { text: '', kind: 'ok' };
         this.busy = true;
+        this.message('Записываю…', '');
+        // Сообщение об успехе — после перечитывания данных: к этому моменту кнопки задания
+        // уже обновлены («Наладка» → «Наладка завершена» без «Обновить», #5339).
         return Promise.resolve().then(work).then(function(text) {
-            self.message(okText != null ? okText : String(text || ''), 'ok');
+            result = { text: okText != null ? okText : String(text || ''), kind: 'ok' };
         }).catch(function(err) {
             console.error('[die-cutter] ❌', err);
-            self.message('Не записано: ' + err.message, 'error');
-        }).then(function() { return self.reload(); }).then(function() { self.busy = false; });
+            result = { text: 'Не записано: ' + err.message, kind: 'error' };
+        }).then(function() { return self.reload(); }).then(function() {
+            self.message(result.text, result.kind);
+            self.busy = false;
+        });
     };
 
     AtexDieCutter.prototype.refByLabel = function(rows, label) {
@@ -808,12 +983,16 @@
     AtexDieCutter.prototype.askPull = function(n) {
         var self = this, j = this.current();
         if (!j) return;
+        // Без мастер-рулона съём молча не открывается: берётся рулон резерва (уже подставлен) или выбор рулона.
+        if (needsRoll(j) && !this.noRollOk[j.id]) { this.askRoll(j, n); return; }
         var pr = jobProgress(j, this.state.runs, this.state.gps);
         var m = metersPerPull(j);
-        var html = '<p>Задание ' + esc(j.order ? 'заказа ' + j.order : j.id) + ': выполнено ' + pr.done + ' из ' + pr.plan + ' съёмов.</p>' +
+        var html = '<p>Задание ' + esc(j.order ? 'заказа ' + j.order : j.id) + ': выполнено ' + pr.done + (pr.plan > 0 ? ' из ' + pr.plan : '') + ' съёмов.</p>' +
             '<label class="atex-dc-label">Съёмов <input class="atex-dc-input" type="number" min="1" max="' + MAX_BATCH + '" data-f="n" value="' + (n || Math.max(1, pr.left)) + '"' + (n ? ' readonly' : '') + '></label>' +
             '<label class="atex-dc-label">Метраж одного съёма, м <input class="atex-dc-input" type="number" min="0" step="0.1" data-f="m" value="' + esc(m || '') + '"></label>' +
-            '<p class="atex-dc-muted">Пробег ножа ' + esc(j.dieNo) + ' вырастет на метраж съёмов; на каждый съём — партия ГП (' + (j.streams || 1) + ' рул.) в упаковку.</p>';
+            '<p class="atex-dc-muted">Пробег ножа ' + esc(j.dieNo) + ' вырастет на метраж съёмов; на каждый съём — партия ГП в упаковку.</p>' +
+            '<p class="atex-dc-muted" data-f="rolls">' + esc(rollsInfo(j, m)) + '</p>' +
+            (needsRoll(j) ? '<p class="atex-dc-muted">Мастер-рулон не выбран: его остаток не спишется.</p>' : '');
         this.modal(html, 'Записать').then(function(yes) {
             if (!yes) return;
             self.writePulls(j, num(self.field('[data-f="n"]')), num(self.field('[data-f="m"]')));
@@ -866,9 +1045,12 @@
                     var r = t.dieJob.reqs, p = {};
                     if (r.pullsFact) p['t' + r.pullsFact] = String(plan.fact);
                     if (plan.status && r.status) p['t' + r.status] = plan.status;
+                    // Рулон взят из резерва — запоминается и в самом задании (#5339).
+                    if (j.rollSource === 'reserve' && j.rollId && r.masterRoll) p['t' + r.masterRoll] = j.rollId;
                     return self.client.post('_m_set/' + encodeURIComponent(j.id) + '?JSON', p);
                 }).then(function() {
-                    return n > 0 ? 'Записано съёмов: ' + n + ' (всего ' + plan.fact + ' из ' + j.pullsPlan + ').' : 'Хвосты дописаны.';
+                    var warn = plan.warnings && plan.warnings.length ? ' Внимание: ' + plan.warnings.join('; ') + '.' : '';
+                    return (n > 0 ? 'Записано съёмов: ' + n + ' (всего ' + plan.fact + (j.pullsPlan > 0 ? ' из ' + j.pullsPlan : '') + ').' : 'Хвосты дописаны.') + warn;
                 });
             });
         }).then(function() {
@@ -878,13 +1060,13 @@
 
     // Событие смены высечки — корневая запись (up=1) со ссылками на задание (j; у событий смены
     // станка его нет) и станок. minutes — только у «Наладка завершена».
-    AtexDieCutter.prototype.writeEvent = function(j, typeLabel, notes, file, minutes) {
+    AtexDieCutter.prototype.writeEvent = function(j, typeLabel, notes, file, minutes, duration) {
         var s = this.state, t = s.tables, self = this;
         var typeId = this.refByLabel(s.eventTypes, typeLabel);
         if (!typeId) return Promise.reject(new Error('в справочнике «Тип события высечки» нет «' + typeLabel + '»'));
         return this.client.serverNow().then(function(now) {
             var p = eventParams(t.dieEvent, { now: now, typeId: typeId, userId: self.userId, notes: notes,
-                jobId: j ? j.id : '', machineId: (j && j.machineId) || self.machineId, minutes: minutes });
+                jobId: j ? j.id : '', machineId: (j && j.machineId) || self.machineId, minutes: minutes, duration: duration });
             return self.client.create(t.dieEvent.id, 1, p);
         }).then(function(id) {
             if (!file || !t.dieEvent.reqs.photo) return id;
@@ -918,6 +1100,75 @@
                 var minutes = setupMinutes(st.since, now);
                 return self.writeEvent(j, EVENT.SETUP_DONE, minutes + ' мин', null, minutes).then(function() { return 'Наладка завершена: ' + minutes + ' мин.'; });
             });
+        });
+    };
+
+    // Выбор мастер-рулона (#5339): «Смена мастер-рулона» или обязательный шаг перед съёмом без рулона.
+    // Выбранный рулон пишется в задание («Мастер-рулон»), в резерв рулона («Задание высечки») и в
+    // событие «Смена мастер-рулона». Оператора не блокируют: «продолжить без рулона» — явный выбор.
+    // afterPull — число съёмов окна, которое открыть после выбора (null — просто смена рулона).
+    AtexDieCutter.prototype.askRoll = function(j, afterPull) {
+        var self = this, s = this.state;
+        if (!j) return;
+        var forced = needsRoll(j);
+        var die = s.dies.filter(function(d) { return d.id === j.dieId; })[0];
+        var list = rollCandidates(j, s.rolls || [], die);
+        if (!forced && !list.length) { this.message('Смена мастер-рулона: подходящих свободных рулонов нет.', 'warn'); return; }
+        var info = function(r) {
+            return r.no + ' · ' + r.format + ' мм · остаток ' + fmtM(r.rest) + ' м' + (r.reserveTaskId === j.id ? ' · резерв задания' : '');
+        };
+        var html = '<h3>' + (forced ? 'Выберите мастер-рулон' : 'Смена мастер-рулона') + '</h3>' +
+            '<p>Сейчас: <b>' + esc(forced ? 'не выбран' : j.roll) + '</b></p>';
+        if (list.length) {
+            html += '<label class="atex-dc-label">Мастер-рулон <select class="atex-dc-input" data-f="to">' +
+                list.map(function(r) { return '<option value="' + esc(r.id) + '">' + esc(info(r)) + '</option>'; }).join('') + '</select></label>' +
+                '<label class="atex-dc-label">Примечание <input class="atex-dc-input" type="text" data-f="note"></label>';
+        } else {
+            html += '<p class="atex-dc-muted">Подходящих свободных рулонов (сырьё «' + esc(j.material || '—') + '», формат ножа) на складе нет.</p>';
+        }
+        if (forced && list.length) html += '<label class="atex-dc-check"><input type="checkbox" data-f="norole"> Продолжить без мастер-рулона (остаток не спишется)</label>';
+        this.modal(html, list.length ? 'Записать' : 'Продолжить без рулона').then(function(yes) {
+            if (!yes) return;
+            var withoutRoll = !list.length || (forced && self.root.querySelector('[data-f="norole"]:checked'));
+            if (withoutRoll) {
+                self.noRollOk[j.id] = true;
+                self.message('Мастер-рулон не выбран: остаток рулона не спишется.', 'warn');
+                if (afterPull != null) self.askPull(afterPull);
+                return;
+            }
+            var toId = self.field('[data-f="to"]');
+            var to = list.filter(function(x) { return x.id === toId; })[0];
+            if (!to) return;
+            var note = changeNote(forced ? '' : j.roll, to.no) + (self.field('[data-f="note"]') ? ' · ' + self.field('[data-f="note"]') : '');
+            var f = rollAssignFields(s.tables, j, to);
+            self.run(function() {
+                var chain = Promise.resolve();
+                if (Object.keys(f.job).length) chain = chain.then(function() { return self.client.post('_m_set/' + encodeURIComponent(j.id) + '?JSON', f.job); });
+                if (Object.keys(f.roll).length) chain = chain.then(function() { return self.client.post('_m_set/' + encodeURIComponent(to.id) + '?JSON', f.roll); });
+                return chain.then(function() { return self.writeEvent(j, EVENT.ROLL, note); });
+            }, 'Мастер-рулон: ' + note + '.').then(function() {
+                if (afterPull != null && !self.busy) self.askPull(afterPull);
+            });
+        });
+    };
+
+    // «Простой» (#5339): минуты — в числовое поле события «Длительность, мин».
+    AtexDieCutter.prototype.askIdle = function() {
+        var self = this, j = this.current();
+        if (!j) return;
+        var html = '<h3>Простой</h3>' +
+            '<label class="atex-dc-label">Длительность, мин <input class="atex-dc-input" type="number" min="1" step="1" data-f="minutes"></label>' +
+            '<label class="atex-dc-label">Причина <input class="atex-dc-input" type="text" data-f="note" placeholder="например: ждём рулон"></label>';
+        this.modal(html, 'Записать').then(function(yes) {
+            if (!yes) return;
+            var minutes = idleMinutes(self.field('[data-f="minutes"]'));
+            if (!(minutes > 0)) { self.message('Простой: укажите длительность в минутах.', 'warn'); return; }
+            var reason = self.field('[data-f="note"]').trim();
+            var hasField = !!(self.state.tables.dieEvent.reqs.duration);
+            // Поля «Длительность, мин» в базе нет — минуты остаются хотя бы в примечании.
+            var note = hasField ? reason : (minutes + ' мин' + (reason ? ' · ' + reason : ''));
+            self.run(function() { return self.writeEvent(j, EVENT.IDLE, note, null, null, minutes); },
+                'Простой записан: ' + minutes + ' мин.' + (hasField ? '' : ' В базе нет поля «Длительность, мин» — минуты только в примечании.'));
         });
     };
 
@@ -1061,6 +1312,7 @@
         return chain.then(function() {
             var p = {};
             p['t' + t.dieJob.reqs.pullsFact] = String(plan.fact);
+            if (j.rollSource === 'reserve' && j.rollId && t.dieJob.reqs.masterRoll) p['t' + t.dieJob.reqs.masterRoll] = j.rollId;
             return self.client.post('_m_set/' + encodeURIComponent(j.id) + '?JSON', p);
         });
     };
@@ -1089,6 +1341,18 @@
             eventParams: eventParams,
             WRITE_ACTIONS: WRITE_ACTIONS,
             metersPerPull: metersPerPull,
+            fmtM: fmtM,
+            pullsCaption: pullsCaption,
+            pullsCount: pullsCount,
+            rollLengthM: rollLengthM,
+            jobRollLength: jobRollLength,
+            rollsPerPull: rollsPerPull,
+            applyReservedRolls: applyReservedRolls,
+            needsRoll: needsRoll,
+            rollCandidates: rollCandidates,
+            rollAssignFields: rollAssignFields,
+            idleMinutes: idleMinutes,
+            idleState: idleState,
             gpName: gpName,
             rollRest: rollRest,
             jobProgress: jobProgress,
