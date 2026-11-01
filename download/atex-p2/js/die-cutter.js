@@ -529,6 +529,12 @@
         return 'съёмов ' + pr.done + (pr.plan > 0 ? ' из ' + pr.plan : '');
     }
 
+    // Окно «Закрыть задание?»: «Съёмов 2 из 5. План не выполнен.»; без плана — «Съёмов 3.» (#5355).
+    function finishSummary(pr) {
+        if (!(pr.plan > 0)) return 'Съёмов ' + pr.done + '.';
+        return 'Съёмов ' + pr.done + ' из ' + pr.plan + '.' + (pr.done < pr.plan ? ' <b>План не выполнен.</b>' : '');
+    }
+
     // ── Клиент Integram (браузер) ───────────────────────────────────────────
 
     function Client(db, xsrf) { this.db = db; this.xsrf = xsrf || ''; }
@@ -1279,7 +1285,7 @@
         var self = this, s = this.state, j = this.current();
         if (!j) return;
         var pr = jobProgress(j, s.runs, s.gps);
-        var html = '<h3>Закрыть задание?</h3><p>Съёмов ' + pr.done + ' из ' + pr.plan + '.' + (pr.done < pr.plan ? ' <b>План не выполнен.</b>' : '') + '</p>';
+        var html = '<h3>Закрыть задание?</h3><p>' + finishSummary(pr) + '</p>';
         this.modal(html, 'Готово').then(function(yes) {
             if (!yes) return;
             self.run(function() {
@@ -1343,6 +1349,7 @@
             metersPerPull: metersPerPull,
             fmtM: fmtM,
             pullsCaption: pullsCaption,
+            finishSummary: finishSummary,
             pullsCount: pullsCount,
             rollLengthM: rollLengthM,
             jobRollLength: jobRollLength,
