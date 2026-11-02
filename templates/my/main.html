@@ -265,7 +265,7 @@
 
                         try {
                             var apiConfig = window._cabinetController && window._cabinetController.apiConfig;
-                            var host = apiConfig ? apiConfig.host : location.hostname;
+                            var host = apiConfig ? apiConfig.host : location.host;
                             var url = 'https://' + host + '/my/report/236592?JSON_KV';
 
                             var fd = new FormData();
