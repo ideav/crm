@@ -12280,7 +12280,7 @@ class IntegramTable{
                 // Fallback: construct API base from current page URL using the database path segment
                 const pathParts = window.location.pathname.split('/');
                 if (pathParts.length >= 2 && pathParts[1]) {
-                    return 'https://' + window.location.hostname + '/' + pathParts[1];
+                    return window.location.origin + '/' + pathParts[1];
                 }
                 return '';
             }
@@ -12467,7 +12467,7 @@ class IntegramTable{
                         case '[USER_ID]':  return (typeof uid !== 'undefined' ? String(uid) : '');
                         case '[ROLE]':     return (typeof role !== 'undefined' ? role : '');
                         case '[ROLE_ID]':  return (typeof roleId !== 'undefined' ? String(roleId) : '');
-                        case '[HTTP_HOST]':    return window.location.hostname || '';
+                        case '[HTTP_HOST]':    return window.location.host || '';
                         case '[REQUEST_URI]':  return window.location.pathname + window.location.search || '';
                         default:
                             // Unknown token or literal value — return as-is

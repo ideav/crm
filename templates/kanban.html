@@ -794,7 +794,7 @@
     };
 
     KanbanBoard.prototype._getApiUrl = function(endpoint) {
-        return 'https://' + window.location.hostname + '/' + window.db + '/' + endpoint;
+        return window.location.origin + '/' + window.db + '/' + endpoint;
     };
 
     KanbanBoard.prototype._loadData = function() {
@@ -1792,7 +1792,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     var urlSearch = window.location.search;
     var urlParams = urlSearch ? urlSearch.slice(1) : '';
-    var apiBase = 'https://' + window.location.hostname + '/' + window.db;
+    var apiBase = window.location.origin + '/' + window.db;
 
     function buildEndpoint(base, params) {
         if (!params) return base;

@@ -1083,7 +1083,7 @@ function performQuickSearch() {
 // Load products list
 function loadProductsList() {
     var xhr = new XMLHttpRequest();
-    xhr.open('GET', 'https://' + window.location.hostname + '/' + db + '/report/5172?JSON_KV', true);
+    xhr.open('GET', window.location.origin + '/' + db + '/report/5172?JSON_KV', true);
     xhr.onload = function() {
         if (xhr.status === 200) {
             try {
@@ -1212,7 +1212,7 @@ console.log('loadKanbanData');
 
     // Load tasks
     var xhr1 = new XMLHttpRequest();
-    xhr1.open('GET', 'https://' + window.location.hostname + '/' + db + '/report/' + tasksReportId + '?JSON_KV' + productParam + managerParam, true);
+    xhr1.open('GET', window.location.origin + '/' + db + '/report/' + tasksReportId + '?JSON_KV' + productParam + managerParam, true);
     xhr1.onload = function(){
         if(xhr1.status === 200){
             try{
@@ -1233,7 +1233,7 @@ console.log('loadKanbanData');
 
     // Load statuses
     var xhr2 = new XMLHttpRequest();
-    xhr2.open('GET', 'https://' + window.location.hostname + '/' + db + '/report/' + statusesReportId + '?JSON_KV' + productParam + managerParam, true);
+    xhr2.open('GET', window.location.origin + '/' + db + '/report/' + statusesReportId + '?JSON_KV' + productParam + managerParam, true);
     xhr2.onload = function(){
         if(xhr2.status === 200){
             try{
@@ -1616,7 +1616,7 @@ function updateColumnCounts(){
 function updateTaskStatus(leadId, newStatusId){
     var timestamp = Math.floor(Date.now() / 1000);
     var xhr = new XMLHttpRequest();
-    xhr.open('POST', 'https://' + window.location.hostname + '/' + db + '/_m_set/' + leadId + '?JSON', true);
+    xhr.open('POST', window.location.origin + '/' + db + '/_m_set/' + leadId + '?JSON', true);
     xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
     xhr.onload = function(){
         if(xhr.status === 200){
@@ -1677,7 +1677,7 @@ function copyContact(value, type, event){
 function loadSourcesAndDistributors(){
     // Load sources
     var xhr1 = new XMLHttpRequest();
-    xhr1.open('GET', 'https://' + window.location.hostname + '/' + db + '/report/4500?JSON_KV', true);
+    xhr1.open('GET', window.location.origin + '/' + db + '/report/4500?JSON_KV', true);
     xhr1.onload = function(){
         if(xhr1.status === 200){
             try{
@@ -1697,7 +1697,7 @@ function loadSourcesAndDistributors(){
 
     // Load distributors
     var xhr2 = new XMLHttpRequest();
-    xhr2.open('GET', 'https://' + window.location.hostname + '/' + db + '/report/4506?JSON_KV', true);
+    xhr2.open('GET', window.location.origin + '/' + db + '/report/4506?JSON_KV', true);
     xhr2.onload = function(){
         if(xhr2.status === 200){
             try{
@@ -1742,7 +1742,7 @@ function populateDistributorsDropdown(){
 // Load managers list for task executor dropdown
 function loadManagersList(){
     var xhr = new XMLHttpRequest();
-    xhr.open('GET', 'https://' + window.location.hostname + '/' + db + '/report/5230?JSON_KV', true);
+    xhr.open('GET', window.location.origin + '/' + db + '/report/5230?JSON_KV', true);
     xhr.onload = function(){
         if(xhr.status === 200){
             try{
@@ -1800,7 +1800,7 @@ function populateManagerSelect() {
 // Load task types list for task type dropdown
 function loadTaskTypesList(){
     var xhr = new XMLHttpRequest();
-    xhr.open('GET', 'https://' + window.location.hostname + '/' + db + '/report/5241?JSON_KV', true);
+    xhr.open('GET', window.location.origin + '/' + db + '/report/5241?JSON_KV', true);
     xhr.onload = function(){
         if(xhr.status === 200){
             try{
@@ -1968,7 +1968,7 @@ function submitAddRecord(){
 
     // Submit via POST
     var xhr = new XMLHttpRequest();
-    xhr.open('POST', 'https://' + window.location.hostname + '/' + db + '/_m_new/' + entityId + '?JSON&up=1', true);
+    xhr.open('POST', window.location.origin + '/' + db + '/_m_new/' + entityId + '?JSON&up=1', true);
     xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
     xhr.onload = function(){
         $('#submitButton').prop('disabled', false).text('Сохранить');
@@ -2084,7 +2084,7 @@ $(document).ready(function(){
 // Load all statuses for edit form (unfiltered)
 function loadEditFormStatuses(){
     var xhr = new XMLHttpRequest();
-    xhr.open('GET', 'https://' + window.location.hostname + '/' + db + '/report/3796?JSON_KV', true);
+    xhr.open('GET', window.location.origin + '/' + db + '/report/3796?JSON_KV', true);
     xhr.onload = function(){
         if(xhr.status === 200){
             try{
@@ -2267,7 +2267,7 @@ function submitCreateTask(){
     postData += '&_xsrf=' + xsrf;
 
     var xhr = new XMLHttpRequest();
-    xhr.open('POST', 'https://' + window.location.hostname + '/' + db + '/_m_new/' + taskTypeId + '?JSON&up=1', true);
+    xhr.open('POST', window.location.origin + '/' + db + '/_m_new/' + taskTypeId + '?JSON&up=1', true);
     xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
     xhr.onload = function(){
         $('#createTaskSubmitButton').prop('disabled', false).text('Создать');
@@ -2423,7 +2423,7 @@ function submitCreateDeal(){
     postData += '&_xsrf=' + xsrf;
 
     var xhr = new XMLHttpRequest();
-    xhr.open('POST', 'https://' + window.location.hostname + '/' + db + '/_m_new/' + dealTypeId + '?JSON&up=' + currentDealLeadId, true);
+    xhr.open('POST', window.location.origin + '/' + db + '/_m_new/' + dealTypeId + '?JSON&up=' + currentDealLeadId, true);
     xhr.setRequestHeader('Content-Type', 'application/x-www-form-urlencoded');
     xhr.onload = function(){
         $('#createDealSubmitButton').prop('disabled', false).text('Создать');

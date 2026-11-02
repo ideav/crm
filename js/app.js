@@ -94,7 +94,7 @@ function apiScheme() {
 
 class ApiConfig {
     constructor() {
-        this.host = localStorage.getItem('apiHost') || window.location.hostname;
+        this.host = localStorage.getItem('apiHost') || window.location.host;
         this.yandexClientId = '959da92b09364e42bf4c7704db0b992f';
     }
 

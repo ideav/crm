@@ -915,7 +915,7 @@
     CardsView.prototype._getApiBase = function() {
         var parts = window.location.pathname.split('/');
         if (parts.length >= 2 && parts[1]) {
-            return 'https://' + window.location.hostname + '/' + parts[1];
+            return window.location.origin + '/' + parts[1];
         }
         return '';
     };
