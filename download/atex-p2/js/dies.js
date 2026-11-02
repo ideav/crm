@@ -9,8 +9,8 @@
 //   - показатели: ножей всего / рабочих / у ресурса / резерв, экспертиза / списано;
 //   - карточка ножа: марка, пробег и % ресурса, история движений с «Накоплено», кнопки смены
 //     состояния (`dieStateActions`). Ножи не затачиваются: выработавший ресурс нож списывается;
-//   - валы: раппорт, станки, на которые вал встаёт («Допустимые валы» станка; пусто — любой
-//     вал), число ножей на валу.
+//   - валы: раппорт, станки, на которые вал встаёт (вал не больше «Макс. вала» станка; пусто —
+//     любой вал), число ножей на валу.
 //
 // Таблицы и реквизиты резолвятся по именам из /metadata (resolveProductionTables), id в коде нет.
 
@@ -151,17 +151,15 @@
     }
 
     // Валы: раппорт, станки, на которые вал встаёт, ножей на валу (всего / рабочих).
-    // Станок с пустыми «Допустимыми валами» принимает любой вал; вал больше «Макс. вала» станка
-    // (maxReq — id реквизита, если он есть в базе) на станок не встаёт.
+    // Вал больше «Макс. вала» станка (maxReq — id реквизита, если он есть в базе) на станок не встаёт;
+    // «Макс. вал» пуст или 0 — станок принимает любой вал (#5366).
     function cylinderRows(cylRecs, machineRecs, dieRows, t, maxReq) {
         var cr = (t.cylinder && t.cylinder.reqs) || {};
-        var mr = (t.machine && t.machine.reqs) || {};
         var S = lp.DIE_STATE;
         return (cylRecs || []).map(function(c) {
             var machines = (machineRecs || []).filter(function(m) {
-                var allowed = refIds(m, mr.cylinders), max = maxReq ? num(reqVal(m, maxReq)) : 0;
-                if (max > 0 && num(c.val) > max) return false;
-                return allowed.length === 0 || allowed.indexOf(c.id) !== -1;
+                var max = maxReq ? num(reqVal(m, maxReq)) : 0;
+                return !(max > 0 && num(c.val) > max);
             }).map(function(m) { return m.val; });
             var dies = (dieRows || []).filter(function(d) { return d.cylinderId === c.id; });
             return {

@@ -182,7 +182,7 @@
         this.state = {
             tables: t, settings: settings, rows: rows, jobs: jobs, machines: machines, dies: dies, dieInfo: diInfo, mr: mr, rolls: rolls, queue: queue,
             cover: cover, groups: groups, positions: positions, cutters: cutters, sleeveTasks: sleeveTasks, sleeveTable: st,
-            sleeveReport: Array.isArray(r[11]), now: r[14], jobById: {}, cylinderNames: (r[3] || []).reduce(function(a, c) { a[c.id] = c.val; return a; }, {})
+            sleeveReport: Array.isArray(r[11]), now: r[14], jobById: {}
         };
         var s = this.state;
         jobs.forEach(function(j) { s.jobById[j.id] = j; });
@@ -392,13 +392,11 @@
             '<p class="atex-dp-muted">Пробег пишет только пульт высечки движениями; здесь — прогноз.</p>';
     };
 
-    // Подсказка к станку: допустимые валы, «Макс. вал» и стоп-лист.
+    // Подсказка к станку: «Макс. вал», стоп-лист, туррель.
     AtexDiePlanningApp.prototype.machineHint = function(id) {
         var m = this.state.machines.filter(function(x) { return x.id === id; })[0];
         if (!m) return '';
-        var names = this.state.cylinderNames || {};
-        var cyl = m.cylinders.length ? ' · валы ' + m.cylinders.map(function(c) { return names[c] || c; }).join(', ') : ' · любой вал';
-        return esc(cyl + (m.maxCylinder > 0 ? ' · вал ≤ ' + m.maxCylinder : '')) + (m.stopMaterials.length ? ' · стоп-лист: ' + m.stopMaterials.length : '') + (m.turret ? ' · туррель: втулка ≥ 2× диаметра' : '');
+        return esc(m.maxCylinder > 0 ? ' · вал ≤ ' + m.maxCylinder : ' · любой вал') + (m.stopMaterials.length ? ' · стоп-лист: ' + m.stopMaterials.length : '') + (m.turret ? ' · туррель: втулка ≥ 2× диаметра' + (this.state.settings && this.state.settings.turretLongM > 0 ? ', метраж ≥ ' + this.state.settings.turretLongM + ' м' : '') : '');
     };
 
     AtexDiePlanningApp.prototype.planMachineOf = function(jobId) {

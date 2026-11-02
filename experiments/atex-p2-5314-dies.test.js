@@ -217,12 +217,12 @@ var A = LP.DIE_ACTION || {};
         D.kvRecords({ object: [{ id: '98', val: '98' }, { id: '96', val: '96' }, { id: '104', val: '104' }],
             reqs: { '96': { '65': '304.80' }, '98': { '65': '311.15' }, '104': { '65': '331.00' } } }),
         D.kvRecords({ object: [{ id: 'm1', val: '1 высечка' }, { id: 'm2', val: '2 высечка' }, { id: 'm3', val: '3 высечка' }],
-            reqs: { m1: { 'ref_69': '12:96,104' }, m2: { 'ref_69': '12:104' }, m3: {} } }),
-        rows, t);
+            reqs: { m1: { '77': '98' }, m2: { '77': '96' }, m3: {} } }),
+        rows, t, '77');
     var c96 = cyl[0], c98 = cyl[1], c104 = cyl[2];
     assert(cyl.map(function(c) { return c.teeth; }).join(',') === '96,98,104', 'валы по числу зубьев');
-    assert(c96.machines.join('|') === '1 высечка|3 высечка' && c98.machines.join('|') === '3 высечка',
-        'станки вала: из «Допустимых валов»; станок с пустым списком принимает любой вал', JSON.stringify(cyl.map(function(c) { return c.machines; })));
+    assert(c96.machines.join('|') === '1 высечка|2 высечка|3 высечка' && c98.machines.join('|') === '1 высечка|3 высечка' && c104.machines.join('|') === '3 высечка',
+        'станки вала: вал не больше «Макс. вала» станка; станок без «Макс. вала» принимает любой вал (#5366)', JSON.stringify(cyl.map(function(c) { return c.machines; })));
     assert(c96.dies === 2 && c96.working === 2 && c98.dies === 1 && c98.working === 0, 'ножей на валу (рабочих)');
     assert(c96.repeatCheck.ok && !c104.repeatCheck.ok, 'раппорт вала сверяется с зубьями × 3.175 (104 → 330.2, а не 331)');
 

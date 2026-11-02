@@ -45,7 +45,9 @@
         horizonDays: ['DIE_HORIZON_DAYS', 14, false],
         mrLength: ['LABEL_MASTER_ROLL_M', 2000, false],
         tolerance: ['JUMBO_FORMAT_TOLERANCE_MM', 15, true],
-        dieResource: ['DIE_RESOURCE_DEFAULT_M', 300000, false]
+        dieResource: ['DIE_RESOURCE_DEFAULT_M', 300000, false],
+        // Туррель — для длинных заданий: метраж от порога (по плану заказчика — от 12,6 км; 0 — без порога).
+        turretLongM: ['DIE_TURRET_LONG_M', 12600, true]
     };
     var DEFAULTS = { tzOffsetMin: 180 };
     Object.keys(SETTING_KEYS).forEach(function(k) { DEFAULTS[k] = SETTING_KEYS[k][1]; });
@@ -175,12 +177,11 @@
     }
     function jobRunMinutes(job, s) { return runMinutes(job.footage, s, rollLengthM(job)); }
 
-    // machine — { id, name, cylinders: [id вала], stopMaterials: [id сырья], active, turret, maxCylinder }.
-    function machineAllows(machine, job) {
+    // machine — { id, name, stopMaterials: [id сырья], active, turret, maxCylinder }.
+    // Валы станка задаёт одно число — «Макс. вал» (зубьев); списка допустимых валов нет (#5366).
+    // settings — для порога туррели (DIE_TURRET_LONG_M); без них — умолчания.
+    function machineAllows(machine, job, settings) {
         if (machine.active === false) return { ok: false, reason: 'станок не работает' };
-        var cyl = machine.cylinders || [];
-        if (cyl.length && job.cylinderId && cyl.indexOf(String(job.cylinderId)) < 0)
-            return { ok: false, reason: 'вал ' + (job.cylinder || job.cylinderId) + ' не в «Допустимых валах» станка' };
         // «Макс. вал» станка (зубьев): вал больше на станок не встаёт; 0/пусто — не ограничен, вал без числа — не режется.
         var maxCyl = num(machine.maxCylinder), teeth = num(job.cylinder);
         if (maxCyl > 0 && teeth > maxCyl)
@@ -189,14 +190,22 @@
             return { ok: false, reason: 'сырьё «' + (job.material || job.materialId) + '» в стоп-листе станка' };
         // Туррель: центрифуга роняет втулку на бок и выравнивает для подачи в жёлоб — нужна ширина ≥ 2× диаметра.
         // Задание, записанное на станок диспетчером, остаётся допустимым (ручное решение).
-        if (machine.turret && !turretFits(job) && String(job.machineId || '') !== String(machine.id)) {
-            var d = sleeveDiameterMm(job.sleeve);
-            return { ok: false, reason: 'туррель: ширина втулки ' + (num(job.sleeveWidth) || '—') + ' мм меньше 2× диаметра' + (d ? ' (' + 2 * d + ' мм)' : ' (диаметр втулки не указан)') };
+        if (machine.turret && !turretFits(job, settings) && String(job.machineId || '') !== String(machine.id)) {
+            if (!turretSleeveFits(job)) {
+                var d = sleeveDiameterMm(job.sleeve);
+                return { ok: false, reason: 'туррель: ширина втулки ' + (num(job.sleeveWidth) || '—') + ' мм меньше 2× диаметра' + (d ? ' (' + 2 * d + ' мм)' : ' (диаметр втулки не указан)') };
+            }
+            return { ok: false, reason: 'туррель: задание короче ' + withDefaults(settings).turretLongM + ' м (метраж ' + (num(job.footage) || 0) + ' м)' };
         }
         return { ok: true };
     }
-    // Задание подходит туррели: ширина втулки ≥ 2× её диаметра (диаметр — из названия втулки).
-    function turretFits(job) {
+    // Задание подходит туррели: длинное (метраж ≥ DIE_TURRET_LONG_M, #5366) и на широкой втулке.
+    function turretFits(job, settings) {
+        var long = withDefaults(settings).turretLongM;
+        return turretSleeveFits(job) && !(long > 0 && num(job && job.footage) < long);
+    }
+    // Широкая втулка: ширина ≥ 2× её диаметра (диаметр — из названия втулки).
+    function turretSleeveFits(job) {
         var d = sleeveDiameterMm(job && job.sleeve), w = num(job && job.sleeveWidth);
         return d > 0 && w >= 2 * d;
     }
@@ -329,10 +338,10 @@
         cands.forEach(function(j) {
             var best = null, turret = null, reasons = [];
             // записанное диспетчером на туррель задание, которое ей не подходит, со станка не снимается
-            var pinned = order.filter(function(id) { return st[id].machine.turret && String(j.machineId || '') === String(id) && !turretFits(j); })[0];
+            var pinned = order.filter(function(id) { return st[id].machine.turret && String(j.machineId || '') === String(id) && !turretFits(j, s); })[0];
             order.forEach(function(id, idx) {
                 if (pinned && id !== pinned) return;
-                var x = st[id], chk = machineAllows(x.machine, j);
+                var x = st[id], chk = machineAllows(x.machine, j, s);
                 if (!chk.ok) { reasons.push((x.machine.name || id) + ': ' + chk.reason); return; }
                 var t = place(x.cursor, x.prev, j);
                 var better = !best || t.item.end < best.t.item.end || (t.item.end === best.t.item.end && t.item.setup < best.t.item.setup);
@@ -340,7 +349,7 @@
                 if (x.machine.turret && (!turret || t.item.end < turret.t.item.end)) turret = { id: id, t: t };
             });
             // подходящее туррели — на туррель, если там оно не уходит в просрочку (или и так опаздывает везде)
-            if (turret && best && turret.id !== best.id && turretFits(j)) {
+            if (turret && best && turret.id !== best.id && turretFits(j, s)) {
                 var due = num(j.due);
                 if (!(due > 0) || turret.t.item.end <= due || best.t.item.end > due) best = turret;
             }
@@ -839,7 +848,7 @@
         return (recs || []).map(function(m) {
             var status = String((m.reqs || {})[r.status] || '');
             var tv = tr ? String((m.reqs || {})[tr] == null ? '' : (m.reqs || {})[tr]).trim().toLowerCase() : '';
-            return { id: m.id, name: m.val, cylinders: refIds(m, r.cylinders), stopMaterials: refIds(m, r.stopMaterials), status: status, active: !INACTIVE_RE.test(status),
+            return { id: m.id, name: m.val, stopMaterials: refIds(m, r.stopMaterials), status: status, active: !INACTIVE_RE.test(status),
                 turret: tv !== '' && tv !== '0' && tv !== 'нет' && tv !== 'false',
                 maxCylinder: mx ? num((m.reqs || {})[mx]) : 0 };
         }).sort(function(a, b) { return (num(a.id) - num(b.id)); });
