@@ -203,6 +203,7 @@ docker compose --env-file .env.local exec -T db \
 | Контейнер `db` перезапускается | Мало памяти/места на диске; смотрите `docker compose --env-file .env.local logs db`. |
 | Страница не открывается снаружи | Порт закрыт в файрволе (п. 6) или заняты 8080/8443 — поменяйте порты. |
 | «Couldn't connect» в логах app | БД ещё поднимается — подождите; если не проходит, смотрите логи `db`. |
+| `app` в `Restarting`, в логах `ERROR 1045 Access denied for user 'ideav'` | Том `integram-local_integram-db` создан прежней установкой с другими паролями: MariaDB берёт пароль из `.env.local` только при создании пустого тома. Верните прежний `.env.local` либо удалите старую базу вместе со всеми данными: `docker compose --env-file .env.local down -v`. Установщик при найденном томе останавливается; `INTEGRAM_RESET_DB=1 bash scripts/install-local-docker.sh` удаляет том и ставит заново. |
 | Порт занят (`address already in use`) | Измените `INTEGRAM_HTTP_PORT`/`INTEGRAM_HTTPS_PORT` в `.env.local`, перезапустите. |
 
 При обращении к нам пришлите вывод `docker compose --env-file .env.local ps` и

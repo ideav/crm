@@ -22,6 +22,40 @@ if [[ -f "$env_file" ]]; then
     fi
 fi
 
+# A new .env.local gets new DB passwords, but MariaDB applies MARIADB_PASSWORD
+# only when it initialises an empty volume. An old integram-db volume would keep
+# the previous password and the app would restart forever with ERROR 1045.
+project="${COMPOSE_PROJECT_NAME:-integram-local}"
+db_volume="$(docker volume ls -q \
+    --filter "label=com.docker.compose.project=$project" \
+    --filter "label=com.docker.compose.volume=integram-db")"
+if [[ -n "$db_volume" ]]; then
+    if [[ "${INTEGRAM_RESET_DB:-}" == "1" ]]; then
+        echo "INTEGRAM_RESET_DB=1: removing containers of $project and volume $db_volume…"
+        containers="$(docker ps -aq --filter "label=com.docker.compose.project=$project")"
+        if [[ -n "$containers" ]]; then
+            # shellcheck disable=SC2086
+            docker rm -f $containers >/dev/null
+        fi
+        docker volume rm "$db_volume" >/dev/null
+    else
+        cat >&2 <<MSG
+STOP: Docker volume $db_volume already exists.
+
+It holds a database created with the passwords of a previous installation.
+A new $env_file would get new passwords, the database would reject them
+and the app container would restart forever (ERROR 1045 Access denied).
+
+Choose one:
+  - keep the data: put the previous $env_file back and run this script again,
+    answering N to "Recreate it?";
+  - drop the old database (ALL its data is lost):
+      INTEGRAM_RESET_DB=1 $0
+MSG
+        exit 1
+    fi
+fi
+
 read -rs -p "Enter Integram master password: " master_password
 echo
 read -rs -p "Repeat Integram master password: " master_password_repeat
