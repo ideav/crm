@@ -850,20 +850,29 @@ function newDb($db, $template, $name, $email, $pwd){
     global $z, $locale;
     $oldz = $z;
     $z = $db;
-	if(strpos(TEMPLATES, ":".strtolower($template).":") !== false) # List of available templates
-		$template = strtolower($template);
-	else
+	$template = strtolower((string)$template);
+	# Одобренная версия шаблона из реестра (#5364) — база из её снимка; иначе системный шаблон-таблица
+	$tpl_ver = Tpl_id_ok($template) ? Tpl_current($template) : 0;
+	if(!$tpl_ver && (strpos(TEMPLATES, ":$template:") === false)) # List of available templates
 		$template = "ru";
+	if($tpl_ver){
+		if(($err = Tpl_deploy($template, $tpl_ver)) !== ""){
+			$z = $oldz;
+			my_die($err);
+		}
+	}
 	# Шаблон — это таблица MySQL, её заводят на сервере отдельно (docs/xcom-matching/template-db.md).
 	# Без проверки отсутствующая таблица даёт на CREATE ... LIKE ошибку 1146, а Exec_sql толкует её
 	# как «База $z не существует» и уводит на страницу входа: сообщение про НОВУЮ базу вместо шаблона.
-	if(!mysqli_fetch_array(Exec_sql("SHOW TABLES LIKE '$template'", "Check the template table exists"))){
+	elseif(!mysqli_fetch_array(Exec_sql("SHOW TABLES LIKE '$template'", "Check the template table exists"))){
 		$z = $oldz;
 		my_die(t9n("[RU]Шаблон «$template» не установлен на этом сервере"
 		        ."[EN]Template '$template' is not installed on this server"));
 	}
-	Exec_sql("CREATE TABLE $z LIKE $template", "Create the initial table");
-	Exec_sql("INSERT INTO $z SELECT * FROM $template", "Fill in the table by template");
+	else{
+		Exec_sql("CREATE TABLE $z LIKE $template", "Create the initial table");
+		Exec_sql("INSERT INTO $z SELECT * FROM $template", "Fill in the table by template");
+	}
 
 	# Insert new user and its data into his DB
 	$id = Insert(1, 0, USER, $z, "Insert new DB user");
@@ -872,8 +881,9 @@ function newDb($db, $template, $name, $email, $pwd){
 		Insert($id, 1, EMAIL, $email, "Insert DB email");
 	if(strlen($name))
 		Insert($id, 1, 33, $name, "Insert user name");
-	Insert($id, 1, ADMINROLE, "115", "Insert Admin role link");
-	
+	# Снимок шаблона мог прийти без роли admin или с другим её id — тогда она находится или создаётся
+	Insert($id, 1, $tpl_ver ? Restore_admin_role() : ADMINROLE, "115", "Insert Admin role link");
+
     # Ключ API владельца новой базы — свой; вход в неё — сессией этого браузера (#1043)
     $key = secureToken();
 	Insert($id, 1, TOKEN, $key, "Save token DB");
@@ -883,9 +893,11 @@ function newDb($db, $template, $name, $email, $pwd){
         Insert($id, 1, PASSWORD, Pwd_hash($pwd), "Insert user password");
 	Auth_cookie($z, Session_new($id), NULL);
 	
-	# Create folders for files and templates
-	exec("cp -r templates/custom/$template templates/custom/$z");
-	exec("cp -r download/$template download/$z");
+	# Create folders for files and templates (файлы шаблона из реестра уже разложил Tpl_deploy)
+	if(!$tpl_ver){
+		exec("cp -r templates/custom/$template templates/custom/$z");
+		exec("cp -r download/$template download/$z");
+	}
 	
     mysendmail(ADMINEMAIL, "New DB from ".$_SERVER["SERVER_NAME"].": $z"
             , "Email: ".$email."\nhttps://".$_SERVER["SERVER_NAME"]."/$z/object/".USER);
@@ -6954,6 +6966,28 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                     header("Location: /$z/dir_admin/?templates=1&add_path=/backups&gf=$name");
 					die();
 					break;
+				# #5168: архив файлов базы и восстановление из него (ссылки в dir_admin, js/code-restore.js)
+				case "code_backup":
+				    Limit_time(300);
+					if(!Restore_allowed())
+						die(t9n("[RU]Архивировать файлы может только владелец базы ($z)[EN]Only the DB owner ($z) can archive the files"));
+            		if(!($name = Code_backup()))
+            		    die(t9n("[RU]Не удалось записать архив в templates/custom/$z/backups[EN]Could not write the archive to templates/custom/$z/backups"));
+                    header("Location: /$z/dir_admin/?templates=1&add_path=/backups&gf=$name");
+					die();
+					break;
+				case "code_restore":
+				    Limit_time(300);
+				    $source = isset($_GET["backup_file"]) ? (string)$_GET["backup_file"] : "";
+                    if($_SERVER["REQUEST_METHOD"] === "POST"){  # с подтверждением — записать файлы архива
+                        check();
+                        api_dump(json_encode(Code_restore_apply($source), JSON_UNESCAPED_UNICODE), "code_restore.json");
+                    }
+					if(!Restore_allowed())
+						die(t9n("[RU]Восстановить файлы может только владелец базы ($z)[EN]Only the DB owner ($z) can restore the files"));
+                    header("Content-Type: text/plain; charset=utf-8");
+                    die(Code_backup_listing($source));
+					break;
 
 				default:
 					$blocks[$block]["title"][] = "Integram";
@@ -11037,8 +11071,9 @@ function pwd_reset($u){
 # или супер-админ сервера (вход паролем ADMINHASH, user_id 0). Дамп может быть снят с любой базы этого
 # сервера: база остаётся под тем же ЛК, владельцу сохраняется его вход и назначается роль admin.
 
-# Снимает дамп всей таблицы базы в templates/custom/<база>/backups, возвращает имя архива .dmp.zip
-function Backup_dump(){
+# Снимает дамп всей таблицы базы в templates/custom/<база>/backups, возвращает имя архива .dmp.zip.
+# $skip — id строк, которых в дампе быть не должно (снимок шаблона без пользователей и секретов, #5364).
+function Backup_dump($skip = array()){
 	global $z;
 	$limit = 500000;
 	if(!is_dir($path="templates/custom/$z/backups"))
@@ -11047,13 +11082,16 @@ function Backup_dump(){
 	if(!($file = @fopen("$path/$name", "a+")))
 		return "";  # каталог не создать или не записать — бэкапа нет
 	fwrite($file, pack('CCC', 0xef, 0xbb, 0xbf));
-	$last = 0;
+	$last = $page = 0;
 	$lastup = $lastt = "";
 	do{
 		$h = "";
-		$data_set = Exec_sql("SELECT id,up,t,ord,val FROM $z WHERE id>$last ORDER BY id LIMIT $limit", "Get Objects list for export");
+		$data_set = Exec_sql("SELECT id,up,t,ord,val FROM $z WHERE id>$page ORDER BY id LIMIT $limit", "Get Objects list for export");
 		$rows_number = mysqli_num_rows($data_set);
 		while($row = mysqli_fetch_assoc($data_set)){
+			$page = $row["id"];
+			if(isset($skip[(int)$row["id"]]))
+				continue;  # пропуск id дамп переносит разницей id следующей строки
 		    if($last + 1 == $row["id"])
 		        $t = ";";
 		    else
@@ -11389,6 +11427,295 @@ function Code_restore_apply($source){
 	return array("result" => "ok", "files" => $wrote, "backup" => $safety);
 }
 # </code-backup-5168>
+# <db-templates-5364>
+# Шаблоны баз. Владелец базы фиксирует версию шаблона — снимок данных и файлов базы; модератор
+# сервиса её одобряет, и при создании базы в ЛК база разворачивается из снимка. Правки исходной базы
+# после фиксации в шаблон не попадают — для них фиксируется следующая версия. Созданные раньше базы
+# остаются как были.
+#
+# Хранилище — templates/custom/my/db_templates:
+#   registry.json      — реестр: {id: {title, descr, source, author, versions: [{ver, status, created, by, note}]}}
+#   <id>/<ver>/data.dmp.zip — дамп базы в формате Backup_dump без пользователей и секретов (Tpl_secret_ids)
+#   <id>/<ver>/code.zip     — файлы базы в формате Code_backup
+# Статус версии: pending (на модерации) → approved | rejected; pending или approved → withdrawn (снята).
+# В ЛК разворачивается последняя approved-версия. Модератор — супер-админ сервера, владелец базы my
+# или логин ЛК из TPL_MODERATORS (include/connection.php), действует в базе my.
+
+function Tpl_dir(){
+	return "templates/custom/my/db_templates";
+}
+# Имя шаблона: 2–15 латинских букв и цифр с буквы. Двухбуквенные — имена системных шаблонов (ru, cm).
+function Tpl_id_ok($id){
+	return is_string($id) && preg_match('/^[a-z][a-z0-9]{1,14}$/', $id) && ($id !== "my");
+}
+function Tpl_registry(){
+	$p = Tpl_dir()."/registry.json";
+	$reg = is_file($p) ? json_decode(file_get_contents($p), TRUE) : array();
+	return is_array($reg) ? $reg : array();
+}
+function Tpl_registry_save($reg){
+	$p = Tpl_dir()."/registry.json";
+	$tmp = "$p.".getmypid();
+	return (file_put_contents($tmp, json_encode($reg, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT)) !== FALSE) && rename($tmp, $p);
+}
+# Правка реестра под блокировкой: читать–менять–писать одним владельцем
+function Tpl_lock(){
+	if(!is_dir(Tpl_dir()))
+		@mkdir(Tpl_dir(), 0777, TRUE);
+	$h = @fopen(Tpl_dir()."/registry.lock", "c");
+	if(!$h || !flock($h, LOCK_EX))
+		return FALSE;
+	return $h;
+}
+function Tpl_unlock($h){
+	flock($h, LOCK_UN);
+	fclose($h);
+}
+function Tpl_moderator(){
+	global $z;
+	if(($z !== "my") || !isset($GLOBALS["GLOBAL_VARS"]["user_id"]))
+		return FALSE;
+	$user = (string)$GLOBALS["GLOBAL_VARS"]["user"];
+	return ((string)$GLOBALS["GLOBAL_VARS"]["user_id"] === "0") || ($user === "my")
+		|| (($user !== "") && defined("TPL_MODERATORS") && (strpos(TPL_MODERATORS, ":$user:") !== FALSE));
+}
+# Последняя одобренная версия шаблона, 0 — такой нет
+function Tpl_current($id, $reg = NULL){
+	if($reg === NULL)
+		$reg = Tpl_registry();
+	$cur = 0;
+	if(isset($reg[$id]["versions"]))
+		foreach($reg[$id]["versions"] as $v)
+			if(($v["status"] === "approved") && ((int)$v["ver"] > $cur))
+				$cur = (int)$v["ver"];
+	return $cur;
+}
+# id строк базы, которые не едут в шаблон: пользователи, реквизиты-секреты записей (пароль, токен,
+# xsrf, Secret, активность, попытки входа) и всё, что под ними или ссылается на них. Реквизиты тех же
+# типов в схеме (строки под типом, up — тип) остаются: без них схема пользователя неполна.
+function Tpl_secret_ids(){
+	global $z;
+	$skip = $front = array();
+	$data_set = Exec_sql("SELECT c.id FROM $z c JOIN $z p ON p.id=c.up WHERE (c.t=".USER." AND c.up=1)"
+		." OR (c.t IN (".PASSWORD.",".TOKEN.",".XSRF.",".SECRET.",".ACTIVITY.",".RETRIES.") AND p.up!=0)", "Template: users and secrets");
+	while($row = mysqli_fetch_array($data_set))
+		$front[(int)$row[0]] = 1;
+	while(count($front)){
+		$skip += $front;
+		$next = array();
+		foreach(array_chunk(array_keys($front), 1000) as $chunk){
+			$in = implode(",", $chunk);
+			$data_set = Exec_sql("SELECT id FROM $z WHERE up IN ($in) OR t IN ($in)", "Template: rows under the skipped");
+			while($row = mysqli_fetch_array($data_set))
+				if(!isset($skip[(int)$row[0]]))
+					$next[(int)$row[0]] = 1;
+		}
+		$front = $next;
+	}
+	return $skip;
+}
+# Логин ЛК, за которым записана база $z
+function Tpl_author(){
+	global $z;
+	$row = mysqli_fetch_array(Exec_sql("SELECT u.val FROM my db JOIN my u ON u.id=db.up WHERE db.t=".DATABASE." AND db.val='$z' LIMIT 1"
+		, "Template: author"));
+	return $row ? (string)$row[0] : "";
+}
+# Зафиксировать новую версию шаблона $id из текущей базы $z. Отправляет её на модерацию.
+function Tpl_publish($id, $title, $descr){
+	global $z;
+	$id = strtolower(trim((string)$id));
+	if(!Restore_allowed()){
+		header("HTTP/1.0 403 Forbidden");
+		return array("error" => t9n("[RU]Опубликовать шаблон может только владелец базы ($z)[EN]Only the DB owner ($z) can publish a template"));
+	}
+	if($z === "my")
+		return array("error" => t9n("[RU]Базу Личного кабинета нельзя сделать шаблоном[EN]The private space DB cannot be a template"));
+	if(!Tpl_id_ok($id))
+		return array("error" => t9n("[RU]Имя шаблона — от 2 до 15 латинских букв и цифр, начиная с буквы[EN]Template name: 2 to 15 latin letters or digits, starting with a letter"));
+	if((strpos(TEMPLATES, ":$id:") !== FALSE) && ((string)$GLOBALS["GLOBAL_VARS"]["user_id"] !== "0"))
+		return array("error" => t9n("[RU]Шаблон $id системный — его версию фиксирует администратор сервера[EN]$id is a system template: only the server administrator can publish it"));
+	$title = mb_substr(trim((string)$title), 0, 100);
+	$descr = mb_substr(trim((string)$descr), 0, 1000);
+	if(!($lock = Tpl_lock()))
+		return array("error" => t9n("[RU]Реестр шаблонов недоступен для записи[EN]The template registry is not writable"));
+	$reg = Tpl_registry();
+	if(isset($reg[$id]) && ($reg[$id]["source"] !== $z)){
+		Tpl_unlock($lock);
+		return array("error" => t9n("[RU]Имя шаблона $id занято шаблоном другой базы[EN]The template name $id is taken by another DB"));
+	}
+	$ver = isset($reg[$id]) ? count($reg[$id]["versions"]) + 1 : 1;
+	$dir = Tpl_dir()."/$id/$ver";
+	Code_rm_dir($dir);
+	@mkdir($dir, 0777, TRUE);
+	$data = Backup_dump(Tpl_secret_ids());
+	$code = Code_backup();
+	$bk = "templates/custom/$z/backups";
+	if(($data === "") || ($code === "") || !@rename("$bk/$data", "$dir/data.dmp.zip") || !@rename("$bk/$code", "$dir/code.zip")){
+		Code_rm_dir($dir);
+		Tpl_unlock($lock);
+		return array("error" => t9n("[RU]Не удалось записать снимок базы — версия не создана[EN]Could not write the DB snapshot — the version is not created"));
+	}
+	$entry = isset($reg[$id]) ? $reg[$id] : array("source" => $z, "author" => Tpl_author(), "versions" => array());
+	$entry["title"] = ($title !== "") ? $title : (isset($entry["title"]) ? $entry["title"] : $id);
+	if(($descr !== "") || !isset($entry["descr"]))
+		$entry["descr"] = $descr;
+	$entry["versions"][] = array("ver" => $ver, "status" => "pending", "created" => date("Y-m-d H:i:s")
+		, "by" => (string)$GLOBALS["GLOBAL_VARS"]["user"], "note" => "");
+	$reg[$id] = $entry;
+	$saved = Tpl_registry_save($reg);
+	Tpl_unlock($lock);
+	if(!$saved){
+		Code_rm_dir($dir);
+		return array("error" => t9n("[RU]Реестр шаблонов не записан — версия не создана[EN]The template registry is not saved — the version is not created"));
+	}
+	wlog("Template $id v$ver from $z by ".$GLOBALS["GLOBAL_VARS"]["user"], "log");
+	mysendmail(ADMINEMAIL, "Template on moderation: $id v$ver", "DB $z, author ".$entry["author"].", ".$entry["title"]
+		."\nhttps://".(isset($_SERVER["SERVER_NAME"]) ? $_SERVER["SERVER_NAME"] : "")."/my/_tpl_list?JSON");
+	return array("result" => "ok", "id" => $id, "ver" => $ver, "status" => "pending");
+}
+# Сменить статус версии. Модератор (в базе my): одобрить или отклонить версию на модерации, снять
+# любую действующую. Владелец исходной базы (в ней): снять свою версию.
+function Tpl_set_status($id, $ver, $status, $note = ""){
+	global $z;
+	$id = strtolower(trim((string)$id));
+	$ver = (int)$ver;
+	if(!in_array($status, array("approved", "rejected", "withdrawn"), TRUE))
+		return array("error" => t9n("[RU]Неизвестный статус {$status}[EN]Unknown status $status"));
+	if(!($lock = Tpl_lock()))
+		return array("error" => t9n("[RU]Реестр шаблонов недоступен для записи[EN]The template registry is not writable"));
+	$reg = Tpl_registry();
+	$err = "";
+	$i = NULL;
+	if(isset($reg[$id]["versions"]))
+		foreach($reg[$id]["versions"] as $k => $v)
+			if((int)$v["ver"] === $ver)
+				$i = $k;
+	$mod = Tpl_moderator();
+	if($i === NULL)
+		$err = t9n("[RU]Нет версии $ver шаблона {$id}[EN]No version $ver of the template $id");
+	elseif(!$mod && !(($status === "withdrawn") && ($reg[$id]["source"] === $z) && Restore_allowed())){
+		header("HTTP/1.0 403 Forbidden");
+		$err = t9n("[RU]Одобряет и отклоняет шаблоны модератор сервиса, снять версию может владелец базы-источника"
+			."[EN]Only the service moderator approves or rejects templates; the source DB owner can withdraw a version");
+	}
+	else{
+		$from = $reg[$id]["versions"][$i]["status"];
+		if(($status === "withdrawn") ? !in_array($from, array("pending", "approved"), TRUE) : ($from !== "pending"))
+			$err = t9n("[RU]Версия $ver шаблона $id в статусе $from — перевести в $status нельзя"
+				."[EN]Version $ver of the template $id is $from — it cannot become $status");
+	}
+	if($err === ""){
+		$reg[$id]["versions"][$i]["status"] = $status;
+		$reg[$id]["versions"][$i]["note"] = mb_substr(trim((string)$note), 0, 500);
+		$reg[$id]["versions"][$i]["moderated"] = date("Y-m-d H:i:s")." ".$GLOBALS["GLOBAL_VARS"]["user"];
+		if(!Tpl_registry_save($reg))
+			$err = t9n("[RU]Реестр шаблонов не записан[EN]The template registry is not saved");
+	}
+	Tpl_unlock($lock);
+	if($err !== "")
+		return array("error" => $err);
+	wlog("Template $id v$ver: $status by ".$GLOBALS["GLOBAL_VARS"]["user"], "log");
+	return array("result" => "ok", "id" => $id, "ver" => $ver, "status" => $status, "current" => Tpl_current($id, $reg));
+}
+# Шаблоны, видимые текущему пользователю: всем — одобренные (последняя версия), модератору в my —
+# все со всеми версиями, владельцу базы-источника (в ней) — его шаблон со всеми версиями.
+function Tpl_list(){
+	global $z;
+	$mod = Tpl_moderator();
+	$out = array();
+	foreach(Tpl_registry() as $id => $t){
+		$cur = Tpl_current($id, array($id => $t));
+		$item = array("id" => (string)$id, "title" => $t["title"], "descr" => $t["descr"], "author" => $t["author"], "ver" => $cur);
+		if($mod || (($t["source"] === $z) && Restore_allowed())){
+			$item["source"] = $t["source"];
+			$item["versions"] = $t["versions"];
+		}
+		elseif(!$cur)
+			continue;
+		$out[] = $item;
+	}
+	return $out;
+}
+# Имена файлов архива .code.zip; чужой путь — строка ошибки
+function Tpl_code_names($zip_path){
+	$zip = new ZipArchive();
+	if($zip->open($zip_path) !== TRUE)
+		return t9n("[RU]Архив файлов шаблона не читается[EN]The template files archive cannot be read");
+	$names = array();
+	for($i = 0; $i < $zip->numFiles; $i++){
+		$n = $zip->getNameIndex($i);
+		if($n === FALSE || $n === "" || substr($n, -1) === "/")
+			continue;
+		if(strpos($n, "\\") !== FALSE || strpos($n, "..") !== FALSE || substr($n, 0, 1) === "/"
+			|| (strpos($n, "templates/") !== 0 && strpos($n, "download/") !== 0)){
+			$zip->close();
+			return t9n("[RU]В архиве шаблона чужой путь {$n}[EN]Foreign path $n in the template archive");
+		}
+		$names[] = $n;
+	}
+	$zip->close();
+	return $names;
+}
+# Развернуть версию $ver шаблона $id в новую базу $z: таблица из дампа, файлы из архива.
+# Возвращает "" или текст ошибки (таблица тогда удалена).
+function Tpl_deploy($id, $ver){
+	global $z;
+	$dir = Tpl_dir()."/$id/$ver";
+	if(!is_file("$dir/data.dmp.zip"))
+		return t9n("[RU]Снимок шаблона $id v$ver не найден на сервере[EN]The snapshot of the template $id v$ver is missing on the server");
+	$names = is_file("$dir/code.zip") ? Tpl_code_names("$dir/code.zip") : array();
+	if(is_string($names))
+		return $names;
+	$tmp = Tpl_dir()."/.deploy_{$z}_".getmypid();
+	Code_rm_dir($tmp);
+	@mkdir($tmp, 0777, TRUE);
+	$zip = new ZipArchive();
+	if($zip->open("$dir/data.dmp.zip") !== TRUE){
+		Code_rm_dir($tmp);
+		return t9n("[RU]Снимок шаблона $id v$ver не читается[EN]The snapshot of the template $id v$ver cannot be read");
+	}
+	$zip->extractTo($tmp);
+	$zip->close();
+	$dmp = glob("$tmp/*.dmp");
+	$rows = $dmp ? Restore_dump_rows($dmp[0]) : array();
+	Code_rm_dir($tmp);
+	if(!count($rows))
+		return t9n("[RU]Снимок шаблона $id v$ver пуст[EN]The snapshot of the template $id v$ver is empty");
+	Exec_sql("CREATE TABLE $z LIKE ru", "Template: create the table");
+	$head = "INSERT INTO `$z` (`id`, `t`, `up`, `ord`, `val`) VALUES ";
+	$chunk = "";
+	foreach($rows as $i => $v){
+		$chunk .= ($chunk === "" ? "" : ",").$v;
+		if((strlen($chunk) < 1000000) && ($i < count($rows) - 1))  # пачка ~1 МБ — меньше max_allowed_packet
+			continue;
+		$res = Exec_sql($head.$chunk, "Template: insert", FALSE, FALSE);
+		if(is_string($res)){
+			Exec_sql("DROP TABLE $z", "Template: drop the incomplete table");
+			return t9n("[RU]База из шаблона $id v$ver не залита[EN]Could not fill the DB from the template $id v$ver").": ".mb_substr($res, 0, 300);
+		}
+		$chunk = "";
+	}
+	@mkdir("templates/custom/$z", 0777, TRUE);
+	@mkdir("download/$z", 0777, TRUE);
+	if(count($names)){
+		$zip = new ZipArchive();
+		$zip->open("$dir/code.zip");
+		$tmp = Tpl_dir()."/.files_{$z}_".getmypid();
+		Code_rm_dir($tmp);
+		@mkdir($tmp, 0777, TRUE);
+		$zip->extractTo($tmp);
+		$zip->close();
+		foreach($names as $n){
+			$to = (strpos($n, "templates/") === 0) ? "templates/custom/$z/".substr($n, 10) : "download/$z/".substr($n, 9);
+			@mkdir(dirname($to), 0777, TRUE);
+			copy("$tmp/$n", $to);
+		}
+		Code_rm_dir($tmp);
+	}
+	return "";
+}
+# </db-templates-5364>
 function check()
 {
     $xsrf = isset($GLOBALS["GLOBAL_VARS"]["xsrf"]) ? (string)$GLOBALS["GLOBAL_VARS"]["xsrf"] : "";
@@ -16078,7 +16405,32 @@ if(Validate_Token())
             Insert($id, 1, 276, $_POST["descr"], "Insert new DB notes");
 			api_dump(json_encode(array("status"=>"Ok","id"=>$id)), "_new_db.json");
 			break;
-			
+
+		# #5364: шаблоны баз — список (в my — для выбора при создании базы и модерации; в своей базе — её шаблон)
+		case "_tpl_list":
+			api_dump(json_encode(array("templates" => Tpl_list(), "moderator" => Tpl_moderator() ? 1 : 0)
+				, JSON_UNESCAPED_UNICODE), "_tpl_list.json");
+			break;
+		# Зафиксировать версию шаблона из этой базы: POST id, title, descr, _xsrf
+		case "_tpl_publish":
+			if($_SERVER["REQUEST_METHOD"] !== "POST")
+				my_die(t9n("[RU]Используйте POST[EN]Use POST"));
+			check();
+			Limit_time(300);
+			api_dump(json_encode(Tpl_publish(isset($_REQUEST["id"]) ? $_REQUEST["id"] : ""
+				, isset($_REQUEST["title"]) ? $_REQUEST["title"] : "", isset($_REQUEST["descr"]) ? $_REQUEST["descr"] : "")
+				, JSON_UNESCAPED_UNICODE), "_tpl_publish.json");
+			break;
+		# Статус версии: POST id, ver, status (approved | rejected | withdrawn), note, _xsrf
+		case "_tpl_status":
+			if($_SERVER["REQUEST_METHOD"] !== "POST")
+				my_die(t9n("[RU]Используйте POST[EN]Use POST"));
+			check();
+			api_dump(json_encode(Tpl_set_status(isset($_REQUEST["id"]) ? $_REQUEST["id"] : "", isset($_REQUEST["ver"]) ? $_REQUEST["ver"] : 0
+				, isset($_REQUEST["status"]) ? (string)$_REQUEST["status"] : "", isset($_REQUEST["note"]) ? $_REQUEST["note"] : "")
+				, JSON_UNESCAPED_UNICODE), "_tpl_status.json");
+			break;
+
 		case "get_record":
 			if($id == 0)
 				die(t9n("[RU]Ошибка: id=0 или не задан[EN]The id is empty or 0"));

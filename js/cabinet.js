@@ -67,6 +67,16 @@ class CabinetController {
         // Load user data
         await this.loadUserData();
 
+        // #5364: одобренные шаблоны баз — в выбор при создании базы, модератору — панель модерации
+        if (window.DbTemplates) {
+            window.DbTemplates.initCabinet({
+                base: 'https://' + this.apiConfig.host + '/my',
+                xsrf: xsrf,
+                select: document.getElementById('new-db-template'),
+                panel: document.getElementById('tpl-moderation')
+            });
+        }
+
         // Show section from URL hash, or default to 'databases'
         const { section, subTab, extra } = this.parseUrlHash();
         const validSections = ['databases', 'community', 'profile', 'tariff', 'balance', 'bonuses', 'referrals'];

@@ -528,6 +528,8 @@
                 <div class="databases-list" id="databases-list">
                     <!-- Databases will be rendered here -->
                 </div>
+                <!-- #5364: модерация шаблонов баз — видна модератору (js/db-templates.js) -->
+                <div id="tpl-moderation" class="tpl-moderation" style="display:none;"></div>
             </section>
 
             <!-- Community Section -->
@@ -761,7 +763,8 @@
     </script>
     <script src="/js/app.js?v=20261022-1043"></script>
     <script src="/js/form-submit.js" defer></script>
-    <script src="/js/cabinet.js?v=20261022-1043"></script>
+    <script src="/js/db-templates.js?v=20261101-5364"></script>
+    <script src="/js/cabinet.js?v=20261101-5364"></script>
     <script>
     function changePwd(){
         var oldPwd=document.getElementById('old-pwd').value;
