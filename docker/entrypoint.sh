@@ -7,7 +7,7 @@ set -euo pipefail
 : "${INTEGRAM_DB_USER:=ideav}"
 : "${INTEGRAM_DB_PASSWORD:=ideav-local-password}"
 
-cert_dir="/etc/integram/certs"
+cert_dir="${INTEGRAM_CERT_DIR:-/etc/integram/certs}"
 mkdir -p "$cert_dir"
 if [[ ! -s "$cert_dir/local.crt" || ! -s "$cert_dir/local.key" ]]; then
     openssl req -x509 -nodes -newkey rsa:2048 -days 825 \
@@ -37,6 +37,28 @@ if ! mysqladmin ping \
     --password="$INTEGRAM_DB_PASSWORD" \
     --silent >/dev/null 2>&1; then
     echo "Database is not reachable at $INTEGRAM_DB_HOST:$INTEGRAM_DB_PORT" >&2
+    exit 1
+fi
+
+# mysqladmin ping succeeds even on "Access denied", so check the login itself.
+if ! auth_error="$(mysql \
+    --host="$INTEGRAM_DB_HOST" \
+    --port="$INTEGRAM_DB_PORT" \
+    --user="$INTEGRAM_DB_USER" \
+    --password="$INTEGRAM_DB_PASSWORD" \
+    --execute="SELECT 1" \
+    "$INTEGRAM_DB_NAME" 2>&1 >/dev/null)"; then
+    echo "$auth_error" >&2
+    if [[ "$auth_error" == *"ERROR 1045"* ]]; then
+        cat >&2 <<MSG
+The database rejected INTEGRAM_DB_PASSWORD for user '$INTEGRAM_DB_USER'.
+Most likely the integram-db volume was created by a previous installation
+with other passwords (MariaDB applies MARIADB_PASSWORD only to an empty
+volume). Either restore the previous .env.local, or drop the old database
+(all its data is lost): docker compose --env-file .env.local down -v
+and start again.
+MSG
+    fi
     exit 1
 fi
 

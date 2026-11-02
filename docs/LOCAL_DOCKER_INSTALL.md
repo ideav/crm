@@ -92,6 +92,8 @@ docker compose --env-file .env.local down
 `integram-local_integram-download`, `integram-local_integram-templates` и
 `integram-local_integram-logs`.
 
+Пароли БД из `.env.local` MariaDB применяет только при создании пустого тома `integram-local_integram-db`. Поэтому `scripts/install-local-docker.sh` останавливается, если находит этот том, а новый `.env.local` ещё не записан: иначе `app` бесконечно перезапускается с `ERROR 1045 Access denied`. Чтобы сохранить данные, верните прежний `.env.local`. Чтобы удалить старую базу вместе со всеми данными, запустите `INTEGRAM_RESET_DB=1 bash scripts/install-local-docker.sh` или `docker compose --env-file .env.local down -v`.
+
 ## Резервная копия базы
 
 ```bash
