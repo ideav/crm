@@ -16383,11 +16383,15 @@ if(Validate_Token())
 			}
 			break;
 
-		case "_ext_rebuild":	# #5373: пересборка read-only вьюх базы и учётки читателя (docs/ext-views.md)
+		case "_ext_rebuild":	# #5373: SQL-доступ пользователя — вьюхи по правам его роли и учётка-читатель (docs/ext-views.md)
 			if(!Restore_allowed())
-				my_die(t9n("[RU]Пересобрать вьюхи может владелец базы[EN]Only the database owner can rebuild the views"));
+				my_die(t9n("[RU]Выдать SQL-доступ может владелец базы[EN]Only the database owner can grant SQL access"));
 			check();
-			api_dump(json_encode(Ext_rebuild_core(isset($_POST["password"]) ? $_POST["password"] : ""), JSON_UNESCAPED_UNICODE), "ext_rebuild.json");
+			$extAct = isset($_POST["action"]) && in_array($_POST["action"], array("list", "revoke"), TRUE) ? $_POST["action"] : "rebuild";
+			if(($extAct !== "list") && !(isset($_POST["user"]) && ctype_digit((string)$_POST["user"])))
+				my_die(t9n("[RU]Не задан пользователь (user=<id>)[EN]No user given (user=<id>)"));
+			api_dump(json_encode(Ext_core_action($extAct, isset($_POST["user"]) ? (int)$_POST["user"] : 0
+				, isset($_POST["password"]) ? $_POST["password"] : ""), JSON_UNESCAPED_UNICODE), "ext_rebuild.json");
 			break;
 
 		case "_new_db":

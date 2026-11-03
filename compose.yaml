@@ -29,8 +29,8 @@ services:
       INTEGRAM_DB_NAME: ${INTEGRAM_DB_NAME:-ideav}
       INTEGRAM_DB_USER: ${INTEGRAM_DB_USER:-ideav}
       INTEGRAM_DB_PASSWORD: ${INTEGRAM_DB_PASSWORD:-ideav-local-password}
-      # Read-only вьюхи для внешнего SQL-клиента (docs/ext-views.md): схемы ext_<база>,
-      # учётки-читатели и GRANT создаёт root локальной MariaDB
+      # SQL-доступ пользователя для внешнего SQL-клиента (docs/ext-views.md): вьюхи в схеме
+      # ext_<база>, учётки-читатели и GRANT создаёт root локальной MariaDB
       INTEGRAM_EXT_ADMIN_USER: root
       INTEGRAM_EXT_ADMIN_PASSWORD: ${INTEGRAM_DB_ROOT_PASSWORD:-ideav-local-root-password}
       INTEGRAM_MASTER_PASSWORD: ${INTEGRAM_MASTER_PASSWORD:?Set INTEGRAM_MASTER_PASSWORD in .env.local}

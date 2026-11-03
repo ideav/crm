@@ -27,6 +27,7 @@
 <div class="da-tabs">
     <button type="button" class="da-tab active" data-pane="da-files">Файлы</button>
     <button type="button" class="da-tab" data-pane="da-journal">Журнал</button>
+    <button type="button" class="da-tab" data-pane="da-sql">SQL-доступ</button>
 </div>
 <div id="da-files" class="da-pane">
 <div class="container" style="margin:1px;">
@@ -242,6 +243,34 @@
        Условия поиска сочетаются по «И», регистр не важен. Клик по строке раскрывает её целиком. Журнал доступен администратору базы.</p>
     <div id="journal-viewer"></div>
 </div>
+<!-- SQL-доступ (#5373): вьюхи пользователя по правам его роли и учётка MySQL для внешнего SQL-клиента -->
+<div id="da-sql" class="da-pane" hidden>
+    <p>Внешний SQL-клиент (DBeaver, DataGrip, Excel/Power BI через ODBC) читает базу только на чтение.
+       Для выбранного пользователя строятся представления MySQL по правам его роли: таблицы, колонки и
+       Запросы, которые роль видит. Имя представления — <code>&lt;пользователь&gt;_&lt;таблица или запрос&gt;</code>;
+       таблица и Запрос с одним именем дают представление Запроса. Пароли и токены не выводятся.
+       Учётке MySQL видны только представления этого пользователя. Выдаёт доступ владелец базы.</p>
+    <div id="ext-access"></div>
+    <h4>Как подключиться через SSH-туннель</h4>
+    <ol>
+        <li>Пользователь создаёт SSH-ключ (<code>ssh-keygen -t ed25519</code>) и присылает администратору
+            сервера открытую часть — файл <code>~/.ssh/id_ed25519.pub</code>.</li>
+        <li>Администратор сервера добавляет ключ в учётку туннеля:
+            <code>sudo scripts/ext-ssh-tunnel.sh add-key &lt;файл ключа&gt;</code>. Ключ открывает только
+            туннель к MySQL: без командной строки и без других портов.</li>
+        <li>Здесь: выбрать пользователя, нажать «Выдать доступ / пересобрать» и передать пользователю логин
+            и пароль. Пароль показывается один раз; новый — той же кнопкой с заполненным полем «Пароль».</li>
+        <li>У пользователя туннель — командой из ответа (<code>ssh -N -L 13306:…</code>) или в DBeaver:
+            вкладка «SSH» подключения — хост, порт и пользователь SSH из ответа, свой ключ; на вкладке
+            «Main» — хост MySQL со стороны сервера, порт, логин, пароль и база из ответа.</li>
+        <li>С туннелем из командной строки подключение идёт на <code>127.0.0.1:13306</code>, база —
+            <code>ext_&lt;база&gt;</code>.</li>
+    </ol>
+    <p>Структура или права роли изменились — нажмите «Выдать доступ / пересобрать» ещё раз: представления
+       сами не обновляются. «Отозвать» удаляет представления пользователя и его учётку MySQL.
+       Встроенные значения Запросов (текущий пользователь, сегодняшняя дата) берутся на момент пересборки;
+       маски строк роли в представлениях таблиц не применяются.</p>
+</div>
 <!-- Просмотр журнала (#5000): запускается при первом открытии вкладки «Журнал» -->
 <script src="/js/journal-viewer.js?5000" defer></script>
 <script>
@@ -254,14 +283,20 @@
             });
             Array.prototype.forEach.call(document.querySelectorAll('.da-pane'), function(p) { p.hidden = p.id !== name; });
             if (name === 'da-journal' && box && box.start) box.start();
-            try { history.replaceState(null, '', name === 'da-journal' ? '#journal' : location.pathname + location.search); } catch (e) {}
+            if (name === 'da-sql' && window.ExtAccess && document.view_dir)
+                ExtAccess.init({ db: db, xsrf: document.view_dir._xsrf ? document.view_dir._xsrf.value : '', box: document.getElementById('ext-access') });
+            var hash = name === 'da-journal' ? '#journal' : (name === 'da-sql' ? '#sql' : '');
+            try { history.replaceState(null, '', hash || location.pathname + location.search); } catch (e) {}
         }
         Array.prototype.forEach.call(document.querySelectorAll('.da-tab'), function(t) {
             t.addEventListener('click', function() { show(t.getAttribute('data-pane')); });
         });
         if (location.hash === '#journal') show('da-journal');
+        if (location.hash === '#sql') show('da-sql');
     });
 </script>
+<!-- SQL-доступ (#5373): выбор пользователя, выдача/пересборка и отзыв доступа -->
+<script src="/js/ext-access.js?5373" defer></script>
 <script src="/js/app.js?v=20261022-1043"></script>
 <script src="/js/form-submit.js" defer></script>
 <script src="/js/js.js"></script>
