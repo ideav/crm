@@ -69,7 +69,7 @@ REPORTS = {
     'die_cutter_runs': [
         ('run_id', ('table', RUN), ABN_ID),
         ('run_date', ('table', RUN), None),
-        ('meters', ('req', RUN, 'Метры пробега'), None),
+        ('revs', ('req', RUN, 'Обороты пробега'), None),
         ('kind', ('req', RUN, 'Вид движения пробега'), None),
         ('job_id', ('req', RUN, 'Задание высечки'), ABN_ID),
         ('die_id', ('table', DIE), ABN_ID),

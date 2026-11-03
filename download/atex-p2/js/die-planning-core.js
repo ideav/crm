@@ -48,7 +48,8 @@
         horizonDays: ['DIE_HORIZON_DAYS', 14, false],
         mrLength: ['LABEL_MASTER_ROLL_M', 2000, false],
         tolerance: ['JUMBO_FORMAT_TOLERANCE_MM', 15, true],
-        dieResource: ['DIE_RESOURCE_DEFAULT_M', 300000, false],
+        // Ресурс ножа без марки, об (один оборот = один раппорт вала): медиана пробега списанных ножей из 1С.
+        dieResource: ['DIE_RESOURCE_DEFAULT_REV', 300000, false],
         // Туррель — для длинных заданий: метраж от порога (по плану заказчика — от 12,6 км; 0 — без порога).
         turretLongM: ['DIE_TURRET_LONG_M', 12600, true],
         // Простой туррели, рабочих минут: её очередь пуста столько — она берёт обычные задания (#5376).
@@ -465,7 +466,8 @@
 
     // ── Блокировки и предупреждения ─────────────────────────────────────────
 
-    // ctx — { dies: { id ножа: { state, mileage, resource } }, openMeters: { id ножа: метры открытых заданий },
+    // ctx — { dies: { id ножа: { state, mileage, resource } } (пробег и ресурс — в оборотах),
+    //         openRevs: { id ножа: обороты открытых заданий },
     //         cover: { id задания: { deficit } } }.
     function jobFlags(job, ctx) {
         var c = ctx || {}, blocks = [], warnings = [];
@@ -477,7 +479,7 @@
             else if (st && st !== LP.DIE_STATE.WORKING) warnings.push('нож в состоянии «' + st + '»');
             var res = num(die.resource);
             if (res > 0) {
-                var forecast = num(die.mileage) + num((c.openMeters || {})[job.dieId]);
+                var forecast = num(die.mileage) + num((c.openRevs || {})[job.dieId]);
                 if (forecast >= res * 0.9) warnings.push('ресурс ножа: прогноз пробега ' + Math.round(forecast / res * 100) + ' % ресурса');
             }
         }
@@ -486,9 +488,16 @@
         return { blocks: blocks, warnings: warnings };
     }
 
-    function openMetersByDie(jobs) {
+    // Обороты задания: метраж × 1000 / раппорт вала задания (job.repeatMm); раппорт неизвестен — 0.
+    function jobRevs(job) {
+        var r = LP.revsFromMeters(num(job && job.footage), job && job.repeatMm);
+        return isFinite(r) ? r : 0;
+    }
+
+    // Обороты ножа, которые ему предстоят: сумма оборотов незавершённых заданий ножа.
+    function openRevsByDie(jobs) {
         var out = {};
-        (jobs || []).forEach(function(j) { if (!isFinal(j) && j.dieId) out[j.dieId] = round1((out[j.dieId] || 0) + num(j.footage)); });
+        (jobs || []).forEach(function(j) { if (!isFinal(j) && j.dieId) out[j.dieId] = (out[j.dieId] || 0) + jobRevs(j); });
         return out;
     }
 
@@ -632,9 +641,9 @@
         var knives = {}, cyls = {};
         function add(j, minutes, it, unplaced) {
             var kk = j.dieId || ('№' + j.dieNo);
-            var k = knives[kk] || (knives[kk] = { dieId: j.dieId, dieNo: j.dieNo, jobs: 0, minutes: 0, meters: 0, planned: 0, unplaced: 0 });
+            var k = knives[kk] || (knives[kk] = { dieId: j.dieId, dieNo: j.dieNo, jobs: 0, minutes: 0, meters: 0, planned: 0, plannedRevs: 0, unplaced: 0 });
             k.jobs++; k.minutes += minutes; k.meters = round1(k.meters + num(j.footage));
-            if (!it || !it.fixed) k.planned = round1(k.planned + num(j.footage));
+            if (!it || !it.fixed) { k.planned = round1(k.planned + num(j.footage)); k.plannedRevs += jobRevs(j); }
             var ck = j.cylinderId || j.cylinder;
             var c = cyls[ck] || (cyls[ck] = { cylinderId: j.cylinderId, cylinder: j.cylinder, jobs: 0, minutes: 0, changes: 0, unplaced: 0 });
             c.jobs++; c.minutes += minutes;
@@ -657,7 +666,7 @@
         var dies = inp.dies || {};
         var kl = Object.keys(knives).map(function(k) {
             var x = knives[k], d = dies[x.dieId] || {}, res = num(d.resource), mil = num(d.mileage);
-            x.mileage = mil; x.mileageAfter = round1(mil + x.planned); x.resource = res;
+            x.mileage = mil; x.mileageAfter = mil + x.plannedRevs; x.resource = res;
             x.level = LP.dieWearLevel(x.mileageAfter, res);
             return x;
         }).sort(function(a, b) { return b.minutes - a.minutes; });
@@ -918,12 +927,12 @@
             return d;
         });
     }
-    // Сведения о ножах для флагов и загрузки: { id: { state, mileage, resource } }.
+    // Сведения о ножах для флагов и загрузки: { id: { state, mileage, resource } } — пробег и ресурс в оборотах.
     function dieInfo(dies, brandResources, defaultResource) {
         var out = {};
         (dies || []).forEach(function(d) {
-            var res = LP.dieResource((brandResources || {})[d.brandId], defaultResource).meters;
-            out[d.id] = { state: d.state, mileage: num(d.meters), resource: isFinite(res) ? res : 0, no: d.no };
+            var res = LP.dieResource((brandResources || {})[d.brandId], defaultResource).revs;
+            out[d.id] = { state: d.state, mileage: num(d.revs), resource: isFinite(res) ? res : 0, no: d.no };
         });
         return out;
     }
@@ -949,7 +958,7 @@
             num: num, norm: norm, readSettings: readSettings, isDone: isDone, isFinal: isFinal, isStarted: isStarted, isMovable: isMovable,
             dueEnd: dueEnd, buildJobs: buildJobs, setupKind: setupKind, setupMinutes: setupMinutes, runMinutes: runMinutes, rollLengthM: rollLengthM, kindOfSetup: kindOfSetup,
             machineAllows: machineAllows, createCalendar: createCalendar, orderQueue: orderQueue, compareJobs: compareJobs,
-            jobFlags: jobFlags, openMetersByDie: openMetersByDie, coverJobs: coverJobs, planReservations: planReservations,
+            jobFlags: jobFlags, jobRevs: jobRevs, openRevsByDie: openRevsByDie, coverJobs: coverJobs, planReservations: planReservations,
             toolLoad: toolLoad, ganttDay: ganttDay, recordedPlan: recordedPlan, inScope: inScope, coverGroups: coverGroups, positionPickFields: positionPickFields, queueGrid: queueGrid, turretFits: turretFits, formJobs: formJobs, jobCreateFields: jobCreateFields, jobPlanFields: jobPlanFields,
             sleeveDiameterMm: sleeveDiameterMm, pickCutter: pickCutter, sleevePlan: sleevePlan,
             sleeveCreateFields: sleeveCreateFields, sleeveUpdateFields: sleeveUpdateFields,

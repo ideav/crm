@@ -184,7 +184,7 @@ if (C) (function() {
     // ── 5. Блокировки и предупреждения ───────────────────────────────────────
     var dieCtx = { dies: { k1: { state: 'Рабочий', mileage: 100000, resource: 300000 }, k2: { state: 'Списан', mileage: 0, resource: 300000 },
         k3: { state: 'Рабочий', mileage: 250000, resource: 300000 }, k4: { state: 'Рабочий', mileage: 0, resource: 0 } },
-        openMeters: { k1: 5000, k3: 30000 }, cover: { '5': { deficit: 1000 }, '1': { deficit: 0 } } };
+        openRevs: { k1: 5000, k3: 30000 }, cover: { '5': { deficit: 1000 }, '1': { deficit: 0 } } };
     assert(C.jobFlags(J(1, { dieId: 'k1' }), dieCtx).blocks.length === 0, 'исправный нож, МР есть — блокировок нет');
     assert(C.jobFlags(J(1, { dieId: '' }), dieCtx).blocks[0] === 'нет ножа', 'нет ножа');
     assert(C.jobFlags(J(1, { dieId: 'k2' }), dieCtx).blocks.indexOf('нож списан') >= 0, 'нож списан');
@@ -222,9 +222,9 @@ if (C) (function() {
     assert(res6.length === 0, 'задание в работе резерв не получает');
 
     // ── 7. Загрузка ножей и валов, Гант ──────────────────────────────────────
-    var jobsL = [J(1, { dieId: 'k1', dieNo: '111', cylinderId: 'c1', cylinder: '96', footage: 44 * 60 }),
-        J(2, { dieId: 'k2', dieNo: '222', cylinderId: 'c1', cylinder: '96', footage: 44 * 60 }),
-        J(3, { dieId: 'k3', dieNo: '333', cylinderId: 'c2', cylinder: '104', footage: 44 * 60 })];
+    var jobsL = [J(1, { dieId: 'k1', dieNo: '111', cylinderId: 'c1', cylinder: '96', footage: 44 * 60, repeatMm: 1000 }),
+        J(2, { dieId: 'k2', dieNo: '222', cylinderId: 'c1', cylinder: '96', footage: 44 * 60, repeatMm: 1000 }),
+        J(3, { dieId: 'k3', dieNo: '333', cylinderId: 'c2', cylinder: '104', footage: 44 * 60, repeatMm: 1000 })];
     var planL = order(jobsL, [M1]);
     var load = C.toolLoad({ plan: planL, jobs: jobsL, from: MON, settings: S,
         dies: { k1: { mileage: 1000, resource: 10000 }, k2: { mileage: 0, resource: 0 }, k3: { mileage: 9000, resource: 10000 } } });

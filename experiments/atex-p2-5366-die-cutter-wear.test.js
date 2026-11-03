@@ -1,5 +1,5 @@
 // #5366 п.2: у предела ресурса ножа пульт высечки предупреждает оператора — нож может
-// перестать выбивать все этикетки. Ресурс — у марки ножа, без марки — DIE_RESOURCE_DEFAULT_M;
+// перестать выбивать все этикетки. Ресурс — у марки ножа, без марки — DIE_RESOURCE_DEFAULT_REV;
 // «у ресурса» — от 90 %, «выработан» — от 100 % (dieWearLevel, label-production.js).
 // Прогноз — пробег сейчас + оставшийся метраж задания.
 'use strict';
@@ -36,12 +36,12 @@ var over = W(100000, 0, 100000);
 assert(over && over.level === 'over' && over.share === 100 && over.text !== (near && near.text), 'пробег не меньше ресурса — «ресурс выработан», свой текст', JSON.stringify(over));
 
 // Оставшийся метраж задания: метраж задания − вырубленное по заданию.
-assert(typeof DC.jobRemainingMeters === 'function', 'есть jobRemainingMeters');
-if (typeof DC.jobRemainingMeters === 'function') {
-    var runs = [{ jobId: '1', dieId: 'D1', meters: 400, kind: 'вырубка' }, { jobId: '1', dieId: 'D1', meters: 200, kind: 'вырубка' },
-        { jobId: '2', dieId: 'D1', meters: 900, kind: 'вырубка' }, { jobId: '1', dieId: 'D1', meters: 5000, kind: 'начальный остаток' }];
-    assert(DC.jobRemainingMeters({ id: '1', footage: 1000 }, runs) === 400, 'осталось = метраж − вырубка этого задания (начальный остаток не в счёт)', DC.jobRemainingMeters({ id: '1', footage: 1000 }, runs));
-    assert(DC.jobRemainingMeters({ id: '1', footage: 500 }, runs) === 0, 'вырублено больше метража — осталось 0');
+assert(typeof DC.jobRemainingRevs === 'function', 'есть jobRemainingRevs');
+if (typeof DC.jobRemainingRevs === 'function') {
+    var runs = [{ jobId: '1', dieId: 'D1', revs: 400, kind: 'вырубка' }, { jobId: '1', dieId: 'D1', revs: 200, kind: 'вырубка' },
+        { jobId: '2', dieId: 'D1', revs: 900, kind: 'вырубка' }, { jobId: '1', dieId: 'D1', revs: 5000, kind: 'начальный остаток' }];
+    assert(DC.jobRemainingRevs({ id: '1', footage: 1000, repeatMm: 1000 }, runs) === 400, 'осталось = метраж в оборотах − вырубка этого задания (начальный остаток не в счёт)', DC.jobRemainingRevs({ id: '1', footage: 1000 }, runs));
+    assert(DC.jobRemainingRevs({ id: '1', footage: 500, repeatMm: 1000 }, runs) === 0, 'вырублено больше метража (в оборотах) — осталось 0');
 }
 
 console.log('\nИтого: ' + pass + ' из ' + total);

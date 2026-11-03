@@ -154,6 +154,8 @@
         jobs.forEach(function(j) {
             var d = dieById[j.dieId];
             if (!j.cylinderId && d && d.cylinderId) { j.cylinderId = d.cylinderId; j.cylinder = String(d.cylinder || ''); j.cylinderMissing = true; }
+            // раппорт вала задания: по нему метраж переводится в обороты ножа
+            j.repeatMm = C.num(cylinders[j.cylinderId]);
         });
         var machineTable = meta.filter(function(x) { return String(x.id) === String(t.machine.id); })[0];
         var machines = C.machinesFromRecords(r[6], t, { turretReq: extra.sreq(machineTable, 'Туррель'), maxCylinderReq: extra.sreq(machineTable, 'Макс. вал') });
@@ -186,9 +188,9 @@
         };
         var s = this.state;
         jobs.forEach(function(j) { s.jobById[j.id] = j; });
-        s.openMeters = C.openMetersByDie(jobs);
+        s.openRevs = C.openRevsByDie(jobs);
         s.flags = {};
-        jobs.forEach(function(j) { if (!C.isFinal(j)) s.flags[j.id] = C.jobFlags(j, { dies: diInfo, openMeters: s.openMeters, cover: cover }); });
+        jobs.forEach(function(j) { if (!C.isFinal(j)) s.flags[j.id] = C.jobFlags(j, { dies: diInfo, openRevs: s.openRevs, cover: cover }); });
         this.plan = null;
         this.cur = null;
     };
@@ -373,7 +375,7 @@
         var di = s.dieInfo[j.dieId] || {}, f = s.flags[j.id] || { blocks: [], warnings: [] };
         var it = null, pm = (this.plan || this.currentPlan()).machines;
         Object.keys(pm).forEach(function(mid) { pm[mid].items.forEach(function(i) { if (i.jobId === j.id) it = i; }); });
-        var after = di.mileage + C.num(j.footage), res = di.resource;
+        var after = (di.mileage || 0) + C.jobRevs(j), res = di.resource;
         var row = function(k, v) { return '<tr><th>' + esc(k) + '</th><td>' + v + '</td></tr>'; };
         var m = s.machines.filter(function(x) { return x.id === (it ? it.machineId : j.machineId); })[0];
         el.innerHTML = '<h3 class="atex-dp-h" style="margin-top:0">Задание ' + esc(j.id) + (j.orderNo ? ' · заказ ' + esc(j.orderNo) : '') + '</h3>' +
@@ -385,7 +387,7 @@
             row('Позиция', esc(j.positionId) + (j.rolls ? ' · ' + esc(fmtNum(j.rolls)) + ' рул.' : '')) +
             row('Сырьё', esc(j.material || '—')) + row('Формат', esc(fmtNum(j.usedFormat || j.minFormat || 0)) + ' мм') +
             row('Нож', esc(j.dieNo || '—') + (di.state ? ' · ' + esc(di.state) : '') + (j.streams ? ' · ' + esc(j.streams) + ' руч.' : '')) +
-            row('Пробег ножа', esc(fmtNum(di.mileage || 0)) + ' → ' + esc(fmtNum(after)) + ' м' + (res ? ' из ' + esc(fmtNum(res)) : '')) +
+            row('Пробег ножа', esc(fmtNum(di.mileage || 0)) + ' → ' + esc(fmtNum(after)) + ' об' + (res ? ' из ' + esc(fmtNum(res)) : '')) +
             row('Вал', esc(j.cylinder || '—')) + row('Втулка', esc(j.sleeve || '—') + (j.sleeveWidth ? ' · ' + esc(fmtNum(j.sleeveWidth)) + ' мм' : '')) +
             row('Мастер-рулон', esc(j.masterRoll || '—')) + row('Статус', esc(j.status || '—')) + '</table>' +
             (f.blocks.length || f.warnings.length ? '<div style="margin-top:8px">' + this.badges(j) + '</div>' : '') +
@@ -483,7 +485,7 @@
             return '<tr><td>' + esc(c.cylinder || c.cylinderId) + '</td><td class="num">' + c.jobs + (c.unplaced ? ' <span class="atex-dp-badge is-warn" title="Не размещены «Упорядочить» — вал им всё равно нужен">' + c.unplaced + ' не размещ.</span>' : '') + '</td><td class="num">' + fmtNum(c.minutes) + '</td><td class="num">' + c.changes + '</td></tr>';
         }).join('');
         return '<h3 class="atex-dp-h">Ножи <span class="atex-dp-muted">горизонт ' + s.settings.horizonDays + ' дн. с ' + esc(fmtDate(s.now)) + ' · ' + (this.plan ? 'по плану «Упорядочить» (не записан)' : 'по записанному плану') + '</span></h3>' +
-            (kn ? '<table class="atex-dp-table"><thead><tr><th>Нож</th><th class="num">Заданий</th><th class="num">Минут</th><th class="num">Метров</th><th class="num">Пробег сейчас, м</th><th class="num">Пробег после плана, м</th><th class="num">Ресурс, м</th><th>Износ</th></tr></thead><tbody>' + kn + '</tbody></table>' : '<div class="atex-dp-empty">В горизонте плана заданий нет.</div>') +
+            (kn ? '<table class="atex-dp-table"><thead><tr><th>Нож</th><th class="num">Заданий</th><th class="num">Минут</th><th class="num">Метров</th><th class="num">Пробег сейчас, об</th><th class="num">Пробег после плана, об</th><th class="num">Ресурс, об</th><th>Износ</th></tr></thead><tbody>' + kn + '</tbody></table>' : '<div class="atex-dp-empty">В горизонте плана заданий нет.</div>') +
             '<h3 class="atex-dp-h">Валы</h3>' +
             (cy ? '<table class="atex-dp-table"><thead><tr><th>Вал</th><th class="num">Заданий</th><th class="num">Минут (с наладкой)</th><th class="num">Смен вала</th></tr></thead><tbody>' + cy + '</tbody></table>' : '<div class="atex-dp-empty">Нет данных.</div>');
     };

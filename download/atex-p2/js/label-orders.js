@@ -94,22 +94,22 @@
         return best == null ? '' : best;
     }
 
-    // Пробег ножей по строкам отчёта die_runs → { id ножа: метры }.
+    // Пробег ножей по строкам отчёта die_runs → { id ножа: обороты }.
     function mileageByDie(runRows) {
         var groups = {};
         (runRows || []).forEach(function(r) {
             var id = String(r.die_id || '');
             if (!id) return;
-            (groups[id] = groups[id] || []).push({ id: r.run_id, date: r.run_date, kind: r.run_kind, meters: r.meters });
+            (groups[id] = groups[id] || []).push({ id: r.run_id, date: r.run_date, kind: r.run_kind, revs: r.revs });
         });
         var out = {};
-        Object.keys(groups).forEach(function(id) { out[id] = lp.dieMileage(groups[id]).meters; });
+        Object.keys(groups).forEach(function(id) { out[id] = lp.dieMileage(groups[id]).revs; });
         return out;
     }
 
     // Ножи для подбора. t — resolveProductionTables(...).tables; selectableStates — { id
     // состояния: true } у состояний с «Нож подбирается»; cylinders — { id вала: раппорт, мм };
-    // mileage — { id ножа: метры } (null — пробег не прочитан).
+    // mileage — { id ножа: обороты } (null — пробег не прочитан).
     function buildDies(dieRecs, t, selectableStates, cylinders, mileage) {
         var r = (t.die && t.die.reqs) || {};
         return (dieRecs || []).map(function(rec) {
@@ -129,7 +129,7 @@
                 sleeveWidth: reqVal(rec, r.sleeveWidth),
                 state: reqVal(rec, r.state),
                 selectable: !!(stateId && selectableStates && selectableStates[stateId]),
-                meters: mileage ? (mileage[rec.id] || 0) : 0
+                revs: mileage ? (mileage[rec.id] || 0) : 0
             };
         });
     }
@@ -624,7 +624,7 @@
                 row('Ручьёв / на раппорте', esc((d.streams || '—') + ' / ' + (d.labelsPerRepeat || '—'))) +
                 row('Вал / раппорт', esc((d.cylinder || '—') + ' / ' + (d.repeatMm ? d.repeatMm + ' мм' : '—'))) +
                 row('Исп. формат', esc(d.usedFormat ? d.usedFormat + ' мм' : '—')) +
-                row('Пробег', esc(this.mileageOk ? fmtInt(d.meters) + ' м' : 'не прочитан'));
+                row('Пробег', esc(this.mileageOk ? fmtInt(d.revs) + ' об' : 'не прочитан'));
             if (plan.die.pick === lp.DIE_PICK.FOUND && plan.die.candidates.length > 1) {
                 html += '<div class="atex-lo-note">Автоподбор: точный размер и основа, наименьший пробег из ' + plan.die.candidates.length + ' подходящих.</div>';
             }
@@ -820,12 +820,12 @@
         if (!p) return;
         var w = num(p.width), l = num(p.length);
         var list = this.dies.filter(function(d) { return Math.abs(num(d.width) - w) <= 0.05 && Math.abs(num(d.length) - l) <= 0.05; })
-            .sort(function(a, b) { return a.meters - b.meters; });
+            .sort(function(a, b) { return a.revs - b.revs; });
         var html = '<h2 class="atex-lo-panel-title">Нож для ' + esc(p.width + ' × ' + p.length) + ' мм</h2>';
-        html += list.length ? '<table class="atex-lo-table"><thead><tr><th>Нож</th><th>Основа</th><th>Состояние</th><th class="num">Ручьёв</th><th>Вал</th><th class="num">Пробег, м</th><th></th></tr></thead><tbody>' +
+        html += list.length ? '<table class="atex-lo-table"><thead><tr><th>Нож</th><th>Основа</th><th>Состояние</th><th class="num">Ручьёв</th><th>Вал</th><th class="num">Пробег, об</th><th></th></tr></thead><tbody>' +
             list.map(function(d) {
                 return '<tr' + (d.selectable ? '' : ' class="is-muted"') + '><td>' + esc(d.no) + '</td><td>' + esc(d.base || '—') + '</td><td>' + esc(d.state || '—') +
-                    '</td><td class="num">' + esc(d.streams || '—') + '</td><td>' + esc(d.cylinder || '—') + '</td><td class="num">' + esc(fmtInt(d.meters)) +
+                    '</td><td class="num">' + esc(d.streams || '—') + '</td><td>' + esc(d.cylinder || '—') + '</td><td class="num">' + esc(fmtInt(d.revs)) +
                     '</td><td><button class="atex-lo-btn" type="button" data-lo-action="manual-choose" data-die="' + esc(d.id) + '">Выбрать</button></td></tr>';
             }).join('') + '</tbody></table>'
             : '<div class="atex-lo-empty">Ножей этого размера в базе нет.</div>';

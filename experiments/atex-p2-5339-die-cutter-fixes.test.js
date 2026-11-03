@@ -32,7 +32,7 @@ var NOW = Date.UTC(2026, 10, 1, 9, 0, 0) / 1000;
 
 function job(o) {
     var base = { id: '1', start: NOW, status: 'Запланировано', pullsPlan: 5, pullsFact: 0, footage: 1000, setup: 30,
-        machineId: 'M1', dieId: 'D1', dieNo: '1247', streams: 4, cylinderId: 'C96', cylinder: '96',
+        machineId: 'M1', dieId: 'D1', dieNo: '1247', streams: 4, cylinderId: 'C96', cylinder: '96', repeatMm: 1000,
         rollId: '', roll: '', rollLength: 0, rollRest: '', rollFormat: 0, order: '3257',
         labelWidth: 58, labelLength: 40, labelsPerRoll: 1000, material: 'Бумага' };
     Object.keys(o || {}).forEach(function(k) { base[k] = o[k]; });
@@ -145,7 +145,7 @@ function roll(o) {
     var p2 = DC.takeoffPlan(job({ streams: 4 }), [], [], [], 1, 200);
     assert(p2.gps[0].rolls === 4 && p2.warnings.length === 1, 'D4: данных нет — партия по ручьям и одно видимое предупреждение в плане');
     // Хвост: партия ГП съёма, записанного раньше, считается от метража ЭТОГО съёма, а не от нового.
-    var runs = [{ id: 'r1', date: NOW, meters: 100, kind: 'вырубка', jobId: '1', dieId: 'D1' }];
+    var runs = [{ id: 'r1', date: NOW, revs: 100, kind: 'вырубка', jobId: '1', dieId: 'D1' }];
     var tail = DC.takeoffPlan(job({ streams: 4, rollLenM: 50, status: 'В работе' }), [], runs, [], 0, 0);
     assert(tail.gps.length === 1 && tail.gps[0].rolls === 8, 'D4: дописывание хвоста — рулоны по метражу записанного съёма (100 м → 2 × 4 = 8)', JSON.stringify(tail.gps));
     // Расчёт ролика для задания по ножу и валу

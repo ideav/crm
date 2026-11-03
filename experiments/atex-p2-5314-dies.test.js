@@ -9,7 +9,7 @@
 //      сумма за всю жизнь ножа; дата движения приходит unix-секундами (object/) или строкой;
 //   4. история пробега ножа — с колонкой «Накоплено» (нарастающий итог);
 //   5. ресурс ножа — у его марки (справочник «Марка ножа»), без марки — ресурс по умолчанию
-//      из «Настройки» (DIE_RESOURCE_DEFAULT_M); ресурса нет нигде — «у ресурса» не считается.
+//      из «Настройки» (DIE_RESOURCE_DEFAULT_REV); ресурса нет нигде — «у ресурса» не считается.
 //
 // Run with: node experiments/atex-p2-5314-dies.test.js
 
@@ -84,24 +84,24 @@ var A = LP.DIE_ACTION || {};
     if (typeof LP.dieMileageIndex !== 'function') return;
     var rows = [
         // нож 10: начальный остаток 5000, вырубка 2000, вырубка 700 (дата строкой)
-        { die_id: '10', run_id: '1', run_date: '1790000000', run_kind: '1000304:начальный остаток', meters: '5000' },
-        { die_id: '10', run_id: '2', run_date: '1790003600', run_kind: 'вырубка', meters: '2000.00' },
-        { die_id: '10', run_id: '4', run_date: '25.09.2026 10:00:00', run_kind: 'вырубка', meters: '700' },
+        { die_id: '10', run_id: '1', run_date: '1790000000', run_kind: '1000304:начальный остаток', revs: '5000' },
+        { die_id: '10', run_id: '2', run_date: '1790003600', run_kind: 'вырубка', revs: '2000.00' },
+        { die_id: '10', run_id: '4', run_date: '25.09.2026 10:00:00', run_kind: 'вырубка', revs: '700' },
         // нож 20: две вырубки
-        { die_id: '20', run_id: '5', run_date: '1790000000', run_kind: 'вырубка', meters: '100' },
-        { die_id: '20', run_id: '6', run_date: '1790000001', run_kind: 'вырубка', meters: '250,5' },
+        { die_id: '20', run_id: '5', run_date: '1790000000', run_kind: 'вырубка', revs: '100' },
+        { die_id: '20', run_id: '6', run_date: '1790000001', run_kind: 'вырубка', revs: '250,5' },
         // нож 30: неизвестный вид; «заточка» — тоже неизвестный вид, пробег не обнуляет
-        { die_id: '30', run_id: '7', run_date: '1790000000', run_kind: 'перемотка', meters: '9' },
-        { die_id: '30', run_id: '8', run_date: '1790000001', run_kind: 'вырубка', meters: '40' },
-        { die_id: '30', run_id: '9', run_date: '1790000002', run_kind: 'заточка', meters: '0' },
-        { die_id: '30', run_id: '10', run_date: '1790000003', run_kind: 'вырубка', meters: '60' }
+        { die_id: '30', run_id: '7', run_date: '1790000000', run_kind: 'перемотка', revs: '9' },
+        { die_id: '30', run_id: '8', run_date: '1790000001', run_kind: 'вырубка', revs: '40' },
+        { die_id: '30', run_id: '9', run_date: '1790000002', run_kind: 'заточка', revs: '0' },
+        { die_id: '30', run_id: '10', run_date: '1790000003', run_kind: 'вырубка', revs: '60' }
     ];
     var idx = LP.dieMileageIndex(rows);
-    assert(idx['10'] && idx['10'].meters === 7700 && idx['10'].runs === 3 && idx['10'].errors.length === 0,
+    assert(idx['10'] && idx['10'].revs === 7700 && idx['10'].runs === 3 && idx['10'].errors.length === 0,
         'нож 10: пробег за всю жизнь 5000 + 2000 + 700 = 7700 м, 3 движения', JSON.stringify(idx['10']));
-    assert(idx['20'] && Math.abs(idx['20'].meters - 350.5) < 1e-9,
+    assert(idx['20'] && Math.abs(idx['20'].revs - 350.5) < 1e-9,
         'нож 20: 350.5 м (десятичная запятая)', JSON.stringify(idx['20']));
-    assert(idx['30'] && idx['30'].meters === 100 && idx['30'].errors.length === 2,
+    assert(idx['30'] && idx['30'].revs === 100 && idx['30'].errors.length === 2,
         'нож 30: неизвестные виды (и «заточка») в сумму не идут, счёт не обнуляют и названы ошибками', JSON.stringify(idx['30']));
     assert(!idx['40'], 'нож без движений в индекс не попадает (пробег 0 считает вызывающий)');
 })();
@@ -111,10 +111,10 @@ var A = LP.DIE_ACTION || {};
     assert(typeof LP.dieRunHistory === 'function', 'dieRunHistory экспортирована');
     if (typeof LP.dieRunHistory !== 'function') return;
     var h = LP.dieRunHistory([
-        { id: 'c', date: 30, kind: 'вырубка', meters: 300 },
-        { id: 'a', date: 10, kind: 'начальный остаток', meters: 1000 },
-        { id: 'b', date: 20, kind: 'вырубка', meters: 200 },
-        { id: 'd', date: 40, kind: 'вырубка', meters: 50 }
+        { id: 'c', date: 30, kind: 'вырубка', revs: 300 },
+        { id: 'a', date: 10, kind: 'начальный остаток', revs: 1000 },
+        { id: 'b', date: 20, kind: 'вырубка', revs: 200 },
+        { id: 'd', date: 40, kind: 'вырубка', revs: 50 }
     ]);
     var acc = h.map(function(r) { return r.id + ':' + r.accumulated; }).join(',');
     assert(acc === 'a:1000,b:1200,c:1500,d:1550', 'история по дате, «Накоплено» — нарастающий итог за всю жизнь ножа', '(получено ' + acc + ')');
@@ -126,14 +126,14 @@ var A = LP.DIE_ACTION || {};
     if (typeof LP.dieResource === 'function') {
         var r1 = LP.dieResource('490 000', '300000'), r2 = LP.dieResource('', '300 000'),
             r3 = LP.dieResource('0', '300000'), r4 = LP.dieResource('', '');
-        assert(r1.meters === 490000 && r1.source === 'brand', 'ресурс марки важнее ресурса по умолчанию', JSON.stringify(r1));
-        assert(r2.meters === 300000 && r2.source === 'default' && r3.meters === 300000 && r3.source === 'default',
+        assert(r1.revs === 490000 && r1.source === 'brand', 'ресурс марки важнее ресурса по умолчанию', JSON.stringify(r1));
+        assert(r2.revs === 300000 && r2.source === 'default' && r3.revs === 300000 && r3.source === 'default',
             'марки нет или у марки ресурс пуст/0 — ресурс по умолчанию', JSON.stringify([r2, r3]));
-        assert(isNaN(r4.meters) && r4.source === '', 'ресурса нет нигде — NaN, а не 0', JSON.stringify(r4));
+        assert(isNaN(r4.revs) && r4.source === '', 'ресурса нет нигде — NaN, а не 0', JSON.stringify(r4));
     }
     var cfg = (LP.PRODUCTION_CONFIGS[LP.PRODUCT_KIND.LABEL] || {}).tables || {};
-    assert(cfg.dieBrand && cfg.dieBrand.name === 'Марка ножа' && cfg.dieBrand.reqs.resource === 'Ресурс, м' &&
-        cfg.die.reqs.brand === 'Марка ножа', 'конфигурация: справочник «Марка ножа» с «Ресурс, м», у ножа ссылка на марку');
+    assert(cfg.dieBrand && cfg.dieBrand.name === 'Марка ножа' && cfg.dieBrand.reqs.resource === 'Ресурс, об' &&
+        cfg.die.reqs.brand === 'Марка ножа', 'конфигурация: справочник «Марка ножа» с «Ресурс, об», у ножа ссылка на марку');
     assert(typeof LP.dieWearLevel === 'function', 'dieWearLevel экспортирована');
     if (typeof LP.dieWearLevel !== 'function') return;
     assert(LP.dieWearLevel(1000, '') === '' && LP.dieWearLevel(1000, '0') === '',
@@ -186,21 +186,21 @@ var A = LP.DIE_ACTION || {};
     assert(brands.b1 === '1 000' && brands.b2 === '3000' && brands.b3 === '', 'марка → ресурс из справочника', JSON.stringify(brands));
 
     var mileage = LP.dieMileageIndex([
-        { die_id: '1', run_id: '1', run_date: '1', run_kind: 'вырубка', meters: '950' },     // near (ресурс марки 1000)
-        { die_id: '2', run_id: '2', run_date: '1', run_kind: 'вырубка', meters: '2100' },    // over (ресурс по умолчанию 2000)
-        { die_id: '3', run_id: '3', run_date: '1', run_kind: 'вырубка', meters: '2500' },    // ok: у BLACK TOP 3in1 ресурс 3000
-        { die_id: '4', run_id: '4', run_date: '1', run_kind: 'вырубка', meters: '7000' },    // over, но списан
-        { die_id: '5', run_id: '5', run_date: '1', run_kind: 'вырубка', meters: '10' }
+        { die_id: '1', run_id: '1', run_date: '1', run_kind: 'вырубка', revs: '950' },     // near (ресурс марки 1000)
+        { die_id: '2', run_id: '2', run_date: '1', run_kind: 'вырубка', revs: '2100' },    // over (ресурс по умолчанию 2000)
+        { die_id: '3', run_id: '3', run_date: '1', run_kind: 'вырубка', revs: '2500' },    // ok: у BLACK TOP 3in1 ресурс 3000
+        { die_id: '4', run_id: '4', run_date: '1', run_kind: 'вырубка', revs: '7000' },    // over, но списан
+        { die_id: '5', run_id: '5', run_date: '1', run_kind: 'вырубка', revs: '10' }
     ]);
     var rows = D.buildDieRows(dies, t, mileage, brands, '2000');
     var r1 = rows[0];
-    assert(r1.no === '736116' && r1.cylinderId === '96' && r1.state === LP.DIE_STATE.WORKING && r1.meters === 950 &&
+    assert(r1.no === '736116' && r1.cylinderId === '96' && r1.state === LP.DIE_STATE.WORKING && r1.revs === 950 &&
         r1.brand === 'AI(Standard)' && r1.resource === 1000 && r1.resourceSource === 'brand' && r1.wear === 'near' && r1.width === '148.00',
         'строка ножа: номер, вал, марка, ресурс марки, состояние, пробег, износ', JSON.stringify(r1));
     assert(rows[1].resource === 2000 && rows[1].resourceSource === 'default' && rows[1].wear === 'over',
         'у марки ресурс не задан — ресурс по умолчанию', JSON.stringify(rows[1]));
     assert(rows[2].resource === 3000 && rows[2].wear === 'ok', 'износ считается от ресурса своей марки: 2500 из 3000 — ещё ok', JSON.stringify(rows[2]));
-    assert(rows[5].meters === 0 && rows[5].state === '' && rows[5].brand === '' && rows[5].resource === 2000 && rows[5].wear === 'ok',
+    assert(rows[5].revs === 0 && rows[5].state === '' && rows[5].brand === '' && rows[5].resource === 2000 && rows[5].wear === 'ok',
         'нож без движений и без марки: пробег 0, ресурс по умолчанию', JSON.stringify(rows[5]));
 
     var k = D.dieKpi(rows);
@@ -226,11 +226,11 @@ var A = LP.DIE_ACTION || {};
     assert(c96.dies === 2 && c96.working === 2 && c98.dies === 1 && c98.working === 0, 'ножей на валу (рабочих)');
     assert(c96.repeatCheck.ok && !c104.repeatCheck.ok, 'раппорт вала сверяется с зубьями × 3.175 (104 → 330.2, а не 331)');
 
-    assert(D.RESOURCE_KEY === 'DIE_RESOURCE_DEFAULT_M', 'ресурс по умолчанию — настройка DIE_RESOURCE_DEFAULT_M');
+    assert(D.RESOURCE_KEY === 'DIE_RESOURCE_DEFAULT_REV', 'ресурс по умолчанию — настройка DIE_RESOURCE_DEFAULT_REV');
     var settings = [
-        { key: 'DIE_RESOURCE_DEFAULT_M', type: '', value: '200000' },
-        { key: 'DIE_RESOURCE_DEFAULT_M', type: 'ATEH1', value: '300 000' },
-        { key: 'DIE_RESOURCE_DEFAULT_M', type: 'ATEH', value: '250000' }
+        { key: 'DIE_RESOURCE_DEFAULT_REV', type: '', value: '200000' },
+        { key: 'DIE_RESOURCE_DEFAULT_REV', type: 'ATEH1', value: '300 000' },
+        { key: 'DIE_RESOURCE_DEFAULT_REV', type: 'ATEH', value: '250000' }
     ];
     assert(D.settingValue(settings, D.RESOURCE_KEY, 'ateh1') === '300 000' && D.settingValue(settings, D.RESOURCE_KEY, 'ateh') === '250000' &&
         D.settingValue(settings.slice(0, 1), D.RESOURCE_KEY, 'ateh') === '200000' && D.settingValue([], D.RESOURCE_KEY, 'ateh') === '',
