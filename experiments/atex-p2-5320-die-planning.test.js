@@ -31,7 +31,9 @@ try { C = require('../download/atex-p2/js/die-planning-core.js').core; }
 catch (e) { console.log('FAIL — модуль download/atex-p2/js/die-planning-core.js не загружается: ' + e.message); process.exitCode = 1; C = null; }
 
 if (C) (function() {
-    var S = C.readSettings([], 'ateh1');
+    // Нормы вала 90 и втулки 20 — явно: сценарии ниже на них посчитаны; умолчания с #5376 —
+    // вал 45 (туррель 90), втулка 15, их проверяет experiments/atex-p2-5376-turret-idle-norms.test.js.
+    var S = C.readSettings([{ key: 'DIE_CYLINDER_CHANGE_MN', type: 'ATEH', value: '90' }, { key: 'DIE_SLEEVE_CHANGE_MN', type: 'ATEH', value: '20' }], 'ateh1');
     function ts(y, mo, d, h, mi) { return Date.UTC(y, mo - 1, d, h || 0, mi || 0) / 1000 - 180 * 60; }   // Москва
     var MON = ts(2026, 11, 2, 8, 0);
     function J(id, o) {
@@ -45,7 +47,7 @@ if (C) (function() {
 
     // ── 1. Нормы ─────────────────────────────────────────────────────────────
     assert(S.cylinderChange === 90 && S.knifeChange === 20 && S.speed === 44 && S.dayStartMin === 480 && S.dayCapacityMin === 455,
-        'нормы по умолчанию: вал 90, нож 20, 44 м/мин, смена с 08:00, 455 мин', JSON.stringify(S));
+        'нормы: вал 90 (задан), нож 20, 44 м/мин, смена с 08:00, 455 мин', JSON.stringify(S));
     var S2 = C.readSettings([{ key: 'DIE_CYLINDER_CHANGE_MN', type: 'ATEH', value: '60' }, { key: 'DIE_SPEED_M_MIN', type: 'ATEH', value: '50' },
         { key: 'DIE_KNIFE_CHANGE_MN', type: 'ATEH', value: 'мусор' }], 'ateh1');
     assert(S2.cylinderChange === 60 && S2.speed === 50 && S2.knifeChange === 20, 'настройки читаются, мусор — значение по умолчанию', JSON.stringify(S2));

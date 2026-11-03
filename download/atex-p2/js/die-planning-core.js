@@ -34,9 +34,12 @@
 
     // Настройки: ключ в «Настройке» → [поле, значение по умолчанию, допустимо ли 0].
     var SETTING_KEYS = {
-        cylinderChange: ['DIE_CYLINDER_CHANGE_MN', 90, true],
+        // Смена вала: обычный станок — 45 мин, станок с туррелью — 90 (переналадка туррели).
+        cylinderChange: ['DIE_CYLINDER_CHANGE_MN', 45, true],
+        turretCylinderChange: ['DIE_TURRET_CYLINDER_CHANGE_MN', 90, true],
         knifeChange: ['DIE_KNIFE_CHANGE_MN', 20, true],
-        sleeveChange: ['DIE_SLEEVE_CHANGE_MN', 20, true],
+        // Смена втулки: втулки надевают на 3 револьверных вала, пока идёт намотка.
+        sleeveChange: ['DIE_SLEEVE_CHANGE_MN', 15, true],
         speed: ['DIE_SPEED_M_MIN', 44, false],
         shortRollSpeed: ['DIE_SPEED_SHORT_M_MIN', 28, false],
         shortRollM: ['DIE_SHORT_ROLL_M', 50, true],
@@ -47,7 +50,9 @@
         tolerance: ['JUMBO_FORMAT_TOLERANCE_MM', 15, true],
         dieResource: ['DIE_RESOURCE_DEFAULT_M', 300000, false],
         // Туррель — для длинных заданий: метраж от порога (по плану заказчика — от 12,6 км; 0 — без порога).
-        turretLongM: ['DIE_TURRET_LONG_M', 12600, true]
+        turretLongM: ['DIE_TURRET_LONG_M', 12600, true],
+        // Простой туррели, рабочих минут: её очередь пуста столько — она берёт обычные задания (#5376).
+        turretIdle: ['TURREL_IDLE_MN', 455, true]
     };
     var DEFAULTS = { tzOffsetMin: 180 };
     Object.keys(SETTING_KEYS).forEach(function(k) { DEFAULTS[k] = SETTING_KEYS[k][1]; });
@@ -147,19 +152,23 @@
         if (!sameKnife(prev, next)) return 'knife';
         return differentSleeve(prev, next) ? 'sleeve' : 'none';
     }
-    function setupMinutesOfKind(kind, s) {
-        return kind === 'cylinder' ? s.cylinderChange : kind === 'knife' ? s.knifeChange : kind === 'sleeve' ? s.sleeveChange : 0;
+    // machine — станок: смена вала на туррели — DIE_TURRET_CYLINDER_CHANGE_MN, на обычном — DIE_CYLINDER_CHANGE_MN.
+    function cylinderChangeOf(s, machine) { return machine && machine.turret ? s.turretCylinderChange : s.cylinderChange; }
+    function setupMinutesOfKind(kind, s, machine) {
+        return kind === 'cylinder' ? cylinderChangeOf(s, machine) : kind === 'knife' ? s.knifeChange : kind === 'sleeve' ? s.sleeveChange : 0;
     }
-    function setupMinutes(prev, next, settings) {
+    function setupMinutes(prev, next, settings, machine) {
         var s = withDefaults(settings);
-        return setupMinutesOfKind(setupKind(prev, next), s);
+        return setupMinutesOfKind(setupKind(prev, next), s, machine);
     }
-    // Вид наладки по записанным минутам (задание уже стоит): самая дорогая норма, которой хватает.
-    function kindOfSetup(setup, s) {
+    // Вид наладки по записанным минутам (задание уже стоит): норма, равная минутам, иначе самая
+    // дорогая норма, которой хватает (нормы станка machine).
+    function kindOfSetup(setup, s, machine) {
         if (!(setup > 0)) return 'none';
-        if (setup >= s.cylinderChange) return 'cylinder';
-        if (setup >= s.knifeChange) return 'knife';
-        return 'sleeve';
+        var norms = [['cylinder', cylinderChangeOf(s, machine)], ['knife', s.knifeChange], ['sleeve', s.sleeveChange]], i, best = null;
+        for (i = 0; i < norms.length; i++) if (norms[i][1] === setup) return norms[i][0];
+        for (i = 0; i < norms.length; i++) if (norms[i][1] <= setup && (!best || norms[i][1] > best[1])) best = norms[i];
+        return best ? best[0] : 'sleeve';
     }
     // Длина одного ролика, м: метраж × ручьи / рулонов (раппорт ножа уже включает зазор).
     function rollLengthM(job) {
@@ -284,8 +293,8 @@
         function tagSegs(segs, jobId) { segs.forEach(function(g) { g.jobId = jobId; }); return segs; }
 
         // Размещение задания после prev с курсора cur.
-        function place(cur, prev, job) {
-            var kind = setupKind(prev, job), setup = setupMinutes(prev, job, s), run = jobRunMinutes(job, s), segs = [], c = cur;
+        function place(cur, prev, job, machine) {
+            var kind = setupKind(prev, job), setup = setupMinutesOfKind(kind, s, machine), run = jobRunMinutes(job, s), segs = [], c = cur;
             if (setup > 0) { var a = cal.advance(c, setup, 'setup-' + kind); segs = segs.concat(a.segments); c = a.cursor; }
             if (run > 0 || !segs.length) { var b = cal.advance(c, run, 'run'); segs = segs.concat(b.segments); c = b.cursor; }
             tagSegs(segs, job.id);
@@ -293,9 +302,9 @@
             return { item: item, cursor: c };
         }
         // Задание, которое уже стоит: со своего старта и своей наладкой.
-        function layoutFixed(job) {
+        function layoutFixed(job, machine) {
             var setup = num(job.setup), run = num(job.duration) > 0 ? num(job.duration) : jobRunMinutes(job, s);
-            var kind = kindOfSetup(setup, s);
+            var kind = kindOfSetup(setup, s, machine);
             var c = cal.cursorAt(job.start), segs = [];
             if (setup > 0) { var a = cal.advance(c, setup, 'setup-' + kind); segs = segs.concat(a.segments); c = a.cursor; }
             var b = cal.advance(c, run, 'run'); segs = segs.concat(b.segments); c = b.cursor;
@@ -315,10 +324,10 @@
             var h = (hist[id] || []).sort(function(a, b) { return a.start - b.start; }), x = st[id], prev = null;
             h.forEach(function(j) {
                 if (isDone(j)) {
-                    if (j.start >= todayStart) { var f = layoutFixed(j); f.item.machineId = id; f.item.done = true; x.fixed.push(f.item); }
+                    if (j.start >= todayStart) { var f = layoutFixed(j, x.machine); f.item.machineId = id; f.item.done = true; x.fixed.push(f.item); }
                     if (j.start <= from) prev = j;
                 } else {
-                    var r = layoutFixed(j); r.item.machineId = id; x.fixed.push(r.item);
+                    var r = layoutFixed(j, x.machine); r.item.machineId = id; x.fixed.push(r.item);
                     if (curKey(r.cursor) > curKey(x.cursor0)) x.cursor0 = r.cursor;
                     prev = j;
                 }
@@ -335,44 +344,88 @@
             cands.push(j);
         });
         cands.sort(compareJobs);
-        cands.forEach(function(j) {
-            var best = null, turret = null, reasons = [];
-            // записанное диспетчером на туррель задание, которое ей не подходит, со станка не снимается
-            var pinned = order.filter(function(id) { return st[id].machine.turret && String(j.machineId || '') === String(id) && !turretFits(j, s); })[0];
-            order.forEach(function(id, idx) {
+
+        // Туррель берёт неподходящие ей задания только как обычный станок: когда её очередь
+        // (подходящие туррели задания) пуста TURREL_IDLE_MN рабочих минут (#5376).
+        // Проход 1 — туррель только под свою очередь; проход 2 — её очередь остаётся как есть,
+        // остальные задания раскладываются заново, туррель открыта им с конца очереди + простой.
+        // Появились задания туррели — при следующем «Упорядочить» очередь растёт, обычные уходят.
+        var turrets = order.filter(function(id) { return st[id].machine.turret; });
+        // open — { id туррели: курсор, с которого она берёт неподходящие задания } (проход 2) или null.
+        function assignOne(j, open, sink) {
+            var best = null, turret = null, reasons = [], fits = turretFits(j, s);
+            // записанное на туррель неподходящее задание остаётся на ней, если туррель свободна сразу
+            var pinned = open ? turrets.filter(function(id) {
+                return !fits && String(j.machineId || '') === String(id) && curKey(open[id]) <= curKey(st[id].cursor);
+            })[0] : null;
+            order.forEach(function(id) {
                 if (pinned && id !== pinned) return;
-                var x = st[id], chk = machineAllows(x.machine, j, s);
-                if (!chk.ok) { reasons.push((x.machine.name || id) + ': ' + chk.reason); return; }
-                var t = place(x.cursor, x.prev, j);
+                var x = st[id], m = x.machine, cur = x.cursor, chk;
+                if (m.turret && open && fits) return;   // подходящее туррели решено в проходе 1
+                if (m.turret && !fits) {
+                    // туррель как обычный станок (ограничения туррели снимаются: её отцепляют)
+                    chk = open ? machineAllows(m, Object.assign({}, j, { machineId: m.id }), s) : machineAllows(m, Object.assign({}, j, { machineId: '' }), s);
+                    if (open && chk.ok && curKey(open[id]) > curKey(cur)) cur = open[id];
+                } else chk = machineAllows(m, j, s);
+                if (!chk.ok) { reasons.push((m.name || id) + ': ' + chk.reason); return; }
+                var t = place(cur, x.prev, j, m);
                 var better = !best || t.item.end < best.t.item.end || (t.item.end === best.t.item.end && t.item.setup < best.t.item.setup);
                 if (better) best = { id: id, t: t };
-                if (x.machine.turret && (!turret || t.item.end < turret.t.item.end)) turret = { id: id, t: t };
+                if (m.turret && (!turret || t.item.end < turret.t.item.end)) turret = { id: id, t: t };
             });
             // подходящее туррели — на туррель, если там оно не уходит в просрочку (или и так опаздывает везде)
-            if (turret && best && turret.id !== best.id && turretFits(j, s)) {
+            if (turret && best && turret.id !== best.id && fits) {
                 var due = num(j.due);
                 if (!(due > 0) || turret.t.item.end <= due || best.t.item.end > due) best = turret;
             }
-            if (!best) { unplaced.push({ jobId: j.id, reasons: reasons.length ? reasons : ['нет станков'] }); return; }
+            if (!best) { sink.push({ jobId: j.id, reasons: reasons.length ? reasons : ['нет станков'] }); return; }
             var x = st[best.id];
             x.seq.push(j); x.cursor = best.t.cursor; x.prev = j;
-        });
+        }
+        var pass1 = [];
+        cands.forEach(function(j) { assignOne(j, null, turrets.length ? pass1 : unplaced); });
+        if (turrets.length) {
+            var open = {}, queued = {};
+            turrets.forEach(function(id) {
+                var x = st[id], last = null;
+                if (x.seq.length) last = x.cursor;
+                else (hist[id] || []).forEach(function(j) {
+                    if (!turretFits(j, s)) return;
+                    var c = layoutFixed(j, x.machine).cursor;
+                    if (!last || curKey(c) > curKey(last)) last = c;
+                });
+                // очереди туррели не было — она простаивает давно, открыта сразу
+                open[id] = last ? (s.turretIdle > 0 ? cal.advance(last, s.turretIdle, 'idle').cursor : cal.normalize(last)) : x.cursor0;
+                x.openAt = open[id];
+                x.queue = x.seq.slice();
+                x.queue.forEach(function(j) { queued[j.id] = true; });
+            });
+            order.forEach(function(id) { var x = st[id]; x.seq = []; x.cursor = x.cursor0; x.prev = x.prev0; });
+            turrets.forEach(function(id) {
+                var x = st[id];
+                x.queue.forEach(function(j) { var t = place(x.cursor, x.prev, j, x.machine); x.seq.push(j); x.cursor = t.cursor; x.prev = j; });
+            });
+            cands.forEach(function(j) { if (!queued[j.id]) assignOne(j, open, unplaced); });
+        }
 
         function runSeq(x, seq) {
-            var cur = x.cursor0, prev = x.prev0, items = [], setupTotal = 0;
-            seq.forEach(function(j) {
-                var t = place(cur, prev, j);
+            var cur = x.cursor0, prev = x.prev0, items = [], setupTotal = 0, open = x.openAt;
+            seq.forEach(function(j, i) {
+                // обычное задание на туррели — не раньше, чем она открыта (конец очереди + простой)
+                if (open && x.queue && i >= x.queue.length && curKey(open) > curKey(cur)) cur = open;
+                var t = place(cur, prev, j, x.machine);
                 t.item.machineId = x.machine.id;
                 items.push(t.item); setupTotal += t.item.setup; cur = t.cursor; prev = j;
             });
             return { items: items, setupTotal: setupTotal };
         }
         // Группировка вал → нож → сырьё без новой просрочки.
+        // У туррели переставляется только её очередь: обычные задания стоят после неё.
         function improve(x) {
-            var seq = x.seq.slice(), base = runSeq(x, seq);
-            for (var p = 0; p < seq.length - 1; p++) {
+            var seq = x.seq.slice(), base = runSeq(x, seq), lim = x.queue ? x.queue.length : seq.length;
+            for (var p = 0; p < lim - 1; p++) {
                 var cur = seq[p], bestQ = -1, bestR = affinity(cur, seq[p + 1]);
-                for (var q = p + 2; q < seq.length; q++) {
+                for (var q = p + 2; q < lim; q++) {
                     var r = affinity(cur, seq[q]);
                     if (r > bestR) { bestR = r; bestQ = q; }
                 }
@@ -625,7 +678,7 @@
             var cur = null, items = [];
             list.forEach(function(j) {
                 var setup = num(j.setup), run = num(j.duration) > 0 ? num(j.duration) : jobRunMinutes(j, s);
-                var kind = kindOfSetup(setup, s);
+                var kind = kindOfSetup(setup, s, m);
                 var c = num(j.start) > 0 ? cal.cursorAt(num(j.start)) : (cur || cal.cursorAt(num(from)));
                 if (cur && curKey(cur) > curKey(c)) c = cur;
                 var segs = [];

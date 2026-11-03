@@ -21,7 +21,9 @@ function assert(cond, name, extra) {
 
 var C = require('../download/atex-p2/js/die-planning-core.js').core;
 // DIE_KNIFE_CHANGE_MN=60 — значение «Настройки» ateh1 (решение владельца 01.11.2026); остальное — умолчания.
-var S = C.readSettings([{ key: 'DIE_KNIFE_CHANGE_MN', type: 'ATEH', value: '60' }], 'ateh1');
+// Вал 90 и втулка 20 заданы явно (умолчания с #5376 — вал 45 / туррель 90, втулка 15).
+var S = C.readSettings([{ key: 'DIE_KNIFE_CHANGE_MN', type: 'ATEH', value: '60' }, { key: 'DIE_CYLINDER_CHANGE_MN', type: 'ATEH', value: '90' },
+    { key: 'DIE_SLEEVE_CHANGE_MN', type: 'ATEH', value: '20' }], 'ateh1');
 
 // 1. Наладка — все сочетания «вал × нож × втулка».
 var base = { cylinderId: 'c1', dieId: 'k1', sleeveId: 's76', sleeve: '76 мм' };
