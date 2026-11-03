@@ -541,7 +541,12 @@ function Ext_core_grants(){
 # хост учётки-читателя — INTEGRAM_EXT_READER_HOST ('%'), SSH-туннель — INTEGRAM_EXT_SSH_HOST/_PORT/_USER.
 function Ext_core_action($action, $userId, $password){
 	global $z, $connection;
-	$db = $GLOBALS["DB_CONN"];
+	$db = isset($GLOBALS["DB_CONN"]) && is_array($GLOBALS["DB_CONN"]) ? $GLOBALS["DB_CONN"] : array();
+	if(empty($db["name"])){	# connection.php без реквизитов (DB_CONN): база — текущая база соединения приложения
+		$row = mysqli_fetch_row(mysqli_query($connection, "SELECT DATABASE()"));
+		$db["name"] = $row[0];
+	}
+	$db += array("host" => "localhost", "port" => 3306);
 	$conn = $connection;
 	$admin = integram_env("INTEGRAM_EXT_ADMIN_USER", "");
 	if($admin !== ""){
