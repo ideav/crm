@@ -1,0 +1,608 @@
+<style>
+label {
+    font-size: 90%;
+    color: gray;
+    margin-bottom: 0.2rem;
+}
+t9n,.t9n {
+    display: none;
+}
+#savebtn,#cancelbtn {
+    width: 114px;
+}
+#savebtn,#cancelbtn {
+    width: 114px;
+}
+.new-db {
+    width: 100%;
+}
+.card-header {
+    padding: 0.75rem;
+}
+.card-active {
+    font-weight: bold;
+}
+.db-cards {
+    display: flex;
+}
+.db-card {
+    border: 1px solid rgba(0,0,0,.125);
+    border-radius: 0.25rem;
+    padding: 1.25rem;
+}
+.gray {
+    color: gray!important;
+}
+.gray:hover {
+    color: gray!important;
+}
+</style>
+<div>
+  <div class="col-12 col-lg-10 col-xl-8 mt-2 p-1 p-sm-3">
+    <div class="card shadow-lg" style=" border-radius: .25rem; border: 1px solid rgba(0,0,0,.125);">
+      <div class="card-body p-1 p-sm-3">
+            <h2><t9n>[RU]Личный кабинет[EN]My private space</t9n><span class="plan"></span></h2>
+            <div class="form-row no-gutters mt-2 mb-1">
+                <div class="col-12 col-md-6 mt-2" onclick="activateTab('','profile')">
+                    <center><img id="t280" height="150"></center>
+                </div>
+                <div class="col-12 col-md-6 mt-3">
+                    <div class="card-columns">
+                        <center>
+                            <div class="card text-white bg-primary mb-3" style="max-width: 9rem;" onclick="activateTab(this,'bonus')">
+                              <div class="card-header"><t9n>[RU]Бонус[EN]Bonus</t9n></div>
+                              <div class="card-body">
+                                <h5 class="card-title bonus">-</h5>
+                                <p class="card-text"></p>
+                              </div>
+                            </div>
+                            <div id="bal" class="card text-white bg-success mb-3" style="max-width: 9rem;" onclick="activateTab(this,'balance')">
+                              <div class="card-header"><t9n>[RU]Баланс[EN]Balance</t9n></div>
+                              <div class="card-body">
+                                <h5 class="card-title balance">-</h5>
+                                <p class="card-text"></p>
+                              </div>
+                            </div>
+                            <div class="card text-white bg-info mb-3" style="max-width: 9rem;" onclick="activateTab(this,'referrals')">
+                              <div class="card-header"><t9n>[RU]Рефералы[EN]Referrals</t9n></div>
+                              <div class="card-body">
+                                <h5 class="card-title referrals">-</h5>
+                                <p class="card-text"></p>
+                              </div>
+                            </div>
+                        </center>
+                    </div>
+                </div>
+                <div class="col-12 mt-5 hi-bonus" style="display:none">
+                    <div class="alert alert-success" role="alert">
+                        <t9n>[RU]Поздравляем! Вам начислен приветственный бонус.[EN]Congratulations! You have received a welcome bonus.</t9n>
+                    </div>
+                </div>
+            </div>
+            <div class="lk-tab mt-3 p-1 p-sm-3 shadow" id="bonus" style="display:none">
+                <h3><t9n>[RU]Бонусы[EN]Bonus</t9n></h3><br />
+                <p><t9n>[RU]Вы получаете бонусы при регистрации и&nbsp;при совершении некоторых действий: прохождение уроков, активность в&nbsp;социальных сетях и&nbsp;участие в&nbsp;промо-акциях Интеграла. Актуальные предложения будут приходить вам на&nbsp;почту.
+                    [EN]You get your first bonus upon Ideav registration, and then we&nbsp;deliver this kind of&nbsp;reward when you complete lessons, participate in&nbsp;promo-actions, and other Ideav related activities. We&nbsp;will inform you about those by&nbsp;email.</t9n>
+                </p>
+                <p><t9n>[RU]Бонусы можно конвертировать в&nbsp;валюту вашего депозита и&nbsp;пополнять таким образом баланс вашего счета: 1&nbsp;бонус&nbsp;=&nbsp;1&nbsp;рубль.
+                    [EN]You may convert bonus to&nbsp;the currency of&nbsp;your account and pay for Ideav services this way: 1&nbsp;bonus&nbsp;=&nbsp;1&nbsp;rub.</t9n>
+                </p>
+                <p id="convert-bonus" style="display:none" class="font-weight-bold"><t9n>[RU]Сейчас вам доступно <font class="text-success"><span class="bonus-avl">-</span> р</font> для конвертирования в валюту баланса.
+                    [EN]At the moment, you have <font class="text-success"> rub<span class="bonus-avl"></span></font> available to convert to your account.</t9n>
+                    <br /><button class="btn btn-primary mt-2" onclick="convertBonus()"><t9n>[RU]Конвертировать бонус[EN]Сonvert bonus</t9n></button>
+                </p>
+                <p><t9n>[RU]Ваша история операций с бонусами хранится в разделе <a class="text-blue" onclick="$('#bal').click()">Баланс</a>.
+                    [EN]The history of your bonus balance is stored in the <a class="text-blue" onclick="$('#bal').click()">Balance</a> section.</t9n>
+                </p>
+            </div>
+            <div class="lk-tab mt-3 p-1 p-sm-3 shadow" id="balance" style="display:none">
+                <h3><t9n>[RU]Баланс[EN]Balance</t9n></h3><br />
+                <p><t9n>[RU]Средства вашего счета расходуются на оплату тарифного плана. Вы можете пополнить счет банковской картой или переводом, а также конвертировать бонусы и партнерские отчисления.
+                    [EN]We charge your account according to your tariff. You may fund the account using plastic card or wire transfer as well as convert your bonuses and referral rewards.</t9n>
+                </p>
+                <p><t9n>[RU]На сегодня вы использовали около <span class="count font-weight-bold">0</span> ед. ресурсов или <span class="countpc font-weight-bold">0</span>% от лимита бесплатного тарифного плана в 20000 ед.
+                    [EN]Currently, you've used about <span class="count font-weight-bold">0</span> units of resources or <span class="countpc font-weight-bold">0</span>% out of the free plan limit of 20000 units.</t9n>
+                </p>
+                <p><t9n>[RU]Вся история операций хранится здесь.
+                    [EN]The history of your transactions is stored here.</t9n>
+                </p>
+                <table class="table table-striped" id="b-history">
+                <thead>
+                    <tr>
+                        <td>Дата</td>
+                        <td>Сумма</td>
+                        <td>Примечание</td>
+                    </tr>
+                </thead>
+                <tbody style="display: none;">
+                    <tr>
+                        <td>:paid:</td>
+                        <td>:payment:</td>
+                        <td>:notes:</td>
+                    </tr>
+                </tbody>
+                </table>
+            </div>
+            <div class="lk-tab mt-3 p-1 p-sm-3 shadow" id="referrals" style="display:none">
+                <h3><t9n>[RU]Партнерская программа[EN]Referrals</t9n></h3><br />
+                <ul class="nav nav-tabs mb-4">
+                    <li class="nav-item">
+                        <a class="nav-link aff-link active" aria-current="page" onclick="affTab('about',this)"><t9n>[RU]О программе[EN]About program</t9n></a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link aff-link gray" aria-current="page" onclick="affTab('rules',this)"><t9n>[RU]Правила[EN]Rules</t9n></a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link aff-link gray" aria-current="page" onclick="affTab('stats',this)"><t9n>[RU]Статистика[EN]Statistics</t9n></a>
+                    </li>
+                </ul>
+                <div class="aff-tab" id="about">
+                    <p><t9n>[RU]Вы получаете вознаграждение 15% за каждую оплату услуги Ideav, которую сделал клиент, привлеченный по вашей реферальной ссылке или промокоду. Программа распространяется также на оплату продления услуг.
+                        [EN]We pay 15% commission of every client payment for Ideav services including recurring payments, for those clients who came via your partner link.</t9n>
+                    </p>
+                    <p><b><t9n>[RU]Это вознаграждение можно вывести на вашу банковскую карту или переводом на счет в РФ. Вывод доступен через один месяц после оплаты клиента.
+                        [EN]You can withdraw funds to your PayPal account one month after the referred customer makes a payment.</t9n></b>
+                    </p>
+                    <p><t9n>[RU]Вы также можете сконвертировать ваше партнерское вознаграждение на ваш баланс для оплаты услуг Ideav.
+                        [EN]You may also convert your commissions to your balance to pay for Ideav services.</t9n>
+                    </p>
+                    <!--
+                    <p><t9n>[RU]Список клиентов, привлеченных по вашим партнерским ссылкам, и история начислений хранятся на закладке Статистика.
+                        [EN]The list of referred customers and history of your commissions are available in the Statistics tab.</t9n>
+                    </p>
+                    -->
+                    <p class="t9n"><b><t9n>[RU]Ваши партнерские ссылки[EN]Your partner links</t9n>:</b>
+                        &nbsp; <span id="copied" style="display:none; color:gray;" class="text-nowrap"><t9n>[RU]Скопировано в буфер[EN]Copied to clipboard</t9n></span><br />
+                    </p>
+                    <p><t9n>[RU]Регистрация:[EN]To register:</t9n>
+                        <a target="_blank" id="reflink" href="https://{_global_.http_host}?aff={_global_.user_id}">https://{_global_.http_host}?aff={_global_.user_id}</a> &nbsp; 
+                        <a title="<t9n>[RU]Скопировать в буфер обмена[EN]Copy to clipboard</t9n>" onclick="copyId($('#reflink').html())">
+                            <svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M4 14H3C2.46957 14 1.96086 13.7893 1.58579 13.4142C1.21071 13.0391 1 12.5304 1 12V3C1 2.46957 1.21071 1.96086 1.58579 1.58579C1.96086 1.21071 2.46957 1 3 1H12C12.5304 1 13.0391 1.21071 13.4142 1.58579C13.7893 1.96086 14 2.46957 14 3V4M10 8H19C20.1046 8 21 8.89543 21 10V19C21 20.1046 20.1046 21 19 21H10C8.89543 21 8 20.1046 8 19V10C8 8.89543 8.89543 8 10 8Z" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                        </a>
+                    </p>
+                    <p><t9n>[RU]Сайт Интеграла:[EN]Link to the site:</t9n>
+                        <a target="_blank" id="reflinkru" href="https://{_global_.http_host}/ru?aff={_global_.user_id}">https://{_global_.http_host}/ru?aff={_global_.user_id}</a> &nbsp; 
+                        <a title="<t9n>[RU]Скопировать в буфер обмена[EN]Copy to clipboard</t9n>" onclick="copyId($('#reflinkru').html())">
+                            <svg width="22" height="22" viewBox="0 0 22 22" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M4 14H3C2.46957 14 1.96086 13.7893 1.58579 13.4142C1.21071 13.0391 1 12.5304 1 12V3C1 2.46957 1.21071 1.96086 1.58579 1.58579C1.96086 1.21071 2.46957 1 3 1H12C12.5304 1 13.0391 1.21071 13.4142 1.58579C13.7893 1.96086 14 2.46957 14 3V4M10 8H19C20.1046 8 21 8.89543 21 10V19C21 20.1046 20.1046 21 19 21H10C8.89543 21 8 20.1046 8 19V10C8 8.89543 8.89543 8 10 8Z" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/>
+                            </svg>
+                        </a>
+                    </p>
+                </div>
+                <div class="aff-tab" id="rules" style="display:none">
+                    <p><b><t9n>[RU]Правила партнерской программы[EN]Rules of the program</t9n></b></p>
+                    <ol>
+                        <li><t9n>[RU]Вознаграждение выплачивается через СБП (Система быстрых платежей) или банковским переводом через месяц после каждого платежа приведенного клиента. Комиссия платежной системы оплачивается из вознаграждения партнера.
+                            [EN]The remuneration is paid through the WebMoney or Solar Staff payment system one month after each payment of the referred client. The commission of the payment system is paid from the partner's remuneration.</t9n>
+                        </li>
+                        <li><t9n>[RU]Не пытайтесь получить скидку, покупая услуги для себя. Мы следим за этим.
+                            [EN]Do not try to get a discount by buying hosting for yourself. We are monitoring this.</t9n>
+                        </li>
+                        <li><t9n>[RU]Минимальная сумма вывода: 360 рублей.
+                            [EN]Minimum withdrawal amount: 360 rub.</t9n>
+                        </li>
+                        <li><t9n>[RU]Запрещено привлечение клиентов с помощью почтовых рассылок.
+                            [EN]It is forbidden to attract customers using mailings.</t9n>
+                        </li>
+                        <li><t9n>[RU]Запрещено привлечение клиентов с контекстной рекламы с использованием бренда Интеграл.
+                            [EN]It is forbidden to attract customers from contextual advertising using the Ideav brand.</t9n>
+                        </li>
+                        <li><t9n>[RU]Запрещена установка партнерской cookie пользователю без его прямого перехода по реферальной ссылке.
+                            [EN]It is prohibited to install an affiliate cookie to a user without his direct click on the referral link.</t9n>
+                        </li>
+                    </ol>
+                    <p><a target="_blank" href="https://{_global_.http_host}/download/AffiliateAgreement.pdf"><t9n>[RU]Партнерский договор[EN]Affiliate Agreement</t9n></a></p>
+                </div>
+                <div class="aff-tab" id="stats" style="display:none">
+                    <p><t9n>[RU]Здесь будет статистика привлечений клиентов, оплат и вашего вознаграждения.
+                        [EN]You will see the clients number, their payments, and your reward amount.</t9n>
+                    </p>
+                    <table class="table table-bordered">
+                        <tr style="background-color:#f9f9f9;">
+                            <th style="text-align:center"><t9n>[RU]Клиенты[EN]Clients</t9n></th>
+                            <th style="text-align:center"><t9n>[RU]Платежи[EN]Payments</t9n></th>
+                            <th style="text-align:center"><t9n>[RU]Созрело[EN]Matured</t9n>*</th>
+                            <th style="text-align:center"><t9n>[RU]Комиссия[EN]Commission</t9n></th>
+                            <th style="text-align:center"><t9n>[RU]Выплачено[EN]Paid out</t9n></th>
+                            <th style="text-align:center"><t9n>[RU]К выплате[EN]Pending</t9n></th>
+                        </tr>
+                        <tr>
+                            <td id="affs" align="center">-</td>
+                            <td id="paid" align="center">-</td>
+                            <td id="matured" align="center">-</td>
+                            <td id="commission" align="center">-</td>
+                            <td id="comm_paid" align="center">-</td>
+                            <td id="topay" align="center">-</td>
+                        </tr>
+                    </table>
+                    <p>&nbsp;* <t9n>[RU]Прошло не менее месяца с момента совершения платежа[EN]Paid more than 1 month ago, ready to pay out</t9n>
+                    </p>
+                </div>
+            </div>
+		    <div class="lk-tab mt-3 p-1 p-sm-3 shadow" id="profile">
+                <div class="form-row no-gutters mt-2 mb-1">
+                    <div class="col-12 col-sm-6 col-md-6 mt-2">
+            			<label><t9n>[RU]Имя[EN]Name</t9n></label>
+                        <input class="form-control req" type="text" id="t33">
+                    </div>
+                    <div class="col-12 col-sm-6 col-md-6 mt-2">
+                        <label><t9n>[RU]Телефон[EN]Phone</t9n></label>
+            			<input class="form-control req" type="text" id="t30">
+                    </div>
+                    <div class="col-12 col-sm-12 col-md-12 mt-2">
+            		    <label>Email</label>
+            			<input class="form-control email" type="text" id="t41" disabled>
+                    </div>
+        	        <div class="col-12 mt-2">
+            			<label><t9n>[RU]Обо мне[EN]About me</t9n></label>
+            			<textarea class="form-control req" id="t39"></textarea>
+                    </div>
+                    <div class="col-12 col-sm-4 col-md-2 mt-1">
+                        <div class="btn-group" role="group" aria-label="Basic example">
+                            <button id="savebtn" class="btn btn-primary mt-4 mb-4" style="display:none" onclick="saveMe()"><t9n>[RU]Сохранить[EN]Save</t9n></button>
+                            <button id="cancelbtn" class="btn btn-outline-secondary mt-4 mb-4 ml-2" style="display:none" onclick="intApi('GET','report/313?JSON','me');">
+                                <t9n>[RU]Отменить[EN]Cancel</t9n>
+                            </button>
+                        </div>
+                    </div>
+    		    </div>
+                <h4><t9n>[RU]Мои базы данных[EN]My databases</t9n></h4>
+                <div id="dbs" class="row">
+                    <div class="col-sm-6 col-lg-4 p-3 db-cards new-db">
+                      <div class="w-100 t9n">
+                        <input class="form-control form-control-sm" type="text" id="t271" autocomplete="off" placeholder="<t9n>[RU]Имя базы[EN]DB name</t9n>" title="<t9n>[RU]От 3 до 15 латинских символов и цифр, начиная с буквы[EN]3 to 15 latin characters or digits, starting with a letter</t9n>">
+                        <div class="invalid-feedback invalid-feedback-db">
+                        </div>
+                        <textarea class="form-control form-control-sm mt-2" id="t276" placeholder="<t9n>[RU]Краткое примечание[EN]Short description</t9n>"></textarea>
+                        <select class="form-control form-control-sm mt-2" id="template">
+                            <option disabled id="choose-template"></option>
+                            <option value="RU">Русский</option>
+                            <option value="EN">English</option>
+                            <option value="FU">Full with HTMLs</option>
+                        </select>
+                        <button class="btn btn-primary btn-sm mt-2 new-db" onclick="checkDB()"><t9n>[RU]Создать[EN]Create</t9n></button>
+                      </div>
+                    </div>
+                </div>
+                <div class="col-12 mt-3 p-0 db-limit" style="display:none">
+                    <div class="alert alert-info mb-0" role="alert">
+                        <p><t9n>[RU]На бесплатном тарифном плане можно создать не более трёх баз данных[EN]Free plan includes three DBs as maximum</t9n></p>
+                    </div>
+                </div>
+                <br />
+            </div>
+            <div class="lk-tab mt-3 p-1 p-sm-3 shadow" id="plan" style="display:none">
+                <h3><t9n>[RU]Ваш тариф[EN]Your plan</t9n><span class="plan"></span></h3><br />
+                <h5><t9n>[RU]Следующее списание[EN]Next billing date is</t9n> <span class="plan-date"></span></h5>
+                <p><t9n>[RU]Списание по тарифному плану производится один раз в месяц, при этом сбрасываются счетчики ресурсов всех ваших баз. Если расход ресурсов не укладывается в лимит плана, то для продолжения работы вам необходимо повысить план. <a target="_blank" href="https://ideav.pro/#rec288682804">Подробнее о планах.</a>
+                    [EN]We charge the account monthly according to the tariff plan, and reset the resource counters of all your databases. If the resource consumption does not fit the plan limit, then you need to upgrade the plan to use the service. <a target="_blank" href="https://ideav.pro/#rec288682804">More about plans.</a></t9n>
+                </p>
+                <p><t9n>[RU]Сейчас вы использовали <span class="count font-weight-bold">0</span> ед. ресурсов или <span class="countpc font-weight-bold">0</span>% от лимита бесплатного тарифного плана в 20000 ед.
+                    [EN]Currently, you've spent <span class="count font-weight-bold">0</span> units of resources or <span class="countpc font-weight-bold">0</span>% out of the Free plan limit of 20000 units.</t9n>
+                </p>
+                <p><t9n>[RU]Для смены плана требуется иметь достаточное количество средств на счете. Пополнить счет вы можете здесь, выбрав нужный план:
+                    [EN]To change the plan, you need to have a sufficient amount of funds in the account. You can top up your account here by choosing the required plan:</t9n>
+                </p>
+                <table>
+                    <tr>
+                        <td>
+                            <select class="form-control w-auto" id="select-plan" onchange="planSelected(this.value)">
+                                <option value="1146">Free</option>
+                                <option value="1147" price-tag="[RU]650 руб[EN]650 rub" price="650">Startup</option>
+                                <option value="1148" price-tag="[RU]1950 руб[EN]1950 rub" price="1950">Scalable</option>
+                            </select>
+                        </td>
+                        <td>
+                            <button class="btn btn-primary plan-btns" style="display: none" id="topup" onclick="topUp()"><t9n>[RU]Пополнить на[EN]Top up</t9n> <span class="amount">1</span></button>
+                            <button class="btn btn-primary plan-btns" style="display: none" id="change-plan" onclick="changePlan(this)"><t9n>[RU]Перейти за[EN]Change for</t9n> <span class="amount">1</span></button>
+                        </td>
+                    </tr>
+                </table>
+                <br />
+            </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+var dbCard='<div class="col-sm-6 col-lg-4 p-3 db-cards" id=":db:">'
+        +'    <div class="db-card shadow-sm w-100">'
+        +'      <h5 class="card-title"><a target="db:id:" href="/:db:" title="'+t9n('[RU]Перейти в эту базу данных[EN]Enter this DB')+'">:db:</a> '
+        +'       <span class="small" title="'+t9n('[RU]Счетчик активности в этом месяце[EN]Resources used this month')+'">(:count:)</span>'
+        +'      </h5>'
+        +'      <h6 class="card-subtitle mb-2 text-muted" title="'+t9n('[RU]Шаблон, выбранный при создании[EN]The template picked upon creation')+'">:template:</h6>'
+        +'      <textarea class="form-control p-0 pb-3" style="border: none;" id="descr_:db:"></textarea>'
+        +'      <!--<a href="#" class="card-link" title="'+t9n('[RU]Вы можете восстановить админа, если он случайно удален[EN]Restore the administrator in case it was accidentally dropped')+'">Create admin</a>-->'
+        +'  </div>'
+        +'</div>';
+$('#template option[value='+locale.substr(1,2)+']').attr('selected','selected');
+$('#choose-template').html(t9n('[RU]Выберите шаблон[EN]Select template'));
+$('#select-plan').find('option[price-tag]').each(function(){
+    this.innerHTML+=' - '+t9n($(this).attr('price-tag'));
+});
+function topUp(el){
+    intApi('POST','report/2192?JSON&confirmed=1&amount='+$('#topup').attr('toPay'),'topUp');
+}
+function changePlan(el){
+    planID=$('#select-plan').val();
+    intApi('POST','report/1278?JSON&confirmed=1&plan='+planID,'changePlan','',$(el).find('.amount').html());
+    $('.plan-btns').hide();
+}
+function planSelected(v){
+    $('.plan-btns').hide();
+    if(parseInt(v)===planID)
+        return;
+    if(parseInt(v)<planID){
+        $('.amount').html('0');
+        $('#change-plan').show();
+    }
+    else{
+        var toPay=$('option[value='+v+']').attr('price')-balance-paidThisMonth;
+        if(toPay>0){
+            $('#topup').attr('toPay',parseFloat(toPay.toFixed(2)));
+            $('#topup').show();
+        }
+        else{
+            toPay=Math.max(0,parseFloat($('option[value='+v+']').attr('price')-paidThisMonth));
+            $('#change-plan').show();
+        }
+        $('.amount').html(parseFloat(toPay.toFixed(2))+t9n('[RU] руб[EN] roubles'));
+    }
+}
+function convertBonus(){
+    intApi('POST','report/1042?JSON&confirmed=1','convertBonus');
+}
+function affTab(i,el){
+    $('.aff-tab').hide();
+    $('#'+i).addClass('active').show();
+    $('.aff-link').removeClass('active').addClass('gray');
+    $(el).addClass('active').removeClass('gray');
+}
+function copyId(i){
+    var $temp = $("<input>");
+    $("body").append($temp);
+    $temp.val(i).select();
+    document.execCommand("copy");
+    $temp.remove();
+    $('#copied').show().delay(2500).slideUp(400);
+}
+function activateTab(el,t){
+    $('.card-active').removeClass('card-active').removeClass('shadow');;
+    $(el).addClass('shadow').addClass('card-active');
+    $('.lk-tab').hide();
+    $('#'+t).show();
+    document.location.href="#";
+    document.location.href="#"+t;
+    if(!$('#b-history').find('tbody').is(':visible'))
+        intApi('GET','report/1095?JSON','tnx');
+}
+function dataByColumn(json,col,i){
+    for(var j in json.columns)
+        if(json.columns[j].name===col)
+            return json.data[j][i];
+    return '';
+}
+// Функция для отправки асинхронного запроса по https api с обработкой его результата
+function intApi(m,u,b,vars,index){ // Параметры: метод, адрес, действие - ветка switch, параметры, ID целевого элемента
+    vars=vars||''; // По умолчанию список параметров пуст
+    var h='',i,j,json,obj=new XMLHttpRequest(); // Объявляем переменную под JSON и API по HTTPS
+    obj.open(m,'/'+db+'/'+u,true); // Открываем асинхронное соединение заданным методом по нужному адресу
+    if(m=='POST'){ // Если это POST запрос, то передаем заданные параметры
+        if(typeof vars=='object')
+            vars.append('_xsrf',xsrf);
+        else{
+            obj.setRequestHeader('Content-Type','application/x-www-form-urlencoded');
+            vars='_xsrf='+xsrf+'&'+vars; // добавляем токен xsrf, необходимый для POST-запроса
+        }
+    }
+    obj.onload=function(e){ // Когда запрос вернет результат - сработает эта функция
+        try{ // в this.responseText лежит ответ от сервера
+            json=JSON.parse(this.responseText); // Пытаемся разобрать ответ как JSON
+        }
+        catch(e){ // Если произошла ошибка при разборе JSON
+            console.log(e); // то выводим детали этой ошибки в консоль браузера
+            console.log(this.responseText);
+        }
+        obj.abort(); // Закрываем соединение
+        var data=json.data;
+        switch(b){ // Отрабатываем заданную команду - переходим в соответствующую ветку case
+            
+            case 'me':
+                if(dataByColumn(json,'Balance',0)==='')
+                    hiBonus=true;
+                me=dataByColumn(json,'User',0);
+                $('.balance').html((balance=parseFloat(dataByColumn(json,'Balance',0))||0)+' р');
+                $('.bonus').html((bonus=dataByColumn(json,'Bonus',0)||0)+' р');
+                $('.referrals').html((dataByColumn(json,'Referrals',0)||0)+' р');
+                $('#t33').val(dataByColumn(json,'Name',0));
+                $('#t30').val(dataByColumn(json,'Phone',0));
+                $('#t41').val(dataByColumn(json,'Email',0));
+                $('#t39').val($('<div />').html(dataByColumn(json,'Notes',0)).text());
+                $('#t280').attr('src',dataByColumn(json,'Picture',0)||'https://ideav.pro/images/tild3366-6237-4630-b561-626231313263__quintet.gif');
+                $('.plan').html(' &mdash; <a class="text-blue" id="tariff" onclick="activateTab(\'\',\'plan\')">'+(dataByColumn(json,'Plan',0)||'Free')+'</a>');
+                planID=parseInt(dataByColumn(json,'PlanID',0))||1146;
+                var d=new Date();
+                $('.plan-date').html(dataByColumn(json,'Plan date',0)||d.toLocaleDateString("en-US",{day:'numeric' })+' '+d.toLocaleDateString("en-US",{month:'short'})+' '+d.toLocaleDateString("en-US",{year:'numeric'}));
+                $('#savebtn,#cancelbtn').hide();
+                if(bonus>0){
+                    $('.bonus-avl').html(bonus);
+                    $('#convert-bonus').show();
+                }
+                i=0;
+                $('.db-card').remove();
+                countRes=0;
+                while(dataByColumn(json,'DB',i)){
+                    j=dataByColumn(json,'Count',i);
+                    countRes+=parseInt(j);
+                    $('#dbs').prepend(dbCard.replace(/:db:/g,dataByColumn(json,'DB',i))
+                                            .replace(/:template:/g,dataByColumn(json,'Template',i))
+                                            .replace(/:count:/g,j));
+                    $('#descr_'+dataByColumn(json,'DB',i)).val($('<div />').html(dataByColumn(json,'Description',i)).text());
+                    i++;
+                }
+                $('.count').html(countRes>1000?Math.round(countRes/1000):(countRes/1000).toFixed(2));
+                // countRes / 20000 / 1000 * 100 - percent of the Free plan limit
+                j=countRes/200000>1?Math.round(countRes/200000):(countRes/200000).toFixed(2);
+                $('.countpc').html(j);
+                if(i>=3&&planID<1147){
+                    $('.new-db').hide();
+                    $('.db-limit').show();
+                }
+                else{
+                    $('.new-db').show();
+                    $('.db-limit').hide();
+                }
+                if(document.location.hash==='#paid'){
+                    $('#tariff').click();
+                    $('#select-plan').find('option').each(function(){
+                        if(parseFloat($(this).attr('price'))-paidThisMonth===balance)
+                            this.selected=true;
+                    });
+                    $('#select-plan').change();
+                }
+                else
+                    $('#select-plan').find('[value='+planID+']').attr('selected','selected');
+                $('.new-db .form-control, .new-db .btn').prop('disabled',false);
+                $('.req').each(function(){req[this.id]=this.value});
+                $('.req').keyup(validateReqs);
+                break;
+                
+            case 'topUp':
+                intApi('GET','report/1905?JSON','doTopUp');
+                break;
+                
+            case 'doTopUp':
+                if(json.data[0]){
+                    $('#plan').append($(dataByColumn(json,'Pay',0)));
+                    $('#pay').submit();
+                }
+                else{
+                    $('.hi-bonus').find('.alert').html(t9n('[RU]Ошибка оплаты, обратитесь в поддержку[EN]Payment error, contact support'));
+                    $('.hi-bonus').find('.alert').removeClass('alert-success').addClass('alert-danger');
+                    $('.hi-bonus').show().delay(30000).slideUp(400);
+                }
+                break;
+                
+            case 'changePlan':
+                if(json.data[0]){
+                    $('.hi-bonus').find('.alert').html(t9n('[RU]Тарифный план был изменен[EN]Your plan has been changed'));
+                    $('.hi-bonus').show().delay(30000).slideUp(400);
+                    intApi('GET','report/313?JSON','me');
+                    intApi('GET','report/1095?JSON','tnx');
+                    console.log(index);
+                    paidThisMonth+=parseFloat(index);
+                }
+                else{
+                    $('.hi-bonus').find('.alert').html(t9n('[RU]Произошла ошибка, обратитесь в поддержку[EN]Change plan error, contact support'));
+                    $('.hi-bonus').find('.alert').removeClass('alert-success').addClass('alert-danger');
+                    $('.hi-bonus').show().delay(30000).slideUp(400);
+                }
+                break;
+                
+            case 'afftopay':
+                $('.referrals').html((dataByColumn(json,'topay',0)||0)+' р');
+            case 'aff':
+                for(i in json.columns)
+                    $('#'+json.columns[i].name).html(json.data[i].pop());
+                break;
+                
+            case 'tnx':
+                for(i in json.data[0])
+                    h+=tnx.replace(':payment:',dataByColumn(json,'Payment',i))
+                        .replace(':paid:',dataByColumn(json,'Paid',i))
+                        .replace(':notes:',dataByColumn(json,'Notes',i));
+                if(i===undefined&&hiBonus){
+                    intApi('POST','report/1158?JSON&confirmed=1','hiBonus');
+                    hiBonus=false;
+                }
+                else
+                    $('#b-history').find('tbody').html(h).show();
+                break;
+                
+            case 'hiBonus':
+                $('.hi-bonus').show().delay(30000).slideUp(400);
+                $('.bonus').html('1000 р');
+                $('.bonus-avl').html(bonus=1000);
+                $('#convert-bonus').show();
+                intApi('POST','report/1095?JSON','tnx');
+                break;
+                
+            case 'convertBonus':
+                $('#convert-bonus').hide(300);
+                intApi('POST','report/1095?JSON','tnx');
+            case 'newDB':
+                intApi('GET','report/313?JSON','me');
+                break;
+                
+            case 'checkDB':
+                if(dataByColumn(json,'DB',0)==='0'){
+                    var fd=new FormData();
+                    fd.append('descr',$('#t276').val());
+                    intApi('POST','_new_db/?JSON&db='+$('#t271').val()+'&template='+$('#template').val(),'newDB',fd);
+                    $('.new-db input, .new-db textarea').val('');
+                }
+                else{
+                    $('.invalid-feedback-db').html(t9n('[RU]Это имя занято, придумайте другое[EN]The name is occupied, please pick another'));
+                    $('#t271').addClass('is-invalid');
+                    $('.new-db .form-control, .new-db .btn').prop('disabled',false);
+                }
+                break;
+                
+            case 'save':
+                $('#savebtn,#cancelbtn').prop('disabled',false).hide();
+                break;
+        }
+    }
+    obj.send(vars); // отправили запрос и теперь будем ждать ответ, а пока - выходим
+}
+var req={},me,bonus,countRes,planID,balance,hiBonus=false
+    ,tnx=$('#b-history').find('tbody').html()
+    ,paidThisMonth=parseFloat('0<!-- Begin:paidThisMonth -->{Payment}<!-- End:paidThisMonth -->');
+intApi('GET','report/313?JSON','me');
+intApi('GET','report/2586?JSON','aff');
+intApi('GET','report/2618?JSON','afftopay');
+function testDB(){
+    return (/^[a-z]\w{2,14}$/i).test($('#t271').val());
+}
+function checkDB(){
+    if(!testDB()){
+        $('.invalid-feedback-db').html(t9n('[RU]От 3 до 15 латинских символов и цифр, начиная с буквы[EN]3 to 15 latin characters or digits, starting with a letter'));
+        $('#t271').addClass('is-invalid');
+    }
+    else{
+        $('#t271').removeClass('is-invalid');
+        $('.new-db .form-control, .new-db .btn').prop('disabled',true);
+        intApi('POST','report/292?JSON&FR_DB='+$('#t271').val(),'checkDB');
+    }
+}
+function saveMe(){
+    $('#savebtn').prop('disabled',true);
+    var fd=new FormData();
+    $('.req').each(function(){
+        fd.append(this.id,req[this.id]=this.value);
+    });
+    intApi('POST','_m_save/'+me+'?JSON','save',fd);
+}
+function validateReqs(){
+    //console.log(event.target.tagName);
+    if(event.keyCode===13&&$('#savebtn').is(":visible")&&event.target.tagName!=='TEXTAREA')
+        saveMe();
+    else{
+        $('#savebtn,#cancelbtn').hide();
+        $('.req').each(function(){
+            if(req[this.id]!==this.value){
+                $('#savebtn,#cancelbtn').show();
+                return;
+            }
+        });
+    }
+}
+$('#navbar-list').click(function(){
+    if($(event.target).attr('href').indexOf('#tariff')!==-1)
+        $('#tariff').click();
+    if($(event.target).attr('href').indexOf('#dbs')!==-1)
+        $('#t280').click();
+});
+</script>

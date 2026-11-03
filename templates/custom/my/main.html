@@ -1,0 +1,960 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- Begin: noAdmin1 --><!--{Role}-->
+    <title>Личный кабинет</title>
+    <link rel="stylesheet" href="/assets/vendor/primeicons/primeicons.css">
+    <link rel="stylesheet" href="/css/styles.css">
+    <link rel="stylesheet" href="/css/cabinet.css">
+<!-- End: noAdmin1 -->
+    <script>
+        var db='{_global_.z}',xsrf='{_global_.xsrf}',id='{_global_.id}',token='{_global_.token}',name='{_global_.user}',uid='{_global_.user_id}',action='{_global_.action}',menu=[];
+    </script>
+<!-- Begin: isAdmin1 --><!--{Role}-->
+    <link rel="stylesheet" href="/assets/vendor/primeicons/primeicons.css">
+    <link rel="stylesheet" href="/css/bootstrap4.5.2.min.css">
+    <link rel="stylesheet" href="/css/css.css" />
+    <style>
+        .content {
+            padding: 49px 0 0 0;
+            margin-bottom: 25px;
+        }
+        .navbar {
+            background-color: #1283da;
+            justify-content: flex-start;
+            min-width: 348px;
+            padding: 0;
+        }
+        .nav-link {
+            color: #eee !important;
+            padding: .5rem !important;
+        }
+        @media (min-width: 563px) {
+            .navbar-expand-562 {
+                flex-flow: row nowrap;
+                justify-content: flex-start;
+            }
+            .navbar-expand-562 .navbar-nav {
+                flex-direction: row;
+            }
+            .navbar-expand-562 .navbar-collapse {
+                display: flex !important;
+                flex-basis: auto;
+            }
+            .navbar-expand-562 .navbar-toggler {
+                display: none;
+            }
+        }
+    </style>
+    <title>Integral</title>
+    <script src="/js/jquery3.1.1.min.js"></script>
+    <script src="/js/jquery-ui1.12.1.min.js"></script>
+    <script src="/js/js.js"></script>
+    <script>
+        <!-- Begin:MyRoleMenu -->menu.push({href:'{HREF}',name:'{Name}'});
+        <!-- End:MyRoleMenu -->
+    </script>
+    <script src="/js/moment.min.js"></script>
+<!-- End: isAdmin1 -->
+</head>
+<body>
+<!-- Begin: noAdmin --><!--{Role}-->
+    <!-- Navigation Bar -->
+    <nav class="navbar">
+        <div class="navbar-left">
+            <a href="/start.html">
+                <img src="/images/logo.png" alt="Логотип" class="logo">
+            </a>
+            <span title="Ваш Личный кабинет Интеграм">ЛК Интеграм</span>
+        </div>
+        <div class="navbar-right">
+            <div class="user-menu-wrapper">
+                <button id="user-menu-toggle" class="account-info" type="button" title="Меню пользователя">
+                    <div id="account-avatar" class="account-avatar">U</div>
+                    <span id="account-email" class="account-email">user@example.com</span>
+                    <span class="user-menu-arrow">▼</span>
+                </button>
+                <div id="user-menu-dropdown" class="user-menu-dropdown" style="display: none;">
+                    <button id="theme-toggle" class="user-menu-item" type="button">
+                        <span class="user-menu-icon" id="theme-icon"><i class="pi pi-moon"></i></span>
+                        <span>Тема</span>
+                        <span class="user-menu-value" id="theme-value">Темная</span>
+                    </button>
+                    <div class="user-menu-divider"></div>
+                    <button id="change-password-btn" class="user-menu-item" type="button" onclick="openChangePasswordForm();">
+                        <span class="user-menu-icon"><i class="pi pi-lock"></i></span>
+                        <span>Сменить пароль</span>
+                    </button>
+                    <div class="user-menu-divider"></div>
+                    <button id="logout-everywhere-btn" class="user-menu-item user-menu-item-danger" type="button" title="Выйти на всех устройствах, где совершен вход">
+                        <span class="user-menu-icon"><i class="pi pi-sign-out"></i></span>
+                        <span>Выйти везде</span>
+                    </button>
+                    <button id="logout-btn" class="user-menu-item user-menu-item-danger" type="button">
+                        <span class="user-menu-icon"><i class="pi pi-sign-out"></i></span>
+                        <span>Выйти</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Cabinet Layout -->
+    <div class="cabinet-layout">
+        <!-- Left Sidebar Menu -->
+        <aside class="cabinet-sidebar" id="cabinet-sidebar">
+            <button id="sidebar-toggle" class="sidebar-toggle" type="button" title="Свернуть меню" aria-label="Toggle sidebar">&#9776;</button>
+            <nav class="cabinet-menu">
+                <button class="cabinet-menu-item active" data-section="databases">
+                    <span class="menu-icon"><i class="pi pi-database"></i></span>
+                    <span>Базы данных</span>
+                </button>
+                <button class="cabinet-menu-item" data-section="community">
+                    <span class="menu-icon"><i class="pi pi-share-alt"></i></span>
+                    <span>Кооперации</span>
+                </button>
+                <button class="cabinet-menu-item" data-section="profile">
+                    <span class="menu-icon"><i class="pi pi-user"></i></span>
+                    <span>Профиль</span>
+                </button>
+                <button class="cabinet-menu-item" data-section="tariff">
+                    <span class="menu-icon"><i class="pi pi-tag"></i></span>
+                    <span>Тариф</span>
+                </button>
+                <button class="cabinet-menu-item" data-section="balance">
+                    <span class="menu-icon"><i class="pi pi-wallet"></i></span>
+                    <span>Баланс</span>
+                </button>
+                <button class="cabinet-menu-item" data-section="bonuses">
+                    <span class="menu-icon"><i class="pi pi-gift"></i></span>
+                    <span>Бонусы</span>
+                </button>
+                <button class="cabinet-menu-item" data-section="referrals">
+                    <span class="menu-icon"><i class="pi pi-users"></i></span>
+                    <span>Партнерская программа</span>
+                </button>
+                <button class="cabinet-menu-item cabinet-menu-item--disabled" disabled title="Скоро">
+                    <span class="menu-icon"><i class="pi pi-shop"></i></span>
+                    <span>Маркетплейс</span>
+                </button>
+            </nav>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="cabinet-content">
+            <!-- Loading State -->
+            <div id="loading-state" class="loading-state">
+                <div class="loading-spinner"></div>
+                <p>Загрузка данных...</p>
+            </div>
+
+            <!-- Profile Section -->
+            <section id="section-profile" class="cabinet-section" style="display: none;">
+                <h1>Профиль</h1>
+
+                <div class="profile-form">
+                    <div class="database-field-group">
+                        <label for="profile-name" class="database-field-label">Имя</label>
+                        <input type="text" id="profile-name" name="name" placeholder="Введите ваше имя" class="database-field-input">
+                    </div>
+                    <div class="database-field-group">
+                        <label for="profile-phone" class="database-field-label">Телефон</label>
+                        <input type="tel" id="profile-phone" name="phone" placeholder="+7 (xxx) xxx-xx-xx" class="database-field-input">
+                    </div>
+                    <div class="database-field-group">
+                        <label for="profile-email" class="database-field-label">Email</label>
+                        <input type="email" id="profile-email" name="email" readonly disabled class="database-field-input profile-email-disabled" title="Email нельзя изменить">
+                    </div>
+                    <div class="database-field-group">
+                        <label for="profile-about" class="database-field-label">Обо мне</label>
+                        <textarea id="profile-about" name="notes" rows="4" placeholder="Расскажите о себе" class="database-field-input"></textarea>
+                    </div>
+                    <div class="database-field-group">
+                        <label class="database-field-label">Фото</label>
+                        <div class="photo-upload">
+                            <div id="profile-photo-preview" class="photo-preview">
+                                <span class="photo-placeholder"><i class="pi pi-camera"></i></span>
+                            </div>
+                            <input type="file" id="profile-photo" name="photo" accept="image/*" style="display: none;">
+                            <button type="button" id="upload-photo-btn" class="btn-secondary">Загрузить фото</button>
+                        </div>
+                    </div>
+                    <div class="database-field-group" id="profile-username-group">
+                        <label for="profile-username" class="database-field-label">Аккаунт</label>
+                        <div class="profile-username-row" style="display:flex;align-items:center;gap:8px;">
+                            <input type="text" id="profile-username" name="username" placeholder="латинские буквы, цифры, дефис" class="database-field-input" maxlength="33" title="Только латинские буквы, цифры и одиночный дефис, начинается с буквы, до 33 символов" autocomplete="off" style="flex:1;">
+                            <button type="button" id="save-username-btn" class="btn-primary btn-small" style="display:none;white-space:nowrap;">Сохранить аккаунт</button>
+                        </div>
+                        <span class="field-hint" id="profile-username-hint" style="display:none;">Только латинские буквы, цифры и одиночный дефис, начинается с буквы, до 33 символов.
+                            <br />Это имя можно поменять только один раз, потому что далее оно будет использоваться в сообществах здесь и в сторонних системах.
+                        </span>
+                        <span class="field-hint field-hint-error" id="profile-username-error" style="display:none;color:#c0392b;"></span>
+                    </div>
+                    <div class="database-field-group">
+                        <label class="profile-public-label">
+                            <input type="checkbox" id="profile-public" name="public">
+                            Публичный профиль
+                        </label>
+                        <span class="field-hint">В публичном профиле видно только Аккаунт, Фото и Обо мне, а телефон и email скрыты</span>
+                    </div>
+                    <button type="button" id="save-profile-btn" class="btn-primary">Сохранить изменения</button>
+                </div>
+            </section>
+
+            <script>
+            var paidThisMonth=parseFloat('0<!-- Begin:paidThisMonth -->{Payment}<!-- End:paidThisMonth -->');
+            (function() {
+                var USERNAME_REGEX = /^[a-zA-Z]([a-zA-Z0-9]|-(?=[a-zA-Z0-9])){0,32}$/;
+                var savedUsername = ''; // tracks the last successfully saved (or loaded) username
+
+                function isValidUsername(val) {
+                    return USERNAME_REGEX.test(val);
+                }
+
+                function initAccountField() {
+                    var usernameInput = document.getElementById('profile-username');
+                    var saveUsernameBtn = document.getElementById('save-username-btn');
+                    var usernameHint = document.getElementById('profile-username-hint');
+                    var usernameError = document.getElementById('profile-username-error');
+                    var publicCheckbox = document.getElementById('profile-public');
+
+                    if (!usernameInput || !saveUsernameBtn || !publicCheckbox) return;
+
+                    var originalUsername = usernameInput.value;
+
+                    function updateUsernameUI() {
+                        var val = usernameInput.value;
+                        var changed = val !== originalUsername;
+                        var valid = isValidUsername(val);
+
+                        // Show save button if value changed
+                        saveUsernameBtn.style.display = changed ? '' : 'none';
+
+                        // Show hint while editing (field is focused or has content being edited)
+                        usernameHint.style.display = changed ? '' : 'none';
+
+                        // Clear error while typing
+                        usernameError.style.display = 'none';
+                        usernameError.textContent = '';
+                    }
+
+                    usernameInput.addEventListener('input', updateUsernameUI);
+                    usernameInput.addEventListener('focus', function() {
+                        if (!isValidUsername(usernameInput.value)) {
+                            usernameHint.style.display = '';
+                        }
+                    });
+                    usernameInput.addEventListener('blur', function() {
+                        if (usernameInput.value === originalUsername) {
+                            usernameHint.style.display = 'none';
+                        }
+                    });
+
+                    saveUsernameBtn.addEventListener('click', async function() {
+                        var val = usernameInput.value.trim();
+                        if (!isValidUsername(val)) {
+                            usernameError.textContent = 'Неверный формат аккаунта. Только латинские буквы, цифры и дефис, начинается с буквы, до 33 символов';
+                            usernameError.style.display = '';
+                            return;
+                        }
+
+                        saveUsernameBtn.disabled = true;
+                        usernameError.style.display = 'none';
+
+                        try {
+                            var apiConfig = window._cabinetController && window._cabinetController.apiConfig;
+                            var host = apiConfig ? apiConfig.host : location.hostname;
+                            var url = 'https://' + host + '/my/report/236592?JSON_KV';
+
+                            var fd = new FormData();
+                            fd.append('name', val);
+                            fd.append('confirmed', '1');
+                            if (typeof xsrf !== 'undefined') fd.append('_xsrf', xsrf);
+
+                            var response = await fetch(url, {
+                                method: 'POST',
+                                credentials: 'include',
+                                body: fd
+                            });
+
+                            if (!response.ok) {
+                                throw new Error('HTTP ' + response.status);
+                            }
+
+                            var data = await response.json();
+
+                            if (!data || typeof data.name === 'undefined' || data.name !== val) {
+                                throw new Error('Сервер вернул неожиданный ответ');
+                            }
+
+                            // Success
+                            originalUsername = val;
+                            savedUsername = val;
+                            usernameInput.value = val;
+                            updateUsernameUI();
+                            if (typeof showToast === 'function') showToast('Аккаунт сохранен', 'success');
+                        } catch (err) {
+                            usernameError.textContent = 'Ошибка сохранения: ' + (err.message || 'неизвестная ошибка');
+                            usernameError.style.display = '';
+                            if (typeof showToast === 'function') showToast('Ошибка сохранения аккаунта', 'error');
+                        } finally {
+                            saveUsernameBtn.disabled = false;
+                        }
+                    });
+
+                    // Restrict public profile checkbox if account is not saved with valid format
+                    publicCheckbox.addEventListener('click', function(e) {
+                        if (!isValidUsername(savedUsername)) {
+                            e.preventDefault();
+                            publicCheckbox.checked = false;
+                            usernameError.textContent = 'Сначала сохраните Аккаунт в правильном формате, чтобы включить публичный профиль';
+                            usernameError.style.display = '';
+                            usernameInput.focus();
+                            return false;
+                        }
+                    });
+                }
+
+                // Wait for DOM + cabinet data load, then patch loadUserData to also set username
+                function patchCabinetController() {
+                    if (!window._cabinetController) {
+                        setTimeout(patchCabinetController, 100);
+                        return;
+                    }
+                    var ctrl = window._cabinetController;
+                    var origPopulateProfile = ctrl.populateProfile.bind(ctrl);
+                    ctrl.populateProfile = function() {
+                        origPopulateProfile();
+                        // Populate username field from UserName field
+                        var usernameInput = document.getElementById('profile-username');
+                        if (usernameInput && ctrl.userData) {
+                            var uname = ctrl.userData.UserName || '';
+                            usernameInput.value = uname;
+                            // If already valid, mark as saved and make it readonly
+                            if (USERNAME_REGEX.test(uname)) {
+                                savedUsername = uname;
+                                usernameInput.readOnly = true;
+                                usernameInput.disabled = true;
+                                usernameInput.title = 'Аккаунт уже задан и не может быть изменён';
+                                usernameInput.classList.add('profile-email-disabled');
+                                var saveBtn = document.getElementById('save-username-btn');
+                                if (saveBtn) saveBtn.style.display = 'none';
+                                var hint = document.getElementById('profile-username-hint');
+                                if (hint) hint.style.display = 'none';
+                            }
+                        }
+                    };
+                }
+
+                document.addEventListener('DOMContentLoaded', function() {
+                    initAccountField();
+                    patchCabinetController();
+                });
+            })();
+            </script>
+
+            <!-- Tariff Section -->
+            <section id="section-tariff" class="cabinet-section" style="display: none;">
+                <h1>Тариф</h1>
+
+                <div class="tariff-section">
+                    <div class="tariff-info">
+                        <p class="tariff-current">
+                            <span>Ваш тариф</span> —
+                            <strong id="current-plan">Free</strong>
+                        </p>
+                        <p class="tariff-next-charge">
+                            <span>Следующее списание</span>
+                            <strong id="next-charge-date">26 марта 2026</strong>
+                        </p>
+                        <p class="tariff-description">
+                            Списание по тарифному плану производится один раз в месяц, при этом сбрасываются счетчики ресурсов всех ваших баз. Если расход ресурсов не укладывается в лимит плана, то для продолжения работы вам необходимо повысить план. <a target="tarif" href="/start.html#tarif">Подробнее о планах</a>.
+                        </p>
+                        <div class="usage-info">
+                            <p>
+                                <span>Сейчас вы использовали</span>
+                                <strong id="usage-units">0.00</strong>
+                                <span>ед. ресурсов или</span>
+                                <strong id="usage-percent">0.00%</strong>
+                                <span>от лимита вашего тарифного плана в</span>
+                                <strong id="usage-limit">{limit}</strong>
+                                <span>ед.</span>
+                            </p>
+                            <div class="usage-bar">
+                                <div id="usage-bar-fill" class="usage-bar-fill" style="width: 0%;"></div>
+                            </div>
+                        </div>
+                        <div class="plan-change">
+                            <p>Для смены плана требуется иметь достаточное количество средств на счете. Пополнить счет вы можете здесь, выбрав нужный план:</p>
+                            <div class="plan-change-row">
+                                <select id="plan-select" class="plan-select" onchange="window._cabinetController && window._cabinetController.planSelected(this.value)">
+                                    <!-- Begin: plans --><option value="{PlanID}" data-price="{Price}" data-limit="{limit}">{PlanName} — {Price} руб./мес.</option>
+                                    <!-- End: plans -->
+                                </select>
+                                <button type="button" id="topup-btn" class="btn-primary plan-action-btn" style="display:none">Пополнить на <span id="topup-amount"></span></button>
+                                <button type="button" id="change-plan-btn" class="btn-primary plan-action-btn" style="display:none">Перейти за <span id="change-plan-amount"></span></button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Balance Section -->
+            <section id="section-balance" class="cabinet-section" style="display: none;">
+                <h1>Баланс</h1>
+
+                <div class="balance-info">
+                    <p>
+                        Средства вашего счета расходуются на оплату тарифного плана. Вы можете пополнить счет банковской картой или переводом, а также конвертировать бонусы и партнерские отчисления.
+                    </p>
+
+                    <div class="balance-current">
+                        <span>Текущий баланс:</span>
+                        <strong id="balance-amount">0</strong>
+                        <span>руб.</span>
+                    </div>
+
+                    <div class="usage-today">
+                        <p>
+                            <span>На сегодня вы использовали около</span>
+                            <strong id="balance-usage-units">0.00</strong>
+                            <span>ед. ресурсов или</span>
+                            <strong id="balance-usage-percent">0.00%</strong>
+                            <span>от лимита вашего тарифного плана в</span>
+                            <strong id="balance-usage-limit">{limit}</strong>
+                            <span>ед.</span>
+                        </p>
+                    </div>
+
+                    <p class="history-link">
+                        Вся история операций хранится здесь.
+                    </p>
+                </div>
+
+                <div class="balance-history">
+                    <h2>История операций</h2>
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Дата</th>
+                                <th>Сумма</th>
+                                <th>Примечание</th>
+                            </tr>
+                        </thead>
+                        <tbody id="balance-history-body">
+                            <tr>
+                                <td colspan="3" class="empty-message">Нет операций</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="balance-actions">
+                    <div class="add-funds-row">
+                        <input type="number" id="add-funds-amount" class="add-funds-amount-input" min="100" step="1" value="100" placeholder="Сумма пополнения, руб." autocomplete="off" autocorrect="off" autocapitalize="off" inputmode="numeric">
+                        <button type="button" id="add-funds-btn" class="btn-primary">Пополнить счет</button>
+                    </div>
+                    <div id="add-funds-hint" class="add-funds-hint" style="display:none;">Минимальная сумма пополнения — 100 рублей</div>
+                </div>
+            </section>
+
+            <!-- Databases Section -->
+            <section id="section-databases" class="cabinet-section" style="display: none;">
+                <div class="databases-header">
+                    <h1>Мои базы данных</h1>
+                    <div class="databases-controls">
+                        <input type="text" id="databases-search" class="databases-search-input" placeholder="Поиск..." title="Поиск по любому полю">
+                        <div class="databases-sort-wrapper">
+                            <button type="button" id="databases-sort-btn" class="databases-sort-btn" title="Сортировка">
+                                <i class="pi pi-sort-alt"></i>
+                            </button>
+                            <div id="databases-sort-dropdown" class="databases-sort-dropdown" style="display:none;">
+                                <button type="button" class="sort-option" data-sort="name" data-dir="asc">По имени ↑</button>
+                                <button type="button" class="sort-option" data-sort="name" data-dir="desc">По имени ↓</button>
+                                <button type="button" class="sort-option" data-sort="count" data-dir="asc">По расходу ↑</button>
+                                <button type="button" class="sort-option" data-sort="count" data-dir="desc">По расходу ↓</button>
+                                <button type="button" class="sort-option" data-sort="date" data-dir="asc">По дате ↑</button>
+                                <button type="button" class="sort-option" data-sort="date" data-dir="desc">По дате ↓</button>
+                            </div>
+                        </div>
+                        <button type="button" id="create-db-btn" class="btn-primary btn-small">
+                            <i class="pi pi-plus"></i> Создать БД
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Create DB Form -->
+                <div id="create-db-form" class="create-db-form" style="display:none;">
+                    <div class="create-db-fields">
+                        <div class="create-db-field">
+                            <label for="new-db-name">Имя базы данных</label>
+                            <input type="text" id="new-db-name" class="database-field-input" autocomplete="off"
+                                placeholder="от 3 до 15 латинских символов"
+                                title="От 3 до 15 латинских символов и цифр, начиная с буквы">
+                            <span id="new-db-name-error" class="create-db-error" style="display:none;"></span>
+                        </div>
+                        <div class="create-db-field">
+                            <label for="new-db-template">Шаблон</label>
+                            <select id="new-db-template" class="database-field-input">
+                                <option value="RU">Русский</option>
+                                <!--
+                                <option value="EN">English</option>
+                                <option value="FU">Full with HTMLs</option>
+                                -->
+                            </select>
+                        </div>
+                        <div class="create-db-actions">
+                            <button type="button" id="create-db-submit-btn" class="btn-primary btn-small">Создать</button>
+                            <button type="button" id="create-db-cancel-btn" class="btn-secondary btn-small">Отменить</button>
+                        </div>
+                    </div>
+                    <div id="db-limit-warning" class="db-limit-warning" style="display:none;">
+                        На бесплатном тарифном плане можно создать не более трёх баз данных.
+                    </div>
+                </div>
+
+                <div class="databases-list" id="databases-list">
+                    <!-- Databases will be rendered here -->
+                </div>
+            </section>
+
+            <!-- Community Section -->
+            <section id="section-community" class="cabinet-section" style="display: none;">
+                <div class="community-header">
+                    <h1>Кооперации</h1>
+                    <input type="text" id="community-search" class="community-search-input" placeholder="Поиск..." title="Поиск по всем полям карточек">
+                </div>
+
+                <!-- Community Tabs -->
+                <div class="community-tabs">
+                    <button class="community-tab active" data-community-tab="my-invites">Приглашенные мной</button>
+                    <button class="community-tab" data-community-tab="invitations">Приглашения мне</button>
+                    <button class="community-tab" data-community-tab="requests">Запросы</button>
+                </div>
+
+                <!-- Active/Archive Toggle -->
+                <div class="community-filter">
+                    <label class="community-radio-label">
+                        <input type="radio" name="community-archive" value="active" checked> Активные
+                    </label>
+                    <label class="community-radio-label">
+                        <input type="radio" name="community-archive" value="archive"> Архив
+                    </label>
+                    <button type="button" id="invite-btn" class="btn-primary btn-small" style="display:none; margin-left: auto;">Пригласить</button>
+                </div>
+
+                <!-- Invite Form (shown when Пригласить is clicked) -->
+                <div id="invite-form" class="invite-form" style="display:none;">
+                    <div class="invite-form-fields">
+                        <div class="invite-form-field">
+                            <label for="invite-db" class="database-field-label">База данных</label>
+                            <select id="invite-db" class="database-field-input">
+                            </select>
+                        </div>
+                        <div class="invite-form-field">
+                            <label for="invite-user" class="database-field-label">Имя или email (необязательно)</label>
+                            <input type="text" id="invite-user" class="database-field-input" placeholder="Имя или email приглашаемого">
+                        </div>
+                        <div class="invite-form-field">
+                            <label for="invite-descr" class="database-field-label">Описание (необязательно)</label>
+                            <input type="text" id="invite-descr" class="database-field-input" placeholder="Описание приглашения">
+                        </div>
+                        <div class="invite-form-actions">
+                            <button type="button" id="invite-submit-btn" class="btn-primary btn-small">Отправить</button>
+                            <button type="button" id="invite-cancel-btn" class="btn-secondary btn-small">Отменить</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab: My Invitations (Приглашенные мной) -->
+                <div class="community-tab-content active" id="community-tab-my-invites">
+                    <div class="community-list" id="community-my-invites-list">
+                        <p class="empty-message">Загрузка данных...</p>
+                    </div>
+                </div>
+
+                <!-- Tab: Invitations to me (Приглашения) -->
+                <div class="community-tab-content" id="community-tab-invitations" style="display: none;">
+                    <div class="community-list" id="community-invitations-list">
+                        <p class="empty-message">Загрузка данных...</p>
+                    </div>
+                </div>
+
+                <!-- Tab: Requests (Запросы) -->
+                <div class="community-tab-content" id="community-tab-requests" style="display: none;">
+                    <div class="community-requests-filter">
+                        <label class="community-radio-label">
+                            <input type="radio" name="community-requests-type" value="to-me" checked> Запросы к моей базе
+                        </label>
+                        <label class="community-radio-label">
+                            <input type="radio" name="community-requests-type" value="from-me"> Мои запросы к чужим базам
+                        </label>
+                        <button type="button" id="create-request-btn" class="btn-primary btn-small" style="margin-left: auto; display: none;">Создать запрос</button>
+                    </div>
+
+                    <!-- Create Request Form -->
+                    <div id="create-request-form" class="invite-form" style="display:none;">
+                        <div class="invite-form-fields">
+                            <div class="invite-form-field">
+                                <label for="request-db" class="database-field-label">Имя базы данных</label>
+                                <input type="text" id="request-db" class="database-field-input" placeholder="Имя базы данных">
+                                <span id="request-db-error" class="field-error" style="display:none;">База не найдена или скрыта владельцем</span>
+                            </div>
+                            <div class="invite-form-field">
+                                <label for="request-descr" class="database-field-label">Обоснование (необязательно)</label>
+                                <input type="text" id="request-descr" class="database-field-input" placeholder="Сопроводительный текст к запросу">
+                            </div>
+                            <div class="invite-form-actions">
+                                <button type="button" id="request-submit-btn" class="btn-primary btn-small">Отправить</button>
+                                <button type="button" id="request-cancel-btn" class="btn-secondary btn-small">Отменить</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="community-list" id="community-requests-list">
+                        <p class="empty-message">Загрузка данных...</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Bonuses Section -->
+            <section id="section-bonuses" class="cabinet-section" style="display: none;">
+                <h1>Бонусы</h1>
+
+                <div class="bonuses-info">
+                    <p>
+                        Вы получаете бонусы при регистрации и при совершении некоторых действий: прохождение уроков, активность в социальных сетях и участие в промо-акциях Интеграма. Актуальные предложения будут приходить вам на почту.
+                    </p>
+
+                    <div class="bonuses-current">
+                        <span>Текущие бонусы:</span>
+                        <strong id="bonuses-amount">0</strong>
+                    </div>
+
+                    <p>
+                        Бонусы можно конвертировать в валюту вашего депозита и пополнять таким образом баланс вашего счета: 1 бонус = 1 рубль.
+                    </p>
+
+                    <p>
+                        Ваша история операций с бонусами хранится в разделе Баланс.
+                    </p>
+                </div>
+
+                <div class="bonuses-actions">
+                    <button type="button" id="convert-bonuses-btn" class="btn-primary">Конвертировать бонусы</button>
+                </div>
+            </section>
+
+            <!-- Referrals Section -->
+            <section id="section-referrals" class="cabinet-section" style="display: none;">
+                <h1>Партнерская программа</h1>
+
+                <!-- Tabs navigation -->
+                <div class="referrals-tabs">
+                    <button class="referrals-tab active" data-tab="about">О программе</button>
+                    <button class="referrals-tab" data-tab="rules">Правила</button>
+                    <button class="referrals-tab" data-tab="stats">Статистика</button>
+                </div>
+
+                <!-- About tab -->
+                <div class="referrals-tab-content active" id="referrals-tab-about">
+                    <div class="referrals-subsection">
+                        <p>
+                            Вы получаете вознаграждение 15% за каждую оплату услуги Ideav, которую сделал клиент, привлеченный по вашей реферальной ссылке или промокоду. Программа распространяется также на оплату продления услуг.
+                        </p>
+                        <p>
+                            Это вознаграждение можно вывести на вашу банковскую карту или переводом на счет в РФ. Вывод доступен через один месяц после оплаты клиента.
+                        </p>
+                        <p>
+                            Вы также можете сконвертировать ваше партнерское вознаграждение на ваш баланс для оплаты услуг Ideav.
+                        </p>
+
+                        <div class="referral-links">
+                            <h3>Ваши партнерские ссылки:</h3>
+                            <div class="referral-link-item">
+                                <span>Регистрация:</span>
+                                <a id="referral-link-register" href="#" target="_blank">https://ideav.ru?aff=...</a>
+                                <button type="button" class="copy-btn" data-copy="referral-link-register" title="Копировать"><i class="pi pi-copy"></i></button>
+                            </div>
+                            <div class="referral-link-item">
+                                <span>Сайт Интеграма:</span>
+                                <a id="referral-link-site" href="#" target="_blank">https://ideav.ru/ru?aff=...</a>
+                                <button type="button" class="copy-btn" data-copy="referral-link-site" title="Копировать"><i class="pi pi-copy"></i></button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Rules tab -->
+                <div class="referrals-tab-content" id="referrals-tab-rules" style="display: none;">
+                    <div class="referrals-subsection">
+                        <div class="rules-list">
+                            <ul>
+                                <li>Вознаграждение выплачивается через СБП (Система быстрых платежей) или банковским переводом через месяц после каждого платежа приведенного клиента. Комиссия платежной системы оплачивается из вознаграждения партнера.</li>
+                                <li>Не пытайтесь получить скидку, покупая услуги для себя. Мы следим за этим.</li>
+                                <li>Минимальная сумма вывода: 500 рублей.</li>
+                                <li>Запрещено привлечение клиентов с помощью почтовых рассылок.</li>
+                                <li>Запрещено привлечение клиентов с контекстной рекламы с использованием бренда Интеграм.</li>
+                                <li>Запрещена установка партнерской cookie пользователю без его прямого перехода по реферальной ссылке.</li>
+                            </ul>
+                            <p>
+                                <a href="https://ideav.ru/download/Партнёрское_соглашение_Интеграм.pdf" target="_blank">Партнерский договор</a>
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Statistics tab -->
+                <div class="referrals-tab-content" id="referrals-tab-stats" style="display: none;">
+                    <div class="referrals-subsection">
+                        <p class="stats-description">
+                            Здесь будет статистика привлечений клиентов, оплат и вашего вознаграждения.
+                        </p>
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Клиенты</th>
+                                    <th>Платежи</th>
+                                    <th>Созрело*</th>
+                                    <th>Комиссия</th>
+                                    <th>Выплачено</th>
+                                    <th>К выплате</th>
+                                </tr>
+                            </thead>
+                            <tbody id="referrals-stats-body">
+                                <tr>
+                                    <td id="stats-clients">0</td>
+                                    <td id="stats-payments">-</td>
+                                    <td id="stats-matured">-</td>
+                                    <td id="stats-commission">-</td>
+                                    <td id="stats-paid">-</td>
+                                    <td id="stats-to-pay">-</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        <p class="stats-note">* Прошло не менее месяца с момента совершения платежа</p>
+                        <div class="referrals-actions">
+                            <button type="button" id="withdraw-referrals-btn" class="btn-primary">Вывести средства</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+    <script>
+        if('{_global_.role}'==='admin')
+            document.querySelectorAll('.adm').forEach(el => {
+                el.style.display = el.style.display === 'none' ? '' : 'none';
+            });
+    </script>
+    <script src="/js/app.js"></script>
+    <script src="/js/form-submit.js" defer></script>
+    <script src="/js/cabinet.js"></script>
+    <script>
+    function changePwd(){
+        var oldPwd=document.getElementById('old-pwd').value;
+        var newPwd=document.getElementById('new-pwd').value;
+        var newAgain=document.getElementById('new-again').value;
+        if(oldPwd===''||newPwd===''||newAgain==='')
+            return changeMsg('alert-danger','Заполните все поля');
+        document.querySelectorAll('.ch-toggle,.wait-toggle').forEach(function(el){el.style.display=el.style.display==='none'?'':'none';});
+        var obj=new XMLHttpRequest();
+        obj.open('POST','/'+db+'/auth?JSON',true);
+        obj.setRequestHeader('Content-Type','application/x-www-form-urlencoded');
+        obj.onload=function(e){
+            document.querySelectorAll('.ch-toggle,.wait-toggle').forEach(function(el){el.style.display=el.style.display==='none'?'':'none';});
+            var json;
+            try{json=JSON.parse(this.responseText);}
+            catch(e){console.log(e);document.getElementById('pwdchangemsg').innerHTML=this.responseText;}
+            if(json&&json.msg){
+                if(json.msg.indexOf('[err')===-1){
+                    changeMsg('alert-success',json.msg);
+                    resetChangePasswordFields();
+                }else
+                    changeMsg('alert-danger',json.msg.replace(/ ?\[.+\]/,''));
+                if(json.token)token=json.token;
+                if(json.xsrf)xsrf=json.xsrf;
+            }else
+                changeMsg('alert-danger','Неверный пароль');
+            obj.abort();
+        };
+        obj.send('change=1&login='+name+'&pwd='+encodeURIComponent(oldPwd)+'&npw1='+encodeURIComponent(newPwd)+'&npw2='+encodeURIComponent(newAgain));
+    }
+    function changeMsg(cl,msg){
+        var el=document.getElementById('pwdchangemsg');
+        el.classList.remove('alert-danger','alert-success');
+        el.classList.add(cl);
+        el.innerHTML=msg;
+        el.style.display='';
+        setTimeout(function(){
+            el.style.transition='opacity 0.4s';
+            el.style.opacity='0';
+            setTimeout(function(){el.style.display='none';el.style.opacity='';el.style.transition='';},400);
+        },4500);
+    }
+    </script>
+<!-- End: noAdmin -->
+<!-- Begin: isAdmin --><!--{Role}-->
+    <nav id="nav" class="navbar navbar-expand-562 fixed-top dark navbar-fixed-top">
+        <a id="brand" class="navbar-brand" href="/{_global_.z}/"></a>
+        <button onclick="burgerClick(this)" class="navbar-toggler" type="button"  data-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
+            <span class="navbar-toggler-icon">
+                <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 16 16" class="icon" style="shape-rendering: geometricprecision; margin-top: 0px;">
+                    <path fill-rule="evenodd" class="" fill="currentColor" d="M2,12 C2,11.4477153 2.45576096,11 3.00247329,11 L12.9975267,11 C13.5511774,11 14,11.4438648 14,12 C14,12.5522847 13.544239,13 12.9975267,13 L3.00247329,13 C2.44882258,13 2,12.5561352 2,12 Z M2,8 C2,7.44771525 2.45576096,7 3.00247329,7 L12.9975267,7 C13.5511774,7 14,7.44386482 14,8 C14,8.55228475 13.544239,9 12.9975267,9 L3.00247329,9 C2.44882258,9 2,8.55613518 2,8 Z M2,4 C2,3.44771525 2.45576096,3 3.00247329,3 L12.9975267,3 C13.5511774,3 14,3.44386482 14,4 C14,4.55228475 13.544239,5 12.9975267,5 L3.00247329,5 C2.44882258,5 2,4.55613518 2,4 Z"></path>
+                </svg>
+            </span> 
+        </button>
+    
+        <div class="collapse navbar-collapse" id="navbarSupportedContent">
+            <ul id="navbar-list" class="navbar-nav">
+                <div id="navlist" class="hidden">
+                    <li class="nav-item"><a class="nav-link" id="list:id:" href="/{_global_.z}/:href:">:name:</a></li>
+                </div>
+                <div id="extralist" class="hidden">
+                    <li id="dropdown-link" class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" id="navbarDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                          Еще
+                        </a>
+                        <div class="dropdown-menu" id="dropdown-list" aria-labelledby="navbarDropdown">
+                            <a class="dropdown-item" href="/{_global_.z}/:href:">:name:</a>
+                        </div>
+                    </li>
+                </div>
+            </ul>
+        </div>
+        <div class="right-block" id="right_block">
+            <div class="nav-item dropdown">
+                <a class="user-link dropdown-toggle user-margin" href="#" id="navbarDropdown" role="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                    <img src="https://img.icons8.com/material-sharp/30/ffffff/user.png"/>
+                </a>
+                <div class="dropdown-menu dropdown-menu-right" aria-labelledby="navbarDropdown">
+                    <a class="dropdown-item" target="_help" href="https://help.ideav.online">Помощь</a>
+                    <a class="dropdown-item" onclick="toggleLocale()">EN/RU</a>
+                    <a class="dropdown-item" onclick="openChangePasswordForm()">Сменить пароль</a>
+                    <a class="dropdown-item" onclick="exitLogin()">Выход</a>
+                </div>
+            </div>
+        </div>
+    </nav>
+    <div class="content">
+    <!-- File: a -->
+    </div>
+    <div class="footer">
+    <!--Elapsed-->
+    </div>
+    <FORM method="POST" id="post" action="/{_global_.z}/"><input type="hidden" name="_xsrf" value="{_global_.xsrf}"></FORM>
+    <script src="/js/popper1.16.1.min.js"></script>
+    <script src="/js/bootstrap4.5.2.min.js"></script>
+    <script src="/js/main.js"></script>
+    <script>
+    localize();
+    function exitLogin(){
+        document.cookie='{_global_.z}=;Path=/';
+        document.location.href='/';
+    }
+    function toggleLocale(){
+        document.cookie='{_global_.z}_locale='+(locale==='[EN]'?'RU':'EN')+';Path=/';
+        location.reload();
+    }
+    function changePwd(){
+        if($('#old-pwd').val()===''||$('#new-pwd').val()===''||$('#new-again').val()==='')
+            return changeMsg('alert-danger','Заполните все поля');
+        $('.ch-toggle,.wait-toggle').toggle();
+        var obj=new XMLHttpRequest();
+        obj.open('POST','/'+db+'/auth?JSON',true);
+        obj.setRequestHeader('Content-Type','application/x-www-form-urlencoded');
+        obj.onload=function(e){
+            $('.ch-toggle,.wait-toggle').toggle();
+            var json;
+            try{json=JSON.parse(this.responseText);}
+            catch(e){console.log(e);$('#pwdchangemsg').html(this.responseText);}
+            if(json&&json.msg){
+                if(json.msg.indexOf('[err')===-1){
+                    changeMsg('alert-success',json.msg);
+                    resetChangePasswordFields();
+                }else
+                    changeMsg('alert-danger',json.msg.replace(/ ?\[.+\]/,''));
+                if(json.token)token=json.token;
+                if(json.xsrf)xsrf=json.xsrf;
+            }else
+                changeMsg('alert-danger','Неверный пароль');
+            obj.abort();
+        };
+        obj.send('change=1&login='+name+'&pwd='+encodeURIComponent($('#old-pwd').val())+'&npw1='+encodeURIComponent($('#new-pwd').val())+'&npw2='+encodeURIComponent($('#new-again').val()));
+    }
+    function changeMsg(cl,msg){
+        $('#pwdchangemsg').removeClass('alert-danger').removeClass('alert-success').addClass(cl).html(msg).show().delay(4500).slideUp(400);
+    }
+    </script>
+<!-- End: isAdmin -->
+
+    <script>
+    function getChangePasswordFields(){
+        return document.querySelectorAll('#old-pwd,#new-pwd,#new-again');
+    }
+    function resetChangePasswordFields(){
+        getChangePasswordFields().forEach(function(el){
+            el.value='';
+            el.disabled=true;
+        });
+    }
+    function openChangePasswordForm(){
+        var form=document.querySelector('.cp-form');
+        if(form)form.style.display='block';
+        getChangePasswordFields().forEach(function(el){
+            el.value='';
+            el.disabled=false;
+        });
+        document.querySelectorAll('.ch-toggle').forEach(function(el){el.style.display='flex';});
+        document.querySelectorAll('.wait-toggle').forEach(function(el){el.style.display='none';});
+    }
+    function closeChangePasswordForm(){
+        var form=document.querySelector('.cp-form');
+        if(form)form.style.display='none';
+        resetChangePasswordFields();
+    }
+    </script>
+
+    <!-- Change Password Modal -->
+    <div class="cp-form" style="display: none; position: fixed; top: 0; left: 0; height: 100%; width: 100%; z-index: 9999; background: rgba(0,0,0,.4);" onclick="closeChangePasswordForm();">
+        <div style="display: flex; align-items: center; justify-content: center; height: 100%;">
+            <div style="border-radius: 8px; background-color: #fff; max-width: 360px; width: 100%; padding: 1.5rem; box-shadow: 0 4px 24px rgba(0,0,0,.18);" onclick="event.stopPropagation();" onkeyup="if(event.keyCode===13)changePwd()">
+                <div class="w-100 text-center mb-3">
+                    <h5 style="margin:0 0 1rem;">Смена пароля</h5>
+                </div>
+                <div id="pwdchangemsg" class="alert w-100" style="display: none;"></div>
+                <label for="old-pwd" style="margin-bottom:0.25rem; display:block;">Действующий пароль</label>
+                <input type="password" id="old-pwd" class="form-control" autocomplete="current-password" disabled style="border: 1px solid lightgray; margin-bottom: 0.75rem; padding: 0.375rem 0.5rem; width: 100%; border-radius: 4px;">
+                <label for="new-pwd" style="margin-bottom:0.25rem; display:block;">Новый пароль</label>
+                <input type="password" id="new-pwd" class="form-control" autocomplete="new-password" disabled style="border: 1px solid lightgray; margin-bottom: 0.75rem; padding: 0.375rem 0.5rem; width: 100%; border-radius: 4px;">
+                <label for="new-again" style="margin-bottom:0.25rem; display:block;">Повторите пароль</label>
+                <input type="password" id="new-again" class="form-control" autocomplete="new-password" disabled style="border: 1px solid lightgray; margin-bottom: 1rem; padding: 0.375rem 0.5rem; width: 100%; border-radius: 4px;">
+                <div style="text-align:center; display:none;" class="wait-toggle"><img src="/i/ajax.gif"></div>
+                <div style="display: flex; gap: 0.5rem;" class="ch-toggle">
+                    <button style="flex:1; padding:0.5rem; background:#3b82f6; color:#fff; border:none; border-radius:6px; cursor:pointer;" type="button" onclick="changePwd()">Сменить</button>
+                    <button style="flex:1; padding:0.5rem; background:#fff; color:#333; border:1px solid #ccc; border-radius:6px; cursor:pointer;" type="button" onclick="closeChangePasswordForm();">Отменить</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Cookie Consent Banner -->
+    <div id="cookie-consent">
+        <span style="font-size:0.9rem;">Мы используем куки для обеспечения работы сайта. Продолжая использовать сайт, вы соглашаетесь с их использованием.</span>
+        <button type="button" onclick="cookieAccept()" style="background:#3b82f6; color:#fff; border:none; border-radius:6px; padding:0.5rem 1.25rem; font-size:0.9rem; cursor:pointer; white-space:nowrap;">Принять</button>
+    </div>
+    <script>
+        (function() {
+            if (!localStorage.getItem('cookie_consent')) {
+                document.getElementById('cookie-consent').style.display = 'flex';
+            }
+        })();
+        function cookieAccept() {
+            localStorage.setItem('cookie_consent', '1');
+            document.getElementById('cookie-consent').style.display = 'none';
+        }
+    </script>
+</body>
+</html>
