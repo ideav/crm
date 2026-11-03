@@ -693,6 +693,7 @@ require_once __DIR__ . "/include/delimiters.php";
 require_once __DIR__ . "/include/json_archive.php";
 require_once __DIR__ . "/include/import_reconcile.php";
 require_once __DIR__ . "/include/schema_json.php";	# #5242: схема одним JSON, поля по именам
+require_once __DIR__ . "/include/ext_views.php";	# #5373: read-only вьюхи для внешнего SQL-клиента
 # Default LIMIT parameter for queries with no filter
 define("DEFAULT_LIMIT", isset($_COOKIE["default_limit"])&&(int)$_COOKIE["default_limit"]>4&&(int)$_COOKIE["default_limit"]<1001?(int)$_COOKIE["default_limit"]:20);
 define("UPLOAD_DIR", "download/$z/");  # Uploaded files folder
@@ -5635,6 +5636,9 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
         trace("RECURSIVE ".$GLOBALS["STORED_REPS"][$id]["sql"]);
         mywrite("\r\n".$GLOBALS["STORED_REPS"][$id]["sql"]);
 	}
+# Только SQL отчёта со всеми колонками, без выполнения — для вьюхи Запроса (#5373)
+	if(isset($GLOBALS["EXT_SQL_ONLY"]))
+		return;
 # Return in case we construct a sub-query
 	if(!$exe){
 		if(isset($GLOBALS["STORED_REPS"][$id]["params"][REP_IFNULL]))	# Apply IF_NULL value, if set
@@ -16377,6 +16381,13 @@ if(Validate_Token())
 					$id = $obj = $myup;
 				}
 			}
+			break;
+
+		case "_ext_rebuild":	# #5373: пересборка read-only вьюх базы и учётки читателя (docs/ext-views.md)
+			if(!Restore_allowed())
+				my_die(t9n("[RU]Пересобрать вьюхи может владелец базы[EN]Only the database owner can rebuild the views"));
+			check();
+			api_dump(json_encode(Ext_rebuild_core(isset($_POST["password"]) ? $_POST["password"] : ""), JSON_UNESCAPED_UNICODE), "ext_rebuild.json");
 			break;
 
 		case "_new_db":
