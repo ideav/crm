@@ -211,7 +211,10 @@ function Ext_plan_tables($types, $reqs, $src, $prefix = "t_", $grants = NULL, &$
 		$main = Ext_unique(Ext_slug($type["name"]), $cols, $id);
 		$sel = array("v.id AS `id`", "v.up AS `parent_id`", "v.ord AS `ord`"
 			, Ext_typed_expr("v.val", $type["base"])." AS ".Ext_qi($main));
+		if(Ext_is_date($type["base"]))	# сырое главное значение: фильтр по нему — диапазон индекса t_val
+			$sel[] = "v.val AS ".Ext_qi(Ext_unique($main."_raw", $cols, $id));
 		$lists = array();
+		$dates = array();
 		foreach(isset($reqs[$id]) && ($tlev !== "REF") ? $reqs[$id] : array() as $req){
 			if(Ext_req_secret($req) || !Ext_req_level($req, $tlev, $grants))
 				continue;
@@ -237,17 +240,36 @@ function Ext_plan_tables($types, $reqs, $src, $prefix = "t_", $grants = NULL, &$
 			}
 			elseif($req["base"] === "BOOLEAN")
 				$sel[] = "EXISTS(SELECT 1 FROM $src f WHERE f.up=v.id AND f.t=$rid AND f.val NOT IN ('', '0')) AS ".Ext_qi($c);
-			else
+			else{
 				$sel[] = "(SELECT ".Ext_typed_expr("f.val", $req["base"])." FROM $src f WHERE f.up=v.id AND f.t=$rid"
 					." ORDER BY f.id LIMIT 1) AS ".Ext_qi($c);
+				if(Ext_is_date($req["base"]))
+					$dates[] = array("req" => $req, "col" => $c);
+			}
 		}
 		$views[] = array("name" => $vname, "kind" => "table", "object" => $id
 			, "sql" => "SELECT ".implode(",\n  ", $sel)."\nFROM $src v JOIN $src p ON p.id=v.up AND p.up!=0"
 				."\nWHERE v.t=$id AND v.up!=0");
 		foreach($lists as $req)
 			$views[] = Ext_plan_list($vname, $id, $req, $src, $taken);
+		foreach($dates as $d)
+			$views[] = Ext_plan_by_date($vname, $id, $d["req"], $d["col"], $sel, $cols, $src, $taken);
 	}
 	return $views;
+}
+function Ext_is_date($base){
+	return in_array($base, array("DATE", "DATETIME"), TRUE);
+}
+# Вьюха <таблица>__по_<поле> для выгрузки за период: колонки вьюхи таблицы и сырое значение поля
+# <поле>_raw. Ведущая строка — значение поля (d), поэтому WHERE <поле>_raw BETWEEN … после подстановки
+# вьюхи становится d.t=<поле> AND d.val BETWEEN … — диапазоном индекса t_val, а не перебором записей.
+# DATE хранится как YYYYMMDD, DATETIME — unix-секундами: строки сравниваются в порядке дат.
+function Ext_plan_by_date($vname, $typeId, $req, $col, $sel, &$cols, $src, &$taken){
+	$rid = $req["id"];
+	$sel[] = "d.val AS ".Ext_qi(Ext_unique($col."_raw", $cols, $rid));
+	return array("name" => Ext_unique($vname."__по_".Ext_slug($req["name"]), $taken, $rid), "kind" => "by_date", "object" => $rid
+		, "sql" => "SELECT ".implode(",\n  ", $sel)."\nFROM $src d JOIN $src v ON v.id=d.up AND v.t=$typeId AND v.up!=0"
+			."\n  JOIN $src p ON p.id=v.up AND p.up!=0\nWHERE d.t=$rid");
 }
 function Ext_plan_list($vname, $typeId, $req, $src, &$taken){
 	$rid = $req["id"];
