@@ -390,16 +390,30 @@
         unit: ['Единица хранения'], qty: ['Заказано количество']
     };
 
-    // «85 х 38 5000 шт. П/Гл каучук намотка внутрь вт 76 (П)» → { width, length, perRoll, core, winding }
-    // или null. «D х 40 …» — круглая этикетка, ширина = длине.
-    var NOMEN_RE = /^\s*([DДdд]|\d+(?:[.,]\d+)?)\s*[хХxX×*]\s*(\d+(?:[.,]\d+)?)\s+(\d[\d\s]*?)\s*шт/;
+    // «85 х 38 5000 шт. П/Гл каучук намотка внутрь вт 76 (П)» → { width, length, perRoll, core, winding,
+    // material, glue, perRollRaw, qtyIn } или null. Круглая этикетка — «D х 40 …» или «D-20 2000 шт.»:
+    // ширина = длине. «27 х 44 7/1500 шт.» — этикеток в рулоне 1500 (perRollRaw = «7/1500»).
+    // qtyIn — в чём «Заказано количество» по пометке в номенклатуре: 'labels' («(в шт)»),
+    // 'thousands' («(в тыс. шт.)», «(тыс.шт.)»), '' — пометки нет.
+    var NOMEN_RE = /^\s*([DДdд]|\d+(?:[.,]\d+)?)\s*[хХxX×*]\s*(\d+(?:[.,]\d+)?)\s+((?:\d+\s*\/\s*)?\d[\d\s]*?)\s*шт/;
+    var NOMEN_ROUND_RE = /^\s*[DДdд]\s*[-–—]?\s*(\d+(?:[.,]\d+)?)\s+((?:\d+\s*\/\s*)?\d[\d\s]*?)\s*шт/;
     function parseNomenclature(s) {
-        var m = NOMEN_RE.exec(String(s == null ? '' : s));
-        if (!m) return null;
-        var length = Number(m[2].replace(',', '.'));
-        var width = /^[DДdд]$/.test(m[1]) ? length : Number(m[1].replace(',', '.'));
-        var perRoll = Number(m[3].replace(/\s+/g, ''));
+        s = String(s == null ? '' : s);
+        var m = NOMEN_RE.exec(s), width, length, perRollRaw;
+        if (m) {
+            length = Number(m[2].replace(',', '.'));
+            width = /^[DДdд]$/.test(m[1]) ? length : Number(m[1].replace(',', '.'));
+            perRollRaw = m[3];
+        } else {
+            m = NOMEN_ROUND_RE.exec(s);
+            if (!m) return null;
+            width = length = Number(m[1].replace(',', '.'));
+            perRollRaw = m[2];
+        }
+        perRollRaw = perRollRaw.replace(/\s+/g, '');
+        var perRoll = Number(perRollRaw.split('/').pop());
         if (!(width > 0) || !(length > 0) || !(perRoll > 0)) return null;
+        var qtyIn = /тыс\.?\s*шт/i.test(s) ? 'thousands' : (/(^|[\s(])в\s+шт/i.test(s) ? 'labels' : '');
         var core = /вт\.?\s*(\d+)/i.exec(s);
         var winding = /намотка\s+внутрь/i.test(s) ? 'внутрь' : (/намотка\s+наруж/i.test(s) ? 'наружу' : '');
         // Сырьё — слово сразу за «шт.» («П/Гл», «П/П»), клей — по списку известных («каучук», «акрил»).
@@ -407,8 +421,53 @@
         var material = mat && !/^(намотка|вт\.?|каучук|акрил)/i.test(mat[1]) ? mat[1] : '';
         var gl = /(каучук|акрил\S*|hot\s*melt)/i.exec(s);
         return { width: width, length: length, perRoll: perRoll, core: core ? core[1] : '', winding: winding,
-            material: material, glue: gl ? gl[1] : '' };
+            material: material, glue: gl ? gl[1] : '', perRollRaw: perRollRaw, qtyIn: qtyIn };
     }
+
+    // Марка мастер-рулона из комментария 1С: «MONOCHROME 0043 SG/HM/YG 0,300 х 2000 (П) - 41 шт» →
+    // «0043 SG/HM/YG». → { code, codes: [все разные марки] }; code — '' при нуле или нескольких марках.
+    var MR_CODE_RE = /MONOCHROME\s+(\d{3,5}\s+[^\s,;]+)/gi;
+    function commentMaterial(comment) {
+        var codes = [], seen = {}, m;
+        MR_CODE_RE.lastIndex = 0;
+        while ((m = MR_CODE_RE.exec(String(comment == null ? '' : comment)))) {
+            var k = codeKey(m[1]);
+            if (!seen[k]) { seen[k] = true; codes.push(m[1]); }
+        }
+        return { code: codes.length === 1 ? codes[0] : '', codes: codes };
+    }
+
+    // Ключ сравнения марки: кириллица, похожая на латиницу (1С пишет «PP/А/G» с русской «А»), — в латиницу.
+    var LOOKALIKE = { 'а': 'a', 'в': 'b', 'е': 'e', 'к': 'k', 'м': 'm', 'н': 'h', 'о': 'o', 'р': 'p', 'с': 'c', 'т': 't', 'у': 'y', 'х': 'x' };
+    function codeKey(s) {
+        return norm(s).replace(/[авекмнорстух]/g, function(ch) { return LOOKALIKE[ch]; });
+    }
+
+    // Количество строки в рулонах. «Заказано количество» в 1С — рулоны, кроме двух случаев:
+    // единица хранения «тыс. шт…» — тысячи этикеток; пометка «(в шт)» / «(в тыс. шт.)» в номенклатуре —
+    // этикетки (множитель — по единице хранения: она у 1С — учётная). → { rolls, labels, source } | { error }
+    function rollsOf(qty, unit, label) {
+        var qtyText = fmtNum(qty);
+        var unitThousands = /тыс/i.test(String(unit || ''));
+        var inLabels = unitThousands || !!(label && label.qtyIn);
+        if (!inLabels) {
+            if (Math.round(qty) !== qty) return { error: 'количество «' + qtyText + '» — нужно целое число рулонов больше нуля' };
+            return { rolls: qty, labels: null, source: '' };
+        }
+        if (!label) return { error: 'количество «' + qtyText + '» в этикетках, а этикеток в рулоне из номенклатуры не разобрано' };
+        var labels = Math.round(qty * (unitThousands ? 1000 : 1) * 1000) / 1000;
+        var rolls = labels / label.perRoll;
+        var src = 'в 1С ' + qtyText + (unitThousands ? ' тыс.' : '') + ' шт этикеток = ' + groupDigits(labels) + ' / ' + label.perRoll + ' в рулоне';
+        if (Math.abs(rolls - Math.round(rolls)) > 1e-9) {
+            return { error: 'количество ' + groupDigits(labels) + ' этикеток не делится на ' + label.perRoll + ' в рулоне (' +
+                fmtNum(rolls) + ' рул.) — проверьте количество или «шт в рулоне» в 1С' };
+        }
+        rolls = Math.round(rolls);
+        if (!(rolls > 0)) return { error: 'количество «' + qtyText + '» — нужно больше нуля' };
+        return { rolls: rolls, labels: labels, source: src + ' = ' + rolls + ' рул.' };
+    }
+
+    function groupDigits(n) { return String(fmtNum(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ' '); }
 
     // Лист заказов → { ok, error, items, duplicates, skipped }. Строки «Итого» и строки партнёра
     // без заказа и артикула — в `skipped`; повтор пары «Заказ клиента» + артикул — в `duplicates`.
@@ -428,21 +487,34 @@
             }
             firstRow[key] = r + 1;
             var errors = [], warnings = [];
-            if (order === '') errors.push('нет «Заказ клиента»');
-            if (article === '') errors.push('нет артикула');
-            var qty = cellNum(cell(row, h.cols, 'qty'));
-            if (qty == null || isNaN(qty) || !(qty > 0) || Math.round(qty) !== qty) {
-                errors.push('количество «' + get('qty') + '» — нужно целое число рулонов больше нуля');
+            if (order === '') {
+                errors.push('нет «Заказ клиента»' + (get('supplierOrder') ? ' (заказ поставщику ' + get('supplierOrder') + ')' : '') +
+                    ' — позицию не к чему привязать, строка не импортируется');
             }
+            if (article === '') errors.push('нет артикула');
             var nom = get('nomenclature');
             var p = parseNomenclature(nom);
-            if (!p) errors.push('номенклатура «' + nom + '» не разобрана: нужен вид «Ш х Д N шт. …», например «85 х 38 5000 шт.»');
+            if (!p) errors.push('номенклатура «' + nom + '» не разобрана: нужен вид «Ш х Д N шт. …» или «D-20 N шт. …», например «85 х 38 5000 шт.»');
+            else if (/\//.test(p.perRollRaw)) warnings.push('«' + p.perRollRaw + ' шт.» в номенклатуре — этикеток в рулоне взято ' + p.perRoll);
+            var qty = cellNum(cell(row, h.cols, 'qty'));
+            var q = null;
+            if (qty == null || isNaN(qty) || !(qty > 0)) errors.push('количество «' + get('qty') + '» — нужно число больше нуля');
+            else {
+                q = rollsOf(qty, get('unit'), p);
+                if (q.error) { errors.push(q.error); q = null; }
+                else if (p && p.qtyIn === 'thousands' && !/тыс/i.test(get('unit'))) {
+                    warnings.push('в номенклатуре пометка «тыс. шт», а единица хранения «' + get('unit') + '» — количество взято в штуках этикеток');
+                }
+            }
+            var mat = commentMaterial(get('comment'));
+            if (mat.codes.length > 1) warnings.push('в комментарии несколько марок мастер-рулона (' + mat.codes.join(', ') + ') — сырьё по комментарию не выбрано');
             var received = excelDate(cell(row, h.cols, 'received'));
             if (!received && get('received')) warnings.push('дата поступления «' + get('received') + '» не разобрана');
             items.push({
                 row: r + 1, key: key, order: order, article: article, partner: get('partner'),
                 supplierOrder: get('supplierOrder'), nomenclature: nom, comment: get('comment'), received: received,
-                knifeType: get('knifeType'), box: get('box'), unit: get('unit'), rolls: qty,
+                knifeType: get('knifeType'), box: get('box'), unit: get('unit'), rolls: q ? q.rolls : null,
+                qtySource: q ? q.source : '', inLabels: !!(q && q.labels != null), materialCode: mat.code,
                 label: p, warnings: warnings, errors: errors
             });
         }
@@ -682,11 +754,20 @@
     }
 
     // Сырьё позиции по обозначению и клею из номенклатуры. materials — [{ id, name, base, glue }].
+    // code — марка мастер-рулона из комментария 1С («0043 SG/HM/YG»): если есть, сырьё ищется только
+    // по ней (название записи = марка), обозначение «П/Гл» уже не угадывается.
     // → { ok, id, name, base } | { ok:false, reason }
-    function matchMaterial(label, materials) {
+    function matchMaterial(label, materials, code) {
         var token = label && label.material ? String(label.material).trim() : '';
         var glue = label && label.glue ? norm(label.glue) : '';
         var list = materials || [];
+        if (code) {
+            var byCode = list.filter(function(m) { return codeKey(m.name) === codeKey(code); });
+            if (byCode.length === 1) return { ok: true, id: byCode[0].id, name: byCode[0].name, base: byCode[0].base };
+            return { ok: false, reason: byCode.length
+                ? 'марке «' + code + '» из комментария 1С подходит несколько записей сырья'
+                : 'марки «' + code + '» из комментария 1С нет в справочнике «Сырьё этикетки»' };
+        }
         if (!token) return { ok: false, reason: 'в номенклатуре 1С нет обозначения материала' };
         if (!list.length) return { ok: false, reason: 'справочник «Сырьё этикетки» пуст' };
         var exact = list.filter(function(m) { return norm(m.name) === norm(token) || (glue && norm(m.name) === norm(token + ' ' + glue)); });
@@ -850,7 +931,7 @@
                 if (i === 0) row.changes = row.changes.concat(orderChanges);
                 var lab = item.label;
                 var pt = {}, plabels = {};
-                var matchRes = t.position.reqs.material ? matchMaterial(lab, ctx.materials) : null;
+                var matchRes = t.position.reqs.material ? matchMaterial(lab, ctx.materials, item.materialCode) : null;
                 var put = function(k, v, label) { if (v == null || v === '' || !t.position.reqs[k]) return; pt[k] = v; plabels[k] = label != null ? label : v; };
                 put('productKind', kindId, lp ? lp.PRODUCT_KIND.LABEL : 'этикетка');
                 put('article', ensure('article', item.article), item.article);
@@ -867,13 +948,15 @@
                 var due = t.position.reqs.due ? addDays(item.received, ctx.dueDays) : '';
                 put('due', due);
                 if (matchRes && matchRes.ok) put('material', matchRes.id, matchRes.name);
-                if (item.unit) {
-                    if (ctx.dict.unit[norm(item.unit)]) put('unit', ctx.dict.unit[norm(item.unit)], item.unit);
-                    else row.warnings.push('единица «' + item.unit + '» — нет в справочнике «Ед.изм.»');
+                // Количество позиции — рулоны: пересчитанное из этикеток пишется с единицей «шт» (рулонов).
+                var unit = item.inLabels ? 'шт' : item.unit;
+                if (unit) {
+                    if (ctx.dict.unit[norm(unit)]) put('unit', ctx.dict.unit[norm(unit)], unit);
+                    else row.warnings.push('единица «' + unit + '» — нет в справочнике «Ед.изм.»');
                 }
                 put('status', ctx.positionStatusNew);
-                put('note', ['Номенклатура 1С: ' + item.nomenclature, item.supplierOrder ? 'заказ поставщику ' + item.supplierOrder : '',
-                    item.box ? 'короб ' + item.box : ''].filter(Boolean).join('; '));
+                put('note', ['Номенклатура 1С: ' + item.nomenclature, item.qtySource, item.supplierOrder ? 'заказ поставщику ' + item.supplierOrder : '',
+                    item.box ? 'короб ' + item.box : '', item.comment ? 'комментарий 1С: ' + item.comment.replace(/\s*\n\s*/g, ' / ') : ''].filter(Boolean).join('; '));
 
                 var rolls = fmtNum(item.rolls);
                 var posList = existing ? ((ctx.positions[existing.id] || {})[norm(item.article)] || []) : [];
@@ -930,7 +1013,8 @@
     function orderSummary(item) {
         var l = item.label;
         return (l ? fmtNum(l.width) + '×' + fmtNum(l.length) + ', ' + l.perRoll + ' шт/рул' : '') +
-            (item.rolls > 0 ? ', ' + item.rolls + ' рул.' : '');
+            (item.rolls > 0 ? ', ' + item.rolls + ' рул.' : '') +
+            (item.qtySource ? ' (' + item.qtySource + ')' : '');
     }
 
     // ── Запись пакетами ──────────────────────────────────────────────────────────────────
