@@ -139,7 +139,7 @@ npm start
 
 | ID | Name | Description |
 |----|------|-------------|
-| 3 | SHORT | Text up to 255 chars |
+| 3 | SHORT | Short text: up to 127 chars recommended, length not enforced |
 | 8 | CHARS | Text |
 | 2 | LONG | Long text |
 | 13 | NUMBER | Numeric |
