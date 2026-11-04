@@ -302,8 +302,44 @@ function dashMarkCellErrorIfAny(row, itemName, colName, panelKey) {
     cell.setAttribute('title', info.error + ' | ' + info.raw);
 }
 
+// Единое правило отображения чисел по умолчанию (когда формат не задан явно):
+// убираем шум плавающей точки (100.000000001, -124975112.49999994), округляя ТОЛЬКО строку
+// для экрана — значения в расчётах и в данных не трогаем. |n| >= 1 — 2 знака после запятой,
+// |n| < 1 — 4 знака (доли и коэффициенты вроде 0.3098 не схлопываются в 0.31). Хвостовые
+// нули не дописываются: 4 -> «4», 0.30 -> «0.3». Не-числа возвращаются как строка.
+function dashRoundNumberText(n) {
+    var x = typeof n === 'number' ? n : parseFloat(n), s;
+    if (!isFinite(x)) return String(n === undefined || n === null ? '' : n);
+    if (Math.abs(x) >= 1e21) return String(x);
+    s = x.toFixed(Math.abs(x) < 1 ? 4 : 2);
+    if (s.indexOf('.') !== -1) s = s.replace(/\.?0+$/, '');
+    return (s === '-0' || s === '') ? '0' : s;
+}
+
+// Атрибут data-raw хранит полное значение ячейки, если на экране оно округлено: формулы и
+// суммы читают ячейки через dashCellText, и округление не должно накапливаться в расчётах.
+function dashCellRawAttr(raw) {
+    var s;
+    if (raw === null || raw === undefined) return '';
+    s = String(raw).trim();
+    if (!s || /e/i.test(s) || dashNormalizeNumberText(s) === '') return '';
+    if (dashGetFloat(dashFormatNumberText(s)) === dashGetFloat(s)) return '';
+    return ' data-raw="' + dashAttr(s) + '"';
+}
+
+function dashSetCellNumber(el, val) {
+    var attr = dashCellRawAttr(val);
+    el.innerHTML = dashFormatNumberText(val);
+    if (attr) el.setAttribute('data-raw', String(val).trim());
+    else if (el.removeAttribute) el.removeAttribute('data-raw');
+}
+
 function dashFormatNumberText(v) {
     if (v === null || v === undefined) return '';
+    if (typeof v === 'number') {
+        if (!isFinite(v)) return String(v);
+        v = dashRoundNumberText(v);
+    }
     var raw = String(v).trim()
         , normalized, sign = '', percent = '', parts, whole, fraction, decimalSep;
     if (!raw) return '';
@@ -318,6 +354,13 @@ function dashFormatNumberText(v) {
     whole = parts[0] || '0';
     fraction = parts.length > 1 ? parts.slice(1).join('') : '';
     if (whole.length > 1 && whole.charAt(0) === '0') return raw;
+    if (fraction.length > 2) {
+        // Лишние знаки после запятой — шум плавающей точки: округляем строку для экрана.
+        var rounded = dashRoundNumberText(parseFloat(whole + '.' + fraction)).split('.');
+        whole = rounded[0];
+        fraction = rounded[1] || '';
+        if (whole === '0' && !fraction) sign = '';
+    }
     decimalSep = fraction && raw.lastIndexOf(',') > raw.lastIndexOf('.') ? ',' : '.';
     whole = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
     return sign + whole + (fraction ? decimalSep + fraction : '') + percent;
@@ -343,7 +386,14 @@ function dashNumberForFormula(v) {
 }
 
 function dashCellText(el) {
-    return el && el.textContent !== undefined ? el.textContent : (el ? el.innerHTML : '');
+    var text, raw;
+    if (!el) return '';
+    text = el.textContent !== undefined ? el.textContent : el.innerHTML;
+    // Ячейка показывает округлённое число, а расчёты берут полное значение из data-raw
+    // (только пока текст ячейки всё ещё соответствует ему — после правки вручную не берём).
+    raw = el.getAttribute ? el.getAttribute('data-raw') : null;
+    if (raw && dashFormatNumberText(raw) === String(text).trim()) return raw;
+    return text;
 }
 
 function dashNormalizeVal(item, val) {
@@ -1571,7 +1621,7 @@ function dashCalcLineTotals() {
             var n = dashGetFloat(dashCellText(cell));
             if (!isNaN(n)) { valids = true; v += n; }
         });
-        if (valids) el.innerHTML = dashFormatNumberText(v);
+        if (valids) dashSetCellNumber(el, v);
     });
 }
 
@@ -1637,7 +1687,7 @@ function dashEvalFormula(el, f) {
         val = '';
         console.log(e + ': ' + f);
     }
-    el.innerHTML = dashFormatNumberText(val);
+    dashSetCellNumber(el, val);
     el.setAttribute('ready', '1');
     return true;
 }
@@ -1787,8 +1837,8 @@ function dashCalcRGFormulas() {
                 console.log('RGformula eval error: ' + e + ' in: ' + expr);
             }
             var valStr = val !== null && val !== undefined ? String(val) : '';
-            el.innerHTML = dashFormatNumberText(valStr);
-            el.title = rgf + ' => ' + expr + ' = ' + valStr;
+            dashSetCellNumber(el, valStr);
+            el.title = rgf + ' => ' + expr + ' = ' + dashFormatNumberText(valStr);
             el.setAttribute('ready', '1');
             progress = true;
         });
@@ -1950,7 +2000,7 @@ function dashDrawPeriods() {
                                             .replace(':classes:', 'f-rg-cell')
                                             .replace(':src:', s.src)
                                             .replace(':item-id:', row.id)
-                                            .replace(':extra:', cellExtra)
+                                            .replace(':extra:', cellExtra + dashCellRawAttr(v))
                                             .replace(':from:', fr)
                                             .replace(':to:', to));
                                     dashMarkCellErrorIfAny(row, itemName, colName, panelId);
@@ -1995,7 +2045,7 @@ function dashDrawPeriods() {
                                         .replace(':classes:', 'f-rg-cell')
                                         .replace(':src:', s.src)
                                         .replace(':item-id:', row.id)
-                                        .replace(':extra:', cellExtra)
+                                        .replace(':extra:', cellExtra + dashCellRawAttr(v))
                                         .replace(':from:', fr)
                                         .replace(':to:', to));
                                 dashMarkCellErrorIfAny(row, itemName, '', panelId);
@@ -2031,7 +2081,7 @@ function dashDrawPeriods() {
                                 .replace(':title:', dashFormulas[row.id] || '')
                                 .replace(':src:', s.src)
                                 .replace(':item-id:', row.id)
-                                .replace(':extra:', cellExtra));
+                                .replace(':extra:', cellExtra + dashCellRawAttr(v)));
                     });
                     break;
                 case 'formulas':
@@ -2127,7 +2177,7 @@ function dashDrawPeriods() {
                                                 .replace(':classes:', 'f-col-cell')
                                                 .replace(':src:', src)
                                                 .replace(':item-id:', row.id)
-                                                .replace(':extra:', extra)
+                                                .replace(':extra:', extra + dashCellRawAttr(dashNormalizeVal(row.id, v || '')))
                                                 .replace(':from:-:to:', i));
                                     });
                                 }
@@ -3541,7 +3591,7 @@ function dashFormatTooltipValue(value, general) {
     } else if (decimals !== null) {
         str = n.toFixed(decimals);
     } else {
-        str = String(n);
+        str = dashRoundNumberText(n);
     }
     return prefix + str + suffix;
 }
@@ -6549,6 +6599,7 @@ function dashMatrixValueSaveDone(json, ctx) {
         return;
     }
     var recId = ctx.recId || json.id || json.obj || '';
+    if (ctx.td.removeAttribute) ctx.td.removeAttribute('data-raw');
     ctx.td.textContent = dashFormatNumberText(ctx.newVal);
     ctx.td.style.backgroundColor = '';
     ctx.td.setAttribute('ready', '1');
@@ -6676,6 +6727,7 @@ window.dashValueSaveDone = function(json, ctx) {
         return;
     }
     // Update cell display
+    if (ctx.td.removeAttribute) ctx.td.removeAttribute('data-raw');
     ctx.td.textContent = dashFormatNumberText(ctx.newVal);
     ctx.td.style.backgroundColor = '';
     ctx.td.setAttribute('ready', '1');
@@ -6718,6 +6770,7 @@ function dashStartInlineEdit(td) {
                 ? currentNumber !== newNumber
                 : newVal !== currentVal;
         restorePadding();
+        if (td.removeAttribute) td.removeAttribute('data-raw');
         td.textContent = dashFormatNumberText(newVal);
         if (changed) {
             td.style.backgroundColor = '#ffe0e0';

@@ -39,6 +39,7 @@ function dashMatrixLabelMatches(filter, value) {
 }
 
 ${extractFunctionMaybe('dashNormalizeNumberText')}
+${extractFunction('dashRoundNumberText')}
 ${extractFunctionMaybe('dashFormatNumberText')}
 ${extractFunction('dashGetFloat')}
 ${extractFunction('dashFormatDetailEntry')}

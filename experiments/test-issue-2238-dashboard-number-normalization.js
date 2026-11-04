@@ -40,6 +40,9 @@ function assertNear(actual, expected, message) {
 }
 
 ${extractFunctionMaybe('dashNormalizeNumberText')}
+${extractFunction('dashRoundNumberText')}
+${extractFunction('dashCellRawAttr')}
+${extractFunction('dashSetCellNumber')}
 ${extractFunctionMaybe('dashFormatNumberText')}
 ${extractFunction('dashGetFloat')}
 ${extractFunctionMaybe('dashNumberForFormula')}

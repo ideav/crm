@@ -83,6 +83,7 @@ function makeCell(dataset) {
 
 ${extractFunction('dashTodayYMD')}
 ${extractFunction('dashNormalizeNumberText')}
+${extractFunction('dashRoundNumberText')}
 ${extractFunction('dashFormatNumberText')}
 ${extractFunction('dashMatrixLabelScore')}
 ${extractFunction('dashNormalizeMatrixKey')}

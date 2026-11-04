@@ -31,6 +31,9 @@ function dashFilterReportRowsForPanel(rows) { return rows || []; }
 ${extractFunction('dashAttr')}
 ${extractFunction('dashEscapeHtml')}
 ${extractFunction('dashNormalizeNumberText')}
+${extractFunction('dashRoundNumberText')}
+${extractFunction('dashCellRawAttr')}
+${extractFunction('dashSetCellNumber')}
 ${extractFunction('dashFormatNumberText')}
 ${extractFunction('dashGetFloat')}
 ${extractFunction('dashCellText')}
