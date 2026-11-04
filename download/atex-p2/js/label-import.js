@@ -439,7 +439,7 @@
             r.errors.forEach(function(e) { notes.push('<div class="atex-limp-err">' + esc(e) + '</div>'); });
             r.warnings.forEach(function(w) { notes.push('<div class="atex-limp-warn">' + esc(w) + '</div>'); });
             var summary = esc(r.summary || '');
-            if (r.mileage != null) summary += (summary ? '; ' : '') + 'пробег ' + esc(r.mileage) + ' м' + (r.mileageSource ? ' (' + esc(r.mileageSource) + ')' : '');
+            if (r.mileage != null) summary += (summary ? '; ' : '') + 'пробег ' + esc(r.mileage) + ' об' + (r.mileageSource ? ' (' + esc(r.mileageSource) + ')' : '');
             return '<tr><td>' + r.row + '</td><td>' + esc(r.key || '—') + '</td><td>' + summary + '</td>' +
                 '<td><span class="atex-limp-badge ' + st.cls + '">' + esc(st.label) + '</span></td><td>' + notes.join('') + '</td></tr>';
         }).join('') + (rows.length > LIMIT ? '<tr><td colspan="5" class="atex-limp-empty">Показано ' + LIMIT + ' из ' + rows.length + ' — сузьте фильтром.</td></tr>' : '') +

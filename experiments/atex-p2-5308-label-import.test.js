@@ -40,9 +40,9 @@ var SCHEMA = [
         'М/э расстояние, мм', 'Между ручьями, мм', 'Ширина кромки, мм', ['Вал', 'Вал'], ['Основа сырья', 'Основа сырья', 'Основа'],
         'Минимальный формат, мм', 'Оптимальный формат, мм', 'Исп. формат, мм', 'Ширина втулки, мм', 'Высота ножа, мкм',
         'Угол заточки', ['Состояние ножа', 'Состояние ножа'], ['Марка ножа', 'Марка ножа']]],
-    ['Движение пробега', ['Метры пробега', ['Вид движения пробега', 'Вид движения пробега']]],
+    ['Движение пробега', ['Обороты пробега', ['Вид движения пробега', 'Вид движения пробега']]],
     ['Вал', ['Раппорт, мм']],
-    ['Основа сырья', []], ['Марка ножа', ['Ресурс, м']], ['Состояние ножа', ['Нож подбирается']],
+    ['Основа сырья', []], ['Марка ножа', ['Ресурс, об']], ['Состояние ножа', ['Нож подбирается']],
     ['Вид движения пробега', []],
     ['Заказ', [['Клиент', 'Клиент'], 'Дата создания', ['Статус заказа', 'Статус заказа'], 'Примечания']],
     ['Заказанное количество', [['Вид продукции', 'Вид продукции'], ['Артикул', 'Артикул'], 'Заказ клиента',
@@ -115,9 +115,9 @@ FakeDb.prototype.records = function(table) { return LI.kvRecords(this.kv(table))
 FakeDb.prototype.dieRuns = function() {
     var self = this;
     var kindReq = this.req('Движение пробега', 'Вид движения пробега');
-    var mReq = this.req('Движение пробега', 'Метры пробега');
+    var mReq = this.req('Движение пробега', 'Обороты пробега');
     return this.rows[this.tid('Движение пробега')].map(function(r) {
-        return { die_id: r.up, run_id: r.id, run_date: r.val, run_kind: self.label(r.reqs[kindReq]), meters: r.reqs[mReq] || '' };
+        return { die_id: r.up, run_id: r.id, run_date: r.val, run_kind: self.label(r.reqs[kindReq]), revs: r.reqs[mReq] || '' };
     });
 };
 FakeDb.prototype.applyFields = function(rec, fields) {
@@ -203,7 +203,7 @@ function send(db) { return function(ops) { return db.batch(ops); }; }
 function mileageOf(db, no) {
     var die = db.records('Нож').filter(function(d) { return d.val === no; })[0];
     var idx = LP.dieMileageIndex(db.dieRuns());
-    return die && idx[die.id] ? idx[die.id] : { meters: 0, runs: 0 };
+    return die && idx[die.id] ? idx[die.id] : { revs: 0, runs: 0 };
 }
 
 function initialCount(db, no) {
@@ -315,25 +315,25 @@ var flow = Promise.resolve().then(function() {
         assert(again.counts.new === 0 && again.counts.update === 0 && again.counts.same === 6,
             'повторный импорт того же файла: 0 новых, 0 обновлённых, 6 без изменений', JSON.stringify(again.counts));
         assert(again.ops.length === 0, 'повторный импорт того же файла не даёт операций');
-        assert(mileageOf(db, '900001').meters === 12000 && initialCount(db, '900001') === 1,
-            'пробег не удвоен: одна запись «начальный остаток», 12 000 м');
-        assert(mileageOf(db, '900009').meters === 7001, 'пробег округляется до метра: 7000.5 → 7001');
+        assert(mileageOf(db, '900001').revs === 12000 && initialCount(db, '900001') === 1,
+            'пробег не удвоен: одна запись «начальный остаток», 12 000 об');
+        assert(mileageOf(db, '900009').revs === 7001, 'пробег округляется до оборота: 7000.5 → 7001');
     });
 }).then(function() {
     // ── 4. Пульт записал вырубку, в 1С пробег изменился ──
     var res = LI.resolveImportTables(db.meta);
     var die1 = db.records('Нож').filter(function(d) { return d.val === '900001'; })[0];
     var cut = db.records('Вид движения пробега').filter(function(k) { return k.val === 'вырубка'; })[0];
-    var f = {}; f[res.tables.dieRun.reqs.meters] = 300; f[res.tables.dieRun.reqs.kind] = cut.id;
+    var f = {}; f[res.tables.dieRun.reqs.revs] = 300; f[res.tables.dieRun.reqs.kind] = cut.id;
     var cutId = db.add('Движение пробега', '1790100000', f, die1.id);
     var plan = LI.planKnives(LI.parseKnifeSheet(KNIVES, planRows(15000)), knifeCtx(db), { now: 1790200000 });
     assert(plan.counts.update === 1 && plan.counts.new === 0, 'изменённый пробег — одна обновлённая строка', JSON.stringify(plan.counts));
     var setRun = plan.ops.filter(function(o) { return o.op === 'set'; });
     assert(setRun.length === 1 && setRun[0].id !== cutId, 'перезаписывается запись «начальный остаток», вырубка не трогается');
     return LI.runBatches(plan.ops, send(db), {}).then(function() {
-        assert(mileageOf(db, '900001').meters === 15300 && initialCount(db, '900001') === 1,
-            'пробег = новое значение из 1С + вырубка: 15 000 + 300', String(mileageOf(db, '900001').meters));
-        assert(db.find(cutId).reqs[res.tables.dieRun.reqs.meters] === '300', 'движение «вырубка» осталось 300 м');
+        assert(mileageOf(db, '900001').revs === 15300 && initialCount(db, '900001') === 1,
+            'пробег = новое значение из 1С + вырубка: 15 000 + 300', String(mileageOf(db, '900001').revs));
+        assert(db.find(cutId).reqs[res.tables.dieRun.reqs.revs] === '300', 'движение «вырубка» осталось 300 об');
     });
 }).then(function() {
     // ── 6. Ручная правка в Интеграме переживает повторный импорт ──

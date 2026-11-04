@@ -64,9 +64,9 @@
     var GP_STATUS_NEW = 'к упаковке';
     var ROLL_STATUS = { OPENED: 'початый', USED: 'израсходован' };
     var DIE_STATE_OFF = ['списан'];
-    // Ресурс ножа без марки (настройка DIE_RESOURCE_DEFAULT_M; то же умолчание у планирования высечки).
-    var RESOURCE_KEY = 'DIE_RESOURCE_DEFAULT_M';
-    var RESOURCE_DEFAULT_M = 300000;
+    // Ресурс ножа без марки, об (настройка DIE_RESOURCE_DEFAULT_REV; то же умолчание у планирования высечки).
+    var RESOURCE_KEY = 'DIE_RESOURCE_DEFAULT_REV';
+    var RESOURCE_DEFAULT_REV = 300000;
     var MAX_BATCH = 50;
 
     // Таблицы ИТС пульта (docs/atex_p2_die_cutter_schema_5326.json).
@@ -189,7 +189,7 @@
     // Строки отчёта die_cutter_runs → движения пробега всех ножей.
     function runsFromReport(rows) {
         return (rows || []).map(function(r) {
-            return { id: String(r.run_id || ''), date: num(r.run_date), meters: num(r.meters), kind: String(r.kind || ''), jobId: String(r.job_id || ''), dieId: String(r.die_id || '') };
+            return { id: String(r.run_id || ''), date: num(r.run_date), revs: num(r.revs), kind: String(r.kind || ''), jobId: String(r.job_id || ''), dieId: String(r.die_id || '') };
         }).filter(function(r) { return r.id !== ''; });
     }
 
@@ -209,6 +209,17 @@
     // Метры одного съёма: метраж задания / план съёмов.
     function metersPerPull(job) {
         return job && job.pullsPlan > 0 && job.footage > 0 ? round1(job.footage / job.pullsPlan) : 0;
+    }
+
+    // Раппорт вала задания, мм: вал задания (нет — вал ножа); «Раппорт, мм» вала, нет его — зубья × 3.175.
+    // Раппорт неизвестен — 0. Один оборот ножа — один раппорт: по нему метры съёма переводятся в обороты.
+    function jobRepeatMm(job, dies, cylinders) {
+        var die = (dies || []).filter(function(d) { return d.id === job.dieId; })[0];
+        var cylId = job.cylinderId || (die && die.cylinderId) || '';
+        var cyl = (cylinders || []).filter(function(c) { return c.id === cylId; })[0];
+        if (!cyl) return 0;
+        if (num(cyl.repeat) > 0) return num(cyl.repeat);
+        return num(cyl.val) > 0 ? lp.cylinderRepeatMm(cyl.val) : 0;
     }
 
     function cutRuns(runs, jobId) {
@@ -272,18 +283,21 @@
         return { rolls: streams * n, warn: '' };
     }
 
-    // План записи n съёмов (n = 0 — только дописать хвосты).
-    // → { ok, runs: [метры], gps: [{ k, name, rolls }], fact, status, rest } | { ok: false, error }.
+    // План записи n съёмов (n = 0 — только дописать хвосты). Пробег ножа пишется в оборотах:
+    // обороты съёма = метры × 1000 / раппорт вала задания (job.repeatMm).
+    // → { ok, runs: [обороты], gps: [{ k, name, rolls }], fact, status, rest } | { ok: false, error }.
     function takeoffPlan(job, jobs, runs, gps, n, meters) {
         n = Math.floor(num(n));
         var m = num(meters);
         if (n < 0 || n > MAX_BATCH) return { ok: false, error: 'число съёмов — от 1 до ' + MAX_BATCH };
         if (n > 0 && !(m > 0)) return { ok: false, error: 'метраж съёма должен быть больше нуля' };
         if (n > 0 && !job.dieId) return { ok: false, error: 'в задании не указан нож — пробег некуда записать' };
+        var revs = lp.revsFromMeters(m, job.repeatMm);
+        if (n > 0 && !isFinite(revs)) return { ok: false, error: 'у вала задания нет раппорта — обороты ножа не посчитать; задайте зубья или «Раппорт, мм» вала' };
         if (isDone(job.status)) return { ok: false, error: 'задание уже выполнено' };
         var pr = jobProgress(job, runs, gps);
         var runsNew = [];
-        for (var i = 0; i < n; i++) runsNew.push(m);
+        for (var i = 0; i < n; i++) runsNew.push(revs);
         var total = pr.done + n;
         var gpsNew = pr.gpMissing.slice();
         for (var k = pr.done + 1; k <= total; k++) gpsNew.push(k);
@@ -291,7 +305,7 @@
         var written = cutRuns(runs, job.id);
         var warnings = [];
         var gpList = gpsNew.map(function(k) {
-            var mk = k <= pr.done && written[k - 1] && written[k - 1].meters > 0 ? written[k - 1].meters : (m > 0 ? m : metersPerPull(job));
+            var mk = k <= pr.done && written[k - 1] && written[k - 1].revs > 0 && num(job.repeatMm) > 0 ? round1(lp.metersFromRevs(written[k - 1].revs, job.repeatMm)) : (m > 0 ? m : metersPerPull(job));
             var rp = rollsPerPull(job, mk);
             if (rp.warn && warnings.indexOf(rp.warn) < 0) warnings.push(rp.warn);
             return { k: k, name: gpName(job.id, k), rolls: rp.rolls };
@@ -307,35 +321,38 @@
         };
     }
 
-    // Пробег ножа: всего (dieMileage) и за смену — с начала суток по серверу.
+    // Пробег ножа, об: всего (dieMileage) и за смену — с начала суток по серверу.
     function dieMileageNow(dieId, runs, dayStart) {
         var mine = (runs || []).filter(function(r) { return r.dieId === dieId; });
         var total = lp.dieMileage(mine);
         var today = 0;
-        mine.forEach(function(r) { if (r.date >= dayStart && lp.runKindOf(r.kind) === lp.RUN_KIND.CUT) today += r.meters; });
-        return { meters: total.meters, today: round1(today), start: round1(total.meters - today), errors: total.errors };
+        mine.forEach(function(r) { if (r.date >= dayStart && lp.runKindOf(r.kind) === lp.RUN_KIND.CUT) today += r.revs; });
+        return { revs: total.revs, today: Math.round(today), start: Math.round(total.revs - today), errors: total.errors };
     }
 
-    // Сколько метров задания ещё вырубить: метраж задания − движения «вырубка» по заданию.
-    function jobRemainingMeters(job, runs) {
+    // Сколько оборотов задания ещё вырубить: метраж задания в оборотах (по раппорту вала) − движения
+    // «вырубка» по заданию. Раппорт неизвестен — 0 (оставшийся пробег не оценить).
+    function jobRemainingRevs(job, runs) {
+        var total = lp.revsFromMeters(num(job && job.footage), job && job.repeatMm);
+        if (!isFinite(total)) return 0;
         var cut = 0;
-        cutRuns(runs, job && job.id).forEach(function(r) { cut += num(r.meters); });
-        return Math.max(0, round1(num(job && job.footage) - cut));
+        cutRuns(runs, job && job.id).forEach(function(r) { cut += num(r.revs); });
+        return Math.max(0, total - cut);
     }
 
     // #5366: у предела ресурса нож может перестать выбивать все этикетки — оператору
-    // предупреждение. meters — пробег сейчас, remaining — оставшийся метраж задания,
-    // resource — ресурс ножа, м. Уровни — dieWearLevel (от 90 % — «у ресурса», от 100 % —
+    // предупреждение. revs — пробег сейчас, remaining — оставшиеся обороты задания,
+    // resource — ресурс ножа, об. Уровни — dieWearLevel (от 90 % — «у ресурса», от 100 % —
     // «выработан»); «у ресурса» ставится и тогда, когда до 90 % пробег дойдёт за это задание.
     // → null | { level: 'near' | 'over', share (% сейчас), after (% после задания), text }.
-    function dieWearNotice(meters, remaining, resource) {
+    function dieWearNotice(revs, remaining, resource) {
         var res = num(resource);
         if (!(res > 0)) return null;
-        var m = num(meters), end = m + Math.max(0, num(remaining));
+        var m = num(revs), end = m + Math.max(0, num(remaining));
         var now = lp.dieWearLevel(m, res), then = lp.dieWearLevel(end, res);
         var pct = function(x) { return Math.floor(x / res * 100); };
-        var head = 'пробег ' + fmtM(m) + ' м — ' + pct(m) + ' % ресурса (' + fmtM(res) + ' м)';
-        var after = end > m ? '; после задания станет ' + fmtM(end) + ' м — ' + pct(end) + ' %' : '';
+        var head = 'пробег ' + fmtNum(m) + ' об — ' + pct(m) + ' % ресурса (' + fmtNum(res) + ' об)';
+        var after = end > m ? '; после задания станет ' + fmtNum(end) + ' об — ' + pct(end) + ' %' : '';
         if (now === 'over') {
             return { level: 'over', share: pct(m), after: pct(end), text: 'Нож выработал ресурс: ' + head + after +
                 '. Будьте внимательнее: нож может выбивать не все этикетки — проверяйте вырубку на каждом съёме; если не выбивает — «Брак» и вызов ИТС.' };
@@ -804,9 +821,9 @@
                 var brandCol = t.dieBrand && t.dieBrand.reqs ? t.dieBrand.reqs.resource : '';
                 var brandRes = {};
                 r[12].forEach(function(b) { brandRes[b.id] = reqVal(b, brandCol); });
-                var defaultRes = settingValue(r[13], RESOURCE_KEY, self.db) || RESOURCE_DEFAULT_M;
+                var defaultRes = settingValue(r[13], RESOURCE_KEY, self.db) || RESOURCE_DEFAULT_REV;
                 var dies = r[3].map(function(d) {
-                    var res = lp.dieResource(brandRes[refId(d, dr.brand)], defaultRes).meters;
+                    var res = lp.dieResource(brandRes[refId(d, dr.brand)], defaultRes).revs;
                     return { id: d.id, val: d.val, width: num(reqVal(d, dr.labelWidth)), length: num(reqVal(d, dr.labelLength)), state: reqVal(d, dr.state), cylinderId: refId(d, dr.cylinder), labelsPerRepeat: num(reqVal(d, dr.labelsPerRepeat)), minFormat: num(reqVal(d, dr.minFormat)), resource: isFinite(res) ? res : 0 };
                 });
                 var cylinders = r[4].map(function(x) { return { id: x.id, val: x.val, repeat: num(reqVal(x, cr.repeat)) }; });
@@ -816,7 +833,7 @@
                 }) : [];
                 // #5339: рулон, зарезервированный под задание, — рулон задания; длина ролика — для рулонов партии ГП.
                 var jobs = applyReservedRolls(jobsFromReport(r[0]), rolls);
-                jobs.forEach(function(j) { j.rollLenM = jobRollLength(j, dies, cylinders); });
+                jobs.forEach(function(j) { j.rollLenM = jobRollLength(j, dies, cylinders); j.repeatMm = jobRepeatMm(j, dies, cylinders); });
                 var machineMeta = (meta || []).filter(function(x) { return String(x.id) === String(t.machine.id); })[0];
                 var maxReq = ((machineMeta && machineMeta.reqs) || []).filter(function(x) { return String(x.val).trim() === 'Макс. вал'; })[0];
                 maxReq = maxReq ? String(maxReq.id) : '';
@@ -989,7 +1006,7 @@
             html += '<div class="atex-dc-message is-warn">Рулоны партии ГП считаются по числу ручьёв: ' + esc(rollsPerPull(j, 0).warn) + '</div>';
         }
         var die = j.dieId ? s.dies.filter(function(d) { return d.id === j.dieId; })[0] : null;
-        var wear = mile && die && !done && wearHidden().indexOf(wearHideKey(j)) < 0 ? dieWearNotice(mile.meters, jobRemainingMeters(j, s.runs), die.resource) : null;
+        var wear = mile && die && !done && wearHidden().indexOf(wearHideKey(j)) < 0 ? dieWearNotice(mile.revs, jobRemainingRevs(j, s.runs), die.resource) : null;
         // Оранжевая плашка на обоих уровнях: заметно, но не тревога (#5366).
         if (wear) html += '<div class="atex-dc-message atex-dc-wear"><span>⚠ ' + esc(wear.text) + '</span>' +
             '<button class="atex-dc-btn" type="button" data-act="wearHide" title="Скрыть для этого заказа">Скрыть</button></div>';
@@ -1016,10 +1033,10 @@
             : '<div class="atex-dc-empty">Событий нет.</div>';
         html += '</div><div><h2 class="atex-dc-panel-title">Пробег ножа ' + esc(j.dieNo || '') + '</h2>';
         html += mile ? '<table class="atex-dc-table">' +
-            '<tr><td>На начало смены</td><td class="num">' + fmtM(mile.start) + ' м</td></tr>' +
-            '<tr><td>Прибавили сегодня</td><td class="num">' + fmtM(mile.today) + ' м</td></tr>' +
-            '<tr><td>Сейчас</td><td class="num"><b>' + fmtM(mile.meters) + ' м</b></td></tr>' +
-            (die && die.resource > 0 ? '<tr><td>Ресурс</td><td class="num">' + fmtM(die.resource) + ' м · ' + Math.floor(mile.meters / die.resource * 100) + ' %</td></tr>' : '') + '</table>' +
+            '<tr><td>На начало смены</td><td class="num">' + fmtNum(mile.start) + ' об</td></tr>' +
+            '<tr><td>Прибавили сегодня</td><td class="num">' + fmtNum(mile.today) + ' об</td></tr>' +
+            '<tr><td>Сейчас</td><td class="num"><b>' + fmtNum(mile.revs) + ' об</b></td></tr>' +
+            (die && die.resource > 0 ? '<tr><td>Ресурс</td><td class="num">' + fmtNum(die.resource) + ' об · ' + Math.floor(mile.revs / die.resource * 100) + ' %</td></tr>' : '') + '</table>' +
             (mile.errors.length ? '<div class="atex-dc-message is-warn">' + esc(mile.errors.join('; ')) + '</div>' : '')
             : '<div class="atex-dc-empty">Нож не указан.</div>';
         html += '</div></div>';
@@ -1091,7 +1108,7 @@
         var html = '<p>Задание ' + esc(j.order ? 'заказа ' + j.order : j.id) + ': выполнено ' + pr.done + (pr.plan > 0 ? ' из ' + pr.plan : '') + ' съёмов.</p>' +
             '<label class="atex-dc-label">Съёмов <input class="atex-dc-input" type="number" min="1" max="' + MAX_BATCH + '" data-f="n" value="' + (n || Math.max(1, pr.left)) + '"' + (n ? ' readonly' : '') + '></label>' +
             '<label class="atex-dc-label">Метраж одного съёма, м <input class="atex-dc-input" type="number" min="0" step="0.1" data-f="m" value="' + esc(m || '') + '"></label>' +
-            '<p class="atex-dc-muted">Пробег ножа ' + esc(j.dieNo) + ' вырастет на метраж съёмов; на каждый съём — партия ГП в упаковку.</p>' +
+            '<p class="atex-dc-muted">Пробег ножа ' + esc(j.dieNo) + ' вырастет на обороты съёмов (метры × 1000 / раппорт вала, об); на каждый съём — партия ГП в упаковку.</p>' +
             '<p class="atex-dc-muted" data-f="rolls">' + esc(rollsInfo(j, m)) + '</p>' +
             (needsRoll(j) ? '<p class="atex-dc-muted">Мастер-рулон не выбран: его остаток не спишется.</p>' : '');
         this.modal(html, 'Записать').then(function(yes) {
@@ -1115,12 +1132,13 @@
                 var chain = close ? self.writeEvent(j, EVENT.SETUP_DONE, close.minutes + ' мин · ' + close.notes, null, close.minutes) : Promise.resolve();
                 var kind = self.refByLabel(s.runKinds, lp.RUN_KIND.CUT);
                 if (plan.runs.length && !kind) throw new Error('в справочнике «Вид движения пробега» нет «' + lp.RUN_KIND.CUT + '»');
-                plan.runs.forEach(function(m) {
+                plan.runs.forEach(function(revs) {
                     chain = chain.then(function() {
                         var r = t.dieRun.reqs, p = {};
                         p['t' + t.dieRun.id] = String(now);
                         if (r.job) p['t' + r.job] = j.id;
-                        if (r.meters) p['t' + r.meters] = String(m);
+                        if (!r.revs) throw new Error('в «Движение пробега» нет колонки «Обороты пробега» (docs/scripts/migrate_die_runs_rev_5376.py)');
+                        p['t' + r.revs] = String(revs);
                         if (r.kind) p['t' + r.kind] = kind;
                         if (r.operator && self.userId) p['t' + r.operator] = self.userId;
                         return self.client.create(t.dieRun.id, j.dieId, p).then(function() { made++; });
@@ -1482,7 +1500,8 @@
             takeoffPlan: takeoffPlan,
             dieMileageNow: dieMileageNow,
             compatibleDies: compatibleDies,
-            jobRemainingMeters: jobRemainingMeters,
+            jobRepeatMm: jobRepeatMm,
+            jobRemainingRevs: jobRemainingRevs,
             dieWearNotice: dieWearNotice,
             wearHideKey: wearHideKey,
             settingValue: settingValue,

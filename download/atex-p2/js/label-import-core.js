@@ -16,7 +16,7 @@
 //     в 1С, переживает повторный импорт;
 //   - состояние ножа пишется только при создании ножа — дальше его ведёт рабочее место «Ножи и
 //     валы» (списанный нож из «Списан» не выходит);
-//   - пробег из 1С — одна запись «начальный остаток» на нож (initialRunPlan): повторный импорт
+//   - пробег из 1С (обороты, пишется как есть) — одна запись «начальный остаток» на нож (initialRunPlan): повторный импорт
 //     её перезаписывает, движения «вырубка» не трогает; пробег ножа = начальный остаток + вырубка;
 //   - у позиции заказа примечание и статус пишутся только при создании.
 //
@@ -47,7 +47,7 @@
             sleeveWidth: 'Ширина втулки, мм', height: 'Высота ножа, мкм', angle: 'Угол заточки',
             brand: 'Марка ножа', state: 'Состояние ножа'
         } },
-        dieRun: { name: 'Движение пробега', reqs: { meters: 'Метры пробега', kind: 'Вид движения пробега' } },
+        dieRun: { name: 'Движение пробега', reqs: { revs: 'Обороты пробега', kind: 'Вид движения пробега' } },
         cylinder: { name: 'Вал', reqs: { repeat: 'Раппорт, мм' } },
         base: { name: 'Основа сырья', reqs: {} },
         brand: { name: 'Марка ножа', reqs: {} },
@@ -77,7 +77,7 @@
     // Без этих таблиц и колонок вкладка не работает; остальные — необязательные (поле не пишется).
     var REQUIRED = {
         knives: ['die', 'dieRun', 'cylinder', 'base', 'brand', 'state', 'runKind',
-            'die.labelWidth', 'die.labelLength', 'dieRun.meters', 'dieRun.kind'],
+            'die.labelWidth', 'die.labelLength', 'dieRun.revs', 'dieRun.kind'],
         orders: ['order', 'position', 'client', 'article', 'productKind',
             'order.client', 'position.productKind', 'position.article', 'position.labelWidth', 'position.labelLength']
     };
@@ -261,7 +261,7 @@
     };
 
     // Пробег по листу «План»: «Суммарный пробег ножа» — одно значение на нож во всех его строках.
-    // → { номер: { meters } | { error } }
+    // → { номер: { revs } | { error } }
     function planMileage(planGrid) {
         var out = {};
         if (!planGrid) return out;
@@ -277,8 +277,8 @@
         }
         Object.keys(seen).forEach(function(no) {
             var vals = Object.keys(seen[no]).map(Number);
-            out[no] = vals.length === 1 ? { meters: vals[0] }
-                : { error: 'в листе «План» у ножа разный «Суммарный пробег ножа» (' + vals.join(', ') + ' м) — пробег не импортирован' };
+            out[no] = vals.length === 1 ? { revs: vals[0] }
+                : { error: 'в листе «План» у ножа разный «Суммарный пробег ножа» (' + vals.join(', ') + ' об) — пробег не импортирован' };
         });
         return out;
     }
@@ -374,9 +374,9 @@
         if (own != null && !isNaN(own)) { mileage = Math.round(own); source = 'Ножи'; }
         else if (plan[key]) {
             if (plan[key].error) warnings.push(plan[key].error);
-            else { mileage = plan[key].meters; source = 'План'; }
+            else { mileage = plan[key].revs; source = 'План'; }
         }
-        if (mileage != null && mileage < 0) { warnings.push('пробег ' + mileage + ' м меньше нуля — не импортирован'); mileage = null; source = ''; }
+        if (mileage != null && mileage < 0) { warnings.push('пробег ' + mileage + ' об меньше нуля — не импортирован'); mileage = null; source = ''; }
 
         return { row: rowNo, key: key, values: v, mileage: mileage, mileageSource: source, warnings: warnings, errors: errors };
     }
@@ -495,7 +495,7 @@
         var runsByDie = {};
         (d.runs || []).forEach(function(r) {
             var id = String(r.die_id == null ? '' : r.die_id).trim();
-            if (id) (runsByDie[id] = runsByDie[id] || []).push({ id: r.run_id, date: r.run_date, kind: r.run_kind, meters: r.meters });
+            if (id) (runsByDie[id] = runsByDie[id] || []).push({ id: r.run_id, date: r.run_date, kind: r.run_kind, revs: r.revs });
         });
         var cylinder = {};
         (d.cylinders || []).forEach(function(r) { var n = cellNum(r.val); if (n > 0 && cylinder[String(n)] == null) cylinder[String(n)] = r.id; });
@@ -602,16 +602,16 @@
             if (runPlan && runPlan.op === 'new') {
                 var run = { op: 'new', table: t.dieRun.id, up: existing ? existing.id : { ref: dieRef }, group: group, fields: {} };
                 run.fields['t' + t.dieRun.id] = now;
-                run.fields['t' + t.dieRun.reqs.meters] = fmtNum(runPlan.meters);
+                run.fields['t' + t.dieRun.reqs.revs] = fmtNum(runPlan.revs);
                 run.fields['t' + t.dieRun.reqs.kind] = ctx.initialKindId;
                 ops.push(run);
-                if (existing) row.changes.push({ field: 'Начальный остаток, м', from: '—', to: fmtNum(runPlan.meters) });
+                if (existing) row.changes.push({ field: 'Начальный остаток, об', from: '—', to: fmtNum(runPlan.revs) });
             } else if (runPlan && runPlan.op === 'set') {
                 var rs = { op: 'set', id: runPlan.id, group: group, fields: {} };
-                rs.fields['t' + t.dieRun.reqs.meters] = fmtNum(runPlan.meters);
+                rs.fields['t' + t.dieRun.reqs.revs] = fmtNum(runPlan.revs);
                 ops.push(rs);
                 var old = (ctx.runsByDie[existing.id] || []).filter(function(x) { return String(x.id) === runPlan.id; })[0];
-                row.changes.push({ field: 'Начальный остаток, м', from: old ? fmtNum(cellNum(old.meters) || 0) : '?', to: fmtNum(runPlan.meters) });
+                row.changes.push({ field: 'Начальный остаток, об', from: old ? fmtNum(cellNum(old.revs) || 0) : '?', to: fmtNum(runPlan.revs) });
             }
             if (!row.status) row.status = row.changes.length ? 'update' : 'same';
             counts[row.status]++;

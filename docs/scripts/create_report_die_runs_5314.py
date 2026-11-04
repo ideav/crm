@@ -12,7 +12,7 @@
 #   die_id    — id ножа (вышестоящая запись, abn_ID) — по нему FR_-фильтр
 #   die_no    — номер ножа (главное значение «Ножа»)
 #   run_kind  — Вид движения пробега
-#   meters    — Метры пробега
+#   revs      — Обороты пробега
 #   job_id    — id задания высечки (abn_ID)
 #   operator  — Оператор
 #
@@ -44,7 +44,7 @@ COLS = [
     ('die_id', ('table', PARENT), ABN_ID),
     ('die_no', ('table', PARENT), None),
     ('run_kind', ('req', 'Вид движения пробега'), None),
-    ('meters', ('req', 'Метры пробега'), None),
+    ('revs', ('req', 'Обороты пробега'), None),
     ('job_id', ('req', 'Задание высечки'), ABN_ID),
     ('operator', ('req', 'Оператор'), None),
 ]

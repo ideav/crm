@@ -61,33 +61,33 @@ function field(t, name) { return ((t && t.fields) || []).filter(function(f) { re
 (function() {
     var K = LP.RUN_KIND;
     var runs = [
-        { id: 'a', date: 100, kind: 'начальный остаток', meters: 12000 },
-        { id: 'b', date: 200, kind: '71:вырубка', meters: 500 },
-        { id: 'c', date: 300, kind: 'ВЫРУБКА', meters: 1000 },
-        { id: 'd', date: 400, kind: ' вырубка ', meters: 300 },
-        { id: 'e', date: 500, kind: 'вырубка', meters: 200 }
+        { id: 'a', date: 100, kind: 'начальный остаток', revs: 12000 },
+        { id: 'b', date: 200, kind: '71:вырубка', revs: 500 },
+        { id: 'c', date: 300, kind: 'ВЫРУБКА', revs: 1000 },
+        { id: 'd', date: 400, kind: ' вырубка ', revs: 300 },
+        { id: 'e', date: 500, kind: 'вырубка', revs: 200 }
     ];
     var r = LP.dieMileage(runs);
-    assert(r.meters === 14000 && r.errors.length === 0, 'пробег — начальный остаток + все вырубки: 12000 + 500 + 1000 + 300 + 200 = 14000',
+    assert(r.revs === 14000 && r.errors.length === 0, 'пробег — начальный остаток + все вырубки: 12000 + 500 + 1000 + 300 + 200 = 14000',
         '(получено ' + JSON.stringify(r) + ')');
     var shuffled = [runs[4], runs[2], runs[0], runs[3], runs[1]];
-    assert(LP.dieMileage(shuffled).meters === 14000, 'порядок записей в ответе не важен');
+    assert(LP.dieMileage(shuffled).revs === 14000, 'порядок записей в ответе не важен');
     var head = LP.dieMileage(runs.slice(0, 2));
-    assert(head.meters === 12500, 'начальный остаток + вырубка = 12500', '(получено ' + head.meters + ')');
-    var typo = LP.dieMileage(runs.concat([{ id: 'f', date: 600, kind: 'вырубкаа', meters: 999 }]));
-    assert(typo.meters === 14000 && typo.errors.length === 1 && /вырубкаа/.test(typo.errors[0]),
+    assert(head.revs === 12500, 'начальный остаток + вырубка = 12500', '(получено ' + head.revs + ')');
+    var typo = LP.dieMileage(runs.concat([{ id: 'f', date: 600, kind: 'вырубкаа', revs: 999 }]));
+    assert(typo.revs === 14000 && typo.errors.length === 1 && /вырубкаа/.test(typo.errors[0]),
         'неизвестный вид движения не попадает в сумму и называется', '(получено ' + JSON.stringify(typo) + ')');
     assert(LP.runKindOf('12:Начальный остаток') === K.INITIAL && LP.runKindOf(' Вырубка ') === K.CUT && LP.runKindOf('заточка') === '' && LP.runKindOf('x') === '',
         'вид движения: подпись или «id:подпись», регистр и пробелы не важны');
 
     // «Начальный остаток» — одна запись на нож; повторный импорт её перезаписывает.
-    var p0 = LP.initialRunPlan([{ id: 'b', date: 1, kind: 'вырубка', meters: 5 }], 12000);
+    var p0 = LP.initialRunPlan([{ id: 'b', date: 1, kind: 'вырубка', revs: 5 }], 12000);
     assert(p0.op === 'new', 'начального остатка нет → создать', JSON.stringify(p0));
     var p1 = LP.initialRunPlan(runs, 12000);
     assert(p1.op === 'none', 'тот же начальный остаток → ничего не писать', JSON.stringify(p1));
     var p2 = LP.initialRunPlan(runs, 15000);
-    assert(p2.op === 'set' && p2.id === 'a' && p2.meters === 15000, 'другой пробег в 1С → перезаписать ту же запись', JSON.stringify(p2));
-    var p3 = LP.initialRunPlan(runs.concat([{ id: 'z', date: 50, kind: 'начальный остаток', meters: 1 }]), 12000);
+    assert(p2.op === 'set' && p2.id === 'a' && p2.revs === 15000, 'другой пробег в 1С → перезаписать ту же запись', JSON.stringify(p2));
+    var p3 = LP.initialRunPlan(runs.concat([{ id: 'z', date: 50, kind: 'начальный остаток', revs: 1 }]), 12000);
     assert(p3.op === 'error' && p3.ids.join(',') === 'a,z', 'два начальных остатка → ошибка с id обоих, а не выбор наугад', JSON.stringify(p3));
 })();
 

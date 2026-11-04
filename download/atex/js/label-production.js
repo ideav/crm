@@ -8,7 +8,7 @@
 //      «Заказанного количества» (1076): `рулон` или `этикетка`, пусто = `рулон`
 //      (позиции, заведённые до Фазы 2). Позиция `этикетка` не попадает в планирование
 //      резок Фазы 1, позиция `рулон` — в планирование высечки (§1.3 состава);
-//   3. сколько пробега у ножа и каков его ресурс: пробег — сумма движений «Движения
+//   3. сколько пробега у ножа и каков его ресурс: пробег — накопленные обороты вырубки, сумма движений «Движения
 //      пробега» (вырубка + «начальный остаток»; остаток у ножа один, повторный импорт его
 //      перезаписывает); ресурс — у марки ножа (справочник «Марка ножа»), без марки —
 //      ресурс по умолчанию из настройки (docs/atex_phase2_solution_composition.md §1.1);
@@ -69,7 +69,7 @@
             runKind: { name: 'Вид движения пробега', reqs: {} },
             // Ресурс ножа — пробег, после которого нож перестаёт до конца пробивать
             // этикетку и идёт в утилизацию. Определяется маркой (сталь, покрытие, закалка).
-            dieBrand: { name: 'Марка ножа', reqs: { resource: 'Ресурс, м' } },
+            dieBrand: { name: 'Марка ножа', reqs: { resource: 'Ресурс, об' } },
             materialBase: { name: 'Основа сырья', reqs: {} },
             material: { name: 'Сырьё этикетки', reqs: {
                 base: 'Основа',
@@ -121,7 +121,7 @@
             } },
             dieRun: { name: 'Движение пробега', reqs: {
                 job: 'Задание высечки',
-                meters: 'Метры пробега',
+                revs: 'Обороты пробега',
                 kind: 'Вид движения пробега',
                 operator: 'Оператор'
             } },
@@ -297,49 +297,49 @@
         });
     }
 
-    function toMeters(v) {
+    function toRevs(v) {
         return Number(String(v == null ? '' : v).replace(/\s+/g, '').replace(',', '.')) || 0;
     }
 
-    // Пробег ножа по его движениям [{ id, date, kind, meters }]: сумма «вырубки» и
-    // «начального остатка» за всю жизнь ножа. → { meters, errors } — движение неизвестного
+    // Пробег ножа по его движениям [{ id, date, kind, revs }]: сумма «вырубки» и
+    // «начального остатка» за всю жизнь ножа. → { revs, errors } — движение неизвестного
     // вида в сумму не идёт и называется в errors.
     function dieMileage(runs) {
         var errors = [];
-        var meters = 0;
+        var revs = 0;
         sortRuns(runs).forEach(function(r) {
             if (runKindOf(r.kind) === '') errors.push('движение ' + (r.id != null ? r.id : '?') + ': неизвестный вид «' + r.kind + '»');
-            else meters += toMeters(r.meters);
+            else revs += toRevs(r.revs);
         });
-        return { meters: meters, errors: errors };
+        return { revs: revs, errors: errors };
     }
 
     // Пробег всех ножей по строкам отчёта движений (`die_runs`: die_id, run_id, run_date,
-    // run_kind, meters). → { die_id: { meters, runs, errors } }; нож без движений в индекс
+    // run_kind, revs). → { die_id: { revs, runs, errors } }; нож без движений в индекс
     // не попадает — его пробег 0.
     function dieMileageIndex(rows) {
         var byDie = {};
         (rows || []).forEach(function(r) {
             var id = String(r.die_id == null ? '' : r.die_id).trim();
             if (id === '') return;
-            (byDie[id] = byDie[id] || []).push({ id: r.run_id, date: r.run_date, kind: r.run_kind, meters: r.meters });
+            (byDie[id] = byDie[id] || []).push({ id: r.run_id, date: r.run_date, kind: r.run_kind, revs: r.revs });
         });
         var out = {};
         Object.keys(byDie).forEach(function(id) {
             var m = dieMileage(byDie[id]);
-            out[id] = { meters: m.meters, runs: byDie[id].length, errors: m.errors };
+            out[id] = { revs: m.revs, runs: byDie[id].length, errors: m.errors };
         });
         return out;
     }
 
     // История пробега ножа: движения по времени с «Накоплено» — пробегом после этого
-    // движения. → [{ id, date, kind, meters, accumulated }].
+    // движения. → [{ id, date, kind, revs, accumulated }].
     function dieRunHistory(runs) {
         var acc = 0;
         return sortRuns(runs).map(function(r) {
             var k = runKindOf(r.kind);
-            if (k !== '') acc += toMeters(r.meters);
-            return { id: r.id, date: r.date, kind: k || String(r.kind == null ? '' : r.kind), meters: toMeters(r.meters), accumulated: acc };
+            if (k !== '') acc += toRevs(r.revs);
+            return { id: r.id, date: r.date, kind: k || String(r.kind == null ? '' : r.kind), revs: toRevs(r.revs), accumulated: acc };
         });
     }
 
@@ -349,24 +349,24 @@
         return /^-?\d+(\.\d+)?$/.test(s) ? Number(s) : NaN;
     }
 
-    // Ресурс ножа, м: ресурс его марки, а если марки нет или у марки ресурс не задан —
-    // ресурс по умолчанию (настройка DIE_RESOURCE_DEFAULT_M). → { meters, source }:
-    // source 'brand' | 'default'; ресурса нет нигде — { meters: NaN, source: '' }.
+    // Ресурс ножа, об: ресурс его марки, а если марки нет или у марки ресурс не задан —
+    // ресурс по умолчанию (настройка DIE_RESOURCE_DEFAULT_REV). → { revs, source }:
+    // source 'brand' | 'default'; ресурса нет нигде — { revs: NaN, source: '' }.
     function dieResource(brandResource, defaultResource) {
         var b = parseSettingNumber(brandResource);
-        if (b > 0) return { meters: b, source: 'brand' };
+        if (b > 0) return { revs: b, source: 'brand' };
         var d = parseSettingNumber(defaultResource);
-        if (d > 0) return { meters: d, source: 'default' };
-        return { meters: NaN, source: '' };
+        if (d > 0) return { revs: d, source: 'default' };
+        return { revs: NaN, source: '' };
     }
 
     // Износ ножа против его ресурса: 'ok' — меньше 90 % ресурса, 'near' — от 90 %,
     // 'over' — ресурс выработан, нож пора утилизировать; ресурса нет — '' (не определяется).
     var DIE_WEAR_NEAR_SHARE = 0.9;
-    function dieWearLevel(meters, resource) {
+    function dieWearLevel(revs, resource) {
         var t = parseSettingNumber(resource);
         if (!(t > 0)) return '';
-        var m = Number(meters) || 0;
+        var m = Number(revs) || 0;
         if (m >= t) return 'over';
         if (m >= t * DIE_WEAR_NEAR_SHARE) return 'near';
         return 'ok';
@@ -424,20 +424,20 @@
     }
 
     // Что сделать с «начальным остатком» ножа при импорте пробега из 1С:
-    //   { op: 'new', meters }        — записи нет, создать;
+    //   { op: 'new', revs }        — записи нет, создать;
     //   { op: 'none' }               — запись есть с тем же пробегом;
-    //   { op: 'set', id, meters }    — перезаписать существующую запись;
+    //   { op: 'set', id, revs }    — перезаписать существующую запись;
     //   { op: 'error', ids, error }  — записей несколько, какую править — не угадываем.
-    function initialRunPlan(runs, meters) {
+    function initialRunPlan(runs, revs) {
         var initial = (runs || []).filter(function(r) { return runKindOf(r.kind) === RUN_KIND.INITIAL; });
-        var m = Number(meters) || 0;
-        if (initial.length === 0) return { op: 'new', meters: m };
+        var m = Number(revs) || 0;
+        if (initial.length === 0) return { op: 'new', revs: m };
         if (initial.length > 1) {
             var ids = initial.map(function(r) { return String(r.id); });
             return { op: 'error', ids: ids, error: 'у ножа несколько записей «начальный остаток»: ' + ids.join(', ') };
         }
-        if ((Number(initial[0].meters) || 0) === m) return { op: 'none' };
-        return { op: 'set', id: String(initial[0].id), meters: m };
+        if ((Number(initial[0].revs) || 0) === m) return { op: 'none' };
+        return { op: 'set', id: String(initial[0].id), revs: m };
     }
 
     // Раппорт вала: шаг зуба 1/8″ = 3.175 мм (вал 96 → 304.8 мм).
@@ -450,6 +450,19 @@
 
     function cylinderRepeatMm(teeth) {
         return Math.round(toNumLoose(teeth) * TOOTH_PITCH_MM * 1000) / 1000;
+    }
+
+    // Пробег и ресурс ножа измеряются в оборотах: один оборот = один раппорт вала.
+    // Обороты = метры × 1000 / раппорт, мм (целое); раппорт неизвестен — NaN: число не выдумывается.
+    function revsFromMeters(meters, repeatMm) {
+        var m = toNumLoose(meters), r = toNumLoose(repeatMm);
+        return m >= 0 && r > 0 ? Math.round(m * 1000 / r) : NaN;
+    }
+
+    // Метры вырубки за обороты на валу с раппортом repeatMm (0 — раппорт неизвестен).
+    function metersFromRevs(revs, repeatMm) {
+        var n = toNumLoose(revs), r = toNumLoose(repeatMm);
+        return n >= 0 && r > 0 ? n * r / 1000 : 0;
     }
 
     // Пара «зубья ↔ раппорт» вала. → { ok } | { ok: false, error }.
@@ -530,8 +543,8 @@
     //   pos  — { width, length, base, orderStreams, knifeStreams }: размер этикетки, основа
     //          сырья позиции, ручьёв в рулоне заказа (пусто = 1), ручьёв из «Типа ножей» 1С
     //          (null — не указано);
-    //   dies — [{ id, no, width, length, base, streams, selectable, meters }]: selectable —
-    //          состояние ножа с «Нож подбирается», meters — пробег.
+    //   dies — [{ id, no, width, length, base, streams, selectable, revs }]: selectable —
+    //          состояние ножа с «Нож подбирается», revs — пробег, об.
     // Нож подходит, если размер совпал точно (без поворота), основа та же, состояние
     // подбирается, ручьёв ножа кратно ручьям заказа и равно ручьям «Типа ножей», если они
     // указаны. Из подходящих — наименьший пробег, при равенстве — меньший номер.
@@ -566,7 +579,7 @@
                 orderStreams + ' ручьям заказа' + (knifeStreams !== null ? ' или не равно ' + knifeStreams + ' из «Типа ножей»' : ''));
         }
         var sorted = byStreams.slice().sort(function(a, b) {
-            var ma = Number(a.meters) || 0, mb = Number(b.meters) || 0;
+            var ma = Number(a.revs) || 0, mb = Number(b.revs) || 0;
             if (ma !== mb) return ma - mb;
             return String(a.no).localeCompare(String(b.no), 'ru', { numeric: true });
         });
@@ -666,6 +679,8 @@
             dieStateActions: dieStateActions,
             initialRunPlan: initialRunPlan,
             cylinderRepeatMm: cylinderRepeatMm,
+            revsFromMeters: revsFromMeters,
+            metersFromRevs: metersFromRevs,
             checkCylinderRepeat: checkCylinderRepeat,
             checkDieRepeat: checkDieRepeat,
             productKindOf: productKindOf,

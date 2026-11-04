@@ -30,8 +30,8 @@ var LP = require('../download/atex/js/label-production.js').core;
 
 // Ножи теста: 148×210 — два бумажных рабочих с разным пробегом, один ПП, один списанный;
 // 18×18 — 15 ручьёв; 85×38 — 3 ручья.
-function die(id, w, l, base, streams, selectable, meters, extra) {
-    var d = { id: id, no: 'N' + id, width: w, length: l, base: base, streams: streams, selectable: selectable, meters: meters };
+function die(id, w, l, base, streams, selectable, revs, extra) {
+    var d = { id: id, no: 'N' + id, width: w, length: l, base: base, streams: streams, selectable: selectable, revs: revs };
     Object.keys(extra || {}).forEach(function(k) { d[k] = extra[k]; });
     return d;
 }

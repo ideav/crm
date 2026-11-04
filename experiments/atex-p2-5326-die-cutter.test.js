@@ -40,13 +40,13 @@ assert(DC.moscowDayStart(DAY) === DAY && DC.moscowDayStart(DAY - 1) === DAY - 86
 
 function job(o) {
     var base = { id: '1', start: NOW, status: 'Запланировано', pullsPlan: 5, pullsFact: 0, footage: 1000, setup: 30,
-        machineId: 'M1', machine: '1 высечка', dieId: 'D1', dieNo: '1247', streams: 4, cylinderId: 'C96', cylinder: '96',
+        machineId: 'M1', machine: '1 высечка', dieId: 'D1', dieNo: '1247', streams: 4, cylinderId: 'C96', cylinder: '96', repeatMm: 1000,
         rollId: 'R1', roll: 'МР-0001', rollLength: 4000, rollRest: '4000', rollFormat: 330, positionId: 'P1', order: '3257',
         labelWidth: 58, labelLength: 40, labelsPerRoll: 2000, material: 'Бумага' };
     Object.keys(o || {}).forEach(function(k) { base[k] = o[k]; });
     return base;
 }
-function cut(id, jobId, meters, date, dieId) { return { id: id, date: date || NOW, meters: meters, kind: 'вырубка', jobId: jobId, dieId: dieId || 'D1' }; }
+function cut(id, jobId, revs, date, dieId) { return { id: id, date: date || NOW, revs: revs, kind: 'вырубка', jobId: jobId, dieId: dieId || 'D1' }; }
 
 // ── 1. Очередь станка ──────────────────────────────────────────────────────
 (function() {
@@ -95,7 +95,7 @@ function cut(id, jobId, meters, date, dieId) { return { id: id, date: date || NO
     assert(more.runs.length === 1 && more.gps.map(function(g) { return g.k; }).join() === '2,3' && more.fact === 3, 'новый съём после обрыва: одно движение, партии ГП №2 и №3, факт 3');
 
     // Движения чужого задания и не «вырубка» в счёт съёмов не идут.
-    var mixed = [cut('a', '1', 200), cut('b', '2', 200), { id: 'c', date: NOW, meters: 5000, kind: 'начальный остаток', jobId: '1', dieId: 'D1' }];
+    var mixed = [cut('a', '1', 200), cut('b', '2', 200), { id: 'c', date: NOW, revs: 5000, kind: 'начальный остаток', jobId: '1', dieId: 'D1' }];
     assert(DC.jobProgress(j, mixed, []).done === 1, 'съёмы задания — только его движения «вырубка»');
 
     assert(!DC.takeoffPlan(j, [j], [], [], 1, 0).ok, 'нулевой метраж съёма — отказ');
@@ -108,16 +108,16 @@ function cut(id, jobId, meters, date, dieId) { return { id: id, date: date || NO
 // ── 3. Пробег ножа ─────────────────────────────────────────────────────────
 (function() {
     var runs = [
-        { id: 'i', date: DAY - 86400 * 30, meters: 100000, kind: 'начальный остаток', jobId: '', dieId: 'D1' },
+        { id: 'i', date: DAY - 86400 * 30, revs: 100000, kind: 'начальный остаток', jobId: '', dieId: 'D1' },
         cut('y', '9', 3000, DAY - 60),
         cut('t1', '1', 200, DAY + 60),
         cut('t2', '1', 200, NOW),
         cut('o', '1', 999, NOW, 'D2')
     ];
     var m = DC.dieMileageNow('D1', runs, DAY);
-    assert(m.meters === 103400, 'пробег сейчас = начальный остаток + вся вырубка ножа', String(m.meters));
+    assert(m.revs === 103400, 'пробег сейчас = начальный остаток + вся вырубка ножа', String(m.revs));
     assert(m.today === 400 && m.start === 103000, 'за смену — вырубка с полуночи по Москве; на начало смены — остальное', m.today + ' / ' + m.start);
-    assert(DC.dieMileageNow('D3', runs, DAY).meters === 0, 'нож без движений — пробег 0');
+    assert(DC.dieMileageNow('D3', runs, DAY).revs === 0, 'нож без движений — пробег 0');
 })();
 
 // ── 4. Остаток мастер-рулона ────────────────────────────────────────────────
