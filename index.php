@@ -694,6 +694,7 @@ require_once __DIR__ . "/include/json_archive.php";
 require_once __DIR__ . "/include/import_reconcile.php";
 require_once __DIR__ . "/include/schema_json.php";	# #5242: схема одним JSON, поля по именам
 require_once __DIR__ . "/include/ext_views.php";	# #5373: read-only вьюхи для внешнего SQL-клиента
+require_once __DIR__ . "/include/ws_push.php";	# #5269: события изменений для демона web-socket
 # Default LIMIT parameter for queries with no filter
 define("DEFAULT_LIMIT", isset($_COOKIE["default_limit"])&&(int)$_COOKIE["default_limit"]>4&&(int)$_COOKIE["default_limit"]<1001?(int)$_COOKIE["default_limit"]:20);
 define("UPLOAD_DIR", "download/$z/");  # Uploaded files folder
@@ -1889,6 +1890,7 @@ function logImportEnd($err = ""){
 }
 # Изменение данных: в журнал, а во время импорта — в счётчики сводки
 function logChange($rec){
+    Ws_collect($rec);  # #5269: изменение — событием подписчикам web-socket (include/ws_push.php)
     if(isset($GLOBALS["LOG_IMPORT"])){
         $imp = &$GLOBALS["LOG_IMPORT"];
         if(isset($rec["err"]))
@@ -6429,6 +6431,7 @@ function Report_tx_commit($id){
 	unset($GLOBALS["REPORT_TX"]);
 	if(!mysqli_commit($GLOBALS["connection"]))
 		die_info("Couldn't commit the transaction for report #$id ".mysqli_error($GLOBALS["connection"]));
+	Ws_tx_end(TRUE);	# #5269: зафиксированные изменения — подписчикам
 	trace("COMMIT transaction for report $id");
 	return TRUE;
 }
@@ -6439,6 +6442,7 @@ function Report_tx_rollback(){
 	if(!isset($GLOBALS["REPORT_TX"]))
 		return FALSE;
 	trace("ROLLBACK transaction for report ".$GLOBALS["REPORT_TX"]);
+	Ws_tx_end(FALSE);	# #5269: откаченное подписчикам не уходит
 	unset($GLOBALS["REPORT_TX"]);
 	@mysqli_rollback($GLOBALS["connection"]);
 	return TRUE;
@@ -15748,6 +15752,7 @@ switch($a)  # Check actions, which don't require authentication
 if(isset($GLOBALS["BT_CALLBACK"]))
 	BtCallbackApply();
 $GLOBALS["GLOBAL_VARS"]["uri"] = htmlentities($_SERVER["REQUEST_URI"]);
+$GLOBALS["GLOBAL_VARS"]["ws"] = defined("WS_PUBLIC_URL") ? htmlspecialchars(WS_PUBLIC_URL, ENT_QUOTES) : "";	# #5269: адрес web-socket для main.html
 Api_always_json_mark($a);
 if(Validate_Token())
 {
@@ -15779,6 +15784,30 @@ if(Validate_Token())
 			die($GLOBALS["GLOBAL_VARS"]["role"].": ".t9n("[RU]У вас нет прав на редактирование типов(".$GLOBALS["GRANTS"][0].").[EN]You don't have permission to edit types (".$GLOBALS["GRANTS"][0].")."));
 	switch ($a)
 	{
+        case "ws_auth":
+            # #5269: демон web-socket (ws-server/) проверяет подключение клиента его же куки или
+            # токеном: кто это, и (с t=<тип>) может ли он подписаться на таблицу — читать её записи.
+            $gv = $GLOBALS["GLOBAL_VARS"];
+            $res = array("user" => (string)$gv["user"], "user_id" => isset($gv["user_id"]) ? (string)$gv["user_id"] : ""
+                        , "role" => isset($gv["role"]) ? (string)$gv["role"] : "");
+            if(isset($_REQUEST["t"])){
+                $res["t"] = $t;
+                $res["read"] = Ws_type_readable($t, Ws_core_ctx());
+            }
+            api_dump(json_encode($res, JSON_UNESCAPED_UNICODE), "ws_auth.json");
+        case "_m_notify":
+            # #5269: уведомление пользователям базы через web-socket (POST, _xsrf).
+            # to — логины через запятую (до 50), msg — текст (до 2000 символов), link — ссылка /… или http(s)://…
+            $msg = isset($_REQUEST["msg"]) && is_string($_REQUEST["msg"]) ? mb_substr(trim($_REQUEST["msg"]), 0, 2000) : "";
+            $to = isset($_REQUEST["to"]) && is_string($_REQUEST["to"]) ? array_slice(array_filter(array_map("trim", explode(",", $_REQUEST["to"])), "strlen"), 0, 50) : array();
+            if(($GLOBALS["GLOBAL_VARS"]["user"] === "guest") || !strlen($msg) || !count($to)){
+                header("HTTP/1.0 400 Bad Request");
+                api_dump(json_encode(array("error" => t9n("[RU]Нужны to и msg[EN]to and msg are required"))), "notify.json");
+            }
+            $data = array("msg" => $msg);
+            if(isset($_REQUEST["link"]) && is_string($_REQUEST["link"]) && preg_match('~^(/[^/\\\\]|https?://)~i', $_REQUEST["link"]))
+                $data["link"] = mb_substr($_REQUEST["link"], 0, 1000);
+            api_dump(json_encode(array("ok" => Ws_notify($to, $data) ? 1 : 0, "to" => count($to))), "notify.json");
         case "ai":
             # Issue #3392: /{db}/ai/agent — упрощённый чат с фиксированным ИИ-агентом
             # (любой вошедший пользователь + проверка оплаты). Старый /{db}/ai/chat

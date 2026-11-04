@@ -45,6 +45,7 @@ class IntegramOpError extends \Exception {}
 define("REP_COL_SET", 132);
 $GLOBALS["connection"] = null;
 
+require_once __DIR__."/../include/ws_push.php";   # #5269: Report_tx_commit/rollback сообщают о транзакции Ws_tx_end
 $source = file_get_contents(__DIR__."/../index.php");
 $code = "namespace Test5261;\n";
 foreach(array("Report_tx_begin", "Report_tx_commit", "Report_tx_rollback", "my_die", "InBatchOp") as $fn){

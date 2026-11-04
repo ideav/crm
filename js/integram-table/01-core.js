@@ -807,6 +807,7 @@
                 if (appendScrollState && typeof window.requestAnimationFrame === 'function') {
                     window.requestAnimationFrame(() => this.restoreScrollState(appendScrollState));
                 }
+                this.liveAttach();  // issue #5269: тип таблицы известен — подписка на изменения
             } catch (error) {
                 console.error('Error loading data:', error);
                 // Stop auto-loading after a failed request (issue #2763).
