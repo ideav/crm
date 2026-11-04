@@ -1404,6 +1404,17 @@ class App {
                 loginPasswordInput.focus();
             }
         }
+
+        this.openAuthFromHash();
+    }
+
+    // start.html#reg (или #register) — форма сразу на вкладке «Регистрация».
+    // На ссылки с #reg ведут инструкции и кнопка «Стать агентом» страниц курсов.
+    openAuthFromHash() {
+        const hash = (window.location.hash || '').toLowerCase();
+        if (hash !== '#reg' && hash !== '#register') return;
+        this.showAuthPanel();
+        this.switchTab('register');
     }
 
     showAuthMessage(message, type = 'error') {
