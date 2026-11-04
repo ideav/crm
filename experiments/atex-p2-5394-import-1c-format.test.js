@@ -188,4 +188,8 @@ function warns(plan) { return [].concat.apply([], plan.rows.map(function(r) { re
     assert(p.items.length === 1 && p.items[0].errors.some(function(e) { return /Заказ клиента/.test(e) && /6139/.test(e); }), 'нет «Заказ клиента» — ошибка с номером заказа поставщику', JSON.stringify(p.items[0] && p.items[0].errors));
 })();
 
+// ── Тип предупреждения: «1С» — название, не число ───────────────────────────────────────────
+
+assert(LI.warningType('материал «ЭКО» из 1С не опознан, 12 строк') === 'материал «…» из 1С не опознан, N строк', '«1С» в типе предупреждения не превращается в «NС»', LI.warningType('материал «ЭКО» из 1С не опознан, 12 строк'));
+
 console.log('\n' + passed + '/' + total + ' passed');

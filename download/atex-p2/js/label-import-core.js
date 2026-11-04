@@ -784,7 +784,8 @@
 
     // Предупреждения по типам: текст без чисел и названий в «…» → { type, count, rows: [номер строки], samples: [текст] }.
     function warningType(text) {
-        return String(text).replace(/«[^»]*»/g, '«…»').replace(/\d+(?:[.,]\d+)?/g, 'N').replace(/\s+/g, ' ').trim();
+        // Число, приклеенное к букве («1С»), — часть названия, а не значение.
+        return String(text).replace(/«[^»]*»/g, '«…»').replace(/\d+(?:[.,]\d+)?(?![A-Za-zА-Яа-яЁё])/g, 'N').replace(/\s+/g, ' ').trim();
     }
     function groupWarnings(rows) {
         var by = {}, order = [];
