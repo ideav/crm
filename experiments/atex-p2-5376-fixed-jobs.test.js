@@ -1,6 +1,8 @@
 // ideav/crm#5376 — зафиксированные задания высечки (реквизит «Зафиксировано», docs/atex_phase2_labels_tz.md §5.4):
-// «Упорядочить» не снимает зафиксированное задание со станка (в том числе с туррели) и не меняет
-// последовательность зафиксированных заданий станка.
+// как 🔒 Фазы 1 — где зафиксировали, там и стоит: «Упорядочить» не снимает задание со станка (в том числе
+// с туррели), не переносит на другой день и не меняет место в дне: свободные задания в его день перед ним
+// не встают, кроме стоявших перед ним в записанном плане; порядок 🔒 не меняется.
+// Перенос (окно 🗓): положение в дне — по весу (по умолчанию), в начало, в конец (movePlacement).
 // Run with: node experiments/atex-p2-5376-fixed-jobs.test.js
 'use strict';
 
@@ -74,5 +76,57 @@ var started = P.orderQueue({ jobs: [J(1, { machineId: 'M1', status: 'В рабо
     machines: [M1], from: MON, settings: S });
 var si = started.machines.M1.items;
 assert(si[0].jobId === '1' && si[1].jobId === '2' && si[1].start >= si[0].end, 'зафиксированное — за начатым', JSON.stringify(si.map(function(i) { return [i.jobId, i.start]; })));
+
+// ── День и место в дне ─────────────────────────────────────────────────────
+var WED = MON + 2 * DAY, SAT = MON + 5 * DAY;
+function items(p, mid) { return (p.machines[mid] || { items: [] }).items; }
+function itemOf(p, id) { var r = null; Object.keys(p.machines).forEach(function(m) { items(p, m).forEach(function(i) { if (i.jobId === id) r = i; }); }); return r; }
+var dayOf = P.createCalendar(S).dayOf;
+// 🔒 на среду; свободные (по 3000 м — 45+69 мин) заполняют пн-вт, в среду перед 🔒 не встают.
+var free = [];
+for (var k = 1; k <= 10; k++) free.push(J(k, { cylinderId: 'c1' }));
+var wed = P.orderQueue({ jobs: free.concat([J(50, { machineId: 'M1', fixed: true, start: WED + 3 * 3600 })]), machines: [M1], from: MON, settings: S });
+var f50 = itemOf(wed, '50');
+assert(f50 && dayOf(f50.start) === dayOf(WED), '🔒 остаётся в своём дне (среда)', f50 && new Date(f50.start * 1000).toISOString());
+var beforeWed = items(wed, 'M1').filter(function(i) { return i.jobId !== '50' && dayOf(i.start) === dayOf(WED) && i.start < f50.start; });
+assert(!beforeWed.length, 'в день 🔒 перед ним свободные не встают', JSON.stringify(beforeWed.map(function(i) { return i.jobId; })));
+assert(items(wed, 'M1').filter(function(i) { return dayOf(i.start) === dayOf(MON); }).length > 0, 'дни до 🔒 заполняются свободными');
+// Стоявшее перед 🔒 в записанном плане того же дня — остаётся перед ним.
+var lead = P.orderQueue({ jobs: [J(1, { machineId: 'M1', start: WED + 3600 }), J(2, { machineId: 'M1', start: WED + 9 * 3600 }),
+    J(50, { machineId: 'M1', fixed: true, start: WED + 2 * 3600 })], machines: [M1], from: MON, settings: S });
+var lo = on(lead, 'M1');
+assert(lo.indexOf('1') < lo.indexOf('50') && dayOf(itemOf(lead, '1').start) === dayOf(WED), 'стоявшее перед 🔒 — перед ним в его дне', lo.join());
+assert(lo.indexOf('2') !== 1 || lo.indexOf('2') > lo.indexOf('50'), 'стоявшее после 🔒 перед ним не встаёт', lo.join());
+// Длинное свободное, которое залезло бы в день 🔒, встаёт после него.
+var spill = P.orderQueue({ jobs: [J(1, { footage: 30000 }), J(50, { machineId: 'M1', fixed: true, start: MON + DAY + 3600 })], machines: [M1], from: MON, settings: S });
+assert(on(spill, 'M1').join() === '50,1' && dayOf(itemOf(spill, '50').start) === dayOf(MON + DAY), 'свободное не залезает в день 🔒 — встаёт после', on(spill, 'M1').join());
+// 🔒 на субботу — день без смены: уходит на ближайший рабочий (пн).
+var sat = P.orderQueue({ jobs: [J(50, { machineId: 'M1', fixed: true, start: SAT + 3600 })], machines: [M1], from: MON, settings: S });
+assert(dayOf(itemOf(sat, '50').start) === dayOf(MON + 7 * DAY), '🔒 на выходной — на ближайший рабочий день', new Date(itemOf(sat, '50').start * 1000).toISOString());
+// Группировка не уводит 🔒 в другой день и не ставит свободное между двумя 🔒.
+var grp = P.orderQueue({ jobs: [J(1, { cylinderId: 'cA' }), J(2, { cylinderId: 'cB' }), J(3, { cylinderId: 'cA' }),
+    J(50, { machineId: 'M1', fixed: true, start: MON + DAY + 3600, cylinderId: 'cB' }), J(51, { machineId: 'M1', fixed: true, start: MON + DAY + 7200, cylinderId: 'cA' })],
+    machines: [M1], from: MON, settings: S });
+var go = on(grp, 'M1');
+assert(go.indexOf('51') === go.indexOf('50') + 1 && dayOf(itemOf(grp, '50').start) === dayOf(MON + DAY), 'два 🔒 подряд, свободное между ними не встаёт', go.join());
+
+// ── Перенос: по весу / в начало / в конец ──────────────────────────────────
+var dayJobs = [J(10, { machineId: 'M1', start: WED + 3600, cylinderId: 'cA' }), J(11, { machineId: 'M1', start: WED + 3 * 3600, cylinderId: 'cB' }),
+    J(12, { machineId: 'M1', start: WED + 5 * 3600, cylinderId: 'cC' })];
+var mj = J(20, { cylinderId: 'cB', machineId: 'M2' });
+var wedDay = dayOf(WED);
+var mS = P.movePlacement({ job: mj, jobs: dayJobs, machine: M1, day: wedDay, position: 'start', settings: S });
+var mE = P.movePlacement({ job: mj, jobs: dayJobs, machine: M1, day: wedDay, position: 'end', settings: S });
+var mW = P.movePlacement({ job: mj, jobs: dayJobs, machine: M1, day: wedDay, position: 'weight', settings: S });
+assert(mS.index === 0 && mS.start < dayJobs[0].start && dayOf(mS.start) === wedDay, 'в начало дня — раньше первого задания дня, тот же день');
+assert(mE.index === 3 && mE.start > dayJobs[2].start && dayOf(mE.start) === wedDay, 'в конец дня — после последнего');
+assert(mW.index === 2 && mW.start > dayJobs[1].start && mW.start < dayJobs[2].start, 'по весу — к заданию того же вала (без смены вала)', JSON.stringify(mW));
+var empty = P.movePlacement({ job: mj, jobs: [], machine: M1, day: wedDay, position: 'weight', settings: S });
+assert(empty.start === P.createCalendar(S).dayTs(wedDay, S.dayStartMin), 'пустой день — начало смены');
+// Перенесённое и зафиксированное «в начало» встаёт первым в своём дне; «в конец» — за стоявшими.
+var after = function(st0) { return P.orderQueue({ jobs: dayJobs.concat([Object.assign({}, mj, { machineId: 'M1', start: st0, fixed: true })]), machines: [M1], from: MON, settings: S }); };
+var aS = on(after(mS.start), 'M1'), aE = on(after(mE.start), 'M1');
+assert(itemOf(after(mS.start), '20') && dayOf(itemOf(after(mS.start), '20').start) === wedDay, 'перенесённое 🔒 — в выбранном дне', aS.join());
+assert(aE.indexOf('20') > aE.indexOf('12') && aE.indexOf('20') > aE.indexOf('10'), '«в конец» + 🔒 — за стоявшими в дне', aE.join());
 
 console.log('\nИтого: ' + passed + ' из ' + total);

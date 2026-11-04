@@ -352,22 +352,41 @@
         });
         cands.sort(compareJobs);
 
-        // Зафиксированные диспетчером («Зафиксировано», #5376) — на своём станке, первыми за начатыми,
-        // в записанном порядке; «Упорядочить» их не переносит и не переставляет. Без станка признак не действует.
-        var locked = {};
-        cands = cands.filter(function(j) {
-            if (!j.fixed || !st[j.machineId]) return true;
+        // Зафиксированные диспетчером («Зафиксировано», #5376) — как 🔒 Фазы 1: где зафиксировали, там и
+        // стоят. Задание держит станок и день своего план-старта и место в дне: свободные задания в его
+        // день перед ним не встают, кроме тех, что стояли перед ним в записанном плане того же станка и
+        // дня (они идут перед ним в записанном порядке — «ведомые»); порядок 🔒 дня не меняется.
+        // День без смен (выходной) — 🔒 уходит на ближайший рабочий. Без станка признак не действует.
+        var anchorDay = {}, byMachineAnchored = {};
+        var lockedSet = {};
+        cands.forEach(function(j) {
+            if (!j.fixed || !st[j.machineId]) return;
             var chk = machineAllows(st[j.machineId].machine, j, s);
-            if (!chk.ok) { unplaced.push({ jobId: j.id, reasons: ['зафиксировано на «' + (st[j.machineId].machine.name || j.machineId) + '»: ' + chk.reason] }); return false; }
-            (locked[j.machineId] = locked[j.machineId] || []).push(j);
-            return false;
+            if (!chk.ok) { unplaced.push({ jobId: j.id, reasons: ['зафиксировано на «' + (st[j.machineId].machine.name || j.machineId) + '»: ' + chk.reason] }); lockedSet[j.id] = 'drop'; return; }
+            lockedSet[j.id] = 'fixed';
         });
+        var byRecorded = function(a, b) { return (num(a.start) || 0) - (num(b.start) || 0) || (num(a.id) - num(b.id)); };
         order.forEach(function(id) {
             var x = st[id];
-            (locked[id] || []).sort(function(a, b) { return (num(a.start) || Infinity) - (num(b.start) || Infinity) || (num(a.id) - num(b.id)); })
-                .forEach(function(j) { var t = place(x.cursor, x.prev, j, x.machine); x.seq.push(j); x.cursor = t.cursor; x.prev = j; });
-            x.lockN = x.seq.length; x.cursorL = x.cursor; x.prevL = x.prev;
+            var fixedHere = cands.filter(function(j) { return lockedSet[j.id] === 'fixed' && String(j.machineId) === String(id); }).sort(byRecorded);
+            var list = [];
+            fixedHere.forEach(function(f, k) {
+                var day = num(f.start) > 0 ? cal.dayOf(num(f.start)) : null;
+                var prevF = k > 0 ? fixedHere[k - 1] : null;
+                var dc = day == null ? x.cursor0 : cal.normalize({ day: day, used: 0 });
+                // ведомые: стояли на этом станке в тот же день перед 🔒 (после предыдущего 🔒 дня)
+                if (day != null) cands.filter(function(j) {
+                    return !lockedSet[j.id] && String(j.machineId) === String(id) && num(j.start) > 0 && cal.dayOf(num(j.start)) === day &&
+                        byRecorded(j, f) < 0 && (!prevF || byRecorded(prevF, j) < 0) && machineAllows(x.machine, j, s).ok;
+                }).sort(byRecorded).forEach(function(j) { lockedSet[j.id] = 'lead'; anchorDay[j.id] = dc; list.push(j); });
+                anchorDay[f.id] = dc; list.push(f);
+            });
+            byMachineAnchored[id] = list;
+            x.pend = list.slice();
         });
+        cands = cands.filter(function(j) { return !lockedSet[j.id]; });
+        function isAnchored(j) { return !!anchorDay[j.id]; }
+        function floorCur(cur, c) { return c && curKey(c) > curKey(cur) ? c : cur; }
 
         // Туррель берёт неподходящие ей задания только как обычный станок: когда её очередь
         // (подходящие туррели задания) пуста TURREL_IDLE_MN рабочих минут (#5376).
@@ -375,6 +394,39 @@
         // остальные задания раскладываются заново, туррель открыта им с конца очереди + простой.
         // Появились задания туррели — при следующем «Упорядочить» очередь растёт, обычные уходят.
         var turrets = order.filter(function(id) { return st[id].machine.turret; });
+
+        // Закреплённые, чей день наступил, встают раньше свободных.
+        function settle(x) {
+            while (x.pend.length && curKey(x.cursor) >= curKey(anchorDay[x.pend[0].id])) {
+                var j = x.pend.shift(), t = place(floorCur(x.cursor, anchorDay[j.id]), x.prev, j, x.machine);
+                x.seq.push(j); x.cursor = t.cursor; x.prev = j;
+            }
+        }
+        // Проба свободного задания на станке с курсора cur: если оно залезает в день очередного 🔒,
+        // сначала встают закреплённые этого дня, потом задание. → { t, flush, prev }.
+        function tryOn(x, j, cur) {
+            var c = cur, prev = x.prev, k = 0;
+            for (;;) {
+                var t = place(c, prev, j, x.machine), nx = x.pend[k];
+                if (!nx || curKey(t.cursor) <= curKey(anchorDay[nx.id])) return { t: t, flush: k };
+                var d = anchorDay[nx.id];
+                while (k < x.pend.length && curKey(anchorDay[x.pend[k].id]) <= curKey(floorCur(c, d))) {
+                    var a = x.pend[k], ta = place(floorCur(c, anchorDay[a.id]), prev, a, x.machine);
+                    c = ta.cursor; prev = a; k++;
+                }
+                if (curKey(cur) > curKey(c)) c = cur;
+            }
+        }
+        function commitOn(x, j, r) {
+            for (var i = 0; i < r.flush; i++) {
+                var a = x.pend.shift(), ta = place(floorCur(x.cursor, anchorDay[a.id]), x.prev, a, x.machine);
+                x.seq.push(a); x.cursor = ta.cursor; x.prev = a;
+            }
+            x.seq.push(j); x.cursor = r.t.cursor; x.prev = j;
+            settle(x);
+        }
+        order.forEach(function(id) { settle(st[id]); });
+
         // open — { id туррели: курсор, с которого она берёт неподходящие задания } (проход 2) или null.
         function assignOne(j, open, sink) {
             var best = null, turret = null, reasons = [], fits = turretFits(j, s);
@@ -389,32 +441,30 @@
                 if (m.turret && !fits) {
                     // туррель как обычный станок (ограничения туррели снимаются: её отцепляют)
                     chk = open ? machineAllows(m, Object.assign({}, j, { machineId: m.id }), s) : machineAllows(m, Object.assign({}, j, { machineId: '' }), s);
-                    if (open && chk.ok && curKey(open[id]) > curKey(cur)) cur = open[id];
+                    if (open && chk.ok) cur = floorCur(cur, open[id]);
                 } else chk = machineAllows(m, j, s);
                 if (!chk.ok) { reasons.push((m.name || id) + ': ' + chk.reason); return; }
-                var t = place(cur, x.prev, j, m);
-                var better = !best || t.item.end < best.t.item.end || (t.item.end === best.t.item.end && t.item.setup < best.t.item.setup);
-                if (better) best = { id: id, t: t };
-                if (m.turret && (!turret || t.item.end < turret.t.item.end)) turret = { id: id, t: t };
+                var r = tryOn(x, j, cur), t = r.t;
+                var better = !best || t.item.end < best.r.t.item.end || (t.item.end === best.r.t.item.end && t.item.setup < best.r.t.item.setup);
+                if (better) best = { id: id, r: r };
+                if (m.turret && (!turret || t.item.end < turret.r.t.item.end)) turret = { id: id, r: r };
             });
             // подходящее туррели — на туррель, если там оно не уходит в просрочку (или и так опаздывает везде)
             if (turret && best && turret.id !== best.id && fits) {
                 var due = num(j.due);
-                if (!(due > 0) || turret.t.item.end <= due || best.t.item.end > due) best = turret;
+                if (!(due > 0) || turret.r.t.item.end <= due || best.r.t.item.end > due) best = turret;
             }
             if (!best) { sink.push({ jobId: j.id, reasons: reasons.length ? reasons : ['нет станков'] }); return; }
-            var x = st[best.id];
-            x.seq.push(j); x.cursor = best.t.cursor; x.prev = j;
+            commitOn(st[best.id], j, best.r);
         }
         var pass1 = [];
         cands.forEach(function(j) { assignOne(j, null, turrets.length ? pass1 : unplaced); });
         if (turrets.length) {
             var open = {}, queued = {};
             turrets.forEach(function(id) {
-                var x = st[id], last = null;
-                if (x.seq.length > x.lockN) last = x.cursor;
-                else if (x.seq.some(function(j) { return turretFits(j, s); })) last = x.cursorL;
-                else (hist[id] || []).forEach(function(j) {
+                var x = st[id], last = null, its = runSeq(x, x.seq).items;
+                its.forEach(function(it, i) { if (turretFits(x.seq[i], s)) last = cal.cursorAt(it.end); });
+                if (!last) (hist[id] || []).forEach(function(j) {
                     if (!turretFits(j, s)) return;
                     var c = layoutFixed(j, x.machine).cursor;
                     if (!last || curKey(c) > curKey(last)) last = c;
@@ -422,35 +472,50 @@
                 // очереди туррели не было — она простаивает давно, открыта сразу
                 open[id] = last ? (s.turretIdle > 0 ? cal.advance(last, s.turretIdle, 'idle').cursor : cal.normalize(last)) : x.cursor0;
                 x.openAt = open[id];
-                x.queue = x.seq.slice(x.lockN);
-                x.queue.forEach(function(j) { queued[j.id] = true; });
+                x.queue = x.seq.filter(function(j) { return !isAnchored(j); });
+                x.queueIds = {};
+                x.queue.forEach(function(j) { queued[j.id] = true; x.queueIds[j.id] = true; });
             });
-            order.forEach(function(id) { var x = st[id]; x.seq = x.seq.slice(0, x.lockN); x.cursor = x.cursorL; x.prev = x.prevL; });
+            order.forEach(function(id) { var x = st[id]; x.seq = []; x.cursor = x.cursor0; x.prev = x.prev0; x.pend = byMachineAnchored[id].slice(); settle(x); });
             turrets.forEach(function(id) {
                 var x = st[id];
-                x.queue.forEach(function(j) { var t = place(x.cursor, x.prev, j, x.machine); x.seq.push(j); x.cursor = t.cursor; x.prev = j; });
+                x.queue.forEach(function(j) { commitOn(x, j, tryOn(x, j, x.cursor)); });
             });
             cands.forEach(function(j) { if (!queued[j.id]) assignOne(j, open, unplaced); });
         }
+        // Закреплённые, до дня которых свободные задания не дошли.
+        order.forEach(function(id) {
+            var x = st[id];
+            while (x.pend.length) {
+                var a = x.pend.shift(), ta = place(floorCur(x.cursor, anchorDay[a.id]), x.prev, a, x.machine);
+                x.seq.push(a); x.cursor = ta.cursor; x.prev = a;
+            }
+        });
 
         function runSeq(x, seq) {
             var cur = x.cursor0, prev = x.prev0, items = [], setupTotal = 0, open = x.openAt;
-            seq.forEach(function(j, i) {
+            seq.forEach(function(j) {
+                if (isAnchored(j)) cur = floorCur(cur, anchorDay[j.id]);
                 // обычное задание на туррели — не раньше, чем она открыта (конец очереди + простой)
-                if (open && x.queue && i >= x.lockN + x.queue.length && curKey(open) > curKey(cur)) cur = open;
+                else if (open && x.queueIds && !x.queueIds[j.id]) cur = floorCur(cur, open);
                 var t = place(cur, prev, j, x.machine);
                 t.item.machineId = x.machine.id;
+                if (lockedSet[j.id] === 'fixed') t.item.locked = true;
                 items.push(t.item); setupTotal += t.item.setup; cur = t.cursor; prev = j;
             });
             return { items: items, setupTotal: setupTotal };
         }
-        // Группировка вал → нож → сырьё без новой просрочки.
-        // Зафиксированные не переставляются; у туррели переставляется только её очередь: обычные задания стоят после неё.
+        // Группировка вал → нож → сырьё без новой просрочки. Переставляются только свободные задания
+        // внутри участков между закреплёнными; у туррели — только её очередь. 🔒 не меняет день.
         function improve(x) {
-            var seq = x.seq.slice(), base = runSeq(x, seq), lim = x.queue ? x.lockN + x.queue.length : seq.length;
-            for (var p = x.lockN; p < lim - 1; p++) {
+            var seq = x.seq.slice(), base = runSeq(x, seq);
+            var movable = function(j) { return !isAnchored(j) && (!x.queueIds || !!x.queueIds[j.id]); };
+            var dayOfItems = function(r) { var d = {}; r.items.forEach(function(i) { if (anchorDay[i.jobId]) d[i.jobId] = cal.dayOf(i.start); }); return d; };
+            var baseDays = dayOfItems(base);
+            for (var p = 0; p < seq.length - 1; p++) {
+                if (!movable(seq[p]) || !movable(seq[p + 1])) continue;
                 var cur = seq[p], bestQ = -1, bestR = affinity(cur, seq[p + 1]);
-                for (var q = p + 2; q < lim; q++) {
+                for (var q = p + 2; q < seq.length && movable(seq[q]); q++) {
                     var r = affinity(cur, seq[q]);
                     if (r > bestR) { bestR = r; bestQ = q; }
                 }
@@ -465,7 +530,9 @@
                     if (!(i.due > 0)) return true;
                     return i.end <= Math.max(ends[i.jobId], i.due);
                 });
-                if (ok) { seq = trial; base = t; }
+                var days = dayOfItems(t);
+                if (ok) ok = Object.keys(days).every(function(k) { return days[k] <= baseDays[k]; });
+                if (ok) { seq = trial; base = t; baseDays = days; }
             }
             x.seq = seq;
             return base;
@@ -859,6 +926,37 @@
         return f;
     }
 
+    // Перенос задания на день day (номер суток) станка machine (окно «Перенести», как 🗓 Фазы 1):
+    // position — 'weight' (по весу: место в дне с наименьшей добавкой наладки; при равенстве — позже),
+    // 'start' (в начало дня), 'end' (в конец дня). Место задаётся план-стартом между записанными стартами
+    // соседей того же станка и дня — по нему «Упорядочить» ставит зафиксированное задание и его ведомых.
+    // → { start, index, neighbours: [id заданий дня по порядку без переносимого] }.
+    function movePlacement(inp) {
+        var s = withDefaults(inp.settings), cal = createCalendar(s), job = inp.job, m = inp.machine, day = inp.day;
+        var on = (inp.jobs || []).filter(function(j) { return String(j.id) !== String(job.id) && !isFinal(j) && String(j.machineId || '') === String(m.id) && num(j.start) > 0; })
+            .sort(function(a, b) { return num(a.start) - num(b.start) || (num(a.id) - num(b.id)); });
+        var dayJobs = on.filter(function(j) { return cal.dayOf(num(j.start)) === day; });
+        var before = on.filter(function(j) { return cal.dayOf(num(j.start)) < day; });
+        var dayFrom = cal.dayTs(day, 0), shift = cal.dayTs(day, s.dayStartMin), n = dayJobs.length;
+        var startAt = function(k) {
+            if (!n) return shift;
+            if (k <= 0) return Math.max(dayFrom, Math.min(shift, num(dayJobs[0].start) - 60));
+            if (k >= n) return num(dayJobs[n - 1].start) + 60;
+            var a = num(dayJobs[k - 1].start), b = num(dayJobs[k].start);
+            return b - a > 1 ? a + Math.floor((b - a) / 2) : a + 1;
+        };
+        var k = inp.position === 'start' ? 0 : n;
+        if (inp.position === 'weight' && n) {
+            var prev0 = before.length ? before[before.length - 1] : null, best = Infinity;
+            for (var i = 0; i <= n; i++) {
+                var p = i ? dayJobs[i - 1] : prev0, q = i < n ? dayJobs[i] : null;
+                var cost = setupMinutes(p, job, s, m) + (q ? setupMinutes(job, q, s, m) - setupMinutes(p, q, s, m) : 0);
+                if (cost <= best) { best = cost; k = i; }
+            }
+        }
+        return { start: startAt(k), index: k, neighbours: dayJobs.map(function(j) { return j.id; }) };
+    }
+
     // «Зафиксировано» задания: fixedReq — id реквизита (его нет в базе — пусто). BOOLEAN снимается пустым значением.
     function jobFixedFields(fixedReq, on) {
         var f = {};
@@ -987,7 +1085,7 @@
         core: {
             JOB_STATUS: JOB_STATUS, DEFAULTS: DEFAULTS, SETTING_KEYS: SETTING_KEYS,
             num: num, norm: norm, readSettings: readSettings, isDone: isDone, isFinal: isFinal, isStarted: isStarted, isMovable: isMovable,
-            dueEnd: dueEnd, buildJobs: buildJobs, setupKind: setupKind, setupMinutes: setupMinutes, runMinutes: runMinutes, jobFixedFields: jobFixedFields, flagOn: flagOn, rollLengthM: rollLengthM, kindOfSetup: kindOfSetup,
+            dueEnd: dueEnd, buildJobs: buildJobs, setupKind: setupKind, setupMinutes: setupMinutes, runMinutes: runMinutes, jobFixedFields: jobFixedFields, flagOn: flagOn, movePlacement: movePlacement, rollLengthM: rollLengthM, kindOfSetup: kindOfSetup,
             machineAllows: machineAllows, createCalendar: createCalendar, orderQueue: orderQueue, compareJobs: compareJobs,
             jobFlags: jobFlags, jobRevs: jobRevs, openRevsByDie: openRevsByDie, coverJobs: coverJobs, planReservations: planReservations,
             toolLoad: toolLoad, ganttDay: ganttDay, recordedPlan: recordedPlan, inScope: inScope, coverGroups: coverGroups, positionPickFields: positionPickFields, queueGrid: queueGrid, turretFits: turretFits, formJobs: formJobs, jobCreateFields: jobCreateFields, jobPlanFields: jobPlanFields,
