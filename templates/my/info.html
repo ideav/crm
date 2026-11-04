@@ -277,8 +277,8 @@ t9n,.t9n {
             <div class="lk-tab mt-3 p-1 p-sm-3 shadow" id="plan" style="display:none">
                 <h3><t9n>[RU]Ваш тариф[EN]Your plan</t9n><span class="plan"></span></h3><br />
                 <h5><t9n>[RU]Следующее списание[EN]Next billing date is</t9n> <span class="plan-date"></span></h5>
-                <p><t9n>[RU]Списание по тарифному плану производится один раз в месяц, при этом сбрасываются счетчики ресурсов всех ваших баз. Если расход ресурсов не укладывается в лимит плана, то для продолжения работы вам необходимо повысить план. <a target="_blank" href="https://ideav.pro/#rec288682804">Подробнее о планах.</a>
-                    [EN]We charge the account monthly according to the tariff plan, and reset the resource counters of all your databases. If the resource consumption does not fit the plan limit, then you need to upgrade the plan to use the service. <a target="_blank" href="https://ideav.pro/#rec288682804">More about plans.</a></t9n>
+                <p><t9n>[RU]Списание по тарифному плану производится один раз в месяц, при этом сбрасываются счетчики ресурсов всех ваших баз. Если расход ресурсов не укладывается в лимит плана, то для продолжения работы вам необходимо повысить план. <a target="_blank" href="/zamena-excel.html#pricing">Подробнее о планах.</a>
+                    [EN]We charge the account monthly according to the tariff plan, and reset the resource counters of all your databases. If the resource consumption does not fit the plan limit, then you need to upgrade the plan to use the service. <a target="_blank" href="/zamena-excel.html#pricing">More about plans.</a></t9n>
                 </p>
                 <p><t9n>[RU]Сейчас вы использовали <span class="count font-weight-bold">0</span> ед. ресурсов или <span class="countpc font-weight-bold">0</span>% от лимита бесплатного тарифного плана в 20000 ед.
                     [EN]Currently, you've spent <span class="count font-weight-bold">0</span> units of resources or <span class="countpc font-weight-bold">0</span>% out of the Free plan limit of 20000 units.</t9n>
@@ -421,7 +421,7 @@ function intApi(m,u,b,vars,index){ // Параметры: метод, адрес
                 $('#t30').val(dataByColumn(json,'Phone',0));
                 $('#t41').val(dataByColumn(json,'Email',0));
                 $('#t39').val($('<div />').html(dataByColumn(json,'Notes',0)).text());
-                $('#t280').attr('src',dataByColumn(json,'Picture',0)||'https://ideav.pro/images/tild3366-6237-4630-b561-626231313263__quintet.gif');
+                $('#t280').attr('src',dataByColumn(json,'Picture',0)||'/images/logo.png');
                 $('.plan').html(' &mdash; <a class="text-blue" id="tariff" onclick="activateTab(\'\',\'plan\')">'+(dataByColumn(json,'Plan',0)||'Free')+'</a>');
                 planID=parseInt(dataByColumn(json,'PlanID',0))||1146;
                 var d=new Date();
