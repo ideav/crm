@@ -33,6 +33,7 @@
 | Импорт батчем `import=1` | [import.md](import.md) | bki_file, DATA, plain_data, формат строк, завершающий `;`, чанки 8МБ, upsert |
 | Архив таблицы: BKI и JSON | [json-archive.md](json-archive.md) | json_export, integram-archive v2, метаданные+данные, types, reqs, target, одна запись на строку, алиасы колонок, gzip, сведение колонок, перенос между базами |
 | Журнал базы (JSON Lines) | [logs.md](logs.md) | _log.jsonl, _sql.jsonl, rid, uid, ~ai, ai_job, old/new, op, import, маскировка секретов, LOG_ROTATE_MB, ротация, чтение journal, cursor, more |
+| Web-socket: живые таблицы, уведомления, события для внешних систем | [realtime.md](realtime.md) | ws-server, /ws, ws_auth, _m_notify, Ws_notify, IntegramWS, subscribe, onNotify, live, liveAttach, INTEGRAM_WS_PUSH_URL, INTEGRAM_WS_SECRET, INTEGRAM_WS_PUBLIC_URL, WS_CORE_URL, push, HMAC, 4401, nginx Upgrade |
 | Иерархический OLTP (разрезы) | [hierarchical-oltp.md](hierarchical-oltp.md) | разрез, частотность групп, накопитель меры, агрегаты, up-уровни |
 
 **Соседние справочники (не дублируем — ссылаемся):**
@@ -48,6 +49,7 @@
 | Симптом / ключ | Тема | Файл |
 |---|---|---|
 | **пустая страница у всех**, с `?debug` — голый `{_block_.&main.a}` | `{слово}` в шаблоне (даже в комментарии, напр. `templates/custom/{db}/…`) — точка вставки без значения гасит весь блок; писать `<база>` | [../WORKSPACE_DEVELOPMENT_GUIDE.md](../WORKSPACE_DEVELOPMENT_GUIDE.md) §1.1 |
+| web-socket: 403 при подключении со своего сайта; события не приходят | nginx не передаёт `Host`; разный `WS_SECRET` у ядра и демона (`/push` → 401) | [realtime.md](realtime.md) |
 | триггер кнопки с запросом ничего не пишет, в журнале ошибка связи «запрос …» | сервер не видит себя по `https://{Host}` — задать `BUTTON_TRIGGER_BASE_URL` | [button-columns.md](button-columns.md) |
 | в `<db>_log.jsonl` нет строки запроса, упавшего с фатальной ошибкой | `exit` в обработчике завершения отменяет остальные — звать `logRequest()` перед `exit` | [logs.md](logs.md) |
 | `_m_set` отбит целиком, «полусделанная» запись, повтор упирается в уже записанное | реквизит без гранта в общем запросе — грант на колонку + изоляция шага | [roles.md](roles.md) |

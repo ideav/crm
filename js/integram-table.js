@@ -824,6 +824,7 @@ class IntegramTable{
                 if (appendScrollState && typeof window.requestAnimationFrame === 'function') {
                     window.requestAnimationFrame(() => this.restoreScrollState(appendScrollState));
                 }
+                this.liveAttach();  // issue #5269: тип таблицы известен — подписка на изменения
             } catch (error) {
                 console.error('Error loading data:', error);
                 // Stop auto-loading after a failed request (issue #2763).
@@ -11287,6 +11288,39 @@ class IntegramTable{
             this.hasMore = true;
             this.totalRows = null;
             this.loadData(false);
+        }
+
+        // Живая таблица (issue #5269, docs/kb/realtime.md): подписка на свой тип через
+        // IntegramWS (js/ws-client.js). Записи таблицы изменил кто-то другой — перечитать
+        // (пачка событий — одно перечитывание через LIVE_DEBOUNCE мс); правка схемы — перечитать
+        // и колонки. Пока ячейка в правке или новая строка не сохранена — ждать. Свои правки
+        // в активной вкладке уже на экране. Отключение — опция live: false.
+        liveAttach() {
+            if (this._liveOff || (this.options && this.options.live === false)) return;
+            const ws = typeof window !== 'undefined' ? window.IntegramWS : null;
+            const typeId = Number(this.options.tableTypeId || this.objectTableId);
+            if (!ws || !ws.enabled() || !Number.isInteger(typeId) || typeId <= 0) return;
+            this._liveOff = ws.subscribe(typeId, (msg) => this.onLiveEvents(msg));
+        }
+
+        onLiveEvents(msg) {
+            const own = !!msg.by && typeof window !== 'undefined' && msg.by === window.user
+                && typeof document !== 'undefined' && typeof document.hasFocus === 'function' && document.hasFocus();
+            if (own && !msg.reload) return;
+            if ((msg.events || []).some((e) => e.k === 'schema')) this._liveSchema = true;
+            if (!this._liveTimer) this._liveTimer = setTimeout(() => this.liveApply(), 1000);   // LIVE_DEBOUNCE
+        }
+
+        liveApply() {
+            this._liveTimer = null;
+            if (this.currentEditingCell || this.pendingNewRow || this.isLoading) {
+                this._liveTimer = setTimeout(() => this.liveApply(), 2000);
+                return;
+            }
+            const schema = !!this._liveSchema;
+            this._liveSchema = false;
+            if (schema) this.refreshData();
+            else this.reload();
         }
 
         saveColumnState() {
