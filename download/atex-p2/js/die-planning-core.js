@@ -105,7 +105,12 @@
         return Date.UTC(y, mo - 1, d + 1) / 1000 - (tz == null ? DEFAULTS.tzOffsetMin : tz) * 60;
     }
 
-    // Строки отчёта die_planning → задания.
+    // Значение BOOLEAN из базы: пусто, 0, «нет», false — выключено.
+    function flagOn(v) {
+        var t = String(v == null ? '' : v).trim().toLowerCase();
+        return t !== '' && t !== '0' && t !== 'нет' && t !== 'false';
+    }
+    // Строки отчёта die_planning → задания (fixed — «Зафиксировано», #5376).
     function buildJobs(rows, tz) {
         return (rows || []).map(function(r) {
             var minF = num(r.min_format);
@@ -120,7 +125,8 @@
                 positionId: String(r.position_id || ''), orderNo: String(r.order_no || ''),
                 due: dueEnd(r.due, tz), dueText: String(r.due || ''), rolls: num(r.rolls),
                 sleeveId: String(r.sleeve_id || ''), sleeve: String(r.sleeve || ''), sleeveWidth: num(r.sleeve_width),
-                materialId: String(r.material_id || ''), material: String(r.material || '')
+                materialId: String(r.material_id || ''), material: String(r.material || ''),
+                fixed: flagOn(r.fixed)
             };
         });
     }
@@ -346,6 +352,23 @@
         });
         cands.sort(compareJobs);
 
+        // Зафиксированные диспетчером («Зафиксировано», #5376) — на своём станке, первыми за начатыми,
+        // в записанном порядке; «Упорядочить» их не переносит и не переставляет. Без станка признак не действует.
+        var locked = {};
+        cands = cands.filter(function(j) {
+            if (!j.fixed || !st[j.machineId]) return true;
+            var chk = machineAllows(st[j.machineId].machine, j, s);
+            if (!chk.ok) { unplaced.push({ jobId: j.id, reasons: ['зафиксировано на «' + (st[j.machineId].machine.name || j.machineId) + '»: ' + chk.reason] }); return false; }
+            (locked[j.machineId] = locked[j.machineId] || []).push(j);
+            return false;
+        });
+        order.forEach(function(id) {
+            var x = st[id];
+            (locked[id] || []).sort(function(a, b) { return (num(a.start) || Infinity) - (num(b.start) || Infinity) || (num(a.id) - num(b.id)); })
+                .forEach(function(j) { var t = place(x.cursor, x.prev, j, x.machine); x.seq.push(j); x.cursor = t.cursor; x.prev = j; });
+            x.lockN = x.seq.length; x.cursorL = x.cursor; x.prevL = x.prev;
+        });
+
         // Туррель берёт неподходящие ей задания только как обычный станок: когда её очередь
         // (подходящие туррели задания) пуста TURREL_IDLE_MN рабочих минут (#5376).
         // Проход 1 — туррель только под свою очередь; проход 2 — её очередь остаётся как есть,
@@ -389,7 +412,8 @@
             var open = {}, queued = {};
             turrets.forEach(function(id) {
                 var x = st[id], last = null;
-                if (x.seq.length) last = x.cursor;
+                if (x.seq.length > x.lockN) last = x.cursor;
+                else if (x.seq.some(function(j) { return turretFits(j, s); })) last = x.cursorL;
                 else (hist[id] || []).forEach(function(j) {
                     if (!turretFits(j, s)) return;
                     var c = layoutFixed(j, x.machine).cursor;
@@ -398,10 +422,10 @@
                 // очереди туррели не было — она простаивает давно, открыта сразу
                 open[id] = last ? (s.turretIdle > 0 ? cal.advance(last, s.turretIdle, 'idle').cursor : cal.normalize(last)) : x.cursor0;
                 x.openAt = open[id];
-                x.queue = x.seq.slice();
+                x.queue = x.seq.slice(x.lockN);
                 x.queue.forEach(function(j) { queued[j.id] = true; });
             });
-            order.forEach(function(id) { var x = st[id]; x.seq = []; x.cursor = x.cursor0; x.prev = x.prev0; });
+            order.forEach(function(id) { var x = st[id]; x.seq = x.seq.slice(0, x.lockN); x.cursor = x.cursorL; x.prev = x.prevL; });
             turrets.forEach(function(id) {
                 var x = st[id];
                 x.queue.forEach(function(j) { var t = place(x.cursor, x.prev, j, x.machine); x.seq.push(j); x.cursor = t.cursor; x.prev = j; });
@@ -413,7 +437,7 @@
             var cur = x.cursor0, prev = x.prev0, items = [], setupTotal = 0, open = x.openAt;
             seq.forEach(function(j, i) {
                 // обычное задание на туррели — не раньше, чем она открыта (конец очереди + простой)
-                if (open && x.queue && i >= x.queue.length && curKey(open) > curKey(cur)) cur = open;
+                if (open && x.queue && i >= x.lockN + x.queue.length && curKey(open) > curKey(cur)) cur = open;
                 var t = place(cur, prev, j, x.machine);
                 t.item.machineId = x.machine.id;
                 items.push(t.item); setupTotal += t.item.setup; cur = t.cursor; prev = j;
@@ -421,10 +445,10 @@
             return { items: items, setupTotal: setupTotal };
         }
         // Группировка вал → нож → сырьё без новой просрочки.
-        // У туррели переставляется только её очередь: обычные задания стоят после неё.
+        // Зафиксированные не переставляются; у туррели переставляется только её очередь: обычные задания стоят после неё.
         function improve(x) {
-            var seq = x.seq.slice(), base = runSeq(x, seq), lim = x.queue ? x.queue.length : seq.length;
-            for (var p = 0; p < lim - 1; p++) {
+            var seq = x.seq.slice(), base = runSeq(x, seq), lim = x.queue ? x.lockN + x.queue.length : seq.length;
+            for (var p = x.lockN; p < lim - 1; p++) {
                 var cur = seq[p], bestQ = -1, bestR = affinity(cur, seq[p + 1]);
                 for (var q = p + 2; q < lim; q++) {
                     var r = affinity(cur, seq[q]);
@@ -835,6 +859,13 @@
         return f;
     }
 
+    // «Зафиксировано» задания: fixedReq — id реквизита (его нет в базе — пусто). BOOLEAN снимается пустым значением.
+    function jobFixedFields(fixedReq, on) {
+        var f = {};
+        if (fixedReq) f['t' + fixedReq] = on ? '1' : '';
+        return f;
+    }
+
     // ── Задачи на втулки ────────────────────────────────────────────────────
 
     // Диаметр втулки, мм (целый, как номинал в справочнике): «(76мм/5мм/…)» или дюймы (1" = 25).
@@ -956,7 +987,7 @@
         core: {
             JOB_STATUS: JOB_STATUS, DEFAULTS: DEFAULTS, SETTING_KEYS: SETTING_KEYS,
             num: num, norm: norm, readSettings: readSettings, isDone: isDone, isFinal: isFinal, isStarted: isStarted, isMovable: isMovable,
-            dueEnd: dueEnd, buildJobs: buildJobs, setupKind: setupKind, setupMinutes: setupMinutes, runMinutes: runMinutes, rollLengthM: rollLengthM, kindOfSetup: kindOfSetup,
+            dueEnd: dueEnd, buildJobs: buildJobs, setupKind: setupKind, setupMinutes: setupMinutes, runMinutes: runMinutes, jobFixedFields: jobFixedFields, flagOn: flagOn, rollLengthM: rollLengthM, kindOfSetup: kindOfSetup,
             machineAllows: machineAllows, createCalendar: createCalendar, orderQueue: orderQueue, compareJobs: compareJobs,
             jobFlags: jobFlags, jobRevs: jobRevs, openRevsByDie: openRevsByDie, coverJobs: coverJobs, planReservations: planReservations,
             toolLoad: toolLoad, ganttDay: ganttDay, recordedPlan: recordedPlan, inScope: inScope, coverGroups: coverGroups, positionPickFields: positionPickFields, queueGrid: queueGrid, turretFits: turretFits, formJobs: formJobs, jobCreateFields: jobCreateFields, jobPlanFields: jobPlanFields,

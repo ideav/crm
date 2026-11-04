@@ -158,6 +158,8 @@
             j.repeatMm = C.num(cylinders[j.cylinderId]);
         });
         var machineTable = meta.filter(function(x) { return String(x.id) === String(t.machine.id); })[0];
+        var jobTable = meta.filter(function(x) { return String(x.id) === String(t.dieJob.id); })[0];
+        var fixedReq = extra.sreq(jobTable, 'Зафиксировано');
         var machines = C.machinesFromRecords(r[6], t, { turretReq: extra.sreq(machineTable, 'Туррель'), maxCylinderReq: extra.sreq(machineTable, 'Макс. вал') });
         var diInfo = C.dieInfo(dies, brandRes, settings.dieResource);
         var rolls = mr.rolls.map(function(x) { return { id: x.id, no: x.no, format: x.format, materialId: x.materialId, rest: x.rest, status: x.status }; });
@@ -184,7 +186,7 @@
         this.state = {
             tables: t, settings: settings, rows: rows, jobs: jobs, machines: machines, dies: dies, dieInfo: diInfo, mr: mr, rolls: rolls, queue: queue,
             cover: cover, groups: groups, positions: positions, cutters: cutters, sleeveTasks: sleeveTasks, sleeveTable: st,
-            sleeveReport: Array.isArray(r[11]), now: r[14], jobById: {}
+            sleeveReport: Array.isArray(r[11]), now: r[14], jobById: {}, fixedReq: fixedReq
         };
         var s = this.state;
         jobs.forEach(function(j) { s.jobById[j.id] = j; });
@@ -352,6 +354,7 @@
         var time = it ? '⏱ ' + clock(runFrom) + ' – ' + clock(runFrom + it.run) + ' · ' + it.run + ' мин' : '⏱ ' + fmtNum(j.duration) + ' мин';
         out += '<div class="' + cls + '" data-job-id="' + esc(j.id) + '"><div class="atex-pp-cut-info">' +
             (it && it.continuation ? '' : '<label class="atex-dp-mark" title="Отметить задание: «Применить» и «Задачи на втулки» можно выполнить только для отмеченных"><input type="checkbox" data-mark="' + esc(j.id) + '"' + (this.marked[j.id] ? ' checked' : '') + '></label>') +
+            (it && it.continuation ? '' : this.fixButton(j)) +
             '<a class="atex-pp-cut-seq" href="/' + esc(this.db) + '/edit_obj/' + esc(j.id) + '" target="_blank" rel="noopener" title="Открыть карточку задания (id ' + esc(j.id) + ')">№ ' + esc(seq) + '</a>' +
             '<div class="atex-pp-cut-time">' + time + '</div>' +
             '<span class="atex-pp-cut-name">' + esc(j.orderNo ? 'заказ ' + j.orderNo : 'поз. ' + j.positionId) + '</span>' +
@@ -400,6 +403,28 @@
         if (!m) return '';
         return esc(m.maxCylinder > 0 ? ' · вал ≤ ' + m.maxCylinder : ' · любой вал') + (m.stopMaterials.length ? ' · стоп-лист: ' + m.stopMaterials.length : '') + (m.turret ? ' · туррель: втулка ≥ 2× диаметра' + (this.state.settings && this.state.settings.turretLongM > 0 ? ', метраж ≥ ' + this.state.settings.turretLongM + ' м' : '') +
             (this.state.settings ? ', обычные — после простоя ' + this.state.settings.turretIdle + ' мин' : '') : '');
+    };
+
+    // «Зафиксировано» (#5376): 🔒 — «Упорядочить» оставляет задание на его станке и в его порядке.
+    // Кнопка есть у не начатого задания со станком, если реквизит заведён в базе.
+    AtexDiePlanningApp.prototype.fixButton = function(j) {
+        var s = this.state;
+        if (!s.fixedReq || !j.machineId || !C.isMovable(j)) return j.fixed ? '<span class="atex-dp-fix is-on" title="Зафиксировано">🔒</span>' : '';
+        return '<button type="button" class="atex-dp-fix' + (j.fixed ? ' is-on' : '') + '" data-fix="' + esc(j.id) + '" title="' +
+            (j.fixed ? 'Зафиксировано: «Упорядочить» не переносит задание с «' + esc(j.machine || j.machineId) + '» и не меняет порядок зафиксированных. Нажмите, чтобы снять.'
+                : 'Зафиксировать на «' + esc(j.machine || j.machineId) + '»: «Упорядочить» не перенесёт задание на другой станок и не изменит порядок зафиксированных') + '">' + (j.fixed ? '🔒' : '🔓') + '</button>';
+    };
+    AtexDiePlanningApp.prototype.toggleFix = function(id) {
+        var self = this, s = this.state, j = s && s.jobById[id];
+        if (!j || !s.fixedReq || this.busy) return;
+        this.busy = true;
+        this.client.post('_m_set/' + encodeURIComponent(id) + '?JSON', C.jobFixedFields(s.fixedReq, !j.fixed)).then(function() {
+            self.busy = false;
+            self.reload(j.fixed ? 'Фиксация снята' : 'Задание зафиксировано на «' + (j.machine || j.machineId) + '»');
+        }).catch(function(err) {
+            self.busy = false;
+            self.message('Не удалось изменить «Зафиксировано»: ' + err.message, 'error');
+        });
     };
 
     AtexDiePlanningApp.prototype.planMachineOf = function(jobId) {
@@ -500,6 +525,8 @@
         var nav = e.target.closest('[data-range]');
         if (nav && this.el.contains(nav)) { this.shiftRange(parseInt(nav.getAttribute('data-range'), 10)); return; }
         if (e.target.closest('.atex-dp-mark')) return;   // отметка — в onChange, карточку не выбирает
+        var fx = e.target.closest('[data-fix]');
+        if (fx && this.el.contains(fx)) { this.toggleFix(fx.getAttribute('data-fix')); return; }
         var card = e.target.closest('[data-job-id]');
         if (card && this.el.contains(card) && !e.target.closest('a')) { this.selected = card.getAttribute('data-job-id'); this.render(); return; }
         var b = e.target.closest('[data-act]');
