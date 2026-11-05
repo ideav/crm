@@ -68,7 +68,7 @@
     <tspan>WHERE </tspan><tspan fill="#f6ad55">Ответственный</tspan><tspan fill="#cbd5e0"> = </tspan><tspan fill="#90cdf4">[CURRENT_USER]</tspan>
   </text>
   <text x="256" y="436" font-family="ui-monospace, Menlo, Consolas, monospace" font-size="13" fill="#a0aec0">
-    Применяется ко всем запросам: UI, отчёты, API, выгрузка.
+    Фильтрует таблицу, API и сохранение. В отчётах не действует.
   </text>
 
   <rect x="760" y="460" width="100" height="32" rx="4" fill="#1abc9c"/>
