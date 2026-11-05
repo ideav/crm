@@ -25,13 +25,18 @@ global.document = {
         removeChild: () => {}
     }
 };
-global.navigator = {
-    clipboard: {
-        writeText: (text) => {
-            clipboardText = text;
+// Node >= 21 has a built-in getter-only `navigator`; plain assignment is silently ignored.
+Object.defineProperty(globalThis, 'navigator', {
+    configurable: true,
+    writable: true,
+    value: {
+        clipboard: {
+            writeText: (text) => {
+                clipboardText = text;
+            }
         }
     }
-};
+});
 
 const IntegramTable = require('../js/integram-table.js');
 
