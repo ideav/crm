@@ -88,7 +88,7 @@
   <text x="240" y="362" font-size="13" font-weight="600" fill="#2d3748">Что сейчас работает на этой странице</text>
   <text x="240" y="382" font-size="12" fill="#4a5568">• Записи коллег не возвращаются сервером — Анна их не увидит даже в API и выгрузке.</text>
   <text x="240" y="400" font-size="12" fill="#4a5568">• Колонка «Сумма» помечена BARRED для роли «Менеджер» — данных нет ни в DOM, ни в JSON.</text>
-  <text x="240" y="418" font-size="12" fill="#4a5568">• Та же маска автоматически отфильтрует сделки в отчётах, дашбордах и API-запросах.</text>
+  <text x="240" y="418" font-size="12" fill="#4a5568">• Маска фильтрует сделки и в API; в отчётах её нет — там фильтр [USER_ID].</text>
 
   <text x="240" y="468" font-size="11" fill="#a0aec0">Источник фильтрации: index.php → getGrants() → $GLOBALS["GRANTS"]["mask"][&lt;table_id&gt;] → Construct_WHERE()</text>
 </svg>
