@@ -216,7 +216,8 @@ function showToast(message, type = 'info') {
 // ============================================================
 // Счётчик ideav.ru подключён в start.html. Регистрация принята (письмо подтверждения ушло) →
 // цель reg_ok; пришёл с лендинга курсов (cookie ig_src ставит кнопка «Стать агентом» на
-// ideav.ru/kurs/) → ещё и цель kurs_agent_reg. Метка одноразовая: после регистрации снимается.
+// ideav.ru/kurs/) → ещё и цель kurs_agent_reg. Метки ig_src и ig_utm (реклама, её читает ядро)
+// одноразовые: после регистрации снимаются.
 // Без Метрики на странице (on-prem) — ничего не делает.
 const REG_METRIKA_ID = 108758829;
 function reachRegistrationGoal() {
@@ -228,6 +229,7 @@ function reachRegistrationGoal() {
         }
     } catch (e) { /* цель не важнее регистрации */ }
     if (src) CookieUtil.delete('ig_src');
+    if (CookieUtil.get('ig_utm') !== null) CookieUtil.delete('ig_utm');
 }
 
 // ============================================================

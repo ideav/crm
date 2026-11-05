@@ -62,7 +62,7 @@ list($out, $log) = run_case($fn, false, true, array("kurs-agents", "a@b.ru", 501
 expect(is_array($log) && count($log) === 0, "без telegram-config.php ничего не отправляется (вывод: ".trim((string)$out).")");
 
 # 2) канал есть, доставка удалась
-list($out, $log) = run_case($fn, true, true, array("kurs-agents", "a@b.ru", 501, 77, "123456"));
+list($out, $log) = run_case($fn, true, true, array("kurs-agents", "a@b.ru", 501, 77, "123456", "utm_source=yandex&utm_campaign=agents\nX"));
 $saves = is_array($log) ? array_values(array_filter($log, function($e){ return $e[0] === "save"; })) : array();
 expect(count($saves) === 1, "в очередь уходит ровно одно сообщение (вывод: ".trim((string)$out).")");
 $text = $saves ? $saves[0][2]["text"] : "";
@@ -72,6 +72,7 @@ expect(strpos($text, "a@b.ru") !== false, "в сообщении почта");
 expect(preg_match('/my.*501/u', $text) === 1, "в сообщении номер в my (его агент ставит в ?aff=)");
 expect(preg_match('/aff.*77/u', $text) === 1, "в сообщении пригласивший агент");
 expect(strpos($text, "123456") !== false, "в сообщении кампания Директа");
+expect(strpos($text, "Метки рекламы: utm_source=yandex&utm_campaign=agents X") !== false, "метки рекламы одной строкой: перевод строки из cookie не рвёт сообщение");
 expect(is_array($log) && in_array(array("cleanup", "spool/1"), $log, true), "доставленное сообщение убирается из очереди");
 
 # 3) канал есть, доставка не удалась — сообщение ждёт cron в очереди
@@ -79,6 +80,7 @@ list($out, $log) = run_case($fn, true, false, array("kurs-agents", "a@b.ru", 501
 expect(is_array($log) && !in_array(array("cleanup", "spool/1"), $log, true), "недоставленное сообщение остаётся в очереди (вывод: ".trim((string)$out).")");
 $saves = is_array($log) ? array_values(array_filter($log, function($e){ return $e[0] === "save"; })) : array();
 expect($saves && preg_match('/aff\): нет/u', $saves[0][2]["text"]) === 1, "без агента в сообщении «нет», а не 0");
+expect($saves && strpos($saves[0][2]["text"], "Метки рекламы: нет") !== false, "без меток в сообщении «нет»");
 
 echo $failures ? "\n$failures FAILED\n" : "\nALL PASSED\n";
 exit($failures ? 1 : 0);
