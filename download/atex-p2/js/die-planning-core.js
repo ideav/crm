@@ -594,9 +594,20 @@
 
     // ── Мастер-рулоны ───────────────────────────────────────────────────────
 
+    // Порядок, в котором задания берут склад МР, — порядок построения плана: начатые (уже стоят на станке)
+    // по своему старту, затем остальные так, как их раскладывает orderQueue (compareJobs: срок, номер
+    // задания). От записанного план-старта свободных заданий он не зависит: «Применить» не перекладывает
+    // рулоны, и повторное «Упорядочить» даёт тот же план.
+    function coverOrder(a, b) {
+        var sa = isMovable(a) ? 1 : 0, sb = isMovable(b) ? 1 : 0;
+        if (sa !== sb) return sa - sb;
+        if (!sa) return (num(a.start) - num(b.start)) || (num(a.id) - num(b.id));
+        return compareJobs(a, b);
+    }
+
     // Покрытие заданий мастер-рулонами — одна мера для блокировки «нет МР нужного формата» и вкладки
     // «Дефицит форматов»; «Зарезервировать МР» показывает тот же расчёт у заданий с нехваткой.
-    // Задания идут по план-старту:
+    // Задания идут в порядке построения плана (coverOrder):
     //   нужно    = метраж задания − уже вырубленное (расход журнала по заданию);
     //   резерв   = свои рулоны на складе: резерв у рулона на это задание или поле «Мастер-рулон» задания;
     //   остатки  = метры, которые никому не нужны: свободные початые рулоны и у рулона, за которым стоит
@@ -612,7 +623,7 @@
         var o = opts || {}, moves = o.moves || [], idx = {}, byJob = {};
         (o.tasks || []).forEach(function(t) { idx[t.id] = t; });
         var list = (jobs || []).filter(function(j) { return num(j.minFormat) || num(j.usedFormat) || num(j.optFormat); })
-            .sort(function(a, b) { return a.start - b.start || (num(a.id) - num(b.id)); });
+            .sort(coverOrder);
         list.forEach(function(j) { byJob[j.id] = j; });
         var stockRolls = (rolls || []).filter(function(r) { return MR.onStock(r); });
         var consumed = function(id) {
@@ -704,13 +715,17 @@
 
     // Резерв по заданиям (задания высечки в виде задач склада MR.buildTasks): рулоны подбираются
     // правилами склада (целые, формат в допуске, не чужие), один рулон — одному заданию.
+    // Задания берут рулоны в порядке покрытия (coverOrder), если даны jobs — задания высечки; иначе по старту.
     // → [{ taskId, rollIds, deficit, need }] по заданиям с дефицитом.
-    function planReservations(tasks, rolls, moves, tolerance) {
+    function planReservations(tasks, rolls, moves, tolerance, jobs) {
         var copy = (rolls || []).map(function(r) { return Object.assign({}, r); });
+        var rank = {};
+        (jobs || []).slice().sort(coverOrder).forEach(function(j, i) { rank[j.id] = i; });
+        var rankOf = function(t) { return rank[t.id] != null ? rank[t.id] : Infinity; };
         var open = (tasks || []).filter(function(t) {
             var st = norm(t.status);
             return t.open && (st === '' || st === 'запланировано') && !t.currentRollId;
-        }).sort(function(a, b) { return a.start - b.start || (num(a.id) - num(b.id)); });
+        }).sort(function(a, b) { var ra = rankOf(a), rb = rankOf(b); return (ra !== rb ? (ra < rb ? -1 : 1) : 0) || a.start - b.start || (num(a.id) - num(b.id)); });
         var out = [];
         open.forEach(function(t) {
             var need = MR.taskNeeds([t], copy, moves, tolerance)[0];
@@ -1087,7 +1102,7 @@
             num: num, norm: norm, readSettings: readSettings, isDone: isDone, isFinal: isFinal, isStarted: isStarted, isMovable: isMovable,
             dueEnd: dueEnd, buildJobs: buildJobs, setupKind: setupKind, setupMinutes: setupMinutes, runMinutes: runMinutes, jobFixedFields: jobFixedFields, flagOn: flagOn, movePlacement: movePlacement, rollLengthM: rollLengthM, kindOfSetup: kindOfSetup,
             machineAllows: machineAllows, createCalendar: createCalendar, orderQueue: orderQueue, compareJobs: compareJobs,
-            jobFlags: jobFlags, jobRevs: jobRevs, openRevsByDie: openRevsByDie, coverJobs: coverJobs, planReservations: planReservations,
+            jobFlags: jobFlags, jobRevs: jobRevs, openRevsByDie: openRevsByDie, coverJobs: coverJobs, coverOrder: coverOrder, planReservations: planReservations,
             toolLoad: toolLoad, ganttDay: ganttDay, recordedPlan: recordedPlan, inScope: inScope, coverGroups: coverGroups, positionPickFields: positionPickFields, queueGrid: queueGrid, turretFits: turretFits, formJobs: formJobs, jobCreateFields: jobCreateFields, jobPlanFields: jobPlanFields,
             sleeveDiameterMm: sleeveDiameterMm, pickCutter: pickCutter, sleevePlan: sleevePlan,
             sleeveCreateFields: sleeveCreateFields, sleeveUpdateFields: sleeveUpdateFields,
