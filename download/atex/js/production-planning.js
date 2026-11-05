@@ -3517,7 +3517,9 @@
     //   RUNS_CHANGE   — у задания меняется «Кол-во резок план»: было → стало
     //   CHAIN_CREATE  — рождение продолжения (родитель, сколько проходов уносит)
     //   CHAIN_DELETE  — снятие сегмента (сколько проходов на нём стояло)
-    //   OP_DROPPED    — операцию снял страж (правило реестра §15, режим `drop`)
+    //   OP_DROPPED    — операцию снял страж (правило реестра §15, режим `drop`); WORK_REFUSED /
+    //                   RATCHET_REFUSED — цепочку снял шлюз сохранности работы / храповик. Все три
+    //                   начинают «Детали» с `правило=<ID>: ` (#5411, `journalGuardRows`)
     //   CHAIN_BALANCE — Σ проходов цепочки ДО и ПОСЛЕ операций; расхождение = потеря
     //   SETTLE_SPLIT  — «Урегулировать» делит частично выполненное: сделано + остаток
     //   DAY_OVER      — станко-день выше потолка смены по ХРАНИМЫМ минутам
@@ -3820,39 +3822,62 @@
         });
     }
 
-    // Что снял страж: разница исходных операций и прошедших. Отдельно помечаем снятый `create` —
-    // именно он оставляет урезанную голову без продолжения (корень #4536/#4598).
-    //   before — операции ДО стража, guard — результат guardPlanOps.
-    function journalGuardDrops(ctx, before, guard) {
-        if (!journalMeta(ctx) || !before || !guard) return Promise.resolve(0);
-        var after = guard.ops || {};
-        var keptU = {}, keptC = {}, keptD = {};
-        ((after.updates) || []).forEach(function(u) { keptU[String(u.cutId)] = true; });
-        ((after.creates) || []).forEach(function(c) { keptC[String(c.parentCutId) + '|' + c.plannedRuns] = true; });
-        ((after.deletes) || []).forEach(function(id) { keptD[String(id)] = true; });
-        var rules = (guard.violations || []).map(function(v) { return v && v.rule; }).filter(Boolean);
-        var why = rules.length ? ' правила: ' + rules.slice(0, 6).join(', ') : '';
+    // #5411: ЧТО СНЯЛ СТРАЖ И КАКИМ ПРАВИЛОМ. Каждая строка начинается с `правило=<ID>[,<ID>…]: ` —
+    // по этому префиксу журнал считает срабатывания каждого правила реестра. GATE_WORK_KEPT —
+    // сохранность работы (#4645): свойство самого шлюза, а не правила реестра.
+    //   OP_DROPPED (cut пуст)  — сводка по правилу `drop`: `before` = сколько операций снято;
+    //   OP_DROPPED (cut, ⛔)    — снятый `create` продолжения: он оставляет урезанную голову без
+    //                            остатка (корень #4536/#4598), поэтому — построчно;
+    //   OP_DROPPED (cut, #4536) — цепочка снята целиком из-за отброшенной операции;
+    //   WORK_REFUSED / RATCHET_REFUSED — цепочка снята шлюзом сохранности работы / храповиком.
+    // Чистая: строит строки по отчёту `guardPlanOps`, ничего не пишет.
+    var JOURNAL_GUARD_MAX_ROWS = 60;
+    function journalGuardRows(guard) {
+        if (!guard) return [];
+        var tag = function(rules) {
+            var list = (rules || []).filter(Boolean);
+            return 'правило=' + (list.length ? list.join(',') : 'UNKNOWN') + ': ';
+        };
         var rows = [];
-        ((before.updates) || []).forEach(function(u) {
-            if (keptU[String(u.cutId)]) return;
-            rows.push({ event: 'OP_DROPPED', cut: u.cutId, after: u.plannedRuns,
-                        details: 'снят update (проходов должно было стать ' + u.plannedRuns + ')' + why });
+        var byRule = {}, order = [];
+        (guard.drops || []).forEach(function(d) {
+            if (!byRule[d.rule]) { byRule[d.rule] = { update: 0, delete: 0, create: 0 }; order.push(d.rule); }
+            byRule[d.rule][d.kind] = (byRule[d.rule][d.kind] || 0) + 1;
         });
-        ((before.creates) || []).forEach(function(c) {
-            if (keptC[String(c.parentCutId) + '|' + c.plannedRuns]) return;
-            rows.push({ event: 'OP_DROPPED', cut: c.parentCutId, after: c.plannedRuns,
-                        details: '⛔ снят CREATE продолжения на ' + c.plannedRuns +
-                                 ' проходов — голова останется без остатка' + why });
+        order.forEach(function(rule) {
+            var n = byRule[rule];
+            rows.push({ event: 'OP_DROPPED', before: n.update + n.delete + n.create,
+                        details: tag([rule]) + 'снято операций: update ' + n.update + ', delete ' + n.delete +
+                                 ', create ' + n.create });
         });
-        ((before.deletes) || []).forEach(function(id) {
-            if (keptD[String(id)]) return;
-            rows.push({ event: 'OP_DROPPED', cut: id, details: 'снят delete' + why });
+        (guard.drops || []).forEach(function(d) {
+            if (d.kind !== 'create') return;
+            rows.push({ event: 'OP_DROPPED', cut: d.cutId, after: d.plannedRuns,
+                        details: tag([d.rule]) + '⛔ снят CREATE продолжения на ' + d.plannedRuns +
+                                 ' проходов — голова останется без остатка' });
         });
-        if ((guard.restoredChains || []).length) {
-            rows.push({ event: 'OP_DROPPED', before: (guard.restoredChains || []).length,
-                        details: '#4536: операции сняты ЦЕЛИКОМ по цепочкам ' + (guard.restoredChains || []).join(', ') });
-        }
-        return planJournalRows(ctx, rows);
+        (guard.restoredChains || []).forEach(function(ch) {
+            rows.push({ event: 'OP_DROPPED', cut: ch,
+                        details: tag((guard.restoredRules || {})[String(ch)]) +
+                                 '#4536: операции задания сняты ЦЕЛИКОМ по цепочке ' + ch });
+        });
+        (guard.lostWorkChains || []).forEach(function(ch) {
+            rows.push({ event: 'WORK_REFUSED', cut: ch,
+                        details: tag(['GATE_WORK_KEPT']) + '#4645: набор операций отнимал проходы у цепочки ' + ch +
+                                 ' — операции сняты целиком, запись оставлена как хранится' });
+        });
+        (guard.ratchetChains || []).forEach(function(ch) {
+            rows.push({ event: 'RATCHET_REFUSED', cut: ch,
+                        details: tag((guard.ratchetRules || {})[String(ch)]) +
+                                 '#4751: набор операций ухудшал жёсткое правило по цепочке ' + ch +
+                                 ' — операции сняты целиком, запись оставлена как хранится' });
+        });
+        return rows.slice(0, JOURNAL_GUARD_MAX_ROWS);
+    }
+
+    function journalGuardDrops(ctx, guard) {
+        if (!journalMeta(ctx) || !guard) return Promise.resolve(0);
+        return planJournalRows(ctx, journalGuardRows(guard));
     }
 
     // Подробности одного применения плана. snapshot — задания ДО (id, plannedRuns, firstPartId),
@@ -5209,19 +5234,26 @@
         var droppers = (rules || []).filter(function(inv) {
             return inv.mode === 'drop' && applies(inv) && typeof inv.drop === 'function';
         });
-        if (!ops) return { ops: ops, violations: violations, skipped: 0, filled: filled,
-                           restoredChains: [], lostWorkChains: [], ratchetChains: [], ratchetViolations: [] };
+        if (!ops) return { ops: ops, violations: violations, skipped: 0, filled: filled, drops: [],
+                           restoredChains: [], restoredRules: {}, lostWorkChains: [],
+                           ratchetChains: [], ratchetViolations: [], ratchetRules: {} };
 
         var skipped = 0;
         // #4759: ЧТО ИМЕННО СНЯТО — вызывающему и правилам. Правило потолка по этому списку видит,
         // какие станко-дни судить больше нельзя: занятость им считал упаковщик ДО отбрасывания.
         var droppedOps = { updates: [], deletes: [], creates: [] };
         ops.droppedOps = droppedOps;
+        // #5411: КТО СНЯЛ — id правила на каждую снятую операцию. Журнал пишет его в запись, иначе
+        // по журналу не сосчитать, какое правило срабатывает (набор мутируется на месте, и задним
+        // числом «до − после» не восстановить).
+        var drops = [];
         function keep(op, kind) {
             for (var i = 0; i < droppers.length; i++) {
                 if (droppers[i].drop(op, ctx, kind)) {
                     skipped++;
                     (kind === 'delete' ? droppedOps.deletes : (kind === 'create' ? droppedOps.creates : droppedOps.updates)).push(op);
+                    drops.push({ kind: kind, rule: droppers[i].id, plannedRuns: op.plannedRuns,
+                                 cutId: String(kind === 'create' ? op.parentCutId : op.cutId) });
                     return false;
                 }
             }
@@ -5242,9 +5274,10 @@
             // обеспечение в базу без единой проверки (боевые WRITE#61…70).
             var ratchetOnly = refuseRatchetRegressions(rules, ops, ctx, who);
             skipped += ratchetOnly.skipped;
-            return { ops: ops, violations: violations, skipped: skipped, filled: filled,
-                     restoredChains: [], lostWorkChains: lostWork.chains,
-                     ratchetChains: ratchetOnly.chains, ratchetViolations: ratchetOnly.violations };
+            return { ops: ops, violations: violations, skipped: skipped, filled: filled, drops: drops,
+                     restoredChains: [], restoredRules: {}, lostWorkChains: lostWork.chains,
+                     ratchetChains: ratchetOnly.chains, ratchetViolations: ratchetOnly.violations,
+                     ratchetRules: ratchetOnly.rulesByChain };
         }
         ops.updates = (ops.updates || []).filter(function(u) { return keep(u, 'update'); });
         // Удаления — «голые» id: нормализуем в операцию, чтобы у правил была одна форма входа.
@@ -5252,6 +5285,19 @@
         ops.creates = (ops.creates || []).filter(function(cr) { return keep(cr || {}, 'create'); });
         var restoredChains = restoreSplitChainIntegrity(ops, ctx, balanceBefore);
         skipped += restoredChains.skipped;
+        // #5411: цепочку снимают целиком из-за операций, которые отбросило правило, — его и называем.
+        var restoredRules = {};
+        if (restoredChains.chains.length && ctx && typeof ctx.chainIdOfCut === 'function') {
+            var restoredSet = {};
+            restoredChains.chains.forEach(function(ch) { restoredSet[String(ch)] = true; });
+            drops.forEach(function(d) {
+                var c = ctx.chainIdOfCut(d.cutId);
+                var ch = String((c == null || c === '') ? d.cutId : c);
+                if (!restoredSet[ch]) return;
+                var list = restoredRules[ch] || (restoredRules[ch] = []);
+                if (list.indexOf(d.rule) < 0) list.push(d.rule);
+            });
+        }
         // #4751: храповик — ПОСЛЕДНИЙ шаг: он судит набор, который реально уйдёт в базу, а не тот,
         // из которого страж ещё не выбросил операции по заморозке и 🔒.
         var ratchet = refuseRatchetRegressions(rules, ops, ctx, who);
@@ -5265,9 +5311,11 @@
         // именно снято, и на него смотрят тесты #4494/#4512.
         var violationsAfterDrop = checkRules(rules, ops, ctx, who);
         return { ops: ops, violations: violations, violationsAfterDrop: violationsAfterDrop,
-                 skipped: skipped, filled: filled,
-                 restoredChains: restoredChains.chains, lostWorkChains: lostWork.chains,
-                 ratchetChains: ratchet.chains, ratchetViolations: ratchet.violations };
+                 skipped: skipped, filled: filled, drops: drops,
+                 restoredChains: restoredChains.chains, restoredRules: restoredRules,
+                 lostWorkChains: lostWork.chains,
+                 ratchetChains: ratchet.chains, ratchetViolations: ratchet.violations,
+                 ratchetRules: ratchet.rulesByChain };
     }
 
     // #4645 (ТЗ §15): ПЛАН НЕ ВПРАВЕ УНИЧТОЖИТЬ РАБОТУ. `restoreSplitChainIntegrity` (#4536) лечит
@@ -5361,7 +5409,7 @@
     // ops мутируется на месте.
     var RATCHET_PASSES = 5;
     function refuseRatchetRegressions(rules, ops, ctx, actor) {
-        var none = { chains: [], violations: [], skipped: 0 };
+        var none = { chains: [], violations: [], skipped: 0, rulesByChain: {} };
         var chainFn = (ctx && typeof ctx.chainIdOfCut === 'function') ? ctx.chainIdOfCut : null;
         if (!ops || !chainFn || ops.manual === true) return none;
         var who = actor === 'human' ? 'human' : 'auto';
@@ -5397,6 +5445,7 @@
         });
 
         var broken = {}, chains = [], reported = [], skipped = 0;
+        var rulesByChain = {};   // #5411: цепочка → id ухудшенных правил (для журнала)
         for (var pass = 0; pass < RATCHET_PASSES; pass++) {
             var fresh = [];
             gates.forEach(function(inv) {
@@ -5417,6 +5466,8 @@
                 (subj.chains || []).forEach(function(id) { if (id != null && id !== '') keys.push(String(id)); });
                 if (!keys.length && hit.v && hit.v.cutId != null) keys.push(chainOf(hit.v.cutId));
                 keys.forEach(function(k) {
+                    var rl = rulesByChain[k] || (rulesByChain[k] = []);
+                    if (rl.indexOf(hit.inv.id) < 0) rl.push(hit.inv.id);
                     if (broken[k]) return;
                     broken[k] = true; chains.push(k); added++;
                 });
@@ -5435,7 +5486,7 @@
                 return true;
             });
         }
-        return { chains: chains, violations: reported, skipped: skipped };
+        return { chains: chains, violations: reported, skipped: skipped, rulesByChain: rulesByChain };
     }
 
     // #4536: СКОЛЬКО РАБОТЫ ОПЕРАЦИИ ДОБАВЛЯЮТ ИЛИ ОТНИМАЮТ У КАЖДОГО ЗАДАНИЯ.
@@ -15109,6 +15160,8 @@
         // #4636: что журнал пишет по набору операций (RUNS_CHANGE / PLAN_MOVE / CHAIN_*) —
         // проверяется `experiments/atex-pp-4636-journal-blindspots.test.js` на стаб-контроллере.
         journalApplyDetails: journalApplyDetails,
+        // #5411: строки журнала по отчёту стража, с id правила (`atex-pp-5411-guard-rule-id.test.js`).
+        journalGuardRows: journalGuardRows,
         // #4979: очередь действия и батч журнала — 30 запросов и 7 секунд на перемещение
         // сводятся к одному `import=1` (проверяется `atex-pp-4979-journal-batch-and-reload`).
         journalBegin: journalBegin,
@@ -26833,9 +26886,10 @@
             if (guard.skipped) console.log('[pp] 🔒 #4436: замороженные дни не трогаем — отброшено записей плана:', guard.skipped);
             // #4618: ЧТО ИМЕННО СНЯЛ СТРАЖ — в журнал. Счётчика `skipped` для расследования мало:
             // потеря проходов выглядит как «голова урезана, продолжения нет», и вопрос всегда один
-            // — сняли ли `create` продолжения. Состав считаем разницей исходных операций и
-            // прошедших, чтобы не менять реестр правил (#4515: страж работает для любого правила).
-            journalGuardDrops(self, ops, guard);
+            // — сняли ли `create` продолжения. #5411: состав и id правила берутся из отчёта стража
+            // (`guard.drops`, `restoredRules`, `ratchetRules`); все строки OP_DROPPED / WORK_REFUSED /
+            // RATCHET_REFUSED строит `journalGuardRows`.
+            journalGuardDrops(self, guard);
             // #4536: страж вернул задание целиком — часть его операций отбросило правило, и остаток
             // сняли, чтобы работа (а с ней и обеспечение заказа) не потерялась.
             if ((guard.restoredChains || []).length) {
@@ -26850,11 +26904,6 @@
                 console.error('[pp] ⛔ #4645: план ОТНИМАЛ проходы у цепочек ' + guard.lostWorkChains.join(', ')
                     + ' — их операции сняты ЦЕЛИКОМ, задания остаются как в базе. Причина выше: '
                     + '«упаковщик не разместил проходы» (#4645) либо ветка плана, потерявшая продолжение.');
-                planJournalRows(self, guard.lostWorkChains.map(function(ch) {
-                    return { event: 'WORK_REFUSED', cut: ch,
-                             details: '#4645: набор операций отнимал проходы у цепочки ' + ch +
-                                      ' — операции сняты целиком, запись оставлена как хранится' };
-                }));
             }
             // #4751: ХРАПОВИК СНЯЛ НАБОР, УХУДШАВШИЙ ЖЁСТКОЕ ПРАВИЛО. Не штатная ветка: план в таком
             // виде уменьшал обеспечение заказа или рвал цепочку — молчать нельзя (ТЗ §14). Оператору
@@ -26863,11 +26912,6 @@
                 console.error('[pp] ⛔ #4751: набор УХУДШАЛ жёсткое правило — операции цепочек '
                     + guard.ratchetChains.join(', ') + ' сняты целиком, записи остаются как в базе. '
                     + (guard.ratchetViolations || []).map(function(v){ return v.rule + ': ' + v.msg; }).join('; '));
-                planJournalRows(self, (guard.ratchetChains || []).map(function(ch) {
-                    return { event: 'RATCHET_REFUSED', cut: ch,
-                             details: '#4751: набор операций ухудшал жёсткое правило по цепочке ' + ch
-                                      + ' — операции сняты целиком, запись оставлена как хранится' };
-                }));
             }
             // #4645: упаковщик сам сообщил, что часть проходов не разместилась нигде. До стража это
             // доходит как отрицательный баланс цепочки (выше), но назвать причину числом умеет только он.
