@@ -1,0 +1,11 @@
+# Normalize line endings: tests match substrings/regexes with '\n',
+# so a CRLF working tree on Windows (core.autocrlf=true) breaks them (#4947).
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.docx binary
+*.eot binary
+*.ttf binary
+*.woff binary
+*.woff2 binary
