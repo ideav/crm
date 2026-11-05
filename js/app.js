@@ -212,6 +212,25 @@ function showToast(message, type = 'info') {
 }
 
 // ============================================================
+// Цели Метрики регистрации (ideav/courses#26)
+// ============================================================
+// Счётчик ideav.ru подключён в start.html. Регистрация принята (письмо подтверждения ушло) →
+// цель reg_ok; пришёл с лендинга курсов (cookie ig_src ставит кнопка «Стать агентом» на
+// ideav.ru/kurs/) → ещё и цель kurs_agent_reg. Метка одноразовая: после регистрации снимается.
+// Без Метрики на странице (on-prem) — ничего не делает.
+const REG_METRIKA_ID = 108758829;
+function reachRegistrationGoal() {
+    const src = CookieUtil.get('ig_src');
+    try {
+        if (typeof window.ym === 'function') {
+            window.ym(REG_METRIKA_ID, 'reachGoal', 'reg_ok', src ? { src: src } : undefined);
+            if (src === 'kurs-agents') window.ym(REG_METRIKA_ID, 'reachGoal', 'kurs_agent_reg');
+        }
+    } catch (e) { /* цель не важнее регистрации */ }
+    if (src) CookieUtil.delete('ig_src');
+}
+
+// ============================================================
 // Yandex SmartCaptcha helpers
 // ============================================================
 function getCaptchaToken(containerId) {
@@ -1293,6 +1312,7 @@ class App {
                 const result = await this.auth.register(email, password, confirmPassword, !agree || agree.checked, captchaToken);
                 showToast(result.message, result.success ? 'success' : 'error');
                 if (result.success) {
+                    reachRegistrationGoal();
                     this.hideAuthPanel();
                 } else {
                     resetCaptcha('register-captcha-container');

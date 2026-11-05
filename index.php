@@ -422,6 +422,9 @@ if(($z === "my") && ((isset($com[2]) ? $com[2] : "") === "register")){ # Registe
         # Inform the admin
         mysendmail(ADMINEMAIL, "Registration from $campId ".$_SERVER["SERVER_NAME"].": $email"
         	, "Email: ".$email."\nhttps://".$_SERVER["SERVER_NAME"]."/$db/object/".USER);
+        # Пришёл с лендинга курсов (cookie ig_src ставит кнопка «Стать агентом» на ideav.ru/kurs/) — в чат заявок
+        if(isset($_COOKIE["ig_src"]) && preg_match('/^[a-z0-9-]{1,32}$/', $_COOKIE["ig_src"]))
+            regNotifyTelegram($_COOKIE["ig_src"], $email, $id, isset($_COOKIE["_aff"]) ? (int)$_COOKIE["_aff"] : 0, $campId);
         # Send the confirmation letter to the new user
         mysendmail($email, t9n("[RU]Регистрация на сервисе [EN]Registration from ").$_SERVER["SERVER_NAME"]
         	, t9n("[RU]\r\nЗдравствуйте![EN]Hello my friend,")."\r\n\r\n"
@@ -775,6 +778,33 @@ function hasValidTokenCookie(){
         if($res && mysqli_fetch_array($res)) return true;
     }
     return false;
+}
+
+# ideav/courses#26: регистрация с лендинга курсов (ideav.ru/kurs/agents.html) — сообщение в Telegram-чат заявок.
+# Канал и очередь — те же, что у форм сайта: telegram-config.php и intake-shared.php рядом с ядром
+# (их выкладывает backlogram). Нет файлов (другой хост) — молча ничего не делаем; сбой доставки
+# регистрацию не ломает: сообщение остаётся в очереди, его доберёт cron tg-deliver.php.
+function regNotifyTelegram($src, $email, $uid, $aff, $campId){
+    $dir = __DIR__;
+    if(!is_file("$dir/telegram-config.php") || !is_file("$dir/intake-shared.php")) return;
+    try{
+        require_once "$dir/telegram-config.php";
+        require_once "$dir/intake-shared.php";
+        $labels = array("kurs-agents" => "Курсы (ideav.ru/kurs): регистрация агента");
+        $text = "Новая регистрация с сайта\n"
+            ."Источник: ".(isset($labels[$src]) ? $labels[$src] : $src)."\n"
+            ."Почта: ".stripslashes($email)."\n"
+            ."Номер в my (для ?aff=): $uid\n"
+            ."Пригласил агент (aff): ".($aff > 0 ? $aff : "нет")."\n"
+            ."Кампания Директа: ".($campId !== "" ? html_entity_decode($campId) : "нет")."\n"
+            ."Регистрация ещё не подтверждена по ссылке из письма.";
+        $saved = intake_spool_save(intake_spool_dir(), array("text" => $text, "parse_mode" => "", "caption" => ""), array());
+        if($saved !== null && intake_spool_deliver($saved))
+            intake_spool_cleanup($saved);
+    }
+    catch(Throwable $e){
+        error_log("regNotifyTelegram: ".$e->getMessage());
+    }
 }
 
 function mail2DB($email, $uid){
