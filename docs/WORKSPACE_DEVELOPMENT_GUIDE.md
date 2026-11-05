@@ -243,6 +243,11 @@
     `templates/form.html` (функция `myApi`);
   - `intApi` (с поддержкой `FormData`) — локальный хелпер в
     `templates/quiz.html` (функция `intApi`) и `templates/object.html` (функция `intApi`).
+- `post(a)` — глобальная функция `templates/main.html` и `templates/report.html`: отправляет
+  POST на `/<база>/<a>` с текущим `_xsrf` и переходит на ответ ядра. На ней держатся кнопки
+  колонок-действий отчёта вида `onclick="post('_m_new/<таблица>?up=<id>&t<реквизит>=…')"`
+  ([kb/report-building.md](kb/report-building.md), приём 10); тест
+  `experiments/main-post-function-5403.test.js` (issue #5403).
 - Не дублируйте логику XSRF вручную, если хелпер уже есть.
 
 ---

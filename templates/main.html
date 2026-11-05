@@ -160,6 +160,29 @@
             roleId = '{_global_.role_id}',
             grants=JSON.parse(atob('{_global_.grants}')),
             action = '{_global_.action}';
+        // Issue #5403: post(a) — как в templates/report.html, чтобы кнопки колонок-действий
+        // отчёта (onclick="post('_m_new/…')") работали в любом рабочем месте на main.html.
+        // Отправляет POST на /<база>/<a> с текущим xsrf (он обновляется при перелогине).
+        function post(a) {
+            var f = document.getElementById('post');
+            if (!f) {
+                f = document.createElement('form');
+                f.method = 'POST';
+                f.id = 'post';
+                f.style.display = 'none';
+                var x = document.createElement('input');
+                x.type = 'hidden';
+                x.name = '_xsrf';
+                f.appendChild(x);
+                document.body.appendChild(f);
+            }
+            if (f._xsrf) f._xsrf.value = xsrf;
+            f.action = '/' + db + '/' + a;
+            f.submit();
+            var e = window.event;
+            if (e) { if (e.preventDefault) e.preventDefault(); else e.returnValue = false; }
+            return false;
+        }
         var menuData = [
         <!-- Begin: MyRoleMenu -->
         {menu_id:'{menu_id}',menu_up:'{menu_up}',name:'{name}',href:'{href}',icon:'{icon}'},
