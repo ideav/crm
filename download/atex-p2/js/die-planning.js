@@ -774,7 +774,7 @@
     // Зарезервировать МР.
     AtexDiePlanningApp.prototype.openReserve = function() {
         var self = this, s = this.state, tol = s.settings.tolerance;
-        var plan = C.planReservations(s.mr.tasks, s.mr.rolls, s.mr.moves, tol);
+        var plan = C.planReservations(s.mr.tasks, s.mr.rolls, s.mr.moves, tol, s.jobs.filter(function(j) { return !C.isFinal(j); }));
         var picks = plan.filter(function(p) { return p.rollIds.length; }), short = plan.filter(function(p) { return p.deficit > 0; });
         var rollById = {};
         s.mr.rolls.forEach(function(r) { rollById[r.id] = r; });
