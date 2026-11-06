@@ -18,7 +18,8 @@
 #   2. Новый тест планирования (atex-pp-*, atex-production-planning-*) без `rules:` — ошибка.
 #   3. Храповик по счётчикам из scripts/rule-trace-baseline.txt: непокрытых меток и тестов
 #      планирования без `rules:` не больше базиса. Если счётчик стал МЕНЬШЕ, базис опускается
-#      тем же PR — иначе выигрыш тихо съест следующий PR.
+#      тем же PR — иначе выигрыш тихо съест следующий PR. Поднять базис правкой файла (против
+#      merge-base) — такое же ослабление, как рост счётчика.
 # Проверки 2–3 снимаются строкой в теле PR или в сообщении коммита (как RATCHET-OK):
 #     TRACE-OK: <почему>
 #
@@ -125,6 +126,15 @@ if [[ $cur_u -gt $base_u ]]; then
   for l in $(printf '%s\n' "${uncovered[@]}" | sort); do fail+=("    $l"); done
 fi
 [[ $cur_t -gt $base_t ]] && fail+=("тестов планирования без rules: $cur_t > базиса $base_t")
+
+# Поднятый правкой файла базис — то же ослабление, что и рост счётчика: иначе храповик снимается молча.
+if [[ -n "${MERGE_BASE:-}" ]]; then
+  old_bl="$(git show "$MERGE_BASE:$BASELINE" 2>/dev/null | tr -d '\r' || true)"
+  old_u="$(grep -E '^uncovered_labels=' <<<"$old_bl" | cut -d= -f2)"
+  old_t="$(grep -E '^tests_without_rules=' <<<"$old_bl" | cut -d= -f2)"
+  [[ "$old_u" =~ ^[0-9]+$ && $base_u -gt $old_u ]] && fail+=("базис uncovered_labels поднят: $old_u → $base_u")
+  [[ "$old_t" =~ ^[0-9]+$ && $base_t -gt $old_t ]] && fail+=("базис tests_without_rules поднят: $old_t → $base_t")
+fi
 
 lower=()
 [[ $cur_u -lt $base_u ]] && lower+=("uncovered_labels=$cur_u")

@@ -20,6 +20,8 @@
 //       (позицию выбирает оператор, а не веса).
 //
 // Run with: node experiments/atex-production-planning-4487.test.js
+//
+// rules: R-12.2-move-position
 
 process.env.TZ = 'UTC';
 global.window = { db: 'ateh1', xsrf: 'x' };

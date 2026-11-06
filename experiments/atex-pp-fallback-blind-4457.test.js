@@ -15,6 +15,8 @@
 //     «просрочка», и задание оставалось в разрыве при НУЛЕ переносов.
 //
 // Run with: node experiments/atex-pp-fallback-blind-4457.test.js
+//
+// rules: R-12-chain-break-trigger
 
 process.env.TZ = 'UTC';
 global.window = { db: 'testdb', xsrf: 'x' };

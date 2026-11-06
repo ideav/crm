@@ -33,6 +33,8 @@
 //   F — автоматическое выравнивание цели не выдумывает: без ручного действия scope её не несёт.
 //
 // Run with: node experiments/atex-pp-4768-move-holds-day.test.js
+//
+// rules: R-12.2-move-pins-day
 
 process.env.TZ = 'Europe/Moscow';
 

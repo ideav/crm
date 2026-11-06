@@ -10,6 +10,8 @@
 // (на свободный станок / раньше по дням), пока все части не встанут в срок.
 //
 // Run: node experiments/atex-production-planning-4290.test.js   (PP_TRACE=1 — трасса)
+//
+// rules: R-12-late-pulled-earlier
 globalThis.PP_TRACE_PLACEMENT = (process.env.PP_TRACE === '1');
 
 var mod = require('../download/atex/js/production-planning.js');

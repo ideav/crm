@@ -14,6 +14,8 @@
 // Прежний рескью (#4224/#4424) снимал им замок дня и тянул в срок — это поведение ОТМЕНЕНО (#4434 п.1).
 //
 // Run with: node experiments/atex-4424-rescue-fixed-overdue.test.js
+//
+// rules: R-12.2-lock-over-due
 
 process.env.TZ = 'Europe/Moscow';
 

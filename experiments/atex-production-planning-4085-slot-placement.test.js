@@ -5,6 +5,8 @@
 // Всё ЧИСТО и НЕ врезано → на живое поведение не влияет (врезка — стадии 4-5).
 //
 // Run with: node experiments/atex-production-planning-4085-slot-placement.test.js
+//
+// rules: R-12.1-foil-penalty
 
 var planning = require('../download/atex/js/production-planning.js').planning;
 var P = planning;
