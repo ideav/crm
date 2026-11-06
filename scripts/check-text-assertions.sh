@@ -42,10 +42,20 @@ mapfile -t files < <(git diff --diff-filter=AM --name-only "$MERGE_BASE"...HEAD 
     | grep -E "$TEST_RE" || true)
 if [[ ${#files[@]} -eq 0 ]]; then echo "тестов в изменениях нет — проверять нечего"; exit 0; fi
 
-# Утверждение о ТЕКСТЕ: assert…( … <переменная-исходник> … .test( | .match( | indexOf( | includes( )
+# Утверждение о ТЕКСТЕ, форма 1: assert…( … <переменная-исходник> … .test( | .match( | indexOf( | includes( )
 # либо assert( /…/.test(src) ). Имена переменных-исходников по факту сложившиеся в репозитории.
 SRC_VAR='(src|source|code|html|css|text|body|content|file)'
 ASSERT_RE="assert[A-Za-z]*\(.*(\b${SRC_VAR}\b.*(\.test\(|\.match\(|\.indexOf\(|\.includes\()|/.*/\.test\(\s*${SRC_VAR}\s*\))"
+# Форма 2 — своя обёртка вместо assert (`check(…)`, `ok(…)`, `eq(…)`, `expect(…)`) и составные имена
+# исходника (`formSource`, `coreSrc`). Без неё сторож молча пропускал
+# `check(formSource.includes(…))` (test-issue-4851, issue #5413). Правило уже первой формы: исходник —
+# самостоятельная переменная (не свойство `res.body`, не кусок строки `'qr-login-code'`), и метод
+# поиска вызывается прямо на ней. `requests[0].body.indexOf(…)`, `snap.text.indexOf(…)`,
+# `cellText.includes('110')` проверяют поведение (запрос, отрисовку) — их форма 2 не трогает.
+WRAP_FN='(assert[A-Za-z]*|check[A-Za-z]*|ok|eq|equal|expect|t\.(ok|true|is))'
+WRAP_VAR='([A-Za-z_]*(Source|Src)|src|source|code|html|css)'
+WRAP_RE="(^|[^A-Za-z0-9_.])${WRAP_FN}\(((.*[^A-Za-z0-9_.'\"-])?${WRAP_VAR}\.(test|match|indexOf|includes)\(|.*/.*/\.test\(\s*${WRAP_VAR}\s*\))"
+ASSERT_RE="(${ASSERT_RE})|(${WRAP_RE})"
 
 hits=()
 for f in "${files[@]}"; do
