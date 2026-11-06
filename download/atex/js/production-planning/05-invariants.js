@@ -1288,19 +1288,26 @@
         var droppers = (rules || []).filter(function(inv) {
             return inv.mode === 'drop' && applies(inv) && typeof inv.drop === 'function';
         });
-        if (!ops) return { ops: ops, violations: violations, skipped: 0, filled: filled,
-                           restoredChains: [], lostWorkChains: [], ratchetChains: [], ratchetViolations: [] };
+        if (!ops) return { ops: ops, violations: violations, skipped: 0, filled: filled, drops: [],
+                           restoredChains: [], restoredRules: {}, lostWorkChains: [],
+                           ratchetChains: [], ratchetViolations: [], ratchetRules: {} };
 
         var skipped = 0;
         // #4759: ЧТО ИМЕННО СНЯТО — вызывающему и правилам. Правило потолка по этому списку видит,
         // какие станко-дни судить больше нельзя: занятость им считал упаковщик ДО отбрасывания.
         var droppedOps = { updates: [], deletes: [], creates: [] };
         ops.droppedOps = droppedOps;
+        // #5411: КТО СНЯЛ — id правила на каждую снятую операцию. Журнал пишет его в запись, иначе
+        // по журналу не сосчитать, какое правило срабатывает (набор мутируется на месте, и задним
+        // числом «до − после» не восстановить).
+        var drops = [];
         function keep(op, kind) {
             for (var i = 0; i < droppers.length; i++) {
                 if (droppers[i].drop(op, ctx, kind)) {
                     skipped++;
                     (kind === 'delete' ? droppedOps.deletes : (kind === 'create' ? droppedOps.creates : droppedOps.updates)).push(op);
+                    drops.push({ kind: kind, rule: droppers[i].id, plannedRuns: op.plannedRuns,
+                                 cutId: String(kind === 'create' ? op.parentCutId : op.cutId) });
                     return false;
                 }
             }
@@ -1321,9 +1328,10 @@
             // обеспечение в базу без единой проверки (боевые WRITE#61…70).
             var ratchetOnly = refuseRatchetRegressions(rules, ops, ctx, who);
             skipped += ratchetOnly.skipped;
-            return { ops: ops, violations: violations, skipped: skipped, filled: filled,
-                     restoredChains: [], lostWorkChains: lostWork.chains,
-                     ratchetChains: ratchetOnly.chains, ratchetViolations: ratchetOnly.violations };
+            return { ops: ops, violations: violations, skipped: skipped, filled: filled, drops: drops,
+                     restoredChains: [], restoredRules: {}, lostWorkChains: lostWork.chains,
+                     ratchetChains: ratchetOnly.chains, ratchetViolations: ratchetOnly.violations,
+                     ratchetRules: ratchetOnly.rulesByChain };
         }
         ops.updates = (ops.updates || []).filter(function(u) { return keep(u, 'update'); });
         // Удаления — «голые» id: нормализуем в операцию, чтобы у правил была одна форма входа.
@@ -1331,6 +1339,19 @@
         ops.creates = (ops.creates || []).filter(function(cr) { return keep(cr || {}, 'create'); });
         var restoredChains = restoreSplitChainIntegrity(ops, ctx, balanceBefore);
         skipped += restoredChains.skipped;
+        // #5411: цепочку снимают целиком из-за операций, которые отбросило правило, — его и называем.
+        var restoredRules = {};
+        if (restoredChains.chains.length && ctx && typeof ctx.chainIdOfCut === 'function') {
+            var restoredSet = {};
+            restoredChains.chains.forEach(function(ch) { restoredSet[String(ch)] = true; });
+            drops.forEach(function(d) {
+                var c = ctx.chainIdOfCut(d.cutId);
+                var ch = String((c == null || c === '') ? d.cutId : c);
+                if (!restoredSet[ch]) return;
+                var list = restoredRules[ch] || (restoredRules[ch] = []);
+                if (list.indexOf(d.rule) < 0) list.push(d.rule);
+            });
+        }
         // #4751: храповик — ПОСЛЕДНИЙ шаг: он судит набор, который реально уйдёт в базу, а не тот,
         // из которого страж ещё не выбросил операции по заморозке и 🔒.
         var ratchet = refuseRatchetRegressions(rules, ops, ctx, who);
@@ -1344,9 +1365,11 @@
         // именно снято, и на него смотрят тесты #4494/#4512.
         var violationsAfterDrop = checkRules(rules, ops, ctx, who);
         return { ops: ops, violations: violations, violationsAfterDrop: violationsAfterDrop,
-                 skipped: skipped, filled: filled,
-                 restoredChains: restoredChains.chains, lostWorkChains: lostWork.chains,
-                 ratchetChains: ratchet.chains, ratchetViolations: ratchet.violations };
+                 skipped: skipped, filled: filled, drops: drops,
+                 restoredChains: restoredChains.chains, restoredRules: restoredRules,
+                 lostWorkChains: lostWork.chains,
+                 ratchetChains: ratchet.chains, ratchetViolations: ratchet.violations,
+                 ratchetRules: ratchet.rulesByChain };
     }
 
     // #4645 (ТЗ §15): ПЛАН НЕ ВПРАВЕ УНИЧТОЖИТЬ РАБОТУ. `restoreSplitChainIntegrity` (#4536) лечит
@@ -1440,7 +1463,7 @@
     // ops мутируется на месте.
     var RATCHET_PASSES = 5;
     function refuseRatchetRegressions(rules, ops, ctx, actor) {
-        var none = { chains: [], violations: [], skipped: 0 };
+        var none = { chains: [], violations: [], skipped: 0, rulesByChain: {} };
         var chainFn = (ctx && typeof ctx.chainIdOfCut === 'function') ? ctx.chainIdOfCut : null;
         if (!ops || !chainFn || ops.manual === true) return none;
         var who = actor === 'human' ? 'human' : 'auto';
@@ -1476,6 +1499,7 @@
         });
 
         var broken = {}, chains = [], reported = [], skipped = 0;
+        var rulesByChain = {};   // #5411: цепочка → id ухудшенных правил (для журнала)
         for (var pass = 0; pass < RATCHET_PASSES; pass++) {
             var fresh = [];
             gates.forEach(function(inv) {
@@ -1496,6 +1520,8 @@
                 (subj.chains || []).forEach(function(id) { if (id != null && id !== '') keys.push(String(id)); });
                 if (!keys.length && hit.v && hit.v.cutId != null) keys.push(chainOf(hit.v.cutId));
                 keys.forEach(function(k) {
+                    var rl = rulesByChain[k] || (rulesByChain[k] = []);
+                    if (rl.indexOf(hit.inv.id) < 0) rl.push(hit.inv.id);
                     if (broken[k]) return;
                     broken[k] = true; chains.push(k); added++;
                 });
@@ -1514,7 +1540,7 @@
                 return true;
             });
         }
-        return { chains: chains, violations: reported, skipped: skipped };
+        return { chains: chains, violations: reported, skipped: skipped, rulesByChain: rulesByChain };
     }
 
     // #4536: СКОЛЬКО РАБОТЫ ОПЕРАЦИИ ДОБАВЛЯЮТ ИЛИ ОТНИМАЮТ У КАЖДОГО ЗАДАНИЯ.
