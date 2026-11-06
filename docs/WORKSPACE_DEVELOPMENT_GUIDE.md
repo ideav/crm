@@ -263,8 +263,10 @@
   - `LIMIT={offset},{count}` — постраничная загрузка;
   - `ORDER={colId}` / `ORDER=-{colId}` — сортировка по возрастанию/убыванию;
   - фильтры `FR_{colId}=`, `TO_{colId}=`, `F_{colId}=` (`issue #547`, `issue #549`);
-  - `RECORD_COUNT=1` — получить только число записей.
+  - `RECORD_COUNT=1` — получить только число записей: `{"count":"N"}` с `JSON`, без учёта `LIMIT`.
 - Экспорт для отчётов разрешён всегда (`issue #1469`).
+- Список для экрана грузится постранично через `WorkspaceData.loadAll` (`js/workspace-data.js`) с
+  признаком усечения — правило в `docs/integram-app-workflow.md` 4.3.4 (`issue #5268`).
 
 ---
 
