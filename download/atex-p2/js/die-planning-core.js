@@ -34,12 +34,12 @@
 
     // Настройки: ключ в «Настройке» → [поле, значение по умолчанию, допустимо ли 0].
     var SETTING_KEYS = {
-        // Смена вала: обычный станок — 45 мин, станок с туррелью — 90 (переналадка туррели).
-        cylinderChange: ['DIE_CYLINDER_CHANGE_MN', 45, true],
-        turretCylinderChange: ['DIE_TURRET_CYLINDER_CHANGE_MN', 90, true],
-        knifeChange: ['DIE_KNIFE_CHANGE_MN', 20, true],
+        // Смена вала (меняется вместе с ножом): обычный станок — 60 мин; станок с туррелью — 120 (запуск туррели, полная наладка).
+        cylinderChange: ['DIE_CYLINDER_CHANGE_MN', 60, true],
+        turretCylinderChange: ['DIE_TURRET_CYLINDER_CHANGE_MN', 120, true],
+        knifeChange: ['DIE_KNIFE_CHANGE_MN', 30, true],
         // Смена втулки: втулки надевают на 3 револьверных вала, пока идёт намотка.
-        sleeveChange: ['DIE_SLEEVE_CHANGE_MN', 15, true],
+        sleeveChange: ['DIE_SLEEVE_CHANGE_MN', 12, true],
         speed: ['DIE_SPEED_M_MIN', 44, false],
         shortRollSpeed: ['DIE_SPEED_SHORT_M_MIN', 28, false],
         shortRollM: ['DIE_SHORT_ROLL_M', 50, true],

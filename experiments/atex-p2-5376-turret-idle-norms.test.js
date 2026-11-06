@@ -16,7 +16,10 @@ function assert(cond, msg, extra) {
 
 var P = require('../download/atex-p2/js/die-planning-core.js').core;
 var MON = Date.UTC(2026, 10, 2, 5, 0) / 1000;   // пн 02.11.2026 08:00 по Москве
-var S = P.readSettings([], 'ateh1');
+// Нормы наладки со встречи (вал 45, туррель 90, втулка 15) — явно: сценарии ниже на них посчитаны;
+// умолчания норм наладки проверяет experiments/atex-p2-5425-changeover-norms.test.js.
+var S = P.readSettings([{ key: 'DIE_CYLINDER_CHANGE_MN', type: 'ATEH', value: '45' }, { key: 'DIE_TURRET_CYLINDER_CHANGE_MN', type: 'ATEH', value: '90' },
+    { key: 'DIE_KNIFE_CHANGE_MN', type: 'ATEH', value: '20' }, { key: 'DIE_SLEEVE_CHANGE_MN', type: 'ATEH', value: '15' }], 'ateh1');
 function J(id, o) {
     return Object.assign({ id: String(id), start: 0, status: 'Запланировано', pullsFact: 0, positionId: 'p' + id, machineId: '',
         dieId: 'k' + id, dieNo: 'N' + id, cylinderId: 'c' + id, cylinder: '96', materialId: 'm1', material: 'M', footage: 3000,
@@ -29,7 +32,7 @@ function on(p, mid) { return items(p, mid).map(function(i) { return i.jobId; });
 
 // ── 1. Нормы ──────────────────────────────────────────────────────────────
 assert(S.cylinderChange === 45 && S.turretCylinderChange === 90 && S.sleeveChange === 15 && S.turretIdle === 455,
-    'умолчания: вал 45 (обычный), 90 (туррель), втулка 15, простой туррели 455', JSON.stringify(S));
+    'нормы: вал 45 (обычный), 90 (туррель), втулка 15; простой туррели по умолчанию 455', JSON.stringify(S));
 assert(P.readSettings([{ key: 'DIE_TURRET_CYLINDER_CHANGE_MN', type: '', value: '100' }, { key: 'TURREL_IDLE_MN', type: '', value: '0' }], 'ateh1').turretCylinderChange === 100 &&
     P.readSettings([{ key: 'TURREL_IDLE_MN', type: '', value: '0' }], 'ateh1').turretIdle === 0, 'нормы туррели читаются из «Настройки», простой 0 допустим');
 var a = J(1), b = J(2);
@@ -43,7 +46,8 @@ var rec = P.recordedPlan([{ id: '7', machineId: 'M4', start: MON, setup: 90, dur
     { id: '8', machineId: 'M1', start: MON, setup: 45, duration: 30, status: 'Запланировано' }], [M1, T4], S, MON);
 assert(items(rec, 'M4')[0].setupKind === 'cylinder' && items(rec, 'M1')[0].setupKind === 'cylinder', 'записанный план: 90 на туррели и 45 на обычном — смена вала');
 // на ateh1 нож — 60 (дороже вала обычного станка): 60 мин читаются как смена ножа
-var S60 = P.readSettings([{ key: 'DIE_KNIFE_CHANGE_MN', type: 'ATEH', value: '60' }], 'ateh1');
+var S60 = P.readSettings([{ key: 'DIE_KNIFE_CHANGE_MN', type: 'ATEH', value: '60' }, { key: 'DIE_CYLINDER_CHANGE_MN', type: 'ATEH', value: '45' },
+    { key: 'DIE_SLEEVE_CHANGE_MN', type: 'ATEH', value: '15' }], 'ateh1');
 assert(P.kindOfSetup(60, S60, M1) === 'knife' && P.kindOfSetup(45, S60, M1) === 'cylinder' && P.kindOfSetup(15, S60, M1) === 'sleeve',
     'вид наладки по минутам — по норме, равной минутам', [P.kindOfSetup(60, S60, M1), P.kindOfSetup(45, S60, M1)].join());
 

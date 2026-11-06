@@ -19,7 +19,10 @@ function assert(cond, name, extra) {
 }
 
 var C = require('../download/atex-p2/js/die-planning-core.js').core;
-var S = C.readSettings([], 'ateh1');
+// Нормы наладки — явно (вал 45, туррель 90, нож 20, втулка 15): сценарии ниже на них посчитаны;
+// умолчания проверяет experiments/atex-p2-5425-changeover-norms.test.js.
+var S = C.readSettings([{ key: 'DIE_CYLINDER_CHANGE_MN', type: 'ATEH', value: '45' }, { key: 'DIE_TURRET_CYLINDER_CHANGE_MN', type: 'ATEH', value: '90' },
+    { key: 'DIE_KNIFE_CHANGE_MN', type: 'ATEH', value: '20' }, { key: 'DIE_SLEEVE_CHANGE_MN', type: 'ATEH', value: '15' }], 'ateh1');
 function ts(y, mo, d, h, mi) { return Date.UTC(y, mo - 1, d, h || 0, mi || 0) / 1000 - 180 * 60; }   // Москва
 var MON = ts(2026, 11, 2, 8, 0);
 function J(id, o) {
