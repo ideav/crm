@@ -5,7 +5,7 @@
 //   1. разбор листа выгрузки (сетка ячеек, первая строка с нужными заголовками — шапка):
 //      parseKnifeSheet (лист «Ножи», пробег — из колонки «Пробег» или из «Суммарного пробега ножа»
 //      листа «План»), parseOrderSheet («Выгруженные заказы этикетка»);
-//   2. сверка с базой по ключу — нож = «Номер ножа», позиция = «Заказ клиента» + артикул:
+//   2. сверка с базой по ключу — нож = «Номер ножа», позиция = «Заказ поставщику» + артикул:
 //      planKnives / planOrders → строки предпросмотра (новая / обновится / без изменений / дубль /
 //      ошибка) и список операций. Ни разбор, ни план ничего не пишут;
 //   3. запись после «Подтвердить»: runBatches шлёт операции пакетами _m_batch (до 1000 операций в
@@ -384,7 +384,7 @@
     // ── Лист заказов ─────────────────────────────────────────────────────────────────────
 
     var ORDER_COLS = {
-        partner: ['Партнер', 'Партнёр'], order: ['Заказ Клиента'], supplierOrder: ['Заказ поставщику'],
+        partner: ['Партнер', 'Партнёр'], order: ['Заказ поставщику'], clientOrder: ['Заказ Клиента'],
         article: ['Артикул'], nomenclature: ['Номенклатура'], comment: ['Заказ.Комментарий', 'Комментарий'],
         received: ['Заказ.Дата поступления', 'Дата поступления'], knifeType: ['Тип ножей'], box: ['Короб'],
         unit: ['Единица хранения'], qty: ['Заказано количество']
@@ -469,8 +469,10 @@
 
     function groupDigits(n) { return String(fmtNum(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ' '); }
 
-    // Лист заказов → { ok, error, items, duplicates, skipped }. Строки «Итого» и строки партнёра
-    // без заказа и артикула — в `skipped`; повтор пары «Заказ клиента» + артикул — в `duplicates`.
+    // Лист заказов → { ok, error, items, duplicates, skipped }. Номер записи «Заказ» (item.order) —
+    // «Заказ поставщику», внутренний заказ (#5419); «Заказ клиента» (item.clientOrder) — поле позиции.
+    // Строки «Итого» и строки партнёра без заказа и артикула — в `skipped`; повтор пары
+    // «Заказ поставщику» + артикул — в `duplicates`.
     function parseOrderSheet(grid) {
         var h = findHeader(grid, ORDER_COLS, ['order', 'article', 'nomenclature', 'qty']);
         if (!h.ok) return { ok: false, error: 'лист заказов: ' + h.error, items: [], duplicates: [], skipped: 0 };
@@ -478,7 +480,7 @@
         for (var r = h.row + 1; r < grid.length; r++) {
             var row = grid[r] || [];
             var get = function(k) { return cellText(cell(row, h.cols, k)); };
-            var order = get('order').replace(/\.0+$/, ''), article = get('article');
+            var order = get('order').replace(/\.0+$/, ''), clientOrder = get('clientOrder').replace(/\.0+$/, ''), article = get('article');
             if (/^итого/i.test(cellText(row[0])) || (order === '' && article === '')) { skipped++; continue; }
             var key = order + ' / ' + article;
             if (order !== '' && article !== '' && firstRow[key] != null) {
@@ -488,9 +490,9 @@
             firstRow[key] = r + 1;
             var errors = [], warnings = [];
             if (order === '') {
-                errors.push('нет «Заказ клиента»' + (get('supplierOrder') ? ' (заказ поставщику ' + get('supplierOrder') + ')' : '') +
+                errors.push('нет «Заказ поставщику»' + (clientOrder ? ' (заказ клиента ' + clientOrder + ')' : '') +
                     ' — позицию не к чему привязать, строка не импортируется');
-            }
+            } else if (clientOrder === '') warnings.push('нет «Заказ клиента» — поле позиции не заполняется');
             if (article === '') errors.push('нет артикула');
             var nom = get('nomenclature');
             var p = parseNomenclature(nom);
@@ -512,7 +514,7 @@
             if (!received && get('received')) warnings.push('дата поступления «' + get('received') + '» не разобрана');
             items.push({
                 row: r + 1, key: key, order: order, article: article, partner: get('partner'),
-                supplierOrder: get('supplierOrder'), nomenclature: nom, comment: get('comment'), received: received,
+                clientOrder: clientOrder, nomenclature: nom, comment: get('comment'), received: received,
                 knifeType: get('knifeType'), box: get('box'), unit: get('unit'), rolls: q ? q.rolls : null,
                 qtySource: q ? q.source : '', inLabels: !!(q && q.labels != null), materialCode: mat.code,
                 label: p, warnings: warnings, errors: errors
@@ -936,7 +938,7 @@
                 var put = function(k, v, label) { if (v == null || v === '' || !t.position.reqs[k]) return; pt[k] = v; plabels[k] = label != null ? label : v; };
                 put('productKind', kindId, lp ? lp.PRODUCT_KIND.LABEL : 'этикетка');
                 put('article', ensure('article', item.article), item.article);
-                put('clientOrder', item.order);
+                put('clientOrder', item.clientOrder);
                 put('labelWidth', fmtNum(lab.width));
                 put('labelLength', fmtNum(lab.length));
                 put('labelsPerRoll', fmtNum(lab.perRoll));
@@ -956,7 +958,7 @@
                     else row.warnings.push('единица «' + unit + '» — нет в справочнике «Ед.изм.»');
                 }
                 put('status', ctx.positionStatusNew);
-                put('note', ['Номенклатура 1С: ' + item.nomenclature, item.qtySource, item.supplierOrder ? 'заказ поставщику ' + item.supplierOrder : '',
+                put('note', ['Номенклатура 1С: ' + item.nomenclature, item.qtySource,
                     item.box ? 'короб ' + item.box : '', item.comment ? 'комментарий 1С: ' + item.comment.replace(/\s*\n\s*/g, ' / ') : ''].filter(Boolean).join('; '));
 
                 var rolls = fmtNum(item.rolls);
@@ -1004,7 +1006,7 @@
         });
         (parsed.duplicates || []).forEach(function(d) {
             rows.push({ row: d.row, key: d.key, order: d.key.split(' / ')[0], status: 'duplicate', summary: '', changes: [],
-                warnings: ['повтор пары «Заказ клиента» + артикул — первое вхождение в строке ' + d.firstRow + ', эта строка пропущена'], errors: [] });
+                warnings: ['повтор пары «Заказ поставщику» + артикул — первое вхождение в строке ' + d.firstRow + ', эта строка пропущена'], errors: [] });
             counts.duplicate++;
         });
         rows.sort(function(a, b) { return a.row - b.row; });

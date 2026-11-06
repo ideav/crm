@@ -2,7 +2,7 @@
 //
 //   1. предпросмотр: новые / обновлённые / пропущенные дубли / ошибки строк — счётчики сходятся с
 //      фикстурой; разбор и план ничего не пишут, запись — только вызовом runBatches («Подтвердить»);
-//   2. ключи сверки: заказ = «Заказ клиента» + артикул, нож = «Номер ножа»;
+//   2. ключи сверки: заказ = «Заказ поставщику» + артикул (#5419), нож = «Номер ножа»;
 //   3. повторный импорт того же файла: 0 новых, 0 обновлённых, пробег не удвоен (одна запись
 //      «начальный остаток» на нож);
 //   4. повторный импорт с изменённым пробегом перезаписывает «начальный остаток», движения
@@ -356,7 +356,7 @@ var flow = Promise.resolve().then(function() {
         'изменение в 1С → обновление с «было → стало»', r1 ? JSON.stringify(r1.changes) : '');
 });
 
-// ── 1, 2, 3. Заказы: ключ «Заказ клиента» + артикул ─────────────────────────────────────
+// ── 1, 2, 3. Заказы: ключ «Заказ поставщику» + артикул ──────────────────────────────────
 var ORDER_HEAD = ['Партнер', 'Заказ Клиента', 'Заказ поставщику', 'Артикул', 'Номенклатура', 'Заказ.Комментарий',
     'Заказ.Дата поступления', 'Тип ножей', 'Короб', 'Единица хранения', 'Заказано количество'];
 var CLIENT = 'ООО ТЕСТОВЫЙ КЛИЕНТ';
@@ -382,8 +382,8 @@ flow = flow.then(function() {
     assert(parsed.ok, 'лист заказов разобран', parsed.error || '');
     var plan = LI.planOrders(parsed, orderCtx(odb), {});
     var c = plan.counts;
-    assert(c.ordersNew === 2 && c.new === 3 && c.update === 0 && c.same === 0 && c.duplicate === 1 && c.error === 2,
-        'заказы: 2 новых заказа, 3 новые позиции, 1 дубль, 2 ошибки', JSON.stringify(c));
+    assert(c.ordersNew === 3 && c.new === 3 && c.update === 0 && c.same === 0 && c.duplicate === 1 && c.error === 2,
+        'заказы: 3 новых заказа (по заказу поставщику), 3 новые позиции, 1 дубль, 2 ошибки', JSON.stringify(c));
     var errs = plan.rows.filter(function(r) { return r.status === 'error'; }).map(function(r) { return r.errors.join(' '); }).join(' | ');
     assert(/количеств/i.test(errs) && /номенклатур/i.test(errs), 'ошибки называют причину: количество и номенклатура', errs);
     var posNew = plan.ops.filter(function(o) { return o.op === 'new' && o.table === res.tables.position.id; });
@@ -394,9 +394,9 @@ flow = flow.then(function() {
     assert(a02 && a02.fields['t' + res.tables.position.reqs.core] === core40, 'втулка «вт 40» → запись справочника «Диаметр втулки» 40 мм');
     return LI.runBatches(plan.ops, send(odb), {}).then(function(r) {
         assert(r.ok, 'заказы записаны', JSON.stringify(r.failed).slice(0, 300));
-        assert(odb.records('Заказ').length === 2 && odb.records('Заказанное количество').length === 3 &&
+        assert(odb.records('Заказ').length === 3 && odb.records('Заказанное количество').length === 3 &&
             odb.records('Клиент').length === 1 && odb.records('Артикул').length === 3,
-            'в базе 2 заказа, 3 позиции, клиент и 3 артикула');
+            'в базе 3 заказа, 3 позиции, клиент и 3 артикула');
         var pos = odb.records('Заказанное количество');
         assert(pos.every(function(p) { return odb.find(p.id).up !== '1'; }), 'позиции подчинены заказам');
         var again = LI.planOrders(LI.parseOrderSheet(orderRows(294)), orderCtx(odb), {});
