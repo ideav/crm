@@ -111,6 +111,15 @@
                 });
             }
 
+            // crm#5437: Ctrl+V скриншота в панели чата — сразу во вложения, без сохранения
+            // файла и скрепки. Слушаем панель: вставка всплывает из поля ввода и кнопок.
+            this.panel.addEventListener('paste', function (e) {
+                var images = self.clipboardImages(e.clipboardData);
+                if (!images.length) return;
+                e.preventDefault();
+                self.addFiles(images);
+            });
+
             // Issue #3410: подхватываем незавершённую/последнюю задачу с сервера —
             // результат не теряется при перезагрузке или заходе с другого браузера.
             this.resume();
@@ -620,6 +629,41 @@
             this.renderAttachments();
         },
 
+        // crm#5437: картинки из буфера обмена. Если в буфере есть текст — это обычная
+        // вставка текста (копия ячеек Excel/таблицы несёт и text/plain, и картинку-снимок),
+        // ничего не прикрепляем. Имя у картинки из буфера — «image.png» у каждой, поэтому
+        // даём своё: «вставка-ГГГГММДД-ЧЧММСС[-N].расширение».
+        pastedSeq: 0,
+        clipboardImages: function (data) {
+            if (!data || !data.items) return [];
+            var types = data.types ? Array.prototype.slice.call(data.types) : [];
+            if (types.indexOf('text/plain') !== -1) return [];
+            var out = [];
+            for (var i = 0; i < data.items.length; i++) {
+                var item = data.items[i];
+                if (!item || item.kind !== 'file' || !/^image\//.test(item.type || '')) continue;
+                var file = item.getAsFile && item.getAsFile();
+                if (file) out.push(this.namePastedImage(file, item.type));
+            }
+            return out;
+        },
+
+        namePastedImage: function (file, type) {
+            var ext = (String(type).split('/')[1] || 'png').replace(/\+.*$/, '').replace(/^jpeg$/, 'jpg');
+            var d = new Date();
+            var pad = function (n) { return (n < 10 ? '0' : '') + n; };
+            var stamp = d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '-' +
+                pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds());
+            this.pastedSeq += 1;
+            var name = 'вставка-' + stamp + (this.pastedSeq > 1 ? '-' + this.pastedSeq : '') + '.' + ext;
+            if (typeof File === 'function') {
+                try { return new File([file], name, { type: type }); } catch (e) { /* старый Edge — ниже */ }
+            }
+            try { file.name = name; } catch (e) { /* только чтение — FormData всё равно получит имя */ }
+            if (file.name !== name) file.pastedName = name;
+            return file;
+        },
+
         removeAttachment: function (index) {
             this.attachments.splice(index, 1);
             this.renderAttachments();
@@ -634,12 +678,12 @@
                 li.className = 'ai-agent-attachment';
 
                 var icon = document.createElement('i');
-                icon.className = 'pi pi-file';
+                icon.className = /^image\//.test(file.type || '') ? 'pi pi-image' : 'pi pi-file';
                 li.appendChild(icon);
 
                 var name = document.createElement('span');
                 name.className = 'ai-agent-attachment-name';
-                name.textContent = file.name;
+                name.textContent = file.pastedName || file.name;
                 li.appendChild(name);
 
                 var remove = document.createElement('button');
@@ -703,7 +747,7 @@
             form.append('conversation', this.conversationId);
             if (!fromAction) {
                 this.attachments.forEach(function (file) {
-                    form.append('files[]', file, file.name);
+                    form.append('files[]', file, file.pastedName || file.name);
                 });
                 if (this.input) this.input.value = '';
                 this.saveDraft();
