@@ -147,7 +147,7 @@ function warns(plan) { return [].concat.apply([], plan.rows.map(function(r) { re
     var base = orderCtx({});
     var R = ids['Заказанное количество'].reqs, O = ids['Заказ'].reqs;
     function existing(posReqs) {
-        var o = rec(700, '3257', (function() { var r = {}; r[O['Клиент']] = 'ПРОИЗВОДСТВО САМОКЛЕЯЩАЯСЯ ЭТИКЕТКА'; r['ref_' + O['Клиент']] = '0:20'; return r; })());
+        var o = rec(700, '5297', (function() { var r = {}; r[O['Клиент']] = 'ПРОИЗВОДСТВО САМОКЛЕЯЩАЯСЯ ЭТИКЕТКА'; r['ref_' + O['Клиент']] = '0:20'; return r; })());
         var p = rec(701, '294', posReqs, 700);
         return orderCtx({ orders: [o], positions: [p] });
     }
@@ -173,7 +173,7 @@ function warns(plan) { return [].concat.apply([], plan.rows.map(function(r) { re
     var O = ids['Заказ'].reqs;
     function withClient(clientId, label) {
         var r = {}; r[O['Клиент']] = label; r['ref_' + O['Клиент']] = '0:' + clientId;
-        return orderCtx({ orders: [rec(700, '3257', r)], positions: [] });
+        return orderCtx({ orders: [rec(700, '5297', r)], positions: [] });
     }
     var other = withClient(21, 'ДРУГОЙ КЛИЕНТ');
     var plan = planOf(other, sheet([line('3257', '00014677', NOM_PAPER)]));
@@ -181,7 +181,7 @@ function warns(plan) { return [].concat.apply([], plan.rows.map(function(r) { re
     assert(w.length === 1 && /ДРУГОЙ КЛИЕНТ/.test(w[0]) && /ПРОИЗВОДСТВО САМОКЛЕЯЩАЯСЯ ЭТИКЕТКА/.test(w[0]), 'номер заказа есть у другого клиента — предупреждение с обоими именами', w.join(' | '));
     var same = withClient(20, 'ПРОИЗВОДСТВО САМОКЛЕЯЩАЯСЯ ЭТИКЕТКА');
     assert(warns(planOf(same, sheet([line('3257', '00014677', NOM_PAPER)]))).every(function(x) { return !/уже есть в базе у клиента/.test(x); }), 'тот же клиент — предупреждения нет');
-    var noClient = orderCtx({ orders: [rec(700, '3257', {})], positions: [] });
+    var noClient = orderCtx({ orders: [rec(700, '5297', {})], positions: [] });
     assert(warns(planOf(noClient, sheet([line('3257', '00014677', NOM_PAPER)]))).every(function(x) { return !/уже есть в базе у клиента/.test(x); }), 'у заказа клиента не было — это заполнение, а не смена');
 })();
 
