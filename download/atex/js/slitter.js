@@ -1487,15 +1487,47 @@
     // cut_planning, что и заказы/ширины. У задания сырьё одно, поэтому в карте одно
     // имя на задание (первое непустое). Пустое (колонки нет / не заполнено) в карту
     // не попадает: подписи просто показывают обычное имя, как раньше.
+    // #5209: имя сырья берётся из Примечания позиции (position_note), если там оно указано:
+    // одно сырьё в разных заказах названо по-разному («MR377/MWR265» → в одних заказах MR377,
+    // в других MWR265), а alt_material отдаётся только позициям с «Кросс». Не разобралось —
+    // alt_material, как раньше.
     function rowsToCutAlts(rows) {
         var map = {};
         (rows || []).forEach(function(row) {
             var cutId = firstField(row, ['cut_id', 'id']);
-            var alt = firstField(row, ['alt_material']);
-            if (!cutId || !alt || map[cutId]) return;
-            map[cutId] = alt;
+            if (!cutId || map[cutId]) return;
+            var alt = materialFromNote(firstField(row, ['position_note']),
+                firstField(row, ['cut_material']), firstField(row, ['material_alt_name']))
+                || firstField(row, ['alt_material']);
+            if (alt) map[cutId] = alt;
         });
         return map;
+    }
+
+    // #5209: имя сырья в Примечании позиции. Формат Примечания:
+    // «6443 / MWR265 100 х 450 IN (…) (П) / 99мм х 9 / 10 резок (891мм)», у образца
+    // « / Образец MR377 (110*30) IN / …». Берётся участок после первой «/», и если он
+    // начинается с имени ЭТОГО сырья — целиком, частью имени через «/» или альт-именем, —
+    // за которым идёт пробел, скобка или конец, возвращается это имя (в написании
+    // справочника). Иначе — пусто: чужое имя из Примечания не подставляется.
+    function materialFromNote(note, material, altName) {
+        var text = String(note == null ? '' : note);
+        var slash = text.indexOf('/');
+        if (slash < 0) return '';
+        var part = text.slice(slash + 1).replace(/^\s+/, '').replace(/^Образец\s+/i, '');
+        var lower = part.toLowerCase();
+        var mat = String(material == null ? '' : material).trim();
+        var names = [mat, String(altName == null ? '' : altName).trim()]
+            .concat(mat.split('/').map(function(s) { return s.trim(); }))
+            .filter(function(n, i, all) { return n !== '' && all.indexOf(n) === i; })
+            .sort(function(a, b) { return b.length - a.length; });
+        for (var i = 0; i < names.length; i++) {
+            var n = names[i];
+            if (lower.indexOf(n.toLowerCase()) !== 0) continue;
+            var next = part.charAt(n.length);
+            if (next === '' || /[\s(]/.test(next)) return n;
+        }
+        return '';
     }
 
     // #5060: втулка задания — из того же отчёта cut_planning (колонки «Дюймы» и
@@ -1722,6 +1754,7 @@
         cutOrderLabel: cutOrderLabel,       // #4606
         rowsToCutWidths: rowsToCutWidths,   // #4958: ширина позиции из cut_planning
         rowsToCutAlts: rowsToCutAlts,       // #4996: альт-имя сырья из cut_planning
+        materialFromNote: materialFromNote, // #5209: имя сырья из Примечания позиции
         rowsToCutSleeves: rowsToCutSleeves, // #5060: втулка задания из cut_planning
         cutSpecLine: cutSpecLine,           // #4958: подпись позиции в карточке очереди
         isForeignWarehouse: isForeignWarehouse,
