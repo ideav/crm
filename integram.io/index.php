@@ -8257,17 +8257,24 @@ function Make_tree($text, $cur_block)
 # The template may be chosen by the request (?name=file), but only a plain file name is accepted
 				$req_file = isset($_GET[$res[2]]) && is_string($_GET[$res[2]]) && preg_match("/^[A-Za-z0-9_\-]+$/", $_GET[$res[2]])
 				            ? $_GET[$res[2]] : $res[2];
-			    if($res[2] == "a")
-			        $text = Get_file($GLOBALS["GLOBAL_VARS"]["action"].".html", FALSE);
-				else
-					$text = Get_file($req_file.".html", FALSE);
+				$name = ($res[2] == "a") ? $GLOBALS["GLOBAL_VARS"]["action"] : $req_file;
+# A template never includes itself: main.html and any file being parsed up the chain fall back
+# to info.html, and info.html already in the chain inserts nothing (GET /<db>/main recursed)
+				$chain = isset($GLOBALS["TPL_FILE_CHAIN"]) ? $GLOBALS["TPL_FILE_CHAIN"] : array();
+				$text = (strcasecmp($name, "main") && !in_array(strtolower($name), $chain, TRUE))
+				        ? Get_file($name.".html", FALSE) : "";
 				if(strlen($text) == 0)
-					$text = Get_file("info.html");   # Default content is in info.html
+				{
+					$name = "info";
+					$text = in_array("info", $chain, TRUE) ? "" : Get_file("info.html");   # Default content is in info.html
+				}
 				$file_block = "$cur_block." . (isset($_REQUEST[$res[2]]) && is_string($_REQUEST[$res[2]]) && preg_match("/^&?[A-Za-z0-9_\-]+$/", $_REQUEST[$res[2]])
 				                               ? $_REQUEST[$res[2]] : $res[2]);
 				$insertion_point = "{_block_.$file_block}";
 				$blocks[$file_block]["PARENT"] = $cur_block;
+				$GLOBALS["TPL_FILE_CHAIN"][] = strtolower($name);
 				Make_tree($text, $file_block);
+				array_pop($GLOBALS["TPL_FILE_CHAIN"]);
 				$blocks[$cur_block]["CONTENT"] .= $insertion_point.$res[3];
 #				die($_REQUEST[$res[2]].".html".$text.$cur_block);
 			}
