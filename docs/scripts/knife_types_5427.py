@@ -113,17 +113,20 @@ def close(a, b, eps):
 
 def load_catalog(path):
     """Наименование -> {'codes': [...], 'rows': [(угол, ручьи, м/э)], 'w', 'l'}."""
-    cat = {}
+    by = defaultdict(dict)  # наименование -> {(угол, ручьи, м/э): [коды]}
     for r in xlsx_rows(path)[1:]:
         r += [''] * (5 - len(r))
         name, code, ang, sg, lg = r[:5]
-        if not name:
-            continue
-        e = cat.setdefault(name, {'codes': [], 'rows': [], 'new': False})
-        e['w'], e['l'] = size_of(name)
-        if code:
-            e['codes'].append(code)
-        e['rows'].append((num(ang), num(sg), num(lg)))
+        if name:
+            by[name].setdefault((num(ang), num(sg), num(lg)), []).extend([code] if code else [])
+    cat = {}
+    for name, variants in by.items():
+        w, l = size_of(name)
+        for params, codes in variants.items():
+            # Одноимённые строки с одинаковыми параметрами — один тип (коды через запятую);
+            # с разными — отдельные типы, к имени добавляется код: «30 х 20 (70) [000000339]».
+            key = name if len(variants) == 1 else '%s [%s]' % (name, codes[0] if codes else fmt(params[2]))
+            cat[key] = {'codes': codes, 'rows': [params], 'w': w, 'l': l, 'new': False, 'base': name}
     return cat
 
 
@@ -147,6 +150,13 @@ def fits(e, key):
         a == ang and close(s, sg, 0.01) and close(g, lg, 0.03) for a, s, g in e['rows'])
 
 
+def param_dist(row, key):
+    """Насколько строка каталога (угол, ручьи, м/э) далека от ножа: угол важнее всего."""
+    ang, sg, lg = row
+    d = lambda a, b: abs(a - b) if a is not None and b is not None else 50
+    return 100 * (ang != key[2]) + d(sg, key[3]) + d(lg, key[4])
+
+
 def profile(knives):
     """Самое частое (ручьёв, вал) у ножей типа — для выбора из нескольких подходящих."""
     c = Counter((k['Ручьёв'], k['Вал']) for k in knives)
@@ -157,9 +167,12 @@ def assign(knives, cat, listed):
     """Каждому ножу — имя типа и источник: list | params | params? | new."""
     by_list = defaultdict(list)
     for k in knives:
-        names = [n for n in listed.get(k['num'], []) if n in cat]
-        if len(set(names)) > 1:  # одна строка на номер — противоречие: решают параметры
-            names = [n for n in names if fits(cat[n], knife_key(k))] or names[:1]
+        listed_names = set(listed.get(k['num'], []))
+        names = sorted(n for n, e in cat.items() if e.get('base') in listed_names)
+        if len(names) > 1:  # две строки на номер или разделённый тип: решают параметры
+            key = knife_key(k)
+            names = [n for n in names if fits(cat[n], key)] or names
+            names.sort(key=lambda n: param_dist(cat[n]['rows'][0], key))
         if names:
             k['type'], k['src'] = names[0], 'list'
             by_list[names[0]].append(k)
@@ -229,6 +242,9 @@ def same(a, b):
     return a == b or (na is not None and nb is not None and abs(na - nb) < 1e-9)
 
 
+REF_TEXT = {}  # id записи-цели ссылки -> её текст (для отчёта)
+
+
 def read_rows(tid, meta_t):
     """Записи таблицы: [{'id', 'num', <имя реквизита>: значение}] (ссылка — 'id:текст' -> id)."""
     names = {int(r['num']): r['val'] for r in meta_t.get('reqs', [])}
@@ -238,7 +254,10 @@ def read_rows(tid, meta_t):
         for i, v in enumerate(o['r'][1:], 1):
             if i in names:
                 s = str(v) if v is not None else ''
-                rec[names[i]] = s.split(':')[0] if re.match(r'^\d+:', s) else s
+                if re.match(r'^\d+:', s):
+                    ref_id, REF_TEXT[ref_id] = s.split(':', 1)[0], s.split(':', 1)[1]
+                    s = ref_id
+                rec[names[i]] = s
         out.append(rec)
     return out
 
@@ -373,7 +392,7 @@ def write_report(cat, knives, of_type):
             per[f] += 1
         if d:
             rows.append('| %s | %s | %s |' % (k['num'], k['type'], '; '.join(
-                '%s: %s ≠ %s' % (f, k[f], vals[k['type']][f]) for f in d)))
+                '%s: %s ≠ %s' % (f, REF_TEXT.get(k[f], k[f]), REF_TEXT.get(vals[k['type']][f], vals[k['type']][f])) for f in d)))
     out += ['| Поле | Ножей |', '|---|---|'] + ['| %s | %d |' % (f, n) for f, n in per.most_common()]
     out += ['', '| Нож | Тип | Нож ≠ тип |', '|---|---|---|'] + rows
     with open(REPORT, 'w', encoding='utf-8') as f:

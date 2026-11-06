@@ -23,8 +23,35 @@ def knife(n, w, l, ang, sg, lg, streams='3', cyl='1'):
     return k
 def entry(name, *rows, codes=()):
     w, l = size_of(name)
-    return {'codes': list(codes), 'rows': list(rows), 'w': w, 'l': l, 'new': False}
+    return {'codes': list(codes), 'rows': list(rows), 'w': w, 'l': l, 'new': False, 'base': name}
 `;
+
+// Минимальный xlsx: sheet1.xml со строками inlineStr.
+const XLSX = `
+import zipfile, tempfile, os
+def xlsx(rows):
+    cell = lambda c, v: '<c r="%s1" t="inlineStr"><is><t>%s</t></is></c>' % (c, v)
+    body = ''.join('<row>%s</row>' % ''.join(cell(chr(65 + i), v) for i, v in enumerate(r)) for r in rows)
+    p = os.path.join(tempfile.mkdtemp(), 't.xlsx')
+    with zipfile.ZipFile(p, 'w') as z:
+        z.writestr('xl/worksheets/sheet1.xml', '<worksheet xmlns="http://schemas.openxmlformats.org/'
+                   'spreadsheetml/2006/main"><sheetData>%s</sheetData></worksheet>' % body)
+    return p
+`;
+
+test('одноимённые строки каталога: одинаковые параметры сливаются, разные — отдельные типы с кодом', { skip: !PY }, () => {
+    const o = run(XLSX + KNIFE + `
+cat = load_catalog(xlsx([['Наименование', 'Код', 'Угол', 'Ручьи', 'М/э'],
+    ['40 х 30 (80)', '071', '80', '3', '2.52'], ['40 х 30 (80)', '248', '80', '3', '2.52'],
+    ['30 х 20 (70)', '186', '70', '3', '3.28'], ['30 х 20 (70)', '339', '70', '3', '3.44']]))
+ks = [knife('1', '30.00', '20.00', '70°', '3.00', '3.44'), knife('2', '30.00', '20.00', '70°', '3.00', '3.28')]
+assign(ks, cat, {'1': ['30 х 20 (70)'], '2': ['30 х 20 (70)']})
+out = {'types': {n: e['codes'] for n, e in cat.items()}, 'knives': [k['type'] for k in ks]}
+`);
+    assert.deepStrictEqual(o.types, { '40 х 30 (80)': ['071', '248'],
+        '30 х 20 (70) [186]': ['186'], '30 х 20 (70) [339]': ['339'] });
+    assert.deepStrictEqual(o.knives, ['30 х 20 (70) [339]', '30 х 20 (70) [186]']);
+});
 
 test('размер типа читается из наименования, в том числе круглые D и латинская x', { skip: !PY }, () => {
     const o = run(`out = [size_of(n) for n in ['100 х 150 (70/4/2,4)', 'D 20 (80)', '73 x 67,8', 'Нож']]`);
