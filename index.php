@@ -171,6 +171,14 @@ define("LOG_READ_LIMIT", 10000);  # чтение журнала (#5103): стр�
 define("LOG_READ_BLOCK", 65536);  # файл читается с конца блоками этого размера
 define("LOG_READ_SCAN_MB", 256);  # больше за один запрос не просматривается — продолжение по курсору
 define("LOG_READ_SKEW_S", 300);  # запас since на строки, записанные не по порядку ts
+# ИИ-агент: задачи (AI_AGENT_JOBS_*) и история диалогов (AI_AGENT_CHAT*). Объявлены здесь, а не
+# рядом с функциями: маршрут callback агента стоит выше их объявлений и завершает запрос сразу —
+# функции в PHP видны во всём файле, а define() ниже маршрута ещё не выполнен (crm#5435).
+if(!defined("AI_AGENT_JOBS_MAX")) define("AI_AGENT_JOBS_MAX", 20);
+if(!defined("AI_AGENT_JOBS_TTL")) define("AI_AGENT_JOBS_TTL", 24 * 3600);
+if(!defined("AI_AGENT_CHATS_MAX")) define("AI_AGENT_CHATS_MAX", 50);
+if(!defined("AI_AGENT_CHAT_TURNS_MAX")) define("AI_AGENT_CHAT_TURNS_MAX", 100);
+if(!defined("AI_AGENT_CHAT_TITLE_LEN")) define("AI_AGENT_CHAT_TITLE_LEN", 60);
 # The kind of a row queued by Insert_batch() - see its comment. Defined up here because the top-level
 # code calling it runs before the line the function is declared on: functions hoist, define() does not.
 define("BATCH_ASIS", -1);
@@ -12605,8 +12613,7 @@ function callIntegramAgent($db, $message, $attachments, $payment, $jobId="", $ca
 # видит только свои задачи (aiAgentStatusRequest, issue #839).
 # Пер-база храним последние AI_AGENT_JOBS_MAX задач не старше AI_AGENT_JOBS_TTL.
 # ============================================================
-if(!defined("AI_AGENT_JOBS_MAX")) define("AI_AGENT_JOBS_MAX", 20);
-if(!defined("AI_AGENT_JOBS_TTL")) define("AI_AGENT_JOBS_TTL", 24 * 3600);
+# Константы AI_AGENT_JOBS_MAX, AI_AGENT_JOBS_TTL — в начале файла (до маршрута callback).
 
 function aiAgentJobsFile($db){
     # "trg:<база>" — задачи кнопок и триггеров (python2node#866), отдельный файл: не вытесняют задачи чата
@@ -12821,9 +12828,8 @@ function aiAgentJobLatest($db, $user=null, $conversation=""){
 # (logs/.htaccess), а время жизни истории не зависит от временного каталога и TTL задач.
 # Держим AI_AGENT_CHATS_MAX последних диалогов и AI_AGENT_CHAT_TURNS_MAX ходов в каждом.
 # ============================================================
-if(!defined("AI_AGENT_CHATS_MAX")) define("AI_AGENT_CHATS_MAX", 50);
-if(!defined("AI_AGENT_CHAT_TURNS_MAX")) define("AI_AGENT_CHAT_TURNS_MAX", 100);
-if(!defined("AI_AGENT_CHAT_TITLE_LEN")) define("AI_AGENT_CHAT_TITLE_LEN", 60);
+# Константы AI_AGENT_CHATS_MAX, AI_AGENT_CHAT_TURNS_MAX, AI_AGENT_CHAT_TITLE_LEN — в начале
+# файла (до маршрута callback).
 
 function aiAgentChatIdValid($id){
     return is_string($id) && preg_match('/^[a-f0-9]{8,64}$/', $id) === 1;
