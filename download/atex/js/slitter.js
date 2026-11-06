@@ -1504,6 +1504,20 @@
         return map;
     }
 
+    // #5209 (комментарий к PR #5434): шапка задания — текст Примечания позиции целиком
+    // («6444 / MWR265 100 х 450 IN (…) (П) / 99мм х 9 / 20 резок (891мм)»). Колонка position_note
+    // того же cut_planning; на задание — первое непустое. Пустых в карте нет: шапка как раньше.
+    function rowsToCutNotes(rows) {
+        var map = {};
+        (rows || []).forEach(function(row) {
+            var cutId = firstField(row, ['cut_id', 'id']);
+            if (!cutId || map[cutId]) return;
+            var note = String(firstField(row, ['position_note']) || '').trim();
+            if (note) map[cutId] = note;
+        });
+        return map;
+    }
+
     // #5209: имя сырья в Примечании позиции. Формат Примечания:
     // «6443 / MWR265 100 х 450 IN (…) (П) / 99мм х 9 / 10 резок (891мм)», у образца
     // « / Образец MR377 (110*30) IN / …». Берётся участок после первой «/», и если он
@@ -1754,6 +1768,7 @@
         cutOrderLabel: cutOrderLabel,       // #4606
         rowsToCutWidths: rowsToCutWidths,   // #4958: ширина позиции из cut_planning
         rowsToCutAlts: rowsToCutAlts,       // #4996: альт-имя сырья из cut_planning
+        rowsToCutNotes: rowsToCutNotes,     // #5209: Примечание позиции — шапка задания
         materialFromNote: materialFromNote, // #5209: имя сырья из Примечания позиции
         rowsToCutSleeves: rowsToCutSleeves, // #5060: втулка задания из cut_planning
         cutSpecLine: cutSpecLine,           // #4958: подпись позиции в карточке очереди
@@ -2286,7 +2301,7 @@
     AtexSlitter.prototype.loadCutOrders = function() {
         var self = this;
         var sid = this.selectedSlitterId;
-        if (!sid) { this.cutOrders = {}; this.cutWidths = {}; this.cutAlts = {}; this.cutSleeves = {}; this.cutOrdersSlitterId = null; return Promise.resolve(); }
+        if (!sid) { this.cutOrders = {}; this.cutWidths = {}; this.cutAlts = {}; this.cutNotes = {}; this.cutSleeves = {}; this.cutOrdersSlitterId = null; return Promise.resolve(); }
         if (this.cutOrdersSlitterId === String(sid)) return Promise.resolve();
         return this.getJson('report/cut_planning?JSON_KV&FR_cut_slitter_id=' + encodeURIComponent(sid) + '&LIMIT=0,5000')
             .then(function(rows) {
@@ -2294,10 +2309,11 @@
                 self.cutOrders = core.rowsToCutOrders(list);
                 self.cutWidths = core.rowsToCutWidths(list);   // #4958
                 self.cutAlts = core.rowsToCutAlts(list);       // #4996
+                self.cutNotes = core.rowsToCutNotes(list);     // #5209: шапка — Примечание
                 self.cutSleeves = core.rowsToCutSleeves(list); // #5060
                 self.cutOrdersSlitterId = String(sid);
             })
-            .catch(function() { self.cutOrders = {}; self.cutWidths = {}; self.cutAlts = {}; self.cutSleeves = {}; self.cutOrdersSlitterId = null; });
+            .catch(function() { self.cutOrders = {}; self.cutWidths = {}; self.cutAlts = {}; self.cutNotes = {}; self.cutSleeves = {}; self.cutOrdersSlitterId = null; });
     };
 
     // #4606: подпись заказа для задания («3738» / «3738, 3742 +1»); пусто — если
@@ -3303,7 +3319,10 @@
             cut.winding || '—',
             cut.leader || '—'
         ];
-        var lines = [el('div', { class: 'atex-sl-spec-line', text: parts.join(' / ') })];
+        // #5209: есть Примечание позиции — в шапке оно, как написано в заказе (владелец: «должно
+        // быть: 6444 / MWR265 100 х 450 IN (без трейлера в начале намотки) (П) / 99мм х 9 / …»).
+        var note = (this.cutNotes || {})[String(cut.id)];
+        var lines = [el('div', { class: 'atex-sl-spec-line', text: note || parts.join(' / ') })];
         var sleeve = (this.cutSleeves || {})[String(cut.id)];
         if (sleeve) lines.push(el('div', { class: 'atex-sl-spec-line atex-sl-spec-sleeve', text: sleeve }));
         return el('div', { class: 'atex-sl-spec' }, lines);
