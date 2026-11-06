@@ -13,6 +13,8 @@
 //   вход  P → Q → M🔒 «в конец дня»  →  план  M → Q → P       (оказалось в НАЧАЛЕ)
 //
 // Run with: node experiments/atex-pp-4464-fixed-block.test.js
+//
+// rules: FIXED_BLOCK, R-12.2-move-position
 
 process.env.TZ = 'UTC';
 global.window = { db: 'ateh1', xsrf: 'x' };

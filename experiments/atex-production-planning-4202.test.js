@@ -11,6 +11,8 @@
 // «после фольги» дороже на FOIL_NOTEND → X встаёт ПЕРЕД фольгой, фольга остаётся последней.
 //
 // Run with: node experiments/atex-production-planning-4202.test.js
+//
+// rules: R-12.1-foil-symmetric
 
 var mod = require('../download/atex/js/production-planning.js');
 var P = mod.planning;

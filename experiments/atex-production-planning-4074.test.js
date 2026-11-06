@@ -9,6 +9,8 @@
 // дня» в buildSequenceOps). Остальное раскладывается по срокам вокруг него.
 //
 // Run with: node experiments/atex-production-planning-4074.test.js
+//
+// rules: R-12.2-move-keeps-due, R-12.2-move-pins-day
 
 var mod = require('../download/atex/js/production-planning.js');
 var planning = mod.planning;

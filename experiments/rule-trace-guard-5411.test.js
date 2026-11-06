@@ -111,3 +111,11 @@ test('снятая строка rules: у старого теста — крас
   const r = guardExit({ 'experiments/atex-pp-2-old.test.js': '// старый тест\n' });
   assert.strictEqual(r.code, 1, r.out);
 });
+
+test('базис поднят правкой файла — красный без TRACE-OK, с ним зелёный', () => {
+  const tz = BASE_FILES['docs/atex_planning_tz.md'] + '\n## 8.2 Штраф {#R-8.2-penalty-sum}\n';
+  const ch = { 'docs/atex_planning_tz.md': tz, ...BL(3, 1) };
+  assert.strictEqual(guardExit(ch).code, 1);
+  const r = guardExit(ch, { env: { TRACE_DECLARATION: 'TRACE-OK: правило заведено, теста пока нет' } });
+  assert.strictEqual(r.code, 0, r.out);
+});

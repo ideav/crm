@@ -14,6 +14,8 @@
 //        КАЛЕНДАРНЫЙ день floor(windowStartMin/1440) (= день planStart).
 //
 // Run with: node experiments/atex-production-planning-4200.test.js
+//
+// rules: R-12-late-pulled-earlier, R-12.2-move-keeps-due
 
 var mod = require('../download/atex/js/production-planning.js');
 var P = mod.planning;

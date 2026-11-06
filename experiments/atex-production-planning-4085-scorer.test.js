@@ -5,6 +5,8 @@
 // «Настройки», и хелпер dayKeyFromOffset (индекс дня → YYYYMMDD для placementDayKey).
 //
 // Run with: node experiments/atex-production-planning-4085-scorer.test.js
+//
+// rules: R-12.1-foil-penalty
 
 var planning = require('../download/atex/js/production-planning.js').planning;
 var tc = planning.transitionCost, ic = planning.insertionCost, dkfo = planning.dayKeyFromOffset;
