@@ -64,6 +64,9 @@ class CabinetController {
         // Setup logout button
         this.setupLogout();
 
+        // #5420: тарифы, оплата месяца и лимит — из отчётов, которые выполняет шаблонизатор
+        await this.loadCabData();
+
         // Load user data
         await this.loadUserData();
 
@@ -77,10 +80,10 @@ class CabinetController {
             });
         }
 
-        // Show section from URL hash, or default to 'databases'
+        // Show section from URL hash, or default to 'overview'
         const { section, subTab, extra } = this.parseUrlHash();
-        const validSections = ['databases', 'community', 'profile', 'tariff', 'balance', 'bonuses', 'referrals'];
-        const targetSection = (section && validSections.includes(section)) ? section : 'databases';
+        const validSections = ['overview', 'databases', 'community', 'profile', 'tariff', 'balance', 'bonuses', 'referrals'];
+        const targetSection = (section && validSections.includes(section)) ? section : 'overview';
         this.showSection(targetSection);
         if (subTab) this.showSubTab(targetSection, subTab);
         // Handle deep-link: #community/requests/request/{dbName}
@@ -146,6 +149,38 @@ class CabinetController {
             rememberWantedDb('');
             offer.style.display = 'none';
         };
+    }
+
+    // #5420: отчёты plans/paidThisMonth/noAdmin закрыты для клиента маской — их выполняет
+    // шаблонизатор (templates/my/cabdata.html), ЛК читает ответ /my/cabdata?JSON
+    async loadCabData() {
+        const data = window.MyMode
+            ? await window.MyMode.loadCabData('https://' + this.apiConfig.host + '/my')
+            : { plans: [], paidThisMonth: 0, limit: 0 };
+        this.cabData = data;
+        window.paidThisMonth = data.paidThisMonth;
+        this.fillPlanOptions(data.plans);
+        if (data.limit) {
+            ['usage-limit', 'balance-usage-limit'].forEach(elId => {
+                const el = document.getElementById(elId);
+                if (el) el.textContent = String(data.limit);
+            });
+        }
+        return data;
+    }
+
+    fillPlanOptions(plans) {
+        const planSelect = document.getElementById('plan-select');
+        if (!planSelect) return;
+        planSelect.textContent = '';
+        (plans || []).forEach(plan => {
+            const opt = document.createElement('option');
+            opt.value = plan.id;
+            opt.dataset.price = String(plan.price);
+            opt.dataset.limit = String(plan.limit);
+            opt.textContent = plan.name + ' — ' + plan.price + ' руб./мес.';
+            planSelect.appendChild(opt);
+        });
     }
 
     // report/292: поле DB равно '0', если имя свободно
