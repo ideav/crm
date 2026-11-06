@@ -58,6 +58,10 @@ def call(method, path, fields=None):
     try:
         return json.loads(body)
     except ValueError:
+        pass
+    try:  # ядро не экранирует «\» из данных: «… \13 ручьев» в каталоге
+        return json.loads(re.sub(r'\\(?![\\"/bfnrtu])', r'\\\\', body))
+    except ValueError:
         raise SystemExit(f'{method} {path}: не JSON: {body[:300]}')
 
 
