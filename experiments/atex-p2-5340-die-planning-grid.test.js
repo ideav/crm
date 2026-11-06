@@ -61,16 +61,17 @@ if (grid) {
 }
 
 // ── Туррель (автоподача втулок центрифугой) ─────────────────────────────
-// При планировании на станок с туррелью попадают только задания, у которых ширина втулки ≥ 2× диаметра.
+// При планировании на станок с туррелью попадают только задания, у которых ширина втулки ≥ диаметра
+// (реквизит станка «Втулка не уже диаметра», #5428).
 // Задание, которое диспетчер записал на такой станок сам, «Упорядочить» с него не снимает.
 // Подходящее задание планирование отдаёт туррели, если от этого оно не уходит в просрочку.
-var T4 = { id: 'M4', name: '4 высечка', cylinders: [], stopMaterials: [], turret: true };
-// Порог длины туррели (#5366) здесь выключен: правило втулки проверяется само по себе.
-var S0 = Object.assign({}, S, { turretLongM: 0 });
+// Порог серии у T4 не задан: правило втулки проверяется само по себе.
+var T4 = { id: 'M4', name: '4 высечка', cylinders: [], stopMaterials: [], turret: true, sleeveNotNarrower: true };
+var S0 = S;
 var W = function(id, o) { return J(id, Object.assign({ sleeve: 'Втулка картонная (40мм/3мм/1000мм)', sleeveWidth: 100 }, o || {})); };
-var N = function(id, o) { return J(id, Object.assign({ sleeve: 'Втулка картонная (76мм/5мм/1000мм)', sleeveWidth: 100 }, o || {})); };
-assert(typeof C.turretFits === 'function' && C.turretFits(W(1), S0) && !C.turretFits(N(1), S0) && C.turretFits(W(1, { sleeveWidth: 80 }), S0) && !C.turretFits(W(1, { sleeveWidth: 79 }), S0) &&
-    !C.turretFits(J(1, { sleeve: '', sleeveWidth: 300 }), S0), 'туррель берёт втулку шириной ≥ 2× диаметра; без диаметра — не берёт');
+var N = function(id, o) { return J(id, Object.assign({ sleeve: 'Втулка картонная (76мм/5мм/1000мм)', sleeveWidth: 70 }, o || {})); };
+assert(typeof C.turretFits === 'function' && C.turretFits(W(1), T4) && !C.turretFits(N(1), T4) && C.turretFits(W(1, { sleeveWidth: 40 }), T4) && !C.turretFits(W(1, { sleeveWidth: 39 }), T4) &&
+    !C.turretFits(J(1, { sleeve: '', sleeveWidth: 300 }), T4), 'туррель берёт втулку шириной ≥ диаметра; без диаметра — не берёт');
 var tn = C.machineAllows(T4, N(1), S0);
 assert(!tn.ok && /туррел/i.test(tn.reason), 'узкая втулка на туррель при планировании не ставится, причина названа', tn.reason);
 assert(C.machineAllows(T4, N(1, { machineId: 'M4' }), S0).ok, 'задание, записанное на туррель диспетчером, туда допустимо');

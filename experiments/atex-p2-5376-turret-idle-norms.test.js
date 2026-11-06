@@ -25,7 +25,8 @@ function J(id, o) {
         dieId: 'k' + id, dieNo: 'N' + id, cylinderId: 'c' + id, cylinder: '96', materialId: 'm1', material: 'M', footage: 3000,
         duration: 0, setup: 0, due: 0, rolls: 1, sleeve: 'Втулка картонная (40мм/3мм/1000мм)', sleeveWidth: 100 }, o || {});
 }
-var T4 = { id: 'M4', name: '4 высечка', stopMaterials: [], turret: true };
+// Правила туррели — реквизиты станка (#5428): серия от 12 600 м, втулка не уже диаметра.
+var T4 = { id: 'M4', name: '4 высечка', stopMaterials: [], turret: true, minSeriesM: 12600, sleeveNotNarrower: true };
 var M1 = { id: 'M1', name: '1 высечка', stopMaterials: [] };
 function items(p, mid) { return (p.machines[mid] || { items: [] }).items; }
 function on(p, mid) { return items(p, mid).map(function(i) { return i.jobId; }); }

@@ -160,7 +160,10 @@
         var machineTable = meta.filter(function(x) { return String(x.id) === String(t.machine.id); })[0];
         var jobTable = meta.filter(function(x) { return String(x.id) === String(t.dieJob.id); })[0];
         var fixedReq = extra.sreq(jobTable, 'Зафиксировано');
-        var machines = C.machinesFromRecords(r[6], t, { turretReq: extra.sreq(machineTable, 'Туррель'), maxCylinderReq: extra.sreq(machineTable, 'Макс. вал') });
+        var machines = C.machinesFromRecords(r[6], t, { turretReq: extra.sreq(machineTable, 'Туррель'),
+            minCylinderReq: extra.sreq(machineTable, 'Мин. вал'), maxCylinderReq: extra.sreq(machineTable, 'Макс. вал'),
+            stopBasesReq: extra.sreq(machineTable, 'Стоп-лист основы'), minSeriesReq: extra.sreq(machineTable, 'Мин. метраж серии, м'),
+            maxRollReq: extra.sreq(machineTable, 'Макс. намотка ролика, м'), sleeveReq: extra.sreq(machineTable, 'Втулка не уже диаметра') });
         var diInfo = C.dieInfo(dies, brandRes, settings.dieResource);
         var rolls = mr.rolls.map(function(x) { return { id: x.id, no: x.no, format: x.format, materialId: x.materialId, rest: x.rest, status: x.status }; });
         var queue = jc && jc.openJobs ? JC.queueSupply(jc.openJobs, settings.mrLength) : [];
@@ -397,12 +400,14 @@
             '<p class="atex-dp-muted">Пробег пишет только пульт высечки движениями; здесь — прогноз.</p>';
     };
 
-    // Подсказка к станку: «Макс. вал», стоп-лист, туррель.
+    // Подсказка к станку: валы, стоп-листы, правила серии/ролика/втулки, туррель (#5428).
     AtexDiePlanningApp.prototype.machineHint = function(id) {
         var m = this.state.machines.filter(function(x) { return x.id === id; })[0];
         if (!m) return '';
-        return esc(m.maxCylinder > 0 ? ' · вал ≤ ' + m.maxCylinder : ' · любой вал') + (m.stopMaterials.length ? ' · стоп-лист: ' + m.stopMaterials.length : '') + (m.turret ? ' · туррель: втулка ≥ 2× диаметра' + (this.state.settings && this.state.settings.turretLongM > 0 ? ', метраж ≥ ' + this.state.settings.turretLongM + ' м' : '') +
-            (this.state.settings ? ', обычные — после простоя ' + this.state.settings.turretIdle + ' мин' : '') : '');
+        return esc(' · валы: ' + C.cylinderRangeText(m) + (m.stopMaterials.length ? ' · стоп-лист сырья: ' + m.stopMaterials.length : '') +
+            ((m.stopBases || []).length ? ' · стоп-лист основы: ' + m.stopBases.length : '') + (m.minSeriesM > 0 ? ' · серия ≥ ' + m.minSeriesM + ' м' : '') +
+            (m.maxRollM > 0 ? ' · ролик ≤ ' + m.maxRollM + ' м' : '') + (m.sleeveNotNarrower ? ' · втулка не уже диаметра' : '') +
+            (m.turret ? ' · туррель' + (this.state.settings ? ', обычные — после простоя ' + this.state.settings.turretIdle + ' мин' : '') : ''));
     };
 
     // «Зафиксировано» (#5376): 🔒 — «Упорядочить» оставляет задание на его станке и в его порядке.

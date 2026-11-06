@@ -36,7 +36,8 @@
 
     var RESOURCE_KEY = 'DIE_RESOURCE_DEFAULT_REV';
     var RUNS_REPORT = 'die_runs';
-    var MAX_CYLINDER = 'Макс. вал';   // реквизит станка высечки: наибольший вал, зубьев (#5344)
+    var MAX_CYLINDER = 'Макс. вал';   // реквизиты станка высечки: диапазон валов, зубьев (#5344, #5428)
+    var MIN_CYLINDER = 'Мин. вал';
 
     // ── Чистые функции (покрыты experiments/atex-p2-5314-dies.test.js) ──────────
 
@@ -151,15 +152,15 @@
     }
 
     // Валы: раппорт, станки, на которые вал встаёт, ножей на валу (всего / рабочих).
-    // Вал больше «Макс. вала» станка (maxReq — id реквизита, если он есть в базе) на станок не встаёт;
-    // «Макс. вал» пуст или 0 — станок принимает любой вал (#5366).
-    function cylinderRows(cylRecs, machineRecs, dieRows, t, maxReq) {
+    // Вал встаёт на станок, если его зубья в диапазоне «Мин. вал»–«Макс. вал» станка (границы включены;
+    // maxReq/minReq — id реквизитов, если они есть в базе; пусто или 0 — без границы, #5428).
+    function cylinderRows(cylRecs, machineRecs, dieRows, t, maxReq, minReq) {
         var cr = (t.cylinder && t.cylinder.reqs) || {};
         var S = lp.DIE_STATE;
         return (cylRecs || []).map(function(c) {
             var machines = (machineRecs || []).filter(function(m) {
-                var max = maxReq ? num(reqVal(m, maxReq)) : 0;
-                return !(max > 0 && num(c.val) > max);
+                var max = maxReq ? num(reqVal(m, maxReq)) : 0, min = minReq ? num(reqVal(m, minReq)) : 0;
+                return !(max > 0 && num(c.val) > max) && !(min > 0 && num(c.val) < min);
             }).map(function(m) { return m.val; });
             var dies = (dieRows || []).filter(function(d) { return d.cylinderId === c.id; });
             return {
@@ -293,6 +294,8 @@
             var machineMeta = (meta || []).filter(function(x) { return String(x.id) === String(res.tables.machine.id); })[0];
             var maxReq = ((machineMeta && machineMeta.reqs) || []).filter(function(x) { return String(x.val).trim() === MAX_CYLINDER; })[0];
             self.maxCylinderReq = maxReq ? String(maxReq.id) : '';
+            var minReq = ((machineMeta && machineMeta.reqs) || []).filter(function(x) { return String(x.val).trim() === MIN_CYLINDER; })[0];
+            self.minCylinderReq = minReq ? String(minReq.id) : '';
             self.settingsTable = (meta || []).filter(function(t) { return String(t.val).trim() === 'Настройка'; })[0] || null;
             self.mountGrids();
             return self.reload(false);
@@ -369,7 +372,7 @@
             self.defaultResource = res[6] || '';
             var mileage = lp.dieMileageIndex(self.runRows);
             self.dieRows = buildDieRows(dies, t, mileage, self.brands, self.defaultResource);
-            self.cylRows = cylinderRows(kvRecords(res[2]), kvRecords(res[3]), self.dieRows, t, self.maxCylinderReq);
+            self.cylRows = cylinderRows(kvRecords(res[2]), kvRecords(res[3]), self.dieRows, t, self.maxCylinderReq, self.minCylinderReq);
             self.renderKpi();
             self.renderWear();
             self.renderCylinders();

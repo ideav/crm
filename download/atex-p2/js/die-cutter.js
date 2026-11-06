@@ -404,11 +404,11 @@
         });
     }
 
-    // Валы для смены: не больше «Макс. вала» станка (пусто или 0 — любой), кроме текущего (#5366).
+    // Валы для смены: в диапазоне «Мин. вал»–«Макс. вал» станка (пусто или 0 — без границы), кроме текущего (#5428).
     function compatibleCylinders(job, cylinders, machine) {
-        var max = num(machine && machine.maxCylinder);
+        var max = num(machine && machine.maxCylinder), min = num(machine && machine.minCylinder);
         return (cylinders || []).filter(function(c) {
-            return c.id !== job.cylinderId && !(max > 0 && num(c.val) > max);
+            return c.id !== job.cylinderId && !(max > 0 && num(c.val) > max) && !(min > 0 && num(c.val) < min);
         });
     }
 
@@ -837,6 +837,8 @@
                 var machineMeta = (meta || []).filter(function(x) { return String(x.id) === String(t.machine.id); })[0];
                 var maxReq = ((machineMeta && machineMeta.reqs) || []).filter(function(x) { return String(x.val).trim() === 'Макс. вал'; })[0];
                 maxReq = maxReq ? String(maxReq.id) : '';
+                var minReq = ((machineMeta && machineMeta.reqs) || []).filter(function(x) { return String(x.val).trim() === 'Мин. вал'; })[0];
+                minReq = minReq ? String(minReq.id) : '';
                 var ic = its.tables.itsCall;
                 self.state = {
                     tables: t,
@@ -845,7 +847,7 @@
                     jobs: jobs,
                     rolls: rolls,
                     runs: runsFromReport(r[1]),
-                    machines: r[2].map(function(m) { return { id: m.id, val: m.val, maxCylinder: maxReq ? num(reqVal(m, maxReq)) : 0 }; }),
+                    machines: r[2].map(function(m) { return { id: m.id, val: m.val, maxCylinder: maxReq ? num(reqVal(m, maxReq)) : 0, minCylinder: minReq ? num(reqVal(m, minReq)) : 0 }; }),
                     dies: dies,
                     cylinders: cylinders,
                     gps: r[5].map(function(g) { return { id: g.id, val: g.val, jobId: refId(g, gr.job) }; }),
