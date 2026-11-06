@@ -268,7 +268,9 @@ def read_rows(tid, meta_t):
 
 def ddl(path, fields, xsrf, what):
     res = call('POST', path + '?JSON', dict(fields, _xsrf=xsrf))
-    got = res.get('obj') or res.get('id') if isinstance(res, dict) else None
+    # _d_new/_d_ref: новый термин — в obj; _d_req: реквизит — в id (obj там = таблица).
+    key = 'id' if path.startswith('_d_req') else 'obj'
+    got = res.get(key) if isinstance(res, dict) else None
     print(f'  {what} -> {json.dumps(res, ensure_ascii=False)[:200]}')
     if not got:
         raise SystemExit(f'{what}: нет id в ответе')
@@ -368,6 +370,13 @@ def main():
             res = call('POST', f'_m_set/{k["id"]}?JSON', {f't{ref}': want, '_xsrf': xsrf})
             if isinstance(res, dict) and res.get('error'):
                 raise SystemExit(f'нож {k["num"]}: {res}')
+    if not DRY:  # ядро может молча не записать — перечитываем
+        kmeta = call('GET', f'metadata/{kid}?JSON=1')
+        got = {r['id']: r.get(TYPE, '') for r in read_rows(kid, kmeta)}
+        bad = [k['num'] for k in knives if got.get(k['id']) != rec_id[k['type']]]
+        print(f'проверка: ссылка верна у {len(knives) - len(bad)} из {len(knives)} ножей')
+        if bad:
+            raise SystemExit('не записалось: ' + ', '.join(bad[:20]))
     for s, n in sorted(stat.items()):
         print(f'{s}: {n}')
     if REPORT:
