@@ -20,7 +20,7 @@ function near(a, b, name) { assert(Math.abs(a - b) < 1e-6, name + ' (' + a + ' �
 // Веса из ТЗ §14 (те же дефолты, что в коде).
 var SETTINGS = {
     KNIVES_CHANGE_COST_MN: 30, KNIVES_INCREASE_COST_MN: 50, MATERIAL_CHANGE_COST_MN: 15,
-    LEADER_COST_MN: 2, FOIL_NOTEND_COST_MN: 60, DEADLINE_COST_MN: 100, EXACT_DEADLINE_COST_MN: 33,
+    LEADER_COST_MN: 2, FOIL_NOTEND_COST_MN: 80, DEADLINE_COST_MN: 100, EXACT_DEADLINE_COST_MN: 33,
     MAX_DISTANCE_COST_MN: 25
 };
 
@@ -46,7 +46,7 @@ function cut(o) {
 console.log('\n== planWeight: настройка / дефолт ==');
 eq(planning.planWeight(SETTINGS, 'KNIVES_INCREASE_COST_MN'), 50, 'берёт значение из настроек');
 eq(planning.planWeight({}, 'DEADLINE_COST_MN'), 100, 'дефолт ТЗ при пустой настройке');
-eq(planning.planWeight({ FOIL_NOTEND_COST_MN: 'abc' }, 'FOIL_NOTEND_COST_MN'), 60, 'нечисловое → дефолт');
+eq(planning.planWeight({ FOIL_NOTEND_COST_MN: 'abc' }, 'FOIL_NOTEND_COST_MN'), 80, 'нечисловое → дефолт');
 
 // ---------------------------------------------------------------------------
 console.log('\n== stripPrefixQuality: пример из ТЗ ==');
@@ -80,9 +80,9 @@ eq(free.weight, 0, 'freeAfterCarry → вес 0 (продолжение прош
 console.log('\n== transitionCost: ситуативные факторы ==');
 var base = cut({ materialId: 'A', bands: { 100: 2 }, isFoil: true });
 var foil = planning.transitionCost(base, cut({ materialId: 'A', bands: { 100: 2 }, isFoil: true }), { settings: SETTINGS, foilNotEnd: true });
-eq(foil.byFactor.foilNotEnd, 60, 'фольга не в конце дня → FOIL_NOTEND 60');
+eq(foil.byFactor.foilNotEnd, 80, 'фольга не в конце дня → FOIL_NOTEND 80');
 var mv = planning.transitionCost(base, cut({ materialId: 'A', bands: { 100: 2 }, isFoil: true }), { settings: SETTINGS, isMove: true });
-eq(mv.byFactor.foilMove, 60, 'перемещение фольги → FOIL_NOTEND 60');
+eq(mv.byFactor.foilMove, 80, 'перемещение фольги → FOIL_NOTEND 80');
 // Срок (issue #4059): размещение ПОСЛЕ срока (день > срок) → штраф опоздания DEADLINE; в срок/заранее — без штрафа.
 var late = planning.transitionCost(base, cut({ dueKey: 20260703 }), { settings: SETTINGS, placementDayKey: 20260710 });
 eq(late.byFactor.deadline, 100, 'размещение ПОСЛЕ срока (день 10.07 > срок 03.07) → DEADLINE 100');
