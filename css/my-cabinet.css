@@ -333,6 +333,53 @@ button.mc-kpi:hover { border-color: var(--mc-accent); transform: translateY(-1px
 }
 .mc-content .data-table td { border-bottom: 1px solid var(--mc-border); padding: .6rem; }
 
+/* Панель модерации шаблонов баз (js/db-templates.js, #5364): разметка с классами бутстрапа
+   (table, btn), которого в ЛК нет, — оформляем здесь (#5447). Работает и в ЛК, и на info.html. */
+.tpl-moderation h3 { font-size: 1.1rem; font-weight: 700; margin: 0 0 .75rem; color: var(--mc-text); }
+.tpl-moderation > .database-field-input {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    border: 1px solid var(--mc-border);
+    border-radius: var(--mc-radius-sm);
+    background: var(--mc-surface);
+    color: var(--mc-text);
+    padding: .55rem .7rem;
+}
+.tpl-moderation .db-templates-status { margin: .5rem 0; font-size: .88rem; }
+.tpl-moderation .db-templates-status:empty { display: none; }
+.tpl-moderation > div { overflow-x: auto; }
+.tpl-moderation .db-templates-table { width: 100%; border-collapse: collapse; font-size: .9rem; margin: 0; }
+.tpl-moderation .db-templates-table th {
+    text-align: left;
+    color: var(--mc-muted);
+    font-weight: 600;
+    font-size: .8rem;
+    white-space: nowrap;
+    border-bottom: 1px solid var(--mc-border);
+    padding: .55rem .6rem;
+}
+.tpl-moderation .db-templates-table td {
+    text-align: left;
+    vertical-align: top;
+    border-bottom: 1px solid var(--mc-border);
+    padding: .6rem;
+    color: var(--mc-text);
+}
+.tpl-moderation .db-templates-table td:last-child { white-space: nowrap; text-align: right; }
+.tpl-moderation .db-templates-table .btn {
+    background: var(--mc-surface);
+    border: 1px solid var(--mc-border);
+    color: var(--mc-text);
+    border-radius: var(--mc-radius-sm);
+    padding: .3rem .7rem;
+    font-size: .85rem;
+    cursor: pointer;
+}
+.tpl-moderation .db-templates-table .btn + .btn { margin-left: .4rem; }
+.tpl-moderation .db-templates-table .btn:hover { border-color: var(--mc-accent); color: var(--mc-accent); }
+.tpl-moderation .db-templates-table .btn:disabled { opacity: .5; cursor: default; }
+
 /* Базы данных — сетка карточек */
 .mc-content .databases-list {
     display: grid;
