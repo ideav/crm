@@ -150,38 +150,9 @@ register_shutdown_function(function() {
 
 header("Cache-Control: no-store, no-cache, must-revalidate");
 header("Pragma: no-cache");
-# CORS (python2node#1142): заголовки Access-Control-* получает только API-запрос — предзапрос
-# OPTIONS, токен в заголовке X-Authorization/Authorization или параметр JSON* (как у isApi()).
-# Страницы, вход и кабинет отдаются без CORS. Список разрешённых origin — константа CORS_ORIGINS
-# в include/connection.php (через пробел или запятую): origin из списка отражается с Vary: Origin,
-# остальные остаются без CORS. Без константы API отвечает «*». Учётные данные (куки) кросс-доменно
-# не разрешаются ни в одном режиме: Access-Control-Allow-Credentials не отдаётся.
-function Cors_headers_list($server, $request, $allow){
-	$api = (isset($server["REQUEST_METHOD"]) && ($server["REQUEST_METHOD"] === "OPTIONS"))
-		|| !empty($server["HTTP_X_AUTHORIZATION"]) || !empty($server["HTTP_AUTHORIZATION"])
-		|| !empty($server["REDIRECT_HTTP_AUTHORIZATION"]);
-	if(!$api)
-		foreach(array_keys((array)$request) as $k)
-			if(strpos((string)$k, "JSON") === 0){
-				$api = true;
-				break;
-			}
-	if(!$api)
-		return array();
-	$h = array();
-	if($allow === null)
-		$h[] = "Access-Control-Allow-Origin: *";
-	else{
-		$origin = isset($server["HTTP_ORIGIN"]) ? (string)$server["HTTP_ORIGIN"] : "";
-		if(($origin === "") || !in_array($origin, (array)$allow, true))
-			return array();
-		$h[] = "Access-Control-Allow-Origin: ".$origin;
-		$h[] = "Vary: Origin";
-	}
-	$h[] = "Access-Control-Allow-Headers: X-Authorization, x-authorization,Content-Type,content-type,Origin,Authorization,authorization";
-	$h[] = "Access-Control-Allow-Methods: *";
-	return $h;
-}
+header('Access-Control-Allow-Headers: X-Authorization, x-authorization,Content-Type,content-type,Origin,Authorization,authorization');
+header('Access-Control-Allow-Methods: *');
+header('Access-Control-Allow-Origin: *');
 mb_internal_encoding("UTF-8");
 if(function_exists('mysqli_report'))
     mysqli_report(MYSQLI_REPORT_OFF);
@@ -311,10 +282,6 @@ if((isset($com[2]) ? $com[2] : "") === "ai"
 
 $locale = isset($_COOKIE[$z."_locale"]) ? $_COOKIE[$z."_locale"] : (isset($_COOKIE["my_locale"]) ? $_COOKIE["my_locale"] : "RU");
 include "include/connection.php";
-# CORS — после connection.php: там задаётся необязательный список CORS_ORIGINS (python2node#1142)
-foreach(Cors_headers_list($_SERVER, array_merge($_GET, $_POST)
-		, defined("CORS_ORIGINS") ? preg_split('/[\s,]+/', CORS_ORIGINS, -1, PREG_SPLIT_NO_EMPTY) : null) as $corsHeader)
-	header($corsHeader, $corsHeader !== "Vary: Origin");
 # Check the DB existence
 # #4539: проверочный запрос НЕ ставится под добивание (Sql_running/KILL QUERY). Он короткий по
 # построению — `LIMIT 1` по только что открытому соединению, — и добивать в нём нечего: серверный
