@@ -47,7 +47,7 @@ $GLOBALS["connection"] = null;
 
 $source = file_get_contents(__DIR__."/../index.php");
 $code = "namespace Test5261;\n";
-foreach(array("Report_tx_begin", "Report_tx_commit", "Report_tx_rollback", "my_die", "InBatchOp") as $fn){
+foreach(array("Boolean_Store_Val", "Report_tx_begin", "Report_tx_commit", "Report_tx_rollback", "my_die", "InBatchOp") as $fn){
     try{ $code .= extract_function_source($source, $fn)."\n"; }
     catch(\Exception $e){ fwrite(STDERR, "FAIL: ".$e->getMessage()." — в index.php нет функции\n"); exit(1); }
 }
