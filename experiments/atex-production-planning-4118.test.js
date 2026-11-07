@@ -14,7 +14,7 @@
 //
 // Run with: node experiments/atex-production-planning-4118.test.js
 //
-// rules: R-12-late-pulled-earlier
+// rules: MOVE-late-pulled-earlier
 
 process.env.TZ = 'UTC';
 var P = require('../download/atex/js/production-planning.js').planning;

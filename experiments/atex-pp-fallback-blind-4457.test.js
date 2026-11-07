@@ -16,7 +16,7 @@
 //
 // Run with: node experiments/atex-pp-fallback-blind-4457.test.js
 //
-// rules: R-12-chain-break-trigger
+// rules: MOVE-chain-break-trigger
 
 process.env.TZ = 'UTC';
 global.window = { db: 'testdb', xsrf: 'x' };

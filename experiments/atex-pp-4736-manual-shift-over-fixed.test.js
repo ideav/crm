@@ -26,7 +26,7 @@
 //
 // Run with: node experiments/atex-pp-4736-manual-shift-over-fixed.test.js
 //
-// rules: R-12.2-lock-over-due
+// rules: MOVE-manual-lock-over-due
 
 process.env.TZ = 'UTC';
 global.window = { db: 'ateh1', xsrf: 'x' };

@@ -16,7 +16,7 @@
 //
 // Run with: node experiments/atex-production-planning-4195.test.js
 //
-// rules: R-12.2-move-keeps-due
+// rules: MOVE-manual-keeps-due
 
 var mod = require('../download/atex/js/production-planning.js');
 var planning = mod.planning;

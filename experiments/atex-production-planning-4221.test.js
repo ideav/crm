@@ -11,7 +11,7 @@
 //
 // Run with: node experiments/atex-production-planning-4221.test.js
 //
-// rules: R-12.2-move-pins-day, R-12.2-move-position, R-12.2-move-single-slitter
+// rules: MOVE-manual-pins-day, MOVE-manual-position, MOVE-manual-single-slitter
 
 var P = require('../download/atex/js/production-planning.js').planning;
 

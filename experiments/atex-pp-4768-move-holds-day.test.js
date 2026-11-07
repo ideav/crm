@@ -34,7 +34,7 @@
 //
 // Run with: node experiments/atex-pp-4768-move-holds-day.test.js
 //
-// rules: R-12.2-move-pins-day
+// rules: MOVE-manual-pins-day
 
 process.env.TZ = 'Europe/Moscow';
 

@@ -15,7 +15,7 @@
 //
 // Run with: node experiments/atex-4424-rescue-fixed-overdue.test.js
 //
-// rules: R-12.2-lock-over-due
+// rules: MOVE-manual-lock-over-due
 
 process.env.TZ = 'Europe/Moscow';
 

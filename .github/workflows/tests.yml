@@ -58,7 +58,7 @@ jobs:
           TEXT_ASSERT_DECLARATION: ${{ github.event.pull_request.body }}
         run: bash scripts/check-text-assertions.sh "origin/${{ github.event.pull_request.base.ref }}"
 
-  # #5411: у правила ТЗ есть тест, у теста есть правило. Метки `{#R-…}` в atex_planning_tz.md и id
+  # #5411: у правила ТЗ есть тест, у теста есть правило. Метки `{#КОД-слово}` в atex_planning_tz.md и id
   # инвариантов §15 против строк `// rules:` в тестах; храповик по счётчикам
   # scripts/rule-trace-baseline.txt. Отступление объявляется строкой `TRACE-OK:` в теле PR.
   rule-trace:
