@@ -305,7 +305,19 @@ function formatIntegramDateCellPlain(value, format) {
     return `${dmy} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
+/**
+ * BOOLEAN (issue #5442): '1' (и 'X' интерфейса, true) — да; '-1', '0', 'false', пусто,
+ * null — нет / не задано. Ядро хранит «нет» как '-1', поэтому «непусто» ≠ «да».
+ */
+function integramBooleanIsTrue(value) {
+    if (value === null || value === undefined || value === false) return false;
+    if (value === true) return true;
+    const v = String(value).trim().toLowerCase();
+    return v !== '' && v !== '0' && v !== '-1' && v !== 'false';
+}
+
 if (typeof window !== 'undefined') {
+    window.integramBooleanIsTrue = integramBooleanIsTrue;
     window.parseIntegramDateValue = parseIntegramDateValue;
     window.formatIntegramDateCellPlain = formatIntegramDateCellPlain;
     window.stripIntegramDateRefPrefix = stripIntegramDateRefPrefix;

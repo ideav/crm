@@ -2589,6 +2589,10 @@ function Construct_WHERE($key, $filter, $cur_typ, $join_req=0)
 					}
 		}
 		$value = BuiltIn($value); # Check for a built-in phrases
+		# issue #5442: у BOOLEAN «не пусто» (%) = да ("1"); "-1" (нет) в «да» не попадает.
+		# true/X/0/false сводятся к хранимым "1" / "-1".
+		if(!isset($GLOBALS["REF_typs"][$key]) && isset($GLOBALS["REV_BT"][$key]) && ($GLOBALS["REV_BT"][$key] == "BOOLEAN"))
+			$value = Boolean_Filter_Val($value);
 		$sql_value = Escape_Filter_Val($value); # Экранированная копия для подстановки в SQL
 		if($value == "%")
 			$search_val = "IS ".($NOT_flag ? "" : "NOT")." NULL";
@@ -3435,6 +3439,41 @@ function Get_Align($typ){
 	}
 	return "LEFT";
 }
+# issue #5442: BOOLEAN различает три состояния — "1" (да), "-1" (нет, хранится явно),
+# строки нет (не задано). Запись: да — "1", "true", "X", любое иное непустое; нет — "-1", "0",
+# "false"; пусто (и пробел) — "" => строка реквизита удаляется.
+function Boolean_Store_Val($val){
+	if(is_bool($val))
+		return $val ? "1" : "-1";
+	$b = strtolower(trim((string)$val));
+	if($b === "")
+		return "";
+	if(($b === "-1") || ($b === "0") || ($b === "false"))
+		return "-1";
+	return "1";
+}
+# Хранимое значение BOOLEAN для показа: API — "1" / "-1"; интерфейс — "X" / "" (нет = пусто).
+function Boolean_View_Val($val, $api){
+	$b = Boolean_Store_Val($val);
+	if($api)
+		return $b;
+	return $b === "1" ? "X" : "";
+}
+# Значение фильтра по BOOLEAN: «не пусто» (%) = да; да / нет любой записью — хранимые "1" / "-1".
+# Прочее (IN(...), [подстановки], диапазоны) — как есть.
+function Boolean_Filter_Val($value){
+	$b = strtolower(trim((string)$value));
+	if($b === "%")
+		return "1";
+	if(in_array($b, array("1", "true", "x", "-1", "0", "false"), TRUE))
+		return Boolean_Store_Val($b);
+	return $value;
+}
+# Значение BOOLEAN для JSON: "1" / "-1"; пусто (строки нет) — null.
+function Boolean_Api_Val($val){
+	$b = Boolean_Store_Val($val);
+	return $b === "" ? NULL : $b;
+}
 function Format_Val($typ, $val){
 	global $z;
 	if($val != "NULL"){
@@ -3468,11 +3507,8 @@ function Format_Val($typ, $val){
     				if($v != 0)
     					$val = $v;
     				break;
-    			case "BOOLEAN":
-    			    if(($val === "") || ($val === "0") || (strtolower($val) === "false") || ($val === "-1") || ($val === " "))
-    					$val = "";
-    				else
-    					$val = "1";
+    			case "BOOLEAN":	# issue #5442: "1" = да, "-1" = нет (хранится), пусто = не задано (строка удаляется)
+    				$val = Boolean_Store_Val($val);
     				break;
     			case "SIGNED":
     				$v = (double)str_replace(",", ".", str_replace(array(" ", chr(0xC2).chr(0xA0)), "", $val));
@@ -3518,9 +3554,8 @@ function Format_Val_View($typ, $val, $id=0)
 				if(!isApi())
 					$val = date("d.m.Y H:i:s", (int)$val + $GLOBALS["tzone"]);	# Microtime
 				break;
-			case "BOOLEAN":
-				if($val != "")
-					$val = "X";
+			case "BOOLEAN":	# issue #5442: API отдаёт 1 / -1, интерфейс — X / пусто
+				$val = Boolean_View_Val($val, isApi());
 				break;
 			case "NUMBER":
 				if((float)$val != 0)  # PHP 8: "З-1" != 0 — true, и значение показывалось как «0»
@@ -4170,6 +4205,8 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 					$GLOBALS["STORED_REPS"][$id]["refs"][$row["ord"]] = $row["refr"];
 			    #trace("_ check length of '".$row["val"]."' = ".strlen($row["val"]));
 				$GLOBALS["STORED_REPS"][$id][$row["col"]][$row["ord"]] = trim($row["val"]);
+				if(trim($row["val"]) === "-1")	# issue #5442: возможно, BOOLEAN «нет» (Скрыть и т.п.) - проверим ниже
+					$rep_false[] = array("col" => $row["col"], "ord" => $row["ord"]);
 				if($row["base"] === "1"){  // Free links are treated as SHORT
 					$row["base"] = "3";
 					$GLOBALS["FREE_LINKS"][$row["typ"]] = 1;
@@ -4184,7 +4221,32 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 			else{	# It's a Param
 				$GLOBALS["STORED_REPS"][$id]["params"][$row["col"]] = $row["val"];
 				$GLOBALS["STORED_REPS"][$id]["rep_params"][$row["param"]] = $row["val"];
+				if(trim($row["val"]) === "-1")	# issue #5442: возможно, BOOLEAN «нет» - проверим ниже
+					$rep_false[] = array("col" => $row["col"], "param" => $row["param"]);
 			}
+		# issue #5442: флаг-BOOLEAN запроса со значением "-1" (нет) - то же, что флага нет
+		if(isset($rep_false)){
+			$cols = array();
+			foreach($rep_false as $f)
+				$cols[(int)$f["col"]] = 1;
+			$bool_cols = array();
+			$data_set = Exec_sql("SELECT r.id FROM $z r JOIN $z term ON term.id=r.t WHERE r.id IN(".implode(",", array_keys($cols)).") AND term.t=".$GLOBALS["BT"]["BOOLEAN"], "Get BOOLEAN report flags");
+			while($row = mysqli_fetch_array($data_set))
+				$bool_cols[$row["id"]] = 1;
+			foreach($rep_false as $f)
+				if(isset($bool_cols[$f["col"]])){
+					if(isset($f["param"])){
+						unset($GLOBALS["STORED_REPS"][$id]["params"][$f["col"]]);
+						unset($GLOBALS["STORED_REPS"][$id]["rep_params"][$f["param"]]);
+					}
+					else{
+						unset($GLOBALS["STORED_REPS"][$id][$f["col"]][$f["ord"]]);
+						if(empty($GLOBALS["STORED_REPS"][$id][$f["col"]]))
+							unset($GLOBALS["STORED_REPS"][$id][$f["col"]]);
+					}
+				}
+			unset($rep_false);
+		}
         $GLOBALS["STORED_REPS"][$id]["columns_flip"] = array_flip($GLOBALS["STORED_REPS"][$id]["columns"]);
         # Add dynamically created columns
 		if(isset($_REQUEST["SELECT"]) && $exe){
@@ -6457,7 +6519,7 @@ function Report_tx_begin($id){
 			|| !(isset($_REQUEST["confirmed"]) || isset($GLOBALS["STORED_REPS"][$id]["rep_params"]["EXECUTE"])))
 		return FALSE;
 	$flag = trim((string)$GLOBALS["STORED_REPS"][$id]["rep_params"]["InTransaction"]);
-	if(($flag === "") || ($flag === "0"))
+	if(Boolean_Store_Val($flag) !== "1")	# issue #5442: "-1" (нет), "0" и пусто — без транзакции
 		return FALSE;
 	if(!mysqli_begin_transaction($GLOBALS["connection"]))
 		die_info("Couldn't start the transaction for report #$id ".mysqli_error($GLOBALS["connection"]));
@@ -7483,6 +7545,9 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
     			if(isApi()){
     				$GLOBALS["GLOBAL_VARS"]["api"]["reqs"][$key]["type"] = $GLOBALS["REQS"][$key]["val"];
     				$GLOBALS["GLOBAL_VARS"]["api"]["reqs"][$key]["order"] = $GLOBALS["REQS"][$key]["ord"];
+    				# issue #5442: BOOLEAN — "1" / "-1"; строки нет (и нет значения по умолчанию) — null
+    				if(($GLOBALS["REV_BT"][$base_typ] == "BOOLEAN") && !isset($GLOBALS["REF_typs"][$key]))
+    					$v = Boolean_Api_Val((isset($row["id"]) ? $row["id"] : 0) > 0 ? $v : Format_Val($base_typ, $v));
     				$GLOBALS["GLOBAL_VARS"]["api"]["reqs"][$key]["value"] = $v;
     				$GLOBALS["GLOBAL_VARS"]["api"]["reqs"][$key]["base"] = $GLOBALS["REV_BT"][$base_typ];
     				if(isset($GLOBALS["REF_typs"][$key])){
@@ -7574,7 +7639,8 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 			# Logical Reqs are sent with "CHECKED" attribute
 			if($GLOBALS["REV_BT"][$blocks[$blocks[$block]["PARENT"]]["CUR_VARS"]["typ"]] == strtoupper(substr($block_name, 9)))
 				if($GLOBALS["REV_BT"][$blocks[$blocks[$block]["PARENT"]]["CUR_VARS"]["base_typ"]] == "BOOLEAN")
-					$blocks[$block]["checked"][] = ($blocks[$blocks[$block]["PARENT"]]["CUR_VARS"]["val"]!="" ? "CHECKED" : "");
+					# issue #5442: отмечена только при «да»; "-1" (нет) и пусто — не отмечена
+					$blocks[$block]["checked"][] = (Boolean_Store_Val(html_entity_decode($blocks[$blocks[$block]["PARENT"]]["CUR_VARS"]["val"])) === "1" ? "CHECKED" : "");
 		case "&editreq_file":
 			$blocks[$block]["reqid"][] = $blocks[$blocks[$block]["PARENT"]]["CUR_VARS"]["reqid"];
 		case "&editreq_reference":
@@ -8576,8 +8642,8 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
             						}
     						    }
     						    elseif(isset($existing) && isset($reqs[$key])){
-    						         # Drop false BOOLEAN: -1 or FALSE
-    						        if($GLOBALS["base"][$key] === "11" /* BOOLEAN */ && (strtolower($object[$order]) === "false" || $object[$order] === "-1" || $object[$order] === " "))
+    						         # issue #5442: BOOLEAN "-1"/false - хранимое «нет»; пробел (пусто) - удалить
+    						        if($GLOBALS["base"][$key] === "11" /* BOOLEAN */ && ($val === ""))
     						            Delete($ids[$key]);
     						        elseif($reqs[$key] !== $val)
     						            if($val === " ")
@@ -8586,8 +8652,8 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
         						            Update_Val($ids[$key], $val);
     						    }
     							else{ // Ordinary attribute of some base type
-    							    # Skip false BOOLEAN: -1 or FALSE
-						            if($GLOBALS["base"][$key] === "11" /* BOOLEAN */ && (strtolower($object[$order]) === "false" || $object[$order] === "-1" || $object[$order] === " "))
+    							    # issue #5442: BOOLEAN "-1"/false пишется как «нет»; пробел (пусто) - не писать
+						            if($GLOBALS["base"][$key] === "11" /* BOOLEAN */ && ($val === ""))
 						                # issue #4140: an earlier line of this file may have queued a value for this column
 						                Drop_batch_column($new_id, BATCH_SCALAR, $key);
 						            elseif($val !== " ")
@@ -8669,13 +8735,18 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 												, isset($GLOBALS["obj_subst"]) ? $GLOBALS["obj_subst"] : Array()
 												, function($id) use ($z){ return (bool)mysqli_fetch_array(Exec_sql("SELECT 1 FROM $z WHERE id=$id", "Check literal value")); }
 												, $count, $GLOBALS["warning"]);
-										if($rec_reqs === NULL)
-											Insert_batch($new_id, 1, $key, $value, "Import req");
-										else{	# issue #5236: совпало - не трогать, отличается - обновить, пробел (BOOLEAN false) - удалить
+										# issue #5442: BOOLEAN - "1" (да) / "-1" (нет, false, 0) пишутся; пробел - не задано
+										$is_bool = isset($GLOBALS["base"][$key]) && ((string)$GLOBALS["base"][$key] === "11" /* BOOLEAN */);
+										if($is_bool && ($value !== " "))
+											$value = Boolean_Store_Val($value);
+										if($rec_reqs === NULL){
+											if(!$is_bool || ($value !== " "))
+												Insert_batch($new_id, 1, $key, $value, "Import req");
+										}
+										else{	# issue #5236: совпало - не трогать, отличается - обновить, пробел - удалить
 											if(!isset($rec_reqs[$key]))
 												$rec_reqs[$key] = array();
-											$clear = ($value === " ") || (isset($GLOBALS["base"][$key]) && ((string)$GLOBALS["base"][$key] === "11" /* BOOLEAN */)
-													&& ((strtolower($value) === "false") || ($value === "-1")));
+											$clear = ($value === " ");
 											Import_req_set($new_id, $key, $value, $clear, $rec_reqs[$key], "Import req");
 										}
 									}

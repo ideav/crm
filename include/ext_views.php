@@ -61,7 +61,7 @@ function Ext_typed_expr($x, $base){
 		case "DATETIME":	# unix-секунды, бывают с дробной частью
 			return "CASE WHEN $x REGEXP '^[0-9]+([.][0-9]+)?$' THEN FROM_UNIXTIME(CAST(FLOOR($x) AS UNSIGNED)) END";
 		case "BOOLEAN":
-			return "CASE WHEN $x IS NULL OR $x IN ('', '0') THEN 0 ELSE 1 END";
+			return "CASE WHEN $x IS NULL OR $x IN ('', '0', '-1') THEN 0 ELSE 1 END";	# issue #5442: "-1" = нет
 	}
 	return $x;
 }
@@ -239,7 +239,7 @@ function Ext_plan_tables($types, $reqs, $src, $prefix = "t_", $grants = NULL, &$
 				$sel[] = "(SELECT a.id $from) AS ".Ext_qi($cid);
 			}
 			elseif($req["base"] === "BOOLEAN")
-				$sel[] = "EXISTS(SELECT 1 FROM $src f WHERE f.up=v.id AND f.t=$rid AND f.val NOT IN ('', '0')) AS ".Ext_qi($c);
+				$sel[] = "EXISTS(SELECT 1 FROM $src f WHERE f.up=v.id AND f.t=$rid AND f.val NOT IN ('', '0', '-1')) AS ".Ext_qi($c);	# issue #5442: "-1" = нет
 			else{
 				$sel[] = "(SELECT ".Ext_typed_expr("f.val", $req["base"])." FROM $src f WHERE f.up=v.id AND f.t=$rid"
 					." ORDER BY f.id LIMIT 1) AS ".Ext_qi($c);

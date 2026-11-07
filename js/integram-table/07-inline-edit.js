@@ -887,8 +887,8 @@
                     editorHtml = `<input type="number" class="inline-editor inline-editor-number" value="${ escapedValue }" ${ format === 'SIGNED' ? 'step="0.01"' : '' }>`;
                     break;
                 case 'BOOLEAN':
-                    // Any non-empty value = checked
-                    const isChecked = currentValue !== null && currentValue !== undefined && currentValue !== '' && currentValue !== '0' && currentValue !== 'false';
+                    // issue #5442: '1'/'X' = checked; '-1', '0', 'false', empty = unchecked
+                    const isChecked = integramBooleanIsTrue(currentValue);
                     editorHtml = `<input type="checkbox" class="inline-editor inline-editor-checkbox" ${ isChecked ? 'checked' : '' }>`;
                     break;
                 case 'DATE':
@@ -967,7 +967,10 @@
             const saveEdit = async () => {
                 let newValue = '';
                 if (format === 'BOOLEAN') {
-                    newValue = editor.checked ? '1' : '0';
+                    // issue #5442: снятая галка - пусто (строка удаляется), как прежде; '0' ядро теперь хранит как «нет»
+                    // первая колонка (значение записи) пустой быть не может - там «нет» пишется явно
+                    const isFirst = this.currentEditingCell.parentInfo && this.currentEditingCell.parentInfo.isFirstColumn;
+                    newValue = editor.checked ? '1' : (isFirst ? '-1' : '');
                 } else if (format === 'DATE') {
                     newValue = this.convertHtml5DateToDisplay(editor.value, false);
                 } else if (format === 'DATETIME') {
@@ -991,8 +994,11 @@
                     return;
                 }
 
-                // Only save if value changed
-                if (newValue !== this.currentEditingCell.originalValue) {
+                // Only save if value changed (BOOLEAN - by state: '' and '0' are both «нет», issue #5442)
+                const changed = format === 'BOOLEAN'
+                    ? integramBooleanIsTrue(newValue) !== integramBooleanIsTrue(this.currentEditingCell.originalValue)
+                    : newValue !== this.currentEditingCell.originalValue;
+                if (changed) {
                     await this.saveInlineEdit(newValue);
                 } else {
                     this.cancelInlineEdit(originalContent);
@@ -2271,7 +2277,7 @@
             // Build main field HTML based on its type
             let mainFieldHtml = '';
             if (mainFieldType === 'BOOLEAN') {
-                const isChecked = decodedInitialValue ? 'checked' : '';
+                const isChecked = integramBooleanIsTrue(decodedInitialValue) ? 'checked' : '';
                 mainFieldHtml = `<input type="checkbox" id="field-main-ref-create" name="main" value="1" ${ isChecked }>`;
             } else if (mainFieldType === 'DATE') {
                 const dateValueHtml5 = decodedInitialValue ? this.formatDateForHtml5(decodedInitialValue, false) : currentDateHtml5;
@@ -2887,8 +2893,8 @@
 
             switch (format) {
                 case 'BOOLEAN':
-                    // Display as checkbox icon: any non-empty value = YES, empty = NO
-                    const boolValue = newValue !== null && newValue !== undefined && newValue !== '' && newValue !== '0' && newValue !== false;
+                    // issue #5442: '1'/'X' = YES; '-1', '0', empty = NO
+                    const boolValue = integramBooleanIsTrue(newValue);
                     // For BOOLEAN, use HTML icon directly (no escaping) and store '1' or '0' for editing
                     escapedValue = boolValue ? '<span class="boolean-check"><i class="pi pi-check"></i></span>' : '<span class="boolean-uncheck"><i class="pi pi-times"></i></span>';
                     fullValueForEditing = boolValue ? '1' : '0';

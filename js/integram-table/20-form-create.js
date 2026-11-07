@@ -1626,7 +1626,7 @@
             // Build main field HTML based on its type
             let mainFieldHtml = '';
             if (mainFieldType === 'BOOLEAN') {
-                const isChecked = decodedInitialValue ? 'checked' : '';
+                const isChecked = integramBooleanIsTrue(decodedInitialValue) ? 'checked' : '';  // issue #5442
                 mainFieldHtml = `<input type="checkbox" id="field-main-form-ref-create" name="main" value="1" ${ isChecked }>`;
             } else if (mainFieldType === 'DATE') {
                 const dateValueHtml5 = decodedInitialValue ? this.formatDateForHtml5(decodedInitialValue, false) : currentDateHtml5;
