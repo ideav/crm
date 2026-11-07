@@ -413,7 +413,7 @@ class IntegramCreateFormHelper {
         // Build main field HTML based on its type
         let mainFieldHtml = '';
         if (mainFieldType === 'BOOLEAN') {
-            const isChecked = mainValue ? 'checked' : '';
+            const isChecked = integramBooleanIsTrue(mainValue) ? 'checked' : '';  // issue #5442
             mainFieldHtml = `<input type="checkbox" id="field-main" name="main" value="1" ${ isChecked }>`;
         } else if (mainFieldType === 'DATE') {
             const dateValueHtml5 = mainValue ? this.formatDateForHtml5(mainValue, false) : currentDateHtml5;
@@ -534,7 +534,7 @@ class IntegramCreateFormHelper {
             }
             // Boolean field
             else if (baseFormat === 'BOOLEAN') {
-                const isChecked = reqValue ? 'checked' : '';
+                const isChecked = integramBooleanIsTrue(reqValue) ? 'checked' : '';  // issue #5442: '-1' = нет
                 html += `<input type="checkbox" id="field-${req.id}" name="t${req.id}" value="1" ${isChecked}>`;
             }
             // Date field
@@ -1766,7 +1766,7 @@ class IntegramCreateFormHelper {
         const format = this.normalizeFormat(type);
 
         if (format === 'BOOLEAN') {
-            const boolVal = value !== 0 && value !== '0' && value !== false;
+            const boolVal = integramBooleanIsTrue(value);  // issue #5442
             return boolVal
                 ? '<span class="boolean-check"><i class="pi pi-check"></i></span>'
                 : '<span class="boolean-uncheck"><i class="pi pi-times"></i></span>';
@@ -2279,7 +2279,7 @@ class IntegramCreateFormHelper {
         // Build main field HTML based on its type
         let mainFieldHtml = '';
         if (mainFieldType === 'BOOLEAN') {
-            const isChecked = mainValue ? 'checked' : '';
+            const isChecked = integramBooleanIsTrue(mainValue) ? 'checked' : '';  // issue #5442
             mainFieldHtml = `<input type="checkbox" id="field-main" name="main" value="1" ${isChecked}>`;
         } else if (mainFieldType === 'DATE') {
             const dateValueHtml5 = mainValue ? this.formatDateForHtml5(mainValue, false) : '';
@@ -2380,7 +2380,7 @@ class IntegramCreateFormHelper {
                     </div>
                 `;
             } else if (fieldType === 'BOOLEAN') {
-                const isChecked = fieldValue ? 'checked' : '';
+                const isChecked = integramBooleanIsTrue(fieldValue) ? 'checked' : '';  // issue #5442
                 fieldHtml = `<input type="checkbox" id="field-${fieldId}" name="t${fieldId}" value="1" ${isChecked}>`;
             } else if (fieldType === 'DATE') {
                 const dateValueHtml5 = fieldValue ? this.formatDateForHtml5(fieldValue, false) : '';
@@ -2517,7 +2517,8 @@ class IntegramCreateFormHelper {
                 // Handle checkbox fields explicitly (not included in formData when unchecked)
                 form.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
                     if (checkbox.name) {
-                        multipartBody.set(checkbox.name, checkbox.checked ? '1' : '0');
+                        // issue #5442: снятая галка - пусто (строка удаляется), как прежде; '0' ядро теперь хранит как «нет»
+                        multipartBody.set(checkbox.name, checkbox.checked ? '1' : '');
                     }
                 });
 
@@ -2533,7 +2534,7 @@ class IntegramCreateFormHelper {
                 // Handle checkbox fields
                 form.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
                     if (checkbox.name) {
-                        params.append(checkbox.name, checkbox.checked ? '1' : '0');
+                        params.append(checkbox.name, checkbox.checked ? '1' : '');  // issue #5442: см. выше
                     }
                 });
 

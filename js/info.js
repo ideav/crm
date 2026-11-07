@@ -276,7 +276,7 @@
                     var format = link['Формат отчета'] || 'report';
                     var queryId = link['ЗапросID'];
                     var label = link['Запрос'] || 'Ссылка';
-                    var isPriority = link['приоритет'] === 'X';
+                    var isPriority = link['приоритет'] === 'X' || link['приоритет'] === '1';  // issue #5442: API отдаёт 1 / -1
                     var url = '/' + window.db + '/' + format + '/' + queryId;
                     html += '<a href="' + url + '" class="quick-link-badge' + (isPriority ? ' priority' : '') + '" target="' + queryId + '">' +
                         (isPriority ? '<span class="icon"><i class="pi pi-bolt"></i></span>' : '') +

@@ -226,8 +226,8 @@
                         }
                         break;
                     case 'BOOLEAN':
-                        const boolA = displayA !== null && displayA !== undefined && displayA !== '' && displayA !== 0 && displayA !== '0' && displayA !== false;
-                        const boolB = displayB !== null && displayB !== undefined && displayB !== '' && displayB !== 0 && displayB !== '0' && displayB !== false;
+                        const boolA = integramBooleanIsTrue(displayA);  // issue #5442
+                        const boolB = integramBooleanIsTrue(displayB);
                         return (boolA === boolB) ? 0 : (boolA ? -1 : 1);
                 }
 

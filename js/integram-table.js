@@ -2732,7 +2732,7 @@ class IntegramTable{
 
             // BOOLEAN cells use HTML icons, so skip HTML escaping for them
             if (format === 'BOOLEAN') {
-                const boolValue = value !== null && value !== undefined && value !== '' && value !== 0 && value !== '0' && value !== false;
+                const boolValue = integramBooleanIsTrue(value);  // issue #5442: '-1' = нет
                 escapedValue = boolValue ? '<span class="boolean-check"><i class="pi pi-check"></i></span>' : '<span class="boolean-uncheck"><i class="pi pi-times"></i></span>';
                 // Store the original value for editing (1 or 0, or the actual value)
                 fullValueForEditing = boolValue ? '1' : '0';
@@ -4902,8 +4902,8 @@ class IntegramTable{
                     editorHtml = `<input type="number" class="inline-editor inline-editor-number" value="${ escapedValue }" ${ format === 'SIGNED' ? 'step="0.01"' : '' }>`;
                     break;
                 case 'BOOLEAN':
-                    // Any non-empty value = checked
-                    const isChecked = currentValue !== null && currentValue !== undefined && currentValue !== '' && currentValue !== '0' && currentValue !== 'false';
+                    // issue #5442: '1'/'X' = checked; '-1', '0', 'false', empty = unchecked
+                    const isChecked = integramBooleanIsTrue(currentValue);
                     editorHtml = `<input type="checkbox" class="inline-editor inline-editor-checkbox" ${ isChecked ? 'checked' : '' }>`;
                     break;
                 case 'DATE':
@@ -4982,7 +4982,10 @@ class IntegramTable{
             const saveEdit = async () => {
                 let newValue = '';
                 if (format === 'BOOLEAN') {
-                    newValue = editor.checked ? '1' : '0';
+                    // issue #5442: снятая галка - пусто (строка удаляется), как прежде; '0' ядро теперь хранит как «нет»
+                    // первая колонка (значение записи) пустой быть не может - там «нет» пишется явно
+                    const isFirst = this.currentEditingCell.parentInfo && this.currentEditingCell.parentInfo.isFirstColumn;
+                    newValue = editor.checked ? '1' : (isFirst ? '-1' : '');
                 } else if (format === 'DATE') {
                     newValue = this.convertHtml5DateToDisplay(editor.value, false);
                 } else if (format === 'DATETIME') {
@@ -5006,8 +5009,11 @@ class IntegramTable{
                     return;
                 }
 
-                // Only save if value changed
-                if (newValue !== this.currentEditingCell.originalValue) {
+                // Only save if value changed (BOOLEAN - by state: '' and '0' are both «нет», issue #5442)
+                const changed = format === 'BOOLEAN'
+                    ? integramBooleanIsTrue(newValue) !== integramBooleanIsTrue(this.currentEditingCell.originalValue)
+                    : newValue !== this.currentEditingCell.originalValue;
+                if (changed) {
                     await this.saveInlineEdit(newValue);
                 } else {
                     this.cancelInlineEdit(originalContent);
@@ -6286,7 +6292,7 @@ class IntegramTable{
             // Build main field HTML based on its type
             let mainFieldHtml = '';
             if (mainFieldType === 'BOOLEAN') {
-                const isChecked = decodedInitialValue ? 'checked' : '';
+                const isChecked = integramBooleanIsTrue(decodedInitialValue) ? 'checked' : '';
                 mainFieldHtml = `<input type="checkbox" id="field-main-ref-create" name="main" value="1" ${ isChecked }>`;
             } else if (mainFieldType === 'DATE') {
                 const dateValueHtml5 = decodedInitialValue ? this.formatDateForHtml5(decodedInitialValue, false) : currentDateHtml5;
@@ -6902,8 +6908,8 @@ class IntegramTable{
 
             switch (format) {
                 case 'BOOLEAN':
-                    // Display as checkbox icon: any non-empty value = YES, empty = NO
-                    const boolValue = newValue !== null && newValue !== undefined && newValue !== '' && newValue !== '0' && newValue !== false;
+                    // issue #5442: '1'/'X' = YES; '-1', '0', empty = NO
+                    const boolValue = integramBooleanIsTrue(newValue);
                     // For BOOLEAN, use HTML icon directly (no escaping) and store '1' or '0' for editing
                     escapedValue = boolValue ? '<span class="boolean-check"><i class="pi pi-check"></i></span>' : '<span class="boolean-uncheck"><i class="pi pi-times"></i></span>';
                     fullValueForEditing = boolValue ? '1' : '0';
@@ -10424,8 +10430,8 @@ class IntegramTable{
                         }
                         break;
                     case 'BOOLEAN':
-                        const boolA = displayA !== null && displayA !== undefined && displayA !== '' && displayA !== 0 && displayA !== '0' && displayA !== false;
-                        const boolB = displayB !== null && displayB !== undefined && displayB !== '' && displayB !== 0 && displayB !== '0' && displayB !== false;
+                        const boolA = integramBooleanIsTrue(displayA);  // issue #5442
+                        const boolB = integramBooleanIsTrue(displayB);
                         return (boolA === boolB) ? 0 : (boolA ? -1 : 1);
                 }
 
@@ -12884,7 +12890,7 @@ class IntegramTable{
             // Build main field HTML based on its type
             let mainFieldHtml = '';
             if (mainFieldType === 'BOOLEAN') {
-                const isChecked = mainValue ? 'checked' : '';
+                const isChecked = integramBooleanIsTrue(mainValue) ? 'checked' : '';  // issue #5442
                 mainFieldHtml = `<input type="checkbox" id="field-main" name="main" value="1" ${ isChecked }>`;
             } else if (mainFieldType === 'DATE') {
                 const dateValueHtml5 = mainValue ? this.formatDateForHtml5(mainValue, false) : (isCreate ? currentDateHtml5 : '');
@@ -13102,7 +13108,7 @@ class IntegramTable{
                 }
                 // Boolean field
                 else if (baseFormat === 'BOOLEAN') {
-                    const isChecked = reqValue ? 'checked' : '';
+                    const isChecked = integramBooleanIsTrue(reqValue) ? 'checked' : '';  // issue #5442: '-1' = нет
                     const prevValue = reqValue || '';
                     html += `<input type="checkbox" id="field-${ req.id }" name="t${ req.id }" value="1" ${ isChecked }>`;
                     html += `<input type="hidden" name="b${ req.id }" value="${ this.escapeHtml(prevValue) }">`;
@@ -14503,8 +14509,8 @@ class IntegramTable{
 
                 switch (baseFormat) {
                     case 'BOOLEAN':
-                        // Display as checkbox icon: any non-empty value = YES, empty = NO
-                        const boolVal = value !== null && value !== undefined && value !== '' && value !== 0 && value !== '0' && value !== false;
+                        // issue #5442: '1'/'X' = YES; '-1', '0', empty = NO
+                        const boolVal = integramBooleanIsTrue(value);
                         return boolVal ? '<span class="boolean-check"><i class="pi pi-check"></i></span>' : '<span class="boolean-uncheck"><i class="pi pi-times"></i></span>';
                     // Ссылка на справочник-дату приходит как "id:штамп" — формат по метке (issue #5313)
                     case 'DATE':
@@ -16191,7 +16197,7 @@ class IntegramTable{
             // Build main field HTML based on its type
             let mainFieldHtml = '';
             if (mainFieldType === 'BOOLEAN') {
-                const isChecked = decodedInitialValue ? 'checked' : '';
+                const isChecked = integramBooleanIsTrue(decodedInitialValue) ? 'checked' : '';  // issue #5442
                 mainFieldHtml = `<input type="checkbox" id="field-main-form-ref-create" name="main" value="1" ${ isChecked }>`;
             } else if (mainFieldType === 'DATE') {
                 const dateValueHtml5 = decodedInitialValue ? this.formatDateForHtml5(decodedInitialValue, false) : currentDateHtml5;
@@ -18906,7 +18912,7 @@ class IntegramTable{
                     // Convert special formats to plain text
                     switch (format) {
                         case 'BOOLEAN':
-                            value = cellValue ? 'Да' : 'Нет';
+                            value = integramBooleanIsTrue(cellValue) ? 'Да' : 'Нет';  // issue #5442: '-1' = Нет
                             break;
                         case 'PWD':
                             // Only mask with asterisks if there's a value
@@ -18969,7 +18975,7 @@ class IntegramTable{
                     // Convert special formats to plain text
                     switch (format) {
                         case 'BOOLEAN':
-                            value = cellValue ? 'Да' : 'Нет';
+                            value = integramBooleanIsTrue(cellValue) ? 'Да' : 'Нет';  // issue #5442: '-1' = Нет
                             break;
                         case 'PWD':
                             // Only mask with asterisks if there's a value
@@ -19496,7 +19502,19 @@ function formatIntegramDateCellPlain(value, format) {
     return `${dmy} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
+/**
+ * BOOLEAN (issue #5442): '1' (и 'X' интерфейса, true) — да; '-1', '0', 'false', пусто,
+ * null — нет / не задано. Ядро хранит «нет» как '-1', поэтому «непусто» ≠ «да».
+ */
+function integramBooleanIsTrue(value) {
+    if (value === null || value === undefined || value === false) return false;
+    if (value === true) return true;
+    const v = String(value).trim().toLowerCase();
+    return v !== '' && v !== '0' && v !== '-1' && v !== 'false';
+}
+
 if (typeof window !== 'undefined') {
+    window.integramBooleanIsTrue = integramBooleanIsTrue;
     window.parseIntegramDateValue = parseIntegramDateValue;
     window.formatIntegramDateCellPlain = formatIntegramDateCellPlain;
     window.stripIntegramDateRefPrefix = stripIntegramDateRefPrefix;
@@ -20052,7 +20070,7 @@ class IntegramCreateFormHelper {
         // Build main field HTML based on its type
         let mainFieldHtml = '';
         if (mainFieldType === 'BOOLEAN') {
-            const isChecked = mainValue ? 'checked' : '';
+            const isChecked = integramBooleanIsTrue(mainValue) ? 'checked' : '';  // issue #5442
             mainFieldHtml = `<input type="checkbox" id="field-main" name="main" value="1" ${ isChecked }>`;
         } else if (mainFieldType === 'DATE') {
             const dateValueHtml5 = mainValue ? this.formatDateForHtml5(mainValue, false) : currentDateHtml5;
@@ -20173,7 +20191,7 @@ class IntegramCreateFormHelper {
             }
             // Boolean field
             else if (baseFormat === 'BOOLEAN') {
-                const isChecked = reqValue ? 'checked' : '';
+                const isChecked = integramBooleanIsTrue(reqValue) ? 'checked' : '';  // issue #5442: '-1' = нет
                 html += `<input type="checkbox" id="field-${req.id}" name="t${req.id}" value="1" ${isChecked}>`;
             }
             // Date field
@@ -21405,7 +21423,7 @@ class IntegramCreateFormHelper {
         const format = this.normalizeFormat(type);
 
         if (format === 'BOOLEAN') {
-            const boolVal = value !== 0 && value !== '0' && value !== false;
+            const boolVal = integramBooleanIsTrue(value);  // issue #5442
             return boolVal
                 ? '<span class="boolean-check"><i class="pi pi-check"></i></span>'
                 : '<span class="boolean-uncheck"><i class="pi pi-times"></i></span>';
@@ -21918,7 +21936,7 @@ class IntegramCreateFormHelper {
         // Build main field HTML based on its type
         let mainFieldHtml = '';
         if (mainFieldType === 'BOOLEAN') {
-            const isChecked = mainValue ? 'checked' : '';
+            const isChecked = integramBooleanIsTrue(mainValue) ? 'checked' : '';  // issue #5442
             mainFieldHtml = `<input type="checkbox" id="field-main" name="main" value="1" ${isChecked}>`;
         } else if (mainFieldType === 'DATE') {
             const dateValueHtml5 = mainValue ? this.formatDateForHtml5(mainValue, false) : '';
@@ -22019,7 +22037,7 @@ class IntegramCreateFormHelper {
                     </div>
                 `;
             } else if (fieldType === 'BOOLEAN') {
-                const isChecked = fieldValue ? 'checked' : '';
+                const isChecked = integramBooleanIsTrue(fieldValue) ? 'checked' : '';  // issue #5442
                 fieldHtml = `<input type="checkbox" id="field-${fieldId}" name="t${fieldId}" value="1" ${isChecked}>`;
             } else if (fieldType === 'DATE') {
                 const dateValueHtml5 = fieldValue ? this.formatDateForHtml5(fieldValue, false) : '';
@@ -22156,7 +22174,8 @@ class IntegramCreateFormHelper {
                 // Handle checkbox fields explicitly (not included in formData when unchecked)
                 form.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
                     if (checkbox.name) {
-                        multipartBody.set(checkbox.name, checkbox.checked ? '1' : '0');
+                        // issue #5442: снятая галка - пусто (строка удаляется), как прежде; '0' ядро теперь хранит как «нет»
+                        multipartBody.set(checkbox.name, checkbox.checked ? '1' : '');
                     }
                 });
 
@@ -22172,7 +22191,7 @@ class IntegramCreateFormHelper {
                 // Handle checkbox fields
                 form.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
                     if (checkbox.name) {
-                        params.append(checkbox.name, checkbox.checked ? '1' : '0');
+                        params.append(checkbox.name, checkbox.checked ? '1' : '');  // issue #5442: см. выше
                     }
                 });
 

@@ -355,7 +355,7 @@
             // Build main field HTML based on its type
             let mainFieldHtml = '';
             if (mainFieldType === 'BOOLEAN') {
-                const isChecked = mainValue ? 'checked' : '';
+                const isChecked = integramBooleanIsTrue(mainValue) ? 'checked' : '';  // issue #5442
                 mainFieldHtml = `<input type="checkbox" id="field-main" name="main" value="1" ${ isChecked }>`;
             } else if (mainFieldType === 'DATE') {
                 const dateValueHtml5 = mainValue ? this.formatDateForHtml5(mainValue, false) : (isCreate ? currentDateHtml5 : '');
@@ -573,7 +573,7 @@
                 }
                 // Boolean field
                 else if (baseFormat === 'BOOLEAN') {
-                    const isChecked = reqValue ? 'checked' : '';
+                    const isChecked = integramBooleanIsTrue(reqValue) ? 'checked' : '';  // issue #5442: '-1' = нет
                     const prevValue = reqValue || '';
                     html += `<input type="checkbox" id="field-${ req.id }" name="t${ req.id }" value="1" ${ isChecked }>`;
                     html += `<input type="hidden" name="b${ req.id }" value="${ this.escapeHtml(prevValue) }">`;
@@ -1974,8 +1974,8 @@
 
                 switch (baseFormat) {
                     case 'BOOLEAN':
-                        // Display as checkbox icon: any non-empty value = YES, empty = NO
-                        const boolVal = value !== null && value !== undefined && value !== '' && value !== 0 && value !== '0' && value !== false;
+                        // issue #5442: '1'/'X' = YES; '-1', '0', empty = NO
+                        const boolVal = integramBooleanIsTrue(value);
                         return boolVal ? '<span class="boolean-check"><i class="pi pi-check"></i></span>' : '<span class="boolean-uncheck"><i class="pi pi-times"></i></span>';
                     // Ссылка на справочник-дату приходит как "id:штамп" — формат по метке (issue #5313)
                     case 'DATE':

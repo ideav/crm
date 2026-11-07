@@ -740,7 +740,7 @@
                     // Convert special formats to plain text
                     switch (format) {
                         case 'BOOLEAN':
-                            value = cellValue ? 'Да' : 'Нет';
+                            value = integramBooleanIsTrue(cellValue) ? 'Да' : 'Нет';  // issue #5442: '-1' = Нет
                             break;
                         case 'PWD':
                             // Only mask with asterisks if there's a value
@@ -803,7 +803,7 @@
                     // Convert special formats to plain text
                     switch (format) {
                         case 'BOOLEAN':
-                            value = cellValue ? 'Да' : 'Нет';
+                            value = integramBooleanIsTrue(cellValue) ? 'Да' : 'Нет';  // issue #5442: '-1' = Нет
                             break;
                         case 'PWD':
                             // Only mask with asterisks if there's a value
