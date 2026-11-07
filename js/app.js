@@ -629,6 +629,15 @@ class AuthManager {
                     } catch (e) { /* ignore parse errors */ }
                     return { success: false, message: 'Неверное имя пользователя или пароль' };
                 }
+                // #1139: после неудач подряд (и для входа admin) сервер требует капчу — 403 с captcha: "required"
+                if (response.status === 403) {
+                    try {
+                        const errData = await response.json();
+                        if (errData.captcha === 'required') {
+                            return { success: false, captchaRequired: true, message: errData.error || 'Пройдите проверку капчи' };
+                        }
+                    } catch (e) { /* ignore parse errors */ }
+                }
                 throw new Error('HTTP ' + response.status);
             }
 
@@ -922,7 +931,8 @@ class App {
                     this.postLoginRedirect(selectedDb);
                 } else {
                     showToast(result.message, 'error');
-                    resetCaptcha('login-captcha-container');
+                    if (result.captchaRequired) this._forceCaptcha();
+                    else resetCaptcha('login-captcha-container');
                     loginInProgress = false;
                 }
             });
@@ -1505,6 +1515,21 @@ class App {
     _loginBlockedByCaptcha(captchaToken) {
         if (this._captchaBypass) return false;
         return captchaToken === null && isCaptchaRendered('login-captcha-container');
+    }
+
+    // #1139: сервер потребовал капчу — поблажка за валидную куку снимается, капча рисуется заново.
+    _forceCaptcha() {
+        this._captchaBypass = false;
+        this._captchaBypassChecked = true;
+        ['login-captcha-container', 'register-captcha-container'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.style.display = '';
+        });
+        if (document.getElementById('login-captcha-container')?.dataset.widgetId !== undefined) {
+            resetCaptcha('login-captcha-container');
+            return;
+        }
+        this._initCaptchaWidgets();
     }
 
     // Issue #2906: hide the captcha containers when a valid token bypasses the captcha.
