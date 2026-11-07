@@ -346,6 +346,11 @@ button.mc-kpi:hover { border-color: var(--mc-accent); transform: translateY(-1px
     color: var(--mc-text);
     padding: .55rem .7rem;
 }
+.tpl-moderation .db-templates-summary { margin: 0 0 .5rem; font-weight: 600; color: var(--mc-text); }
+.tpl-moderation .db-templates-help { margin: 0 0 .75rem; font-size: .88rem; color: var(--mc-muted); }
+.tpl-moderation .db-templates-help summary { cursor: pointer; color: var(--mc-text); }
+.tpl-moderation .db-templates-help ol { margin: .5rem 0 0; padding-left: 1.25rem; }
+.tpl-moderation .db-templates-help li { margin-bottom: .35rem; }
 .tpl-moderation .db-templates-status { margin: .5rem 0; font-size: .88rem; }
 .tpl-moderation .db-templates-status:empty { display: none; }
 .tpl-moderation > div { overflow-x: auto; }
