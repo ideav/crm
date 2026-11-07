@@ -201,6 +201,7 @@ define("RETRIES", 301); # #3581: счётчик попыток входа дол
                         # залипал на лимите и давал «превышено» при «пустом» Retries.
 define("RETRIES_LIMIT", 5);
 define("CHECKCODE_RETRIES_LIMIT", 2);
+define("CAPTCHA_AFTER_RETRIES", 2);   # #1139: со стольких неудач подряд у логина вход только с капчей
 define("TOKEN", 125);
 # python2node#1043: сессии на устройство, MCP-токены, блокировка подбора (функции — в блоке auth-1043)
 defined("SESSION_IDLE") || define("SESSION_IDLE", 30*86400);
@@ -282,6 +283,7 @@ if((isset($com[2]) ? $com[2] : "") === "ai"
 
 $locale = isset($_COOKIE[$z."_locale"]) ? $_COOKIE[$z."_locale"] : (isset($_COOKIE["my_locale"]) ? $_COOKIE["my_locale"] : "RU");
 include "include/connection.php";
+Secrets_guard($z);  # #1139: дефолтные секреты на сервере — отказ, а не воспроизводимый мастер-токен
 # Check the DB existence
 # #4539: проверочный запрос НЕ ставится под добивание (Sql_running/KILL QUERY). Он короткий по
 # построению — `LIMIT 1` по только что открытому соединению, — и добивать в нём нечего: серверный
@@ -745,9 +747,19 @@ $GLOBALS["GLOBAL_VARS"]["version"] = VERSION;
 $GLOBALS["GLOBAL_VARS"]["newapi"] = [];
 
 # ################# FUNCTIONS #################
+# Локальная установка (kit на localhost): ей разрешены заглушки, которые на сервере — ошибка конфигурации.
+function Is_local_server(){
+    $sn = strtolower(isset($_SERVER["SERVER_NAME"]) ? (string)$_SERVER["SERVER_NAME"] : "");
+    return in_array($sn, array("localhost", "127.0.0.1", "::1", "[::1]"), TRUE) || (substr($sn, -10) === ".localhost");
+}
+# #1139: ключ-заглушка (или незаданный ключ) пропускает капчу только на localhost; на сервере — отказ
 function verifyCaptcha($token) {
-    if (SMARTCAPTCHA_SERVER_KEY === 'ysc2_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX') return true;
-    if (empty($token)) return false;
+    if ((SMARTCAPTCHA_SERVER_KEY === 'ysc2_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX') || (SMARTCAPTCHA_SERVER_KEY === '')) {
+        if (Is_local_server()) return true;
+        wlog("Captcha: SMARTCAPTCHA_SERVER_KEY is not configured", "log");
+        return false;
+    }
+    if (empty($token) || !is_string($token)) return false;
     $url = 'https://smartcaptcha.yandexcloud.net/validate';
     $params = http_build_query([
         'secret' => SMARTCAPTCHA_SERVER_KEY,
@@ -766,6 +778,49 @@ function verifyCaptcha($token) {
     if ($result === false) return false;
     $data = json_decode($result, true);
     return isset($data['status']) && $data['status'] === 'ok';
+}
+# Капча входа проверяется не больше раза за запрос: токен SmartCaptcha одноразовый.
+function Login_captcha_passed(){
+    static $ok = NULL;
+    if($ok === NULL)
+        $ok = verifyCaptcha(isset($_POST["smart-token"]) ? $_POST["smart-token"] : "");
+    return $ok;
+}
+function Login_captcha_die(){
+    $captchaMsg = t9n("[RU]Проверка капчи не пройдена. Пожалуйста, попробуйте снова.[EN]Captcha verification failed. Please try again.");
+    if(isApi()){
+        header("HTTP/1.0 403 Forbidden");
+        api_dump(json_encode(["error" => $captchaMsg, "msg" => $captchaMsg, "captcha" => "required"], JSON_UNESCAPED_UNICODE));
+    }
+    my_die($captchaMsg);
+}
+# #1139: капча обязательна (без поблажки за чужую валидную куку) с CAPTCHA_AFTER_RETRIES неудач подряд
+# у логина и всегда — для входа admin паролем сервера: у него нет счётчика неудач.
+function Login_captcha_required($retries){
+    $parts = explode(":", (string)$retries, 2);
+    return (int)$parts[0] >= CAPTCHA_AFTER_RETRIES;
+}
+# #1139 (B1): мастер-токен и xsrf супер-админа сервера (user_id 0). HMAC с ключом из ADMINHASH и SALT:
+# одного мастер-пароля мало, чтобы собрать токен; сменили SALT — все мастер-токены отозваны.
+function Admin_token($db){
+    return hash_hmac("sha512", "token:".$db, ADMINHASH.SALT);
+}
+function Admin_xsrf($db){
+    return hash_hmac("sha512", "xsrf:".$db, ADMINHASH.SALT);
+}
+# #1139 (B1): с дефолтными (или пустыми) секретами ядро на сервере не работает — иначе мастер-токен
+# воспроизводим и даёт admin в любой базе. На localhost (kit) — разрешено.
+function Secrets_are_default($z){
+    $sn = isset($_SERVER["SERVER_NAME"]) ? $_SERVER["SERVER_NAME"] : "";
+    return (SALT === "") || (SALT === "yyy") || (ADMINHASH === "")
+        || (ADMINHASH === sha1($sn.$z."xxx")) || (ADMINHASH === sha1($sn.$z));
+}
+function Secrets_guard($z){
+    if(!Secrets_are_default($z) || Is_local_server())
+        return;
+    wlog("Config: default or empty MASTER_PASSWORD/SALT — refusing to run", "log");
+    header("HTTP/1.0 500 Internal Server Error");
+    die("Server configuration error");
 }
 
 # Issue #2906: a returning visitor who already holds a valid auth token (an idb_*
@@ -3293,11 +3348,12 @@ function Validate_Token(){ # Validates the cookie token and gathers the user per
             getGrants($row["r"]);
 #print_r($GLOBALS); die($v." ".$attrs." ".count($blocks[$attrs][strtolower($attrs)]));
 		}
-		elseif((isset($_COOKIE["idb_$z"]) && $_COOKIE["idb_$z"] === hash("sha512", ADMINHASH.$z)) || ($tok === hash("sha512", ADMINHASH.$z))){
+		elseif((isset($_COOKIE["idb_$z"]) && is_string($_COOKIE["idb_$z"]) && hash_equals(Admin_token($z), $_COOKIE["idb_$z"]))
+				|| (is_string($tok) && hash_equals(Admin_token($z), $tok))){
 			$GLOBALS["GLOBAL_VARS"]["user"] = $GLOBALS["GLOBAL_VARS"]["role"] = "admin";
 			$GLOBALS["GLOBAL_VARS"]["user_id"] = 0;
 			$GLOBALS["GLOBAL_VARS"]["role_id"] = ADMINROLE;
-			$xsrf = hash("sha512", $z.ADMINHASH);
+			$xsrf = Admin_xsrf($z);
 		}
 		elseif(($typ === TOKEN) && isset($_COOKIE["idb_$z"]) && is_string($_COOKIE["idb_$z"])
 				&& ($_COOKIE["idb_$z"] !== "gtuoeksetn") && (addslashes($_COOKIE["idb_$z"]) === $tok))
@@ -11312,7 +11368,7 @@ function Restore_admin_allowed(){
 	foreach($tokens as $tok){
 		if(!is_string($tok) || ($tok === ""))
 			continue;
-		if(hash_equals(hash("sha512", ADMINHASH.$z), $tok))
+		if(hash_equals(Admin_token($z), $tok))
 			return TRUE;
 		if(mysqli_fetch_array(Exec_sql("SELECT u.id FROM $z u, $z tok WHERE u.t=".USER." AND u.val='$z' AND tok.up=u.id"
 				." AND tok.t=".TOKEN." AND ".Token_match_sql("tok", $tok)." LIMIT 1", "Restore admin: owner token")))
@@ -15054,7 +15110,7 @@ function BtLoadUser($ref){
 	global $z;
 	if((is_int($ref) || ctype_digit((string)$ref)) && (int)$ref === 0 && isset($GLOBALS["GLOBAL_VARS"]["user_id"]) && (string)$GLOBALS["GLOBAL_VARS"]["user_id"] === "0")
 		return array("user" => "admin", "user_id" => 0, "role" => "admin", "role_id" => ADMINROLE
-			, "token" => hash("sha512", ADMINHASH.$z), "xsrf" => hash("sha512", $z.ADMINHASH), "grants" => FALSE);
+			, "token" => Admin_token($z), "xsrf" => Admin_xsrf($z), "grants" => FALSE);
 	$where = (is_int($ref) || ctype_digit((string)$ref)) ? "u.id=".(int)$ref : "u.val='".addslashes((string)$ref)."'";
 	$row = mysqli_fetch_array(Exec_sql("SELECT u.id, u.val, role_def.id r, role_def.val role, tok.val tok, xsrf.val xsrf FROM $z u"
 			." LEFT JOIN ($z r CROSS JOIN $z role_def) ON r.up=u.id AND role_def.id=r.t AND role_def.t=".ROLE
@@ -15534,14 +15590,10 @@ switch($a)  # Check actions, which don't require authentication
 			$GLOBALS["tzone"] = round(((int)$_POST["tzone"] - time() - date("Z"))/1800)*1800; # Round the time zone shift to 30 min
 			setcookie("tzone", $GLOBALS["tzone"], time() + COOKIES_EXPIRE, "/"); # 30 days
 		}
-		if(isset($_POST["smart-token"]) && !hasValidTokenCookie() && !verifyCaptcha($_POST["smart-token"])){
-			$captchaMsg = t9n("[RU]Проверка капчи не пройдена. Пожалуйста, попробуйте снова.[EN]Captcha verification failed. Please try again.");
-			if(isApi()){
-				header("HTTP/1.0 403 Forbidden");
-				api_dump(json_encode(["error" => $captchaMsg, "msg" => $captchaMsg], JSON_UNESCAPED_UNICODE));
-			}
-			my_die($captchaMsg);
-		}
+		# Присланная капча обязана быть верной (свою валидную куку — #2906 — вправе не решать);
+		# обязательной капча становится после неудач (ниже, по счётчику логина) и для входа admin.
+		if(isset($_POST["smart-token"]) && !hasValidTokenCookie() && !Login_captcha_passed())
+			Login_captcha_die();
 		$msg = "";
 		$p = isset($_POST["pwd"]) && is_string($_POST["pwd"]) ? $_POST["pwd"] : "";
 		$sql = "SELECT u.id uid, u.val, pwd.id pwd_id, pwd.val pwd, tok.id tok, tok.val token, act.id act, xsrf.id xsrf, retries.id retries_id, retries.val retries
@@ -15569,6 +15621,8 @@ switch($a)  # Check actions, which don't require authentication
 			$lockLeft = Login_lock_left($row["retries"], time());
 			if($lockLeft > 0)
 				Login_locked_die($u, $lockLeft);
+			if(Login_captcha_required($row["retries"]) && !Login_captcha_passed())
+				Login_captcha_die();  # #1139: пароль не сверяем — перебор без капчи не узнаёт ответа
 			if(!Pwd_verify($p, $row["pwd"])){
 				incrementRetries($row["uid"], $row["retries_id"], $row["retries"]);
 				$row = false;
@@ -15638,12 +15692,13 @@ switch($a)  # Check actions, which don't require authentication
 				Exec_sql("DELETE FROM $z WHERE up=".(int)$row["uid"]." AND t=".TOKEN." AND val REGEXP '^(s|m)[.]'", "Drop sessions on password change");
 			updateTokens($row, Rotate_token_hashes($row, $u, $p, !empty($pwdChanged)));
 		}
-		elseif((strtolower($u) == "admin") && (hash("sha512", sha1($_SERVER["SERVER_NAME"].$z.$p).$z) === hash("sha512", ADMINHASH.$z))){
+		elseif((strtolower($u) == "admin") && (Login_captcha_passed() || Login_captcha_die())
+				&& hash_equals(ADMINHASH, sha1($_SERVER["SERVER_NAME"].$z.$p))){
 			$GLOBALS["GLOBAL_VARS"]["user"] = $GLOBALS["GLOBAL_VARS"]["role"] = "admin";
 			$GLOBALS["GLOBAL_VARS"]["user_id"] = 0;
-			$GLOBALS["GLOBAL_VARS"]["xsrf"] = hash("sha512", $z.ADMINHASH);
-			$GLOBALS["GLOBAL_VARS"]["token"] = hash("sha512", ADMINHASH.$z);
-			setcookie("idb_$z", hash("sha512", ADMINHASH.$z), Auth_cookie_opts(0));
+			$GLOBALS["GLOBAL_VARS"]["xsrf"] = Admin_xsrf($z);
+			$GLOBALS["GLOBAL_VARS"]["token"] = Admin_token($z);
+			setcookie("idb_$z", Admin_token($z), Auth_cookie_opts(0));
 		}
 		elseif(isApi()){
 			header("HTTP/1.0 401 Unauthorized");
@@ -15852,7 +15907,7 @@ switch($a)  # Check actions, which don't require authentication
     				Insert($row["id"], 1, ROLE, ADMINROLE, "Restore admin role");
 			}
 			else{ # No admin found
-   				$id = Insert($row["id"], 1, USER, $z, "Restore admin ");
+   				$id = Insert(1, 0, USER, $z, "Restore admin ");
    				Insert($id, 1, ROLE, ADMINROLE, "Set admin role");
 			}
 		}
