@@ -7,7 +7,7 @@
 //
 // Run with: node experiments/atex-production-planning-3717.test.js
 //
-// rules: R-12.1-foil-penalty, R-12.1-foil-end-hard
+// rules: FOIL-penalty, FOIL-end-hard
 
 process.env.TZ = 'UTC';
 

@@ -3,4 +3,4 @@
 # Стартовое состояние: ни одной метки в ТЗ, 13 инвариантов §15 и 291 тест планирования не размечены.
 uncovered_labels=14
 tests_without_rules=272
-# 06.11 (#5411 PR 2): метки §12 (12 шт.). Без теста — R-12-move-strictly-cheaper, R-12.1-foil-due.
+# 06.11 (#5411 PR 2): метки §12 (12 шт.). Без теста — MOVE-strictly-cheaper, FOIL-due.

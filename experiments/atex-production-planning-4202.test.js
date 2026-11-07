@@ -12,7 +12,7 @@
 //
 // Run with: node experiments/atex-production-planning-4202.test.js
 //
-// rules: R-12.1-foil-symmetric
+// rules: FOIL-symmetric
 
 var mod = require('../download/atex/js/production-planning.js');
 var P = mod.planning;

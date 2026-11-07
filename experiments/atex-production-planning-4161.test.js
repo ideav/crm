@@ -9,7 +9,7 @@
 //
 // Run with: node experiments/atex-production-planning-4161.test.js
 //
-// rules: R-12.2-lock-over-due
+// rules: MOVE-manual-lock-over-due
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

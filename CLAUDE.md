@@ -55,8 +55,9 @@ bash scripts/run-tests.sh --all  # вместе с карантином, для 
   роняют работу `text-assertions` (`scripts/check-text-assertions.sh`); законное исключение
   объявляется строкой `TEXT-ASSERT-OK: <почему поведением нельзя>` — как `RATCHET-OK`.
 - **Тест планирования называет правило (#5411).** В шапке нового `atex-pp-*` /
-  `atex-production-planning-*` строка `// rules: <метка>[, <метка>]`: метка — якорь `{#R-…}` из
-  `docs/atex_planning_tz.md` или id инварианта §15 (`FROZEN_DAY`…); тест на разовый дефект —
+  `atex-production-planning-*` строка `// rules: <метка>[, <метка>]`: метка — якорь `{#КОД-слово}` из
+  `docs/atex_planning_tz.md` (КОД — постоянный код раздела из таблицы «Коды правил» в конце ТЗ,
+  номер раздела в метку не входит) или id инварианта §15 (`FROZEN_DAY`…); тест на разовый дефект —
   `// rules: none (defect #NNNN)`. Проверяет `scripts/check-rule-trace.sh` (работа `rule-trace`):
   ссылка на несуществующую метку — красный всегда; счётчики непокрытых меток и тестов без
   `rules:` в `scripts/rule-trace-baseline.txt` только уменьшаются (уменьшил — опусти базис в том же
