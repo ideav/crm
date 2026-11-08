@@ -1,0 +1,103 @@
+#tp-root{
+  --bg:#f6f5f2; --card:#ffffff; --ink:#18181b; --muted:#6b6b73; --line:#e6e4df;
+  --accent:#ff5a36; --accent-ink:#ffffff; --accent-soft:#fff0eb; --ok:#1f9d55; --warn:#b45309;
+  --radius:16px; --shadow:0 1px 2px rgba(0,0,0,.04),0 8px 24px rgba(0,0,0,.06);
+}
+@media (prefers-color-scheme: dark){
+  #tp-root{
+    --bg:#121214; --card:#1b1b1f; --ink:#f2f2f3; --muted:#a0a0a8; --line:#2c2c32;
+    --accent:#ff6b4a; --accent-soft:#2a1a15; --ok:#4ade80; --warn:#fbbf24;
+    --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.35);
+  }
+}
+#tp-root{position:fixed;inset:0;z-index:2147483000;overflow:auto;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;display:flex;flex-direction:column;text-align:left}
+#tp-root *,#tp-root *:before,#tp-root *:after{box-sizing:border-box;font-family:inherit}
+#tp-root>*{min-width:0}
+#tp-root{overflow-x:hidden}
+#tp-root a{color:inherit}
+#tp-root h1,#tp-root h2,#tp-root h3,#tp-root p{font-family:inherit;color:inherit}
+#tp-root .wrap{width:100%;max-width:1120px;margin:0 auto;padding:0 16px}
+#tp-root main.wrap{flex:1;padding-bottom:48px}
+
+/* Шапка */
+#tp-root .top{position:sticky;top:0;z-index:5;flex:none;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+#tp-root .top-in{display:flex;align-items:center;justify-content:space-between;height:64px;gap:12px}
+#tp-root .logo{display:flex;align-items:center;gap:8px;font-weight:800;font-size:22px;text-decoration:none;letter-spacing:-.02em}
+#tp-root .logo-dot{width:14px;height:14px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px var(--accent-soft)}
+#tp-root .top-nav{display:flex;gap:4px;align-items:center}
+#tp-root .top-nav a{text-decoration:none;padding:8px 12px;border-radius:999px;font-weight:600;font-size:15px;color:var(--muted)}
+#tp-root .top-nav a:hover,#tp-root .top-nav a.on{color:var(--ink);background:var(--card)}
+#tp-root .top-nav .badge{display:inline-block;min-width:20px;padding:0 6px;margin-left:4px;border-radius:999px;background:var(--accent);color:var(--accent-ink);font-size:12px;text-align:center}
+@media (max-width:560px){#tp-root .top-org{display:none}#tp-root .top-nav a{padding:8px 10px}}
+
+/* Афиша */
+#tp-root .hero{padding:40px 0 20px}
+#tp-root .hero h1{font-size:clamp(30px,5vw,48px);line-height:1.1;letter-spacing:-.03em;margin:0 0 8px}
+#tp-root .hero p{color:var(--muted);margin:0 0 24px;font-size:18px}
+#tp-root .search{display:flex;gap:8px;flex-wrap:wrap}
+#tp-root .search input,#tp-root .search select{height:48px;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:12px;padding:0 14px;font:inherit;outline:none}
+#tp-root .search input{flex:1 1 260px}
+#tp-root .search input:focus,#tp-root .search select:focus{border-color:var(--accent)}
+#tp-root .chips{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0 24px}
+#tp-root .chip{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:999px;padding:7px 14px;font:inherit;font-size:14px;font-weight:600;cursor:pointer}
+#tp-root .chip.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+#tp-root .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(300px,100%),1fr));gap:20px}
+@media (max-width:420px){#tp-root .grid{grid-template-columns:1fr}#tp-root .search select{flex:1 1 100%}}
+#tp-root .card{background:var(--card);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow);text-decoration:none;display:flex;flex-direction:column;transition:transform .15s}
+#tp-root .card:hover{transform:translateY(-3px)}
+#tp-root .cover{position:relative;aspect-ratio:16/9;background-size:cover;background-position:center;display:flex;align-items:flex-end;padding:14px}
+#tp-root .cover-cat{background:rgba(0,0,0,.45);color:#fff;font-size:12px;font-weight:700;padding:4px 10px;border-radius:999px;backdrop-filter:blur(4px)}
+#tp-root .date-badge{position:absolute;top:14px;left:14px;background:var(--card);color:var(--ink);border-radius:12px;padding:6px 10px;text-align:center;line-height:1.1;box-shadow:var(--shadow)}
+#tp-root .date-badge b{display:block;font-size:22px}
+#tp-root .date-badge span{font-size:12px;font-weight:700;text-transform:uppercase;color:var(--accent)}
+#tp-root .card-body{padding:16px 18px 18px;display:flex;flex-direction:column;gap:6px;flex:1}
+#tp-root .card h3{margin:0;font-size:18px;line-height:1.3;letter-spacing:-.01em}
+#tp-root .meta{color:var(--muted);font-size:14px}
+#tp-root .card-foot{display:flex;justify-content:space-between;align-items:center;margin-top:auto;padding-top:10px}
+#tp-root .price{font-weight:800}
+#tp-root .price.free{color:var(--ok)}
+#tp-root .left{font-size:13px;color:var(--muted)}
+#tp-root .left.low{color:var(--warn);font-weight:700}
+#tp-root .empty{padding:60px 0;text-align:center;color:var(--muted)}
+
+/* Страница события */
+#tp-root .back{display:inline-block;margin:24px 0 16px;color:var(--muted);text-decoration:none;font-weight:600}
+#tp-root .event{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:32px;align-items:start}
+@media (max-width:880px){#tp-root .event{grid-template-columns:1fr}}
+#tp-root .event .cover{aspect-ratio:21/9;border-radius:var(--radius)}
+#tp-root .event h1{font-size:clamp(26px,4vw,38px);line-height:1.15;letter-spacing:-.02em;margin:20px 0 12px}
+#tp-root .facts{display:grid;gap:10px;margin:0 0 20px;padding:0;list-style:none}
+#tp-root .facts li{display:flex;gap:10px}
+#tp-root .facts .k{flex:0 0 110px;color:var(--muted);font-size:14px;padding-top:1px}
+#tp-root .desc p{margin:0 0 12px}
+#tp-root .panel{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);padding:22px;position:sticky;top:84px}
+#tp-root .panel .price{font-size:28px;letter-spacing:-.02em}
+#tp-root .bar{height:6px;border-radius:3px;background:var(--line);overflow:hidden;margin:12px 0 6px}
+#tp-root .bar i{display:block;height:100%;background:var(--accent)}
+#tp-root .form{display:grid;gap:12px;margin-top:18px}
+#tp-root .form label{display:grid;gap:4px;font-size:14px;font-weight:600}
+#tp-root .form input[type=text],#tp-root .form input[type=email],#tp-root .form input[type=tel]{height:46px;border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:10px;padding:0 12px;font:inherit;font-weight:500;outline:none}
+#tp-root .form input:focus{border-color:var(--accent)}
+#tp-root .form .check{display:flex;gap:8px;align-items:flex-start;font-weight:500;color:var(--muted);font-size:13px}
+#tp-root .btn{height:50px;border:0;border-radius:12px;background:var(--accent);color:var(--accent-ink);font:inherit;font-weight:800;font-size:16px;cursor:pointer;padding:0 20px;text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
+#tp-root .btn:disabled{opacity:.5;cursor:default}
+#tp-root .btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+#tp-root .err{color:#dc2626;font-size:14px;min-height:1em}
+#tp-root .note{color:var(--muted);font-size:13px}
+
+/* Билет */
+#tp-root .ticket{max-width:520px;margin:32px auto;background:var(--card);border-radius:20px;box-shadow:var(--shadow);overflow:hidden}
+#tp-root .ticket-head{padding:24px;color:#fff}
+#tp-root .ticket-head .ok{font-weight:700;opacity:.9}
+#tp-root .ticket-head h2{margin:6px 0 0;font-size:24px;line-height:1.2}
+#tp-root .ticket-body{padding:24px;border-top:2px dashed var(--line);position:relative}
+#tp-root .ticket-body:before,#tp-root .ticket-body:after{content:"";position:absolute;top:-12px;width:24px;height:24px;border-radius:50%;background:var(--bg)}
+#tp-root .ticket-body:before{left:-12px}#tp-root .ticket-body:after{right:-12px}
+#tp-root .code{font:800 34px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;letter-spacing:.12em;text-align:center;padding:14px;border-radius:12px;background:var(--accent-soft);color:var(--accent);margin:4px 0 18px}
+#tp-root .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
+#tp-root .list{display:grid;gap:12px;margin-top:24px}
+#tp-root .row{display:flex;justify-content:space-between;gap:12px;align-items:center;background:var(--card);border-radius:12px;padding:14px 16px;box-shadow:var(--shadow);text-decoration:none}
+#tp-root .row .code-s{font:700 15px ui-monospace,Menlo,Consolas,monospace;color:var(--accent)}
+#tp-root .foot{border-top:1px solid var(--line);color:var(--muted);font-size:14px;padding:20px 0}
+#tp-root .skeleton{height:280px;border-radius:var(--radius);background:linear-gradient(90deg,var(--card),var(--line),var(--card));background-size:200% 100%;animation:sk 1.2s infinite}
+@keyframes sk{to{background-position:-200% 0}}

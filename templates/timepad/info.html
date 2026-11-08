@@ -1,0 +1,65 @@
+<!-- Главная базы timepad (issue #5461): гостя ведёт на публичную афишу, организатору показывает сводку по событиям -->
+<script>
+if('{_global_.user}'==='guest') location.replace('/timepad/afisha');
+</script>
+<style>
+.tp-wrap{max-width:1000px;margin:24px auto;padding:0 16px;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+.tp-head{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin-bottom:16px}
+.tp-head h2{margin:0;font-size:24px}
+.tp-btns{display:flex;gap:8px;flex-wrap:wrap}
+.tp-btn{display:inline-block;padding:8px 14px;border-radius:8px;background:#ff5a36;color:#fff !important;text-decoration:none;font-weight:600}
+.tp-btn.tp-ghost{background:transparent;color:inherit !important;border:1px solid #ccc}
+.tp-tbl{width:100%;border-collapse:collapse;font-size:14px}
+.tp-tbl th,.tp-tbl td{padding:8px 10px;border-bottom:1px solid #e5e5e5;text-align:left;vertical-align:top}
+.tp-tbl th{font-weight:600;color:#666}
+.tp-num{text-align:right !important;white-space:nowrap}
+.tp-bar{height:4px;background:#eee;border-radius:2px;margin-top:4px;overflow:hidden}
+.tp-bar i{display:block;height:100%;background:#ff5a36}
+.tp-draft{color:#999;font-size:12px;margin-left:6px}
+.tp-note{color:#777;font-size:13px;margin-top:16px;line-height:1.5}
+</style>
+<div class="tp-wrap">
+  <div class="tp-head">
+    <h2>События</h2>
+    <div class="tp-btns">
+      <a class="tp-btn" href="/timepad/object/470">Добавить или изменить событие</a>
+      <a class="tp-btn tp-ghost" href="/timepad/object/494">Все билеты</a>
+      <a class="tp-btn tp-ghost" href="/timepad/afisha" target="_blank">Открыть афишу</a>
+    </div>
+  </div>
+  <div id="tpList">Загрузка…</div>
+  <p class="tp-note">На афише видны события с отметкой «Опубликовано». Посетитель регистрируется без входа и получает
+  код билета; код, имя, email и телефон участника появляются в таблице «Билет». Число мест — поле «Всего мест»
+  (пусто — без ограничения).</p>
+</div>
+<script>
+(function(){
+  var box=document.getElementById('tpList');
+  function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return c==='&'?'&amp;':c==='<'?'&lt;':c==='>'?'&gt;':'&quot;';});}
+  function get(u){return fetch(u,{credentials:'same-origin'}).then(function(r){return r.json();});}
+  Promise.all([
+    get('/timepad/metadata/470?JSON=1'),
+    get('/timepad/object/470/?JSON_OBJ&LIMIT=0,500'),
+    get('/timepad/report/'+encodeURIComponent('Занятость')+'?JSON_KV')
+  ]).then(function(res){
+    var pos={},sold={};
+    (res[0].reqs||[]).forEach(function(r){pos[r.id]=r.num;});
+    (res[2]||[]).forEach(function(x){sold[x.event]=+x.sold||0;});
+    var rows=(res[1]||[]).map(function(o){
+      var g=function(id){return o.r[pos[id]];};
+      return {id:o.i,title:o.r[0],start:+g(472)||0,cap:+g(485)||0,pub:String(g(491))==='1',city:g(480)};
+    }).sort(function(a,b){return a.start-b.start;});
+    if(!rows.length){box.innerHTML='Событий пока нет.';return;}
+    var f=new Intl.DateTimeFormat('ru-RU',{timeZone:'Europe/Moscow',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+    box.innerHTML='<table class="tp-tbl"><tr><th>Событие</th><th>Когда</th><th class="tp-num">Билеты</th><th></th></tr>'+
+      rows.map(function(e){
+        var n=sold[e.id]||0,p=e.cap?Math.min(100,Math.round(n/e.cap*100)):0;
+        return '<tr><td><a href="/timepad/edit_obj/'+e.id+'">'+esc(e.title)+'</a>'+(e.pub?'':'<span class="tp-draft">черновик</span>')+
+          '</td><td>'+(e.start?esc(f.format(new Date(e.start*1000))):'—')+(e.city?'<br><span class="tp-draft">'+esc(e.city)+'</span>':'')+
+          '</td><td class="tp-num">'+n+(e.cap?' / '+e.cap+'<div class="tp-bar"><i style="width:'+p+'%"></i></div>':'')+
+          '</td><td><a href="/timepad/object/494/?F_496=@'+e.id+'">участники</a>'+
+          (e.pub?' · <a href="/timepad/afisha#/e/'+e.id+'" target="_blank">на афише</a>':'')+'</td></tr>';
+      }).join('')+'</table>';
+  }).catch(function(e){box.textContent='Не удалось загрузить события: '+e.message;});
+})();
+</script>
