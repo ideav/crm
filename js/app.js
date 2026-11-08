@@ -1359,8 +1359,12 @@ class App {
         // authorized in a workspace and will never see the captcha. It now runs
         // lazily, right before the captcha decision, via _ensureCaptchaBypass().
 
-        // Handle redirect reasons from the backend: show login form and a visible message
-        const urlParams = new URLSearchParams(window.location.search);
+        this.openAuthFromParams(new URLSearchParams(window.location.search));
+        this.openAuthFromHash();
+    }
+
+    // Причины перенаправления с бэкенда (?r=) и ссылки входа (?db=, ?u=): форма входа и сообщение.
+    openAuthFromParams(urlParams) {
         if (urlParams.get('r') === 'dBNotExists') {
             const dbParam = urlParams.get('db');
             const details = urlParams.get('d');
@@ -1394,8 +1398,9 @@ class App {
             const msg = details ? details : 'Ошибка авторизации';
             showToast(msg, 'error');
             this.showAuthPanel();
-        } else if (urlParams.get('db') && this.auth.allIdbDbs.length === 0) {
-            // Redirected here after logout with ?db=<name> but no auth cookies remain — show login form
+        } else if (urlParams.get('db') && !this.auth.allIdbDbs.includes(urlParams.get('db'))) {
+            // ?db=<name> без входа в эту базу — форма входа в неё: кнопка «Войти» гостя, выход из базы.
+            // Входы в другие базы форму не отменяют (#5457); гостевая кука idb_* — HttpOnly и без метки idbs_*.
             const dbParam = urlParams.get('db');
             const usernameParam = urlParams.get('u');
             if (dbParam !== 'my' && !this.auth.validDbs.includes(dbParam)) {
@@ -1436,8 +1441,6 @@ class App {
                 loginPasswordInput.focus();
             }
         }
-
-        this.openAuthFromHash();
     }
 
     // start.html#reg (или #register) — форма сразу на вкладке «Регистрация».
