@@ -8,7 +8,7 @@
 # запросу (худшее переплетение). GET_LOCK в фейковой базе ведёт себя как в MySQL: занятое имя
 # ждёт освобождения, своё — берётся повторно. Функции ядра — настоящие, из index.php:
 # UniqueKeyLock, UniqueKeyUnlock, FindUniqueRecordDuplicateFromRequest, FindUniqueRecordDuplicate, Insert.
-# Последовательность одного запроса — как в ApplyMNew: проверка → вставка → снятие блокировки.
+# Последовательность одного запроса: проверка → вставка → конец запроса (снятие блокировки).
 #
 # Запуск: php experiments/unique-key-race-5465.test.php (php 8.1+, нужен Fiber)
 

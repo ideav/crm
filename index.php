@@ -13866,9 +13866,10 @@ function FindUniqueRecordDuplicate($typ, $skipId, $up, $val, $keyValues, $includ
 }
 # Issue #5465: проверка дубля (SELECT) и вставка (INSERT) — разные запросы, и два параллельных _m_new с одним
 # значением оба не находили дубля и оба вставляли (на ideav.ru/timepad 2 слота из 25 при 12 гостях на слот).
-# Именованная блокировка MySQL на «таблица + родитель + значение» держится от проверки до конца операции:
-# второй запрос ждёт, пока первый вставит запись, и видит её. Блокировка сессионная — обрыв скрипта
-# (my_die, die) снимает её вместе с соединением. Составной ключ блокируется по таблице и родителю.
+# Именованная блокировка MySQL на «таблица + родитель + значение» держится от проверки до конца запроса:
+# второй запрос ждёт, пока первый вставит запись, и видит её. Блокировка сессионная — конец скрипта
+# (и обрыв: my_die, die) снимает её вместе с соединением; перед отложенными триггерами её снимает
+# BtRunDeferred. Составной ключ блокируется по таблице и родителю.
 function UniqueKeyLock($typ, $up, $val, $includeVal){
 	$name = "iu_".md5($GLOBALS["z"]."|".(int)$typ."|".(int)$up.($includeVal ? "|".$val : ""));
 	if(isset($GLOBALS["UNIQUE_LOCKS"][$name]))
@@ -14582,7 +14583,6 @@ function ApplyMNew($id, $up, $files)
                 				if($up != 1)
                 					$arg .= "&F_U=$up";  # Retain this for Array elements only
                 			}
-                			UniqueKeyUnlock();
                 			return array("rec" => (int)$row[0], "id" => $next, "json" => $json, "warning" => $msg);
 						}
 			}
@@ -14714,7 +14714,6 @@ function ApplyMNew($id, $up, $files)
 					$arg = "F_U=$up";  # Retain this for Array elements only
 			}
 			$obj=$i;
-			UniqueKeyUnlock();	# #5465: запись и её реквизиты вставлены — дубль увидит следующий
 			return array("rec" => (int)$i, "id" => $next
 				, "json" => "{\"id\":$i,\"obj\":$obj,\"ord\":$ord,\"next_act\":\"$a\",\"args\":\"$arg\",\"val\":\"".htmlentities(Format_Val_View($base_typ, $val))."\"}");
 }
@@ -15020,7 +15019,6 @@ function ApplyMSave($id, $req, $files)
             	$obj = $id;
             	$id = $typ;
 			}
-	UniqueKeyUnlock();	# #5465: снять блокировку уникального значения после записи
 	return $id;
 }
 # </m-batch-4981>
@@ -15341,6 +15339,7 @@ function BtDefer($key, $fn){
 function BtRunDeferred(){
 	if(empty($GLOBALS["BT_DEFERRED"]))
 		return;
+	UniqueKeyUnlock();	# #5465: запись сохранена — триггеры не держат блокировку уникального значения
 	if(function_exists("fastcgi_finish_request"))
 		@fastcgi_finish_request();
 	ob_start(function($buffer){ return ""; });	# вывод ядра после ответа никуда не идёт
