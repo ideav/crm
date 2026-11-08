@@ -689,6 +689,7 @@ define("MAIL_MASK", "/.+@.+\..+/i");  # Mask for the email validation
 define("LOGIN_PAGE", " <A HREF=\"/$z\">Продолжить</A>.");  # Path to the login page
 define("BACK_LINK" , " <A href=\"#\" onclick=\"history.back();\">Go back</A>");
 define("PASSWORDSTARS" , "******");
+define("UNIQUE_LOCK_WAIT", 10);	# Секунд ждать блокировку уникального значения (UniqueKeyLock, issue #5465)
 
 define("REPORT", 22);
 define("LEVEL", 47);
@@ -13863,7 +13864,29 @@ function FindUniqueRecordDuplicate($typ, $skipId, $up, $val, $keyValues, $includ
 	$result = Exec_sql($sql, "Check composite unique Obj");
 	return mysqli_fetch_array($result);
 }
+# Issue #5465: проверка дубля (SELECT) и вставка (INSERT) — разные запросы, и два параллельных _m_new с одним
+# значением оба не находили дубля и оба вставляли (на ideav.ru/timepad 2 слота из 25 при 12 гостях на слот).
+# Именованная блокировка MySQL на «таблица + родитель + значение» держится от проверки до конца операции:
+# второй запрос ждёт, пока первый вставит запись, и видит её. Блокировка сессионная — обрыв скрипта
+# (my_die, die) снимает её вместе с соединением. Составной ключ блокируется по таблице и родителю.
+function UniqueKeyLock($typ, $up, $val, $includeVal){
+	$name = "iu_".md5($GLOBALS["z"]."|".(int)$typ."|".(int)$up.($includeVal ? "|".$val : ""));
+	if(isset($GLOBALS["UNIQUE_LOCKS"][$name]))
+		return;
+	$row = mysqli_fetch_array(Exec_sql("SELECT GET_LOCK('$name', ".UNIQUE_LOCK_WAIT.")", "Lock unique key"));
+	if(!$row || (string)$row[0] !== "1")
+		my_die(t9n("[RU]Запись с таким значением сейчас создаётся другим запросом, повторите позже[EN]A record with this value is being created by another request, try again later"), "409 Conflict");
+	$GLOBALS["UNIQUE_LOCKS"][$name] = TRUE;
+}
+function UniqueKeyUnlock(){
+	if(empty($GLOBALS["UNIQUE_LOCKS"]))
+		return;
+	foreach(array_keys($GLOBALS["UNIQUE_LOCKS"]) as $name)
+		Exec_sql("SELECT RELEASE_LOCK('$name')", "Unlock unique key");
+	$GLOBALS["UNIQUE_LOCKS"] = array();
+}
 function FindUniqueRecordDuplicateFromRequest($typ, $skipId, $up, $val, $request, $includeVal=true){
+	UniqueKeyLock($typ, $up, $val, $includeVal);
 	$keyReqs = UniqueKeyReqs($typ);
 	$keyValues = UniqueKeyValuesFromRequest($typ, $skipId, $request, $keyReqs);
 	return FindUniqueRecordDuplicate($typ, $skipId, $up, $val, $keyValues, $includeVal);
@@ -14559,6 +14582,7 @@ function ApplyMNew($id, $up, $files)
                 				if($up != 1)
                 					$arg .= "&F_U=$up";  # Retain this for Array elements only
                 			}
+                			UniqueKeyUnlock();
                 			return array("rec" => (int)$row[0], "id" => $next, "json" => $json, "warning" => $msg);
 						}
 			}
@@ -14690,6 +14714,7 @@ function ApplyMNew($id, $up, $files)
 					$arg = "F_U=$up";  # Retain this for Array elements only
 			}
 			$obj=$i;
+			UniqueKeyUnlock();	# #5465: запись и её реквизиты вставлены — дубль увидит следующий
 			return array("rec" => (int)$i, "id" => $next
 				, "json" => "{\"id\":$i,\"obj\":$obj,\"ord\":$ord,\"next_act\":\"$a\",\"args\":\"$arg\",\"val\":\"".htmlentities(Format_Val_View($base_typ, $val))."\"}");
 }
@@ -14995,6 +15020,7 @@ function ApplyMSave($id, $req, $files)
             	$obj = $id;
             	$id = $typ;
 			}
+	UniqueKeyUnlock();	# #5465: снять блокировку уникального значения после записи
 	return $id;
 }
 # </m-batch-4981>
