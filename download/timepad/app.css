@@ -101,3 +101,16 @@
 #tp-root .foot{border-top:1px solid var(--line);color:var(--muted);font-size:14px;padding:20px 0}
 #tp-root .skeleton{height:280px;border-radius:var(--radius);background:linear-gradient(90deg,var(--card),var(--line),var(--card));background-size:200% 100%;animation:sk 1.2s infinite}
 @keyframes sk{to{background-position:-200% 0}}
+
+/* Консультации: сетка слотов (issue #5465) */
+#tp-root .slots{display:grid;grid-template-columns:repeat(auto-fill,minmax(76px,1fr));gap:8px;margin:14px 0 4px}
+#tp-root .slot{height:42px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font:inherit;font-weight:700;cursor:pointer}
+#tp-root .slot:hover:not(:disabled){border-color:var(--accent)}
+#tp-root .slot.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+#tp-root .slot:disabled{opacity:.4;text-decoration:line-through;cursor:default}
+#tp-root .picked{font-weight:800;font-size:18px}
+#tp-root .confirm{margin-top:16px;padding:14px 16px;border-radius:12px;background:var(--accent-soft)}
+#tp-root .confirm p{margin:0}
+#tp-root .ticket.cancelled .ticket-head{filter:grayscale(1)}
+#tp-root .ticket.cancelled .code{text-decoration:line-through;opacity:.6}
+#tp-root .row.off{opacity:.55}

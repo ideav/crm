@@ -1,4 +1,4 @@
-<!-- Главная базы timepad (issue #5461): гостя ведёт на публичную афишу, организатору показывает сводку по событиям -->
+<!-- Главная базы timepad (issue #5461): гостя ведёт на публичную афишу, организатору показывает сводку по событиям и консультациям (issue #5465) -->
 <script>
 if('{_global_.user}'==='guest') location.replace('/timepad/afisha');
 </script>
@@ -17,6 +17,9 @@ if('{_global_.user}'==='guest') location.replace('/timepad/afisha');
 .tp-bar i{display:block;height:100%;background:#ff5a36}
 .tp-draft{color:#999;font-size:12px;margin-left:6px}
 .tp-note{color:#777;font-size:13px;margin-top:16px;line-height:1.5}
+.tp-cons{margin-top:36px}
+.tp-cons h3{margin:24px 0 8px;font-size:18px}
+.tp-who{color:#555;font-size:13px;line-height:1.6}
 </style>
 <div class="tp-wrap">
   <div class="tp-head">
@@ -30,8 +33,22 @@ if('{_global_.user}'==='guest') location.replace('/timepad/afisha');
   <div id="tpList">Загрузка…</div>
   <p class="tp-note">На афише видны события с отметкой «Опубликовано». Посетитель регистрируется без входа и получает
   код билета; код, имя, email и телефон участника появляются в таблице «Билет». Число мест — поле «Всего мест»
-  (пусто — без ограничения).</p>
+  (пусто — без ограничения). Отменённые билеты (поле «Отменён») в занятость не входят.</p>
+  <div class="tp-cons">
+    <div class="tp-head">
+      <h2>Консультации</h2>
+      <div class="tp-btns">
+        <a class="tp-btn" href="/timepad/object/855">Добавить или изменить консультацию</a>
+        <a class="tp-btn tp-ghost" href="/timepad/object/857">Занятые слоты</a>
+      </div>
+    </div>
+    <div id="tpCons">Загрузка…</div>
+    <p class="tp-note">Расписание консультации — дни недели внутри периода «Период с» … «Период по» и (или) список дат в поле
+    «Даты»; отменённый день — запись в подчинённой таблице «Исключение». Слоты дня — от «Время с» до «Время до» с шагом
+    «Шаг, мин», кроме перерыва. На один слот записывается один человек; посетитель может отменить запись по коду билета.</p>
+  </div>
 </div>
+<script src="/download/timepad/schedule.js?v=5"></script>
 <script>
 (function(){
   var box=document.getElementById('tpList');
@@ -61,5 +78,51 @@ if('{_global_.user}'==='guest') location.replace('/timepad/afisha');
           (e.pub?' · <a href="/timepad/afisha#/e/'+e.id+'" target="_blank">на афише</a>':'')+'</td></tr>';
       }).join('')+'</table>';
   }).catch(function(e){box.textContent='Не удалось загрузить события: '+e.message;});
+
+  // Консультации: по каждому дню расписания — занято из всего и кто записан (без отменённых)
+  var cbox=document.getElementById('tpCons'),S=window.PoraSchedule;
+  var CN={weekdays:868,periodFrom:870,periodTo:872,dates:874,timeFrom:876,timeTo:878,step:880,breakFrom:882,breakTo:884,pub:887};
+  function reader(meta){var pos={};(meta.reqs||[]).forEach(function(r){pos[r.id]=r.num;});return function(r,id){return pos[id]!=null?r[pos[id]]:'';};}
+  Promise.all([
+    get('/timepad/metadata/855?JSON=1'),
+    get('/timepad/object/855/?JSON_OBJ&LIMIT=0,200'),
+    get('/timepad/metadata/494?JSON=1'),
+    get('/timepad/object/494/?JSON_OBJ&LIMIT=0,5000'),
+    get('/timepad/object/857/?JSON_OBJ&LIMIT=0,5000')
+  ]).then(function(res){
+    var gc=reader(res[0]),gt=reader(res[2]),taken={},people={};
+    (res[4]||[]).forEach(function(o){taken[o.r[0]]=1;});
+    (res[3]||[]).forEach(function(o){
+      var cons=String(gt(o.r,892)||''),at=+gt(o.r,894)||0;
+      if(!cons||!at||gt(o.r,896))return;
+      var id=cons.split(':')[0],k=id+'|'+S.dayOf(at);
+      (people[k]=people[k]||[]).push({at:at,name:gt(o.r,546),email:gt(o.r,609),phone:gt(o.r,611),code:o.r[0]});
+    });
+    var list=(res[1]||[]);
+    if(!list.length){cbox.innerHTML='Консультаций пока нет.';return;}
+    var from=S.today(),to=S.addDays(from,S.HORIZON_DAYS);
+    var df=new Intl.DateTimeFormat('ru-RU',{timeZone:'Europe/Moscow',weekday:'short',day:'numeric',month:'short'});
+    var tf=new Intl.DateTimeFormat('ru-RU',{timeZone:'Europe/Moscow',hour:'2-digit',minute:'2-digit'});
+    var exc=list.map(function(o){return get('/timepad/object/856/?JSON_OBJ&F_U='+o.i+'&LIMIT=0,500').catch(function(){return [];});});
+    return Promise.all(exc).then(function(ex){
+      cbox.innerHTML=list.map(function(o,n){
+        var c={exceptions:(ex[n]||[]).map(function(x){return x.r[0];})};
+        Object.keys(CN).forEach(function(k){c[k]=gc(o.r,CN[k]);});
+        var days=S.days(c,from,to);
+        var head='<h3><a href="/timepad/edit_obj/'+o.i+'">'+esc(o.r[0])+'</a>'+(String(c.pub)==='1'?'':'<span class="tp-draft">черновик</span>')+'</h3>';
+        if(!days.length)return head+'<p class="tp-note">В ближайшие '+S.HORIZON_DAYS+' дней по расписанию дней нет.</p>';
+        return head+'<table class="tp-tbl"><tr><th>День</th><th class="tp-num">Занято</th><th>Записались</th></tr>'+days.map(function(d){
+          var sl=S.slots(c,d),busy=sl.filter(function(s){return taken[S.slotKey(o.i,d,s.time)];}).length;
+          var who=(people[o.i+'|'+d]||[]).sort(function(a,b){return a.at-b.at;});
+          var p=sl.length?Math.round(busy/sl.length*100):0;
+          return '<tr><td>'+esc(df.format(new Date((sl.length?sl[0].start:0)*1000)))+
+            (String(c.pub)==='1'?'<br><a class="tp-draft" href="/timepad/afisha#/c/'+o.i+'/'+d+'" target="_blank">на афише</a>':'')+
+            '</td><td class="tp-num">'+busy+' / '+sl.length+'<div class="tp-bar"><i style="width:'+p+'%"></i></div></td><td class="tp-who">'+
+            (who.length?who.map(function(w){return '<b>'+esc(tf.format(new Date(w.at*1000)))+'</b> '+esc(w.name)+' · '+esc(w.email)+(w.phone?' · '+esc(w.phone):'')+' <span class="tp-draft">'+esc(w.code)+'</span>';}).join('<br>'):'—')+
+            '</td></tr>';
+        }).join('')+'</table>';
+      }).join('');
+    });
+  }).catch(function(e){cbox.textContent='Не удалось загрузить консультации: '+e.message;});
 })();
 </script>
