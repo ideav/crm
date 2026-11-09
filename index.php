@@ -2816,6 +2816,8 @@ function Construct_WHERE($key, $filter, $cur_typ, $join_req=0)
             						$GLOBALS["where"] .= " AND a$key.val $search_val ";
         					    elseif(isset($inID))
             						$GLOBALS["where"] .= " AND a$key.id $search_val ";
+							    elseif($is_date) # issue #5469: дата ггггммдд — строковым литералом, иначе приведение типа мимо индекса (t,val)
+    								$GLOBALS["where"] .= " AND a$key.val$NOT_EQ$EQ'$sql_value' ";
 							    elseif(is_numeric($value))
     								$GLOBALS["where"] .= " AND a$key.val$NOT_EQ$EQ$value ";
 							    else
