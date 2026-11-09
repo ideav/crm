@@ -98,8 +98,9 @@ function my_die($msg, $code = ""){ throw new \Exception(($code === "" ? "400 Bad
 
 $coreSrc = file_get_contents(__DIR__."/../index.php");
 $helper = core_function($coreSrc, "RequireNumber");
+$helperDeps = core_function($coreSrc, "Normalize_Number").core_function($coreSrc, "Number_Storage_Val");
 ok($helper !== "", "в ядре есть проверка числового значения RequireNumber");
-eval("namespace Test5220;\n".core_function($coreSrc, "ApplyMSet").$helper);
+eval("namespace Test5220;\n".core_function($coreSrc, "ApplyMSet").$helper.$helperDeps);
 if(!function_exists(__NAMESPACE__."\\RequireNumber")){
     function RequireNumber($t, $val){ return $val; }   # прежнее поведение: проверки нет
 }

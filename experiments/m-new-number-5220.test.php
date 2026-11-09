@@ -64,7 +64,7 @@ $core = getenv("CORE") ?: __DIR__."/../index.php";
 $coreSrc = file_get_contents($core);
 $code = core_function($coreSrc, "ApplyMNew");
 $check = (string)core_function($coreSrc, "Number_check");
-$code .= $check.core_function($coreSrc, "RequireNumber");
+$code .= $check.core_function($coreSrc, "RequireNumber").core_function($coreSrc, "Normalize_Number").core_function($coreSrc, "Number_Storage_Val");
 if($check === "")
 	$code .= "function Number_check(){}\n";	# прежнее ядро: проверки нет, мерка краснеет по поведению
 $code .= "function Required_check(){}\n";	# обязательные поля — мерка #5219
