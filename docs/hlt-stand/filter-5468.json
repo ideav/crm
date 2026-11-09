@@ -1,0 +1,243 @@
+[
+ {
+  "part": "F",
+  "table": "T_1M_W12",
+  "scenario": "agg1_date_day",
+  "filter": "FR_released=01.01.2020&TO_released=01.01.2020",
+  "threads": 1,
+  "rows": 400,
+  "ms": [
+   24690,
+   42762
+  ],
+  "at": "2026-11-09T07:50:33.619Z"
+ },
+ {
+  "part": "F",
+  "table": "T_1M_W12",
+  "scenario": "agg1_date_week",
+  "filter": "FR_released=01.01.2020&TO_released=07.01.2020",
+  "threads": 1,
+  "rows": 2800,
+  "ms": [
+   350,
+   386,
+   786,
+   884
+  ],
+  "at": "2026-11-09T07:50:37.981Z"
+ },
+ {
+  "part": "F",
+  "table": "T_1M_W12",
+  "scenario": "agg1_date_month",
+  "filter": "FR_released=01.01.2020&TO_released=31.01.2020",
+  "threads": 1,
+  "rows": 12400,
+  "ms": [
+   618,
+   806,
+   825,
+   1400
+  ],
+  "at": "2026-11-09T07:50:42.737Z"
+ },
+ {
+  "part": "F",
+  "table": "T_1M_W12",
+  "scenario": "agg1_date_quarter",
+  "filter": "FR_released=01.01.2020&TO_released=31.03.2020",
+  "threads": 1,
+  "rows": 36400,
+  "ms": [
+   1183,
+   1595,
+   2229,
+   3570
+  ],
+  "at": "2026-11-09T07:50:51.024Z"
+ },
+ {
+  "part": "F",
+  "table": "T_1M_W12",
+  "scenario": "agg1_date_year",
+  "filter": "FR_released=01.01.2020&TO_released=31.12.2020",
+  "threads": 1,
+  "rows": 146400,
+  "ms": [
+   12910,
+   14211,
+   17501,
+   18016
+  ],
+  "at": "2026-11-09T07:51:24.552Z"
+ },
+ {
+  "part": "F",
+  "table": "T_1M_W12",
+  "scenario": "agg3_date_day",
+  "filter": "FR_released=01.01.2020&TO_released=01.01.2020",
+  "threads": 1,
+  "rows": 200,
+  "ms": [
+   46992
+  ],
+  "at": "2026-11-09T07:52:11.634Z"
+ },
+ {
+  "part": "F",
+  "table": "T_1M_W12",
+  "scenario": "agg3_date_week",
+  "filter": "FR_released=01.01.2020&TO_released=07.01.2020",
+  "threads": 1,
+  "rows": 200,
+  "ms": [
+   422,
+   974,
+   1196,
+   3421
+  ],
+  "at": "2026-11-09T07:52:19.369Z"
+ },
+ {
+  "part": "F",
+  "table": "T_1M_W12",
+  "scenario": "agg3_date_month",
+  "filter": "FR_released=01.01.2020&TO_released=31.01.2020",
+  "threads": 1,
+  "rows": 200,
+  "ms": [
+   907,
+   1048,
+   1315,
+   1335
+  ],
+  "at": "2026-11-09T07:52:24.877Z"
+ },
+ {
+  "part": "F",
+  "table": "T_1M_W12",
+  "scenario": "agg3_date_quarter",
+  "filter": "FR_released=01.01.2020&TO_released=31.03.2020",
+  "threads": 1,
+  "rows": 200,
+  "ms": [
+   2051,
+   2831,
+   3434,
+   5648
+  ],
+  "at": "2026-11-09T07:52:34.269Z"
+ },
+ {
+  "part": "F",
+  "table": "T_1M_W12",
+  "scenario": "agg3_date_year",
+  "filter": "FR_released=01.01.2020&TO_released=31.12.2020",
+  "threads": 1,
+  "rows": 200,
+  "ms": [
+   14612,
+   16704,
+   17800,
+   26887
+  ],
+  "at": "2026-11-09T07:53:21.011Z"
+ },
+ {
+  "part": "F",
+  "table": "T_1M_W12",
+  "scenario": "agg5_date_day",
+  "filter": "FR_released=01.01.2020&TO_released=01.01.2020",
+  "threads": 1,
+  "rows": 200,
+  "ms": [
+   71733
+  ],
+  "at": "2026-11-09T07:54:32.820Z"
+ },
+ {
+  "part": "F",
+  "table": "T_1M_W12",
+  "scenario": "agg5_date_week",
+  "filter": "FR_released=01.01.2020&TO_released=07.01.2020",
+  "threads": 1,
+  "rows": 200,
+  "ms": [
+   621,
+   1146,
+   2882,
+   3495
+  ],
+  "at": "2026-11-09T07:54:40.055Z"
+ },
+ {
+  "part": "F",
+  "table": "T_1M_W12",
+  "scenario": "agg5_date_month",
+  "filter": "FR_released=01.01.2020&TO_released=31.01.2020",
+  "threads": 1,
+  "rows": 200,
+  "ms": [
+   1413,
+   1612,
+   1975,
+   2447
+  ],
+  "at": "2026-11-09T07:54:47.241Z"
+ },
+ {
+  "part": "F",
+  "table": "T_1M_W12",
+  "scenario": "agg5_date_quarter",
+  "filter": "FR_released=01.01.2020&TO_released=31.03.2020",
+  "threads": 1,
+  "rows": 200,
+  "ms": [
+   3436,
+   4597,
+   4665,
+   7092
+  ],
+  "at": "2026-11-09T07:55:00.896Z"
+ },
+ {
+  "part": "F",
+  "table": "T_1M_W12",
+  "scenario": "agg5_date_year",
+  "filter": "FR_released=01.01.2020&TO_released=31.12.2020",
+  "threads": 1,
+  "rows": 200,
+  "ms": [
+   18345,
+   20571,
+   22090,
+   23400
+  ],
+  "at": "2026-11-09T07:55:46.688Z"
+ },
+ {
+  "part": "F",
+  "table": "T_1M_W12",
+  "scenario": "agg1_cast1k",
+  "filter": "FR_code=>=0&TO_code=<1000",
+  "threads": 1,
+  "rows": 1001,
+  "ms": [
+   60462
+  ],
+  "at": "2026-11-09T07:56:47.214Z"
+ },
+ {
+  "part": "F",
+  "table": "T_1M_W12",
+  "scenario": "agg1_all",
+  "filter": "",
+  "threads": 1,
+  "rows": 1000000,
+  "ms": [
+   114893
+  ],
+  "at": "2026-11-09T07:58:42.178Z"
+ }
+]
