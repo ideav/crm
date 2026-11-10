@@ -591,12 +591,13 @@
     }
 
     function truthyFlag(value) {
+        // #5475: BOOLEAN с #5442 — "1" да, "-1" нет (хранится явно), пусто — не задано.
         if (value === true) return true;
         if (value === false || value == null) return false;
-        if (typeof value === 'number') return isFinite(value) && value !== 0;
+        if (typeof value === 'number') return isFinite(value) && value > 0;
         var s = String(value).trim().toLowerCase();
         if (s === '') return false;
-        if (s === '0' || s === 'false' || s === 'нет' || s === 'no' || s === 'off') return false;
+        if (s === '0' || s === '-1' || s === 'false' || s === 'нет' || s === 'no' || s === 'off') return false;
         return true;
     }
 
@@ -605,7 +606,7 @@
         if (batch.active === true) return true;
         if (batch.active === false) return false;
         var s = String(batch.active).trim().toLowerCase();
-        return !(s === '0' || s === 'false' || s === 'нет' || s === 'no' || s === 'off' || s === 'неактивно');
+        return !(s === '0' || s === '-1' || s === 'false' || s === 'нет' || s === 'no' || s === 'off' || s === 'неактивно');   // #5475
     }
 
     function activeReqId(meta) {
