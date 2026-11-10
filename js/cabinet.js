@@ -70,6 +70,13 @@ class CabinetController {
         // Load user data
         await this.loadUserData();
 
+        // Партнёрский раздел: материалы с персональными ссылками, клиенты, экзамен (js/partner-cabinet.js)
+        if (window.PartnerCabinet) {
+            window.PartnerCabinet.init(document, 'https://' + this.apiConfig.host + '/my', {
+                host: 'https://ideav.ru', bot: 'Integrammbot', userId: this.userData.DBID || '0'
+            });
+        }
+
         // #5364: одобренные шаблоны баз — в выбор при создании базы, модератору — панель модерации
         if (window.DbTemplates) {
             window.DbTemplates.initCabinet({
