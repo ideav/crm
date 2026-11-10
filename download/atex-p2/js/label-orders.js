@@ -74,10 +74,10 @@
         return String(v == null ? '' : v).trim() !== '' && isFinite(n) ? n : NaN;
     }
 
-    // BOOLEAN Интеграма: «X» (или «1») — да, пусто — нет.
+    // BOOLEAN Интеграма: «1» (или «X») — да, «-1» — нет (хранится явно, #5442), пусто — не задано.
     function bool(v) {
         var s = String(v == null ? '' : v).trim().toLowerCase();
-        return s !== '' && s !== '0' && s !== 'false';
+        return s !== '' && s !== '0' && s !== '-1' && s !== 'false';
     }
 
     function settingValue(recs, key, db) {

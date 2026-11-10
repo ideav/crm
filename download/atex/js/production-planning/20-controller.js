@@ -2264,7 +2264,7 @@
                     diameterId: row.sleeve_diameter_id == null ? '' : String(row.sleeve_diameter_id).trim(),
                     dateKey: Number(row.batch_date) || 0,
                     remaining: stripNum(legacy ? row.remaining_m : qty),
-                    active: String(row.active == null ? '' : row.active).trim() !== ''
+                    active: truthyFlag(row.active)   // #5475: "-1" = нет (#5442)
                 };
             });
         }).catch(function() { self.sleeveBatches = []; });

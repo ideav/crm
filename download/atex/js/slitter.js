@@ -595,12 +595,13 @@
     }
 
     function truthyFlag(value) {
+        // #5475: BOOLEAN с #5442 — "1" да, "-1" нет (хранится явно), пусто — не задано.
         if (value === true) return true;
         if (value === false || value == null) return false;
-        if (typeof value === 'number') return isFinite(value) && value !== 0;
+        if (typeof value === 'number') return isFinite(value) && value > 0;
         var s = String(value).trim().toLowerCase();
         if (!s) return false;
-        return !(s === '0' || s === 'false' || s === 'нет' || s === 'no' || s === 'off' || s === 'неактивно');
+        return !(s === '0' || s === '-1' || s === 'false' || s === 'нет' || s === 'no' || s === 'off' || s === 'неактивно');
     }
 
     function isActiveBatch(batch) {
