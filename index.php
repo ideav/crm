@@ -2779,6 +2779,20 @@ function Construct_WHERE($key, $filter, $cur_typ, $join_req=0)
 			    # We might get a statement here, thus check if we got no letters and stuff
 			    if((double)str_replace(" ", "", $value) != 0)
     			    $value = str_replace(" ", "", $value);
+				# Issue #5471: «равно»/«не равно» по NUMBER/SIGNED — значение приводится так же, как при сохранении,
+				# и подставляется строкой в кавычках: число против longtext val не даёт использовать индекс (t, val).
+				# Ноль не трогаем: при сохранении 0 не приводится ("0.0"/"00" лежат как пришли) — прежнее числовое сравнение.
+				$num_eq = FALSE;
+				if(($EQ === "=") && !isset($in) && !isset($inID) && !isset($GLOBALS["REF_typs"][$key])
+						&& isset($GLOBALS["REV_BT"][$key]) && in_array($GLOBALS["REV_BT"][$key], array("NUMBER", "SIGNED"))
+						&& (strpos($value, "%") === FALSE) && !preg_match("/\[([^\[\]]+)\]/", $value)
+						&& (($canon = Normalize_Number($value)) !== FALSE)){
+					$canon = (string)Number_Storage_Val($GLOBALS["REV_BT"][$key], $canon);
+					if((double)$canon != 0){
+						$value = $canon;
+						$num_eq = TRUE;
+					}
+				}
 				$sql_value = Escape_Filter_Val($value); # значение изменилось — пересчитываем
 				# Check if we got only one range border, and then transform it into an exact match
 				if((!isset($filter["TO"])) || (!isset($filter["FR"])) || ($value === "%")){
@@ -2818,7 +2832,7 @@ function Construct_WHERE($key, $filter, $cur_typ, $join_req=0)
             						$GLOBALS["where"] .= " AND a$key.id $search_val ";
 							    elseif($is_date) # issue #5469: дата ггггммдд — строковым литералом, иначе приведение типа мимо индекса (t,val)
     								$GLOBALS["where"] .= " AND a$key.val$NOT_EQ$EQ'$sql_value' ";
-							    elseif(is_numeric($value))
+							    elseif(is_numeric($value) && !$num_eq)
     								$GLOBALS["where"] .= " AND a$key.val$NOT_EQ$EQ$value ";
 							    else
     								$GLOBALS["where"] .= " AND a$key.val='$sql_value' ";
@@ -14133,7 +14147,9 @@ function RequireRefId($t, $val)
 # обычный минус; апостроф между разрядами (1'000) — разделитель. Запятая — десятичный знак;
 # если есть и точка, и запятая, десятичный — последний из них, а другой — разделитель групп
 # по три цифры (1.234,56 и 1,234.56). Возвращает число строкой без разделителей.
-function RequireNumber($t, $val)
+# Issue #5471: нормализация числа, общая для записи (RequireNumber) и фильтра (Construct_WHERE):
+# каноническая числовая строка или FALSE, если значение не число. Без my_die.
+function Normalize_Number($val)
 {
 	$num = is_array($val) ? "" : (string)preg_replace('/[\s\p{Z}\x{200B}-\x{200D}\x{2060}\x{FEFF}]+/u', "", (string)$val);
 	$num = (string)preg_replace('/[\x{2212}\x{2013}]/u', "-", $num);
@@ -14141,7 +14157,17 @@ function RequireNumber($t, $val)
 	if(preg_match('/^[+-]?\d{1,3}(?:([.,])\d{3})*(?!\1)[.,]\d*$/', $num, $m) && isset($m[1]) && ($m[1] !== ""))
 		$num = str_replace($m[1], "", $num);	# 1.234,56 / 1,234.56: разделитель групп — прочь
 	$num = str_replace(",", ".", $num);
-	if(!is_numeric($num))
+	return is_numeric($num) ? $num : FALSE;
+}
+# Как значение NUMBER/SIGNED приводится при сохранении: (int) для NUMBER, (double) для SIGNED.
+function Number_Storage_Val($base, $num)
+{
+	return $base === "NUMBER" ? (int)$num : (double)$num;
+}
+function RequireNumber($t, $val)
+{
+	$num = Normalize_Number($val);
+	if($num === FALSE)
 		my_die(t9n("[RU]Значение должно быть числом[EN]Value must be a number").": t$t = ".(is_array($val) ? "array" : $val));
 	return $num;
 }
@@ -14248,9 +14274,9 @@ function ApplyMSet($id, $req, $files)
 							if($t == PASSWORD) // Encrypt the password
         						$val = Pwd_hash($val);
         					elseif(($GLOBALS["REV_BT"][$row["t"]] == "NUMBER") && ($val != 0))
-        						$val = $val === "" ? "" : (int)RequireNumber($t, $val);
+        						$val = $val === "" ? "" : Number_Storage_Val("NUMBER", RequireNumber($t, $val));
         					elseif(($GLOBALS["REV_BT"][$row["t"]] == "SIGNED") && ($val != 0))
-        						$val = $val === "" ? "" : (double)RequireNumber($t, $val);
+        						$val = $val === "" ? "" : Number_Storage_Val("SIGNED", RequireNumber($t, $val));
         					else
         						$val = Format_Val($row["t"], $val);
         					if($cur_id){ # The Req exists

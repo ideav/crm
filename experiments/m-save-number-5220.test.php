@@ -106,7 +106,7 @@ function mysqli_fetch_array($it){
 $coreSrc = file_get_contents(__DIR__."/../index.php");
 $check = core_function($coreSrc, "Number_check");
 ok($check !== "", "в ядре есть проверка Number_check");
-$code = core_function($coreSrc, "ApplyMSave").$check.core_function($coreSrc, "RequireNumber");
+$code = core_function($coreSrc, "ApplyMSave").$check.core_function($coreSrc, "RequireNumber").core_function($coreSrc, "Normalize_Number").core_function($coreSrc, "Number_Storage_Val");
 if($check === "")
     $code .= "function Number_check(){}\n";   # прежнее ядро: проверки нет, мерка краснеет по поведению
 eval("namespace Test5220s;\n".$code);
