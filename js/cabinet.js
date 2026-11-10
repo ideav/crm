@@ -5,6 +5,14 @@
 // Имя базы: от 3 до 15 латинских символов и цифр, начиная с буквы
 const DB_NAME_RE = /^[a-zA-Z][a-zA-Z0-9]{2,14}$/;
 
+// BOOLEAN после #5442: «да» = 1 (или X); -1, 0, пусто = «нет» (#5478)
+function cabinetBoolIsTrue(value) {
+    if (value === null || value === undefined || value === false) return false;
+    if (value === true) return true;
+    const v = String(value).trim().toLowerCase();
+    return v !== '' && v !== '0' && v !== '-1' && v !== 'false';
+}
+
 class CabinetController {
     constructor() {
         this.userData = null;
@@ -433,10 +441,10 @@ class CabinetController {
         const aboutInput = document.getElementById('profile-about');
         if (aboutInput) aboutInput.value = this.userData.Notes || '';
 
-        // Public profile checkbox (IsPublic: empty = no, any value = yes)
+        // Public profile checkbox (IsPublic: 1/X = yes; empty, 0, -1 = no — #5442/#5478)
         const publicCheckbox = document.getElementById('profile-public');
         if (publicCheckbox) {
-            publicCheckbox.checked = !!(this.userData.IsPublic);
+            publicCheckbox.checked = cabinetBoolIsTrue(this.userData.IsPublic);
         }
 
         // Store original values for change detection
@@ -444,7 +452,7 @@ class CabinetController {
             'profile-name': this.userData.Name || '',
             'profile-phone': this.userData.Phone || '',
             'profile-about': this.userData.Notes || '',
-            'profile-public': !!(this.userData.IsPublic)
+            'profile-public': cabinetBoolIsTrue(this.userData.IsPublic)
         };
 
         // Hide save button initially
