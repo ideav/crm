@@ -114,6 +114,15 @@ check('события клиента: время, вид и текст из от
     assert.deepStrictEqual(e, [{ time: '03.11.2026 10:02', kind: 'Материал', text: 'Открыл видео' }]);
 });
 
+check('дата-время из отчёта в unix-секундах показывается датой (DATETIME в JSON_KV)', () => {
+    const sec = 1794030594, d = new Date(sec * 1000), p = n => String(n).padStart(2, '0');
+    const want = p(d.getDate()) + '.' + p(d.getMonth() + 1) + '.' + d.getFullYear() + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+    assert.strictEqual(A.readEvents([{ EventTime: String(sec), Kind: 'Бот', Text: 'Запустил' }])[0].time, want);
+    assert.strictEqual(A.readPartners([{ PartnerID: '1', Name: 'А', LastActive: String(sec) }])[0].last, want);
+    assert.strictEqual(A.readClients([{ ClientID: '1', PartnerID: '1', Client: 'К', LastActive: String(sec) }])[0].last, want);
+    assert.strictEqual(A.readClients([{ ClientID: '1', PartnerID: '1', Client: 'К', LastActive: '' }])[0].last, '');
+});
+
 function fakeDoc() {
     const byId = {};
     function el(tag) {

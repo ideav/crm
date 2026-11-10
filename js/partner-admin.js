@@ -16,6 +16,13 @@
     }
     function num(v) { var n = parseFloat(String(v == null ? '' : v).replace(/\s/g, '').replace(',', '.')); return isNaN(n) ? 0 : n; }
     function rub(n) { return n ? String(n).replace(/\B(?=(\d{3})+$)/g, ' ') + ' ₽' : '—'; }
+    // DATETIME в JSON_KV приходит unix-секундами; дата (DATE) — уже «дд.мм.гггг».
+    function when(v) {
+        if (!/^\d{9,11}$/.test(v)) return v;
+        var d = new Date(parseInt(v, 10) * 1000);
+        function p(n) { return (n < 10 ? '0' : '') + n; }
+        return p(d.getDate()) + '.' + p(d.getMonth() + 1) + '.' + d.getFullYear() + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+    }
     function rows(x) { return Array.isArray(x) ? x.filter(function (r) { return r && typeof r === 'object'; }) : []; }
 
     function readPartners(json) {
@@ -25,7 +32,7 @@
                 id: get(r, 'PartnerID'), name: get(r, 'Name') || get(r, 'PartnerID'), reg: get(r, 'Reg'),
                 exam: passed ? 'passed' : (score > 0 || date ? 'failed' : 'none'), score: score, examDate: date,
                 opens: num(get(r, 'Opens')), bot: num(get(r, 'BotStarts')), flows: num(get(r, 'Flows')),
-                earned: num(get(r, 'Earned')), payable: num(get(r, 'Payable')), last: get(r, 'LastActive'), minutes: num(get(r, 'Minutes'))
+                earned: num(get(r, 'Earned')), payable: num(get(r, 'Payable')), last: when(get(r, 'LastActive')), minutes: num(get(r, 'Minutes'))
             };
         });
     }
@@ -36,7 +43,7 @@
             return {
                 id: get(r, 'ClientID'), pid: get(r, 'PartnerID'), name: get(r, 'Client') || get(r, 'ClientID'),
                 came: get(r, 'Came'), stage: isNaN(st) ? 1 : Math.min(5, Math.max(1, st)),
-                trialStart: get(r, 'TrialStart') || get(r, 'Came'), last: get(r, 'LastActive'),
+                trialStart: get(r, 'TrialStart') || get(r, 'Came'), last: when(get(r, 'LastActive')),
                 direct: num(get(r, 'DirectCount')), paid: get(r, 'Paid') === '1',
                 bases: num(get(r, 'Bases')), records: num(get(r, 'Records')), tokens: num(get(r, 'Tokens'))
             };
@@ -45,7 +52,7 @@
 
     function readEvents(json) {
         return rows(json).filter(function (r) { return get(r, 'Text') || get(r, 'Kind'); }).map(function (r) {
-            return { time: get(r, 'EventTime'), kind: get(r, 'Kind'), text: get(r, 'Text') };
+            return { time: when(get(r, 'EventTime')), kind: get(r, 'Kind'), text: get(r, 'Text') };
         });
     }
 
