@@ -464,3 +464,17 @@ button.mc-kpi:hover { border-color: var(--mc-accent); transform: translateY(-1px
 .partner-wait, .partner-trial, .partner-lapsed { background: #f6e8cc; color: #7a4d0c; }
 .partner-stats { display: flex; flex-wrap: wrap; gap: 10px 28px; }
 .partner-stat b { display: block; font-size: 1.3rem; }
+
+/* Сводный кабинет партнёров (templates/my/partners.html) */
+.partner-crumbs { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin: 6px 0 12px; }
+.partner-lnk { background: none; border: 0; color: #1f5fa8; cursor: pointer; font: inherit; font-weight: 600; padding: 10px 6px; min-height: 44px; text-align: left; }
+.partner-frow { display: grid; grid-template-columns: minmax(150px, 220px) 1fr 60px; gap: 10px; align-items: center; margin-bottom: 8px; }
+.partner-sig { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-top: 1px solid var(--mc-border, #dde4ee); }
+.partner-sig:first-of-type { border-top: 0; }
+.partner-filters { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.partner-filters select, .partner-filters input { min-height: 44px; padding: 8px 10px; }
+.partner-steps { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0 14px; }
+.partner-step { padding: 6px 12px; border-radius: 99px; font-size: .82rem; border: 1px solid var(--mc-border, #dde4ee); color: var(--mc-muted, #56606e); }
+.partner-step.partner-on { background: #1f5fa8; border-color: #1f5fa8; color: #fff; }
+.partner-ev { display: grid; grid-template-columns: 130px 110px 1fr; gap: 10px; padding: 8px 0; border-top: 1px solid var(--mc-border, #dde4ee); font-size: .9rem; }
+@media (max-width: 640px) { .partner-frow { grid-template-columns: 1fr 50px; } .partner-ev { grid-template-columns: 1fr; } }
