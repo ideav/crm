@@ -26,6 +26,12 @@
     });
     return row;
   }
+  // значение FILE приходит как <a href="/download/..">имя</a> → {url, name}
+  A.fileInfo = function (v) {
+    var m = /href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i.exec(String(v || ''));
+    if (m) return { url: m[1].replace(/&amp;/g, '&'), name: m[2].replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"') };
+    return v ? { url: '', name: String(v) } : null;
+  };
   // значение ссылки приходит как «id:текст»
   A.refId = function (v) { var m = /^(\d+):/.exec(String(v || '')); return m ? m[1] : String(v || ''); };
   A.refText = function (v) { return String(v || '').replace(/^\d+:/, ''); };
@@ -81,6 +87,37 @@
   A.update = function (name, id, fields) {
     if (A.mock) return A.mockApi.update(name, id, fields);
     return post('_m_set/' + id + '?JSON', toParams(tbl(name), fields));
+  };
+  // Загрузка файла: multipart в _m_new (поле t<id реквизита FILE>), XHR ради индикатора прогресса.
+  // fields — реквизиты таблицы по именам (кроме FILE); file — File; onProgress(0..1).
+  A.upload = function (name, main, fields, fileField, file, onProgress) {
+    if (A.mock) return A.mockApi.upload(name, main, fields, fileField, file);
+    var t = tbl(name), p = toParams(t, fields);
+    if (!t.req[fileField]) return Promise.reject(new Error('Нет реквизита «' + fileField + '»'));
+    p['t' + t.id] = main; p._xsrf = L.xsrf || '';
+    var fd = new FormData();
+    Object.keys(p).forEach(function (k) { fd.append(k, p[k]); });
+    fd.append('t' + t.req[fileField], file, file.name);
+    return new Promise(function (resolve, reject) {
+      var x = new XMLHttpRequest();
+      x.open('POST', '/' + A.z + '/_m_new/' + t.id + '?JSON&up=1');
+      x.withCredentials = true;
+      x.upload.onprogress = function (e) { if (onProgress && e.lengthComputable) onProgress(e.loaded / e.total); };
+      x.onerror = function () { reject(new Error('нет связи с сервером')); };
+      x.onload = function () {
+        var d = null; try { d = JSON.parse(x.responseText); } catch (e) { /* не JSON */ }
+        var err = d && (Array.isArray(d) ? d[0] && d[0].error : d.error);
+        if (x.status >= 400 || err || !d || !(d.id || d.obj)) return reject(new Error(err || (d ? 'ошибка загрузки' : String(x.responseText || '').replace(/<[^>]+>/g, '').slice(0, 120)) || ('HTTP ' + x.status)));
+        resolve(String(d.obj || d.id));
+      };
+      x.send(fd);
+    });
+  };
+  // Удаление строки с файлом: сначала очищаем реквизит FILE (так сервер стирает сам файл), потом строку.
+  A.removeFile = function (name, id, fileField) {
+    if (A.mock) return A.mockApi.remove(name, id);
+    var f = {}; f[fileField] = '';
+    return post('_m_set/' + id + '?JSON', toParams(tbl(name), f)).then(function () { return post('_m_del/' + id + '?JSON', {}); });
   };
   A.reportRows = function (name) {
     if (A.mock) return A.mockApi.report(name);

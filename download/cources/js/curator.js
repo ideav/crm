@@ -8,6 +8,22 @@
   A.curatorKey = function (course) { return keys()[course] || D.accessKey(course) || ''; };
   A.setCuratorKey = function (course, k) { var o = keys(); o[course] = k; A.store.set('lms_keys', JSON.stringify(o)); };
 
+  // названия вместо кодов: courses.json (D.courses); нет в каталоге — показываем код
+  function courseTitle(code) { var c = D.course(code); return c ? c.title : code; }
+  function lessonTitle(code, id) {
+    var c = D.course(code), l = c && (c.lessons || []).filter(function (x) { return x.id === id; })[0];
+    return l ? l.title : id;
+  }
+  var filesBy = {};
+  function fileKey(r) { return A.refId(r['Пользователь']) + '|' + r['Курс'] + '|' + r['Урок']; }
+  function filesOf(r) { return filesBy[fileKey(r)] || []; }
+  function fileLinks(r) {
+    return filesOf(r).sort(function (a, b) { return Number(a._id) - Number(b._id); }).map(function (f) {
+      var fi = A.fileInfo(f['Файл']) || { url: '', name: '' };
+      return E('div', { class: 'file-row' }, [fi.url ? E('a', { href: fi.url, target: '_blank', rel: 'noopener', text: fi.name }) : E('span', { text: fi.name }),
+        E('span', { class: 'muted small', text: ' · задание ' + (Number(f['Задание']) + 1) })]);
+    });
+  }
   function answerText(row) {
     var a = {}; try { a = JSON.parse(row['Ответ'] || '{}'); } catch (e) { a = {}; }
     var out = [];
@@ -18,6 +34,8 @@
       if (t.score != null) out.push('Тест: ' + t.score + '%, попыток ' + (t.attempts || 1));
       if (t.db) out.push('База: ' + t.db + (t.selfConfirmed ? ' (самоподтверждение)' : ''));
     });
+    var nf = filesOf(row).length;
+    if (nf) out.push('Файлов: ' + nf);
     return out.filter(Boolean).join('\n\n');
   }
 
@@ -39,14 +57,16 @@
 
   function feed(pane) {
     pane.appendChild(E('p', { class: 'muted', text: 'Загружаем…' }));
-    A.list('Прогресс', {}).then(function (rows) {
+    Promise.all([A.list('Прогресс', {}), A.list('Файл ответа', {}).catch(function () { return []; })]).then(function (res) {
+      var rows = res[0]; filesBy = {};
+      res[1].filter(function (f) { return f['Файл']; }).forEach(function (f) { (filesBy[fileKey(f)] = filesBy[fileKey(f)] || []).push(f); });
       pane.innerHTML = '';
       rows = rows.filter(function (r) { return answerText(r); }).sort(function (a, b) { return Number(b._id) - Number(a._id); });
       if (!rows.length) { pane.appendChild(E('p', { class: 'lms-empty', text: 'Ответов пока нет.' })); return; }
       var detail = E('div', { class: 'detail' });
       pane.appendChild(E('div', { class: 'feed' }, rows.slice(0, 200).map(function (r) {
         return E('button', { class: 'feed-row', type: 'button', onclick: function () { open(detail, r); detail.scrollIntoView({ block: 'nearest' }); } }, [
-          E('b', { text: A.refText(r['Пользователь']) }), E('span', { class: 'muted', text: ' · ' + r['Курс'] + ' / ' + r['Урок'] + ' · ' + (r['Дата и время'] || '') }),
+          E('b', { text: A.refText(r['Пользователь']) }), E('span', { class: 'muted', text: ' · ' + courseTitle(r['Курс']) + ' / ' + lessonTitle(r['Курс'], r['Урок']) + ' · ' + (r['Дата и время'] || '') }),
           E('div', { class: 'feed-ans', text: answerText(r).slice(0, 140) })]);
       })));
       pane.appendChild(detail);
@@ -56,8 +76,10 @@
   function open(box, r) {
     box.innerHTML = '';
     var course = r['Курс'], lesson = r['Урок'];
-    box.appendChild(E('h3', { text: A.refText(r['Пользователь']) + ' — ' + course + ' / ' + lesson }));
+    box.appendChild(E('h3', { text: A.refText(r['Пользователь']) + ' — ' + courseTitle(course) + ' / ' + lessonTitle(course, lesson) }));
     box.appendChild(E('pre', { class: 'answer', text: answerText(r) }));
+    var fl = fileLinks(r);
+    if (fl.length) box.appendChild(E('div', { class: 'files' }, [E('b', { text: 'Файлы ученика' })].concat(fl)));
     var crit = E('div', { class: 'criteria muted', text: 'Критерии: загружаем…' });
     var key = A.curatorKey(course);
     var kin = E('input', { class: 'inp', type: 'text', placeholder: 'Ключ курса ' + course, value: key });
