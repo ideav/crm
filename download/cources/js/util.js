@@ -87,7 +87,7 @@
 
   var toastEl;
   A.toast = function (msg, ms) {
-    if (!toastEl) { toastEl = A.el('div', { class: 'lms-toast', role: 'status' }); document.body.appendChild(toastEl); }
+    if (!toastEl) { toastEl = A.el('div', { class: 'lms-toast', role: 'status' }); (document.getElementById('lms-shell') || document.body).appendChild(toastEl); }
     toastEl.textContent = msg;
     toastEl.classList.add('on');
     clearTimeout(toastEl._t);
@@ -101,7 +101,7 @@
     } else fallback();
     function fallback() {
       var t = A.el('textarea', { style: 'position:fixed;opacity:0' });
-      t.value = text; document.body.appendChild(t); t.select();
+      t.value = text; (document.getElementById('lms-shell') || document.body).appendChild(t); t.select();
       try { document.execCommand('copy'); done(); } catch (e) { A.toast('Не удалось скопировать'); }
       t.remove();
     }

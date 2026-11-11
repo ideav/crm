@@ -5,7 +5,7 @@
 <script>
 var LMS = window.LMS = {z:'cources', user:'my42', userId:'1', role:(/[?&]role=curator/.test(location.search)?'Куратор':(/[?&]role=admin/.test(location.search)?'admin':'Ученик')), xsrf:'dev'};
 </script></head><body>
-<div id="lms-app"></div>
+<div id="lms-shell"><div id="lms-app"></div></div>
 <script src="/download/cources/js/util.js"></script><script src="/download/cources/js/mock.js"></script>
 <script src="/download/cources/js/api.js"></script><script src="/download/cources/js/data.js"></script>
 <script src="/download/cources/js/tasks.js"></script><script src="/download/cources/js/quiz.js"></script>

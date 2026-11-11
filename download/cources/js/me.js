@@ -62,7 +62,7 @@
         E('div', { class: 'ls-text', text: kind === 'lesson1' ? 'Нравится? Поделитесь курсом с коллегой — ссылка с вашим кодом:' : 'Поздравляем с завершением курса! Расскажите друзьям — ваша ссылка:' }),
         E('div', { class: 'row' }, [E('button', { class: 'btn btn-primary', type: 'button', text: 'Копировать ссылку', onclick: function () { A.copy(link); } })]),
         E('button', { class: 'ls-x', type: 'button', 'aria-label': 'Закрыть', text: '×', onclick: function () { card.remove(); } })]);
-      document.body.appendChild(card);
+      (document.getElementById('lms-shell') || document.body).appendChild(card);
     }
   };
 })();

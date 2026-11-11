@@ -77,7 +77,7 @@
     function startAuto() {
       cancelAuto();
       var stay = E('button', { class: 'btn', type: 'button', text: 'Остаться', onclick: cancelAuto });
-      document.body.appendChild(E('div', { class: 'lms-auto', role: 'status' }, [E('span', { text: lesson.next ? 'Урок выполнен. Переходим к следующему…' : 'Курс пройден! Открываем карту…' }), stay]));
+      (document.getElementById('lms-shell') || document.body).appendChild(E('div', { class: 'lms-auto', role: 'status' }, [E('span', { text: lesson.next ? 'Урок выполнен. Переходим к следующему…' : 'Курс пройден! Открываем карту…' }), stay]));
       timer = setTimeout(go, 1500);
     }
     next.addEventListener('click', function () {

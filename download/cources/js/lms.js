@@ -24,7 +24,7 @@
     else if (h === '/me') A.views.me(root);
     else if (h === '/curator') A.views.curator(root);
     else root.appendChild(E('p', { class: 'lms-empty', text: 'Страница не найдена.' }));
-    if (!/^\/c\//.test(h)) window.scrollTo(0, 0);
+    if (!/^\/c\//.test(h)) { var sh = document.getElementById('lms-shell'); if (sh) sh.scrollTop = 0; else window.scrollTo(0, 0); }
   }
   A.route = render;
 
@@ -32,7 +32,8 @@
     var app = document.getElementById('lms-app');
     nav = E('nav', { class: 'lms-nav' }, [E('a', { class: 'brand', href: '#/' }, [E('span', { class: 'dot' }), 'Курсы Интеграм']),
       E('div', { class: 'links' }, [E('a', { href: '#/map', text: 'Карта' }), E('a', { href: '#/me', text: 'Кабинет' }),
-        A.isCurator() ? E('a', { href: '#/curator', text: 'Куратор' }) : null]),
+        A.isCurator() ? E('a', { href: '#/curator', text: 'Куратор' }) : null,
+        A.isAdmin() ? E('a', { href: '/' + L.z + '/dict', target: '_self', text: 'Интерфейс базы' }) : null]),
       E('span', { class: 'who', text: L.user || '' })]);
     root = E('main', { class: 'lms-main' });
     app.innerHTML = '';
