@@ -116,6 +116,25 @@
     var m = /^my(\d+)$/i.exec(L.user || '');
     return m ? m[1] : null;
   };
+  // --- гость: куки перед входом (sso_back возвращает в портал, _aff — реферал) ---
+  function setCookie(n, v, age) { document.cookie = n + '=' + v + '; path=/; max-age=' + age + '; secure; samesite=lax'; }
+  A.hasCookie = function (n) { return new RegExp('(?:^|; )' + n + '=').test(document.cookie); };
+  A.rememberAff = function () {
+    var m = /[?&]aff=([0-9]+)/.exec(location.search);
+    if (m && !A.hasCookie('_aff')) setCookie('_aff', m[1], 15552000);
+  };
+  A.beforeLogin = function () { setCookie('sso_back', 'cources', 86400); A.rememberAff(); };
+  A.loginYandex = function () {
+    A.beforeLogin();
+    location.href = 'https://oauth.yandex.ru/authorize?response_type=code&client_id=959da92b09364e42bf4c7704db0b992f&redirect_uri=' +
+      encodeURIComponent(location.origin + '/auth.asp') + '&state=yandex';
+  };
+  A.loginMail = function () { A.beforeLogin(); location.href = '/start.html?db=my&uri=%2Fcources%2F'; };
+  A.loginButtons = function () {
+    return [A.el('button', { class: 'btn btn-primary', type: 'button', text: 'Войти через Яндекс', onclick: A.loginYandex }),
+      A.el('button', { class: 'btn', type: 'button', text: 'Войти по почте', onclick: A.loginMail })];
+  };
   A.isCurator = function () { return /куратор|curator/i.test(L.role || '') || A.isAdmin(); };
+  A.isGuest = function () { return L.user === 'guest'; };
   A.isAdmin = function () { return /^(admin|админ)/i.test(L.role || ''); };
 })();

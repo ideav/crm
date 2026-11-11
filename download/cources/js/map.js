@@ -19,11 +19,12 @@
         E('div', { class: 'course-head' }, [E('h2', { text: c.title }),
           E('span', { class: 'badge', text: access ? doneN + ' из ' + ls.length : (c.price ? 'Закрыт · ' + c.price + ' ₽' : 'Закрыт') })])]);
       if (!access) {
-        var req = D.requests.filter(function (r) { return r['Курс'] === c.code; })[0];
-        card.appendChild(E('p', { class: 'muted', text: 'Доступ откроется после оплаты или по промокоду. Если вы уже оплатили или получили промокод — введите его, и мы откроем курс.' }));
+        if (A.isGuest()) { card.appendChild(E('p', { class: 'muted', text: 'Войдите, чтобы получить доступ к курсу.' })); card.appendChild(E('div', { class: 'row' }, A.loginButtons())); }
+        var req = A.isGuest() ? null : D.requests.filter(function (r) { return r['Курс'] === c.code; })[0];
+        if (!A.isGuest()) card.appendChild(E('p', { class: 'muted', text: 'Доступ откроется после оплаты или по промокоду. Если вы уже оплатили или получили промокод — введите его, и мы откроем курс.' }));
         if (req && req['Статус'] !== 'reject') {
           card.appendChild(E('p', { class: 'good', text: 'Заявка отправлена' + (req['Статус'] === 'done' ? ' и обработана — обновите страницу.' : ', ждите открытия доступа.') }));
-        } else card.appendChild(promoForm(c));
+        } else if (!A.isGuest()) card.appendChild(promoForm(c));
       }
       var list = E('ol', { class: 'lessons' }, ls.map(function (l) {
         var s = status(c, l);

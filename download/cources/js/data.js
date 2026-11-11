@@ -8,6 +8,9 @@
 
   D.uid = uid;
   D.init = function () {
+    if (A.isGuest()) { // гость: только публичный каталог, никаких запросов к API данных
+      return A.getJSON(A.contentRoot + 'courses.json').then(function (c) { D.courses = c.courses || []; });
+    }
     return A.loadSchema().then(function () {
       return Promise.all([
         A.getJSON(A.contentRoot + 'courses.json'),

@@ -5,6 +5,7 @@
   var root, nav;
 
   function entry() {
+    if (A.isGuest()) return '#/';
     if (!D.hasAnyProgress()) return '#/c/mini/00-start';
     var c = D.lastCourse() || D.course('mini');
     var l = c && D.firstOpen(c);
@@ -15,7 +16,8 @@
     if (A.cleanup) A.cleanup();
     var h = location.hash.replace(/^#/, '');
     var m;
-    if (!h || h === '/') { location.replace(entry()); return; }
+    if (A.isGuest() && (h === '/me' || h === '/curator')) { location.replace('#/'); return; }
+    if (!h || h === '/') { if (A.isGuest()) { root.innerHTML = ''; A.views.landing(root); return; } location.replace(entry()); return; }
     root.innerHTML = '';
     [].forEach.call(nav.querySelectorAll('a'), function (a) { a.classList.toggle('on', a.getAttribute('href') === '#' + h.split('/').slice(0, 2).join('/')); });
     if ((m = /^\/c\/([^/]+)\/([^/]+)$/.exec(h))) A.views.lesson(root, decodeURIComponent(m[1]), decodeURIComponent(m[2]));
@@ -30,7 +32,10 @@
 
   function start() {
     var app = document.getElementById('lms-app');
-    nav = E('nav', { class: 'lms-nav' }, [E('a', { class: 'brand', href: '#/' }, [E('span', { class: 'dot' }), 'Курсы Интеграм']),
+    if (A.isGuest()) A.rememberAff();
+    nav = A.isGuest() ? E('nav', { class: 'lms-nav' }, [E('a', { class: 'brand', href: '#/' }, [E('span', { class: 'dot' }), 'Курсы Интеграм']),
+      E('div', { class: 'links' }, [E('a', { href: '#/map', text: 'Курсы' })]),
+      E('button', { class: 'btn btn-primary nav-login', type: 'button', text: 'Войти', onclick: A.loginYandex })]) : E('nav', { class: 'lms-nav' }, [E('a', { class: 'brand', href: '#/' }, [E('span', { class: 'dot' }), 'Курсы Интеграм']),
       E('div', { class: 'links' }, [E('a', { href: '#/map', text: 'Карта' }), E('a', { href: '#/me', text: 'Кабинет' }),
         A.isCurator() ? E('a', { href: '#/curator', text: 'Куратор' }) : null,
         A.isAdmin() ? E('a', { href: '/' + L.z + '/dict', target: '_self', text: 'Интерфейс базы' }) : null]),
