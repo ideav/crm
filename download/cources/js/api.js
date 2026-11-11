@@ -13,8 +13,12 @@
     if (!t) throw new Error('В schema.json нет таблицы «' + name + '»');
     return t;
   }
-  // Порядок реквизитов в r[] = порядок ключей tbl.req (или tbl.order, если он есть).
-  function order(t) { return t.order || Object.keys(t.req); }
+  // Порядок реквизитов в r[] = порядок ключей tbl.req (или tbl.order, если он есть). Поля, закрытые
+  // роли грантом BARRED (tbl.hide[роль] в schema.json), ядро в JSON_OBJ не отдаёт — их пропускаем.
+  function order(t) {
+    var all = t.order || Object.keys(t.req), hide = (t.hide && t.hide[L.role]) || [];
+    return hide.length ? all.filter(function (n) { return hide.indexOf(n) < 0; }) : all;
+  }
 
   function parseRow(t, rec) {
     var row = { _id: String(rec.i), _main: rec.r && rec.r[0] };

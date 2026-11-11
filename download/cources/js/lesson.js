@@ -20,7 +20,6 @@
       return;
     }
     root.appendChild(E('p', { class: 'lms-empty', text: 'Загружаем урок…' }));
-    if (D.joinFree) D.joinFree(course);
     D.loadLesson(course, id).then(function (lesson) { root.innerHTML = ''; build(root, course, lesson); },
       function () { root.innerHTML = ''; root.appendChild(E('div', { class: 'card' }, [E('p', { text: 'Не удалось загрузить урок.' }), E('a', { class: 'btn', href: '#/map', text: 'К карте' })])); });
   };
