@@ -47,7 +47,7 @@ function fake_http($method, $url, $headers, $body){
     $q = parse_url($url, PHP_URL_QUERY); $path = parse_url($url, PHP_URL_PATH);
     if(strpos($url, 'enter.tochka.com') !== false){
         $net['tochka'][] = array('url' => $url, 'headers' => $headers, 'body' => json_decode($body, true));
-        return array(200, json_encode(array('Data' => array('operationId' => $net['op'], 'paymentLink' => 'https://merch.tochka.com/order/?uuid=' . $net['op']))));
+        return array(200, json_encode(array('Data' => array('operationId' => $net['op'], 'paymentLink' => 'https://merch.securepaytb.ru/order/?uuid=' . $net['op']))));
     }
     if($path === '/cources/xsrf'){
         $isAdmin = false;
@@ -91,7 +91,7 @@ expect(isset($r['error']) && count($net['tochka']) === 0, 'неизвестны�
 # ссылка на «Адепт»
 $r = Cp_start_payment($cfg, 'idb_cources=U', 'adept');
 $t = $net['tochka'][0]['body']['Data'] ?? array();
-expect(($r['redirect'] ?? '') === 'https://merch.tochka.com/order/?uuid=op-1', 'ученик получает ссылку Точки');
+expect(($r['redirect'] ?? '') === 'https://merch.securepaytb.ru/order/?uuid=op-1', 'ученик получает ссылку Точки (домен страницы оплаты — не tochka.com)');
 expect(($t['amount'] ?? '') === '9900.00' && ($t['Items'][0]['amount'] ?? '') === '9900.00', 'сумма — цена из каталога: 9900.00');
 expect(isset($t['purpose']) && !preg_match('/\d/', $t['purpose']) && !preg_match('/\d/', $t['Items'][0]['name']), 'в purpose и позиции чека нет цифр: «' . ($t['purpose'] ?? '') . '»');
 expect(($t['Client']['email'] ?? '') === 'student@example.com', 'чек — на почту ученика');

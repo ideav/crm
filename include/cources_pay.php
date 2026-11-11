@@ -183,7 +183,7 @@ function Cp_start_payment($cfg, $cookie, $code){
             json_encode(array('Data' => $data), JSON_UNESCAPED_UNICODE));
         $op = isset($d['Data']['operationId']) ? $d['Data']['operationId'] : null;
         $link = isset($d['Data']['paymentLink']) ? $d['Data']['paymentLink'] : null;
-        if (!Cp_order_path($cfg, $op) || !$link || !preg_match('~^https://[a-z0-9.-]*tochka\.com/~', $link))
+        if (!Cp_order_path($cfg, $op) || !$link || !preg_match('~^https://[^\s"<>]+$~', $link))
             throw new Exception('Точка не вернула operationId/paymentLink');
         Cp_order_save($cfg, $op, array('user' => $uid, 'login' => isset($me['user']) ? $me['user'] : '', 'course' => $code,
             'amount' => (float)$course['price'], 'created' => date('Y-m-d H:i:s')));
