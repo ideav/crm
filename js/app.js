@@ -146,7 +146,14 @@ async function validateToken(host, dbName) {
 // of issuing a network request for every remaining cookie on every page load.
 // (Stale cookies for the not-yet-checked dbs are cleaned up lazily when those dbs
 // are actually validated.)
-async function hasValidAuthToken(host) {
+//
+// backlogram#930: с probeDb решение сначала берётся у сервера (serverCaptchaBypass) —
+// он видит HttpOnly-куки idb_*; перебор меток idbs_* ниже — только когда сервер не ответил.
+async function hasValidAuthToken(host, probeDb) {
+    if (probeDb) {
+        const server = await serverCaptchaBypass(host, probeDb);
+        if (server !== null) return server;
+    }
     const dbNames = CookieUtil.getAllIdb();
     for (const db of dbNames) {
         const data = await validateToken(host, db);
@@ -156,6 +163,22 @@ async function hasValidAuthToken(host) {
         }
     }
     return false;
+}
+
+// ideav/backlogram#930: куки входа idb_* — HttpOnly, странице видны только метки idbs_*,
+// а метки ставит не каждый путь входа и снимает validateToken при сбое. Сервер видит сами
+// куки: GET /{db}/_captcha?JSON → { bypass }. true/false — ответ сервера; null — ответа нет
+// (ядро без _captcha, сбой сети), тогда решает перебор меток hasValidAuthToken.
+async function serverCaptchaBypass(host, db) {
+    try {
+        const response = await fetch(apiScheme() + host + '/' + encodeURIComponent(db) + '/_captcha?JSON',
+            { method: 'GET', credentials: 'include' });
+        if (!response.ok) return null;
+        const data = await response.json();
+        return data && typeof data.bypass === 'boolean' ? data.bypass : null;
+    } catch (err) {
+        return null;
+    }
 }
 
 // ============================================================
@@ -1490,9 +1513,17 @@ class App {
     async _ensureCaptchaBypass() {
         if (this._captchaBypassChecked) return this._captchaBypass;
         this._captchaBypassChecked = true;
-        this._captchaBypass = await hasValidAuthToken(this.apiConfig.host);
+        this._captchaBypass = await hasValidAuthToken(this.apiConfig.host, this._captchaProbeDb());
         if (this._captchaBypass) this._hideCaptchaWidgets();
         return this._captchaBypass;
+    }
+
+    // backlogram#930: база, у которой сервер спрашивают про капчу: из ?db=, иначе last_db, иначе my.
+    _captchaProbeDb() {
+        const fromUrl = /[?&]db=([^&#]*)/.exec((window.location && window.location.search) || '');
+        const lastDb = /(?:^|;\s*)last_db=([^;]*)/.exec((document && document.cookie) || '');
+        const db = (fromUrl && decodeURIComponent(fromUrl[1])) || (lastDb && decodeURIComponent(lastDb[1])) || '';
+        return db || 'my';
     }
 
     async _initCaptchaWidgets() {

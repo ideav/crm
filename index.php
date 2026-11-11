@@ -15593,6 +15593,13 @@ switch($a)  # Check actions, which don't require authentication
 		header("Location: /start.html?".http_build_query($lgU === "" ? array("db" => $z) : array("db" => $z, "u" => $lgU)));
 		die();
 
+	# backlogram#930: нужна ли капча на start.html. Куки входа idb_* HttpOnly — страница их не видит,
+	# сервер видит: есть валидная не-гостевая кука хоть одной базы — капчу не показываем.
+	case "_captcha":
+		header("Content-Type: application/json; charset=utf-8");
+		header("Cache-Control: no-store");
+		die(json_encode(array("bypass" => hasValidTokenCookie())));
+
 	case "jwt":
         $params = verifyJWT($_POST["jwt"], JWT_PUBLIC_KEY);
         if($params){
