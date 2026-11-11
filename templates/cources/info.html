@@ -1,0 +1,30 @@
+<!-- Портал курсов (issue ideav/courses 84). Главная страница базы: портал ученика слоем во весь экран
+     поверх стандартной оболочки main.html. Остальные адреса базы (таблицы, отчёты) открываются
+     обычным интерфейсом. Скобки в этом файле - только точки вставки _global_.
+     Версию ?v=N у js и css поднимать при каждой правке файла. -->
+<link rel="stylesheet" href="/download/cources/css/lms.css?v=3">
+<script>
+var LMS = window.LMS = Object.create(null);
+LMS.z = '{_global_.z}';
+LMS.user = '{_global_.user}';
+LMS.userId = '{_global_.user_id}';
+LMS.role = '{_global_.role}';
+LMS.xsrf = '{_global_.xsrf}';
+document.documentElement.classList.add('lms-on');
+document.title = 'Курсы Интеграм';
+</script>
+<div id="lms-shell"><div id="lms-app"><p style="padding:24px;font-family:sans-serif">Загрузка…</p></div></div>
+<script src="/download/cources/js/util.js?v=3"></script>
+<script src="/download/cources/js/mock.js?v=3"></script>
+<script src="/download/cources/js/api.js?v=3"></script>
+<script src="/download/cources/js/data.js?v=3"></script>
+<script src="/download/cources/js/tasks.js?v=3"></script>
+<script src="/download/cources/js/quiz.js?v=3"></script>
+<script src="/download/cources/js/practicum.js?v=3"></script>
+<script src="/download/cources/js/lesson.js?v=3"></script>
+<script src="/download/cources/js/map.js?v=3"></script>
+<script src="/download/cources/js/me.js?v=3"></script>
+<script src="/download/cources/js/curator.js?v=3"></script>
+<script src="/download/cources/js/admin.js?v=3"></script>
+<script src="/download/cources/js/checks.js?v=3"></script>
+<script src="/download/cources/js/lms.js?v=3"></script>
