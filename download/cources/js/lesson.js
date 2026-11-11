@@ -14,12 +14,13 @@
     if (!D.hasAccess(course)) {
       var g = A.isGuest();
       root.appendChild(E('div', { class: 'card' }, [E('h1', { text: course.title }),
-        E('p', { text: g ? 'Войдите, чтобы получить доступ к курсу.' : 'Этот курс пока закрыт. Откройте карту курсов, чтобы ввести промокод.' }),
+        E('p', { text: g ? 'Войдите, чтобы получить доступ к курсу.' : (course.authored ? 'Этот курс откроется после оплаты.' : 'Этот курс пока закрыт. Откройте карту курсов, чтобы ввести промокод.') }),
         g ? E('div', { class: 'row' }, A.loginButtons()) : null,
-        E('a', { class: 'btn btn-primary', href: '#/map', text: 'К карте курсов' })]));
+        course.authored ? E('a', { class: 'btn btn-primary', href: '#/course/' + encodeURIComponent(course.code), text: 'К странице курса' }) : E('a', { class: 'btn btn-primary', href: '#/map', text: 'К карте курсов' })]));
       return;
     }
     root.appendChild(E('p', { class: 'lms-empty', text: 'Загружаем урок…' }));
+    if (D.joinFree) D.joinFree(course);
     D.loadLesson(course, id).then(function (lesson) { root.innerHTML = ''; build(root, course, lesson); },
       function () { root.innerHTML = ''; root.appendChild(E('div', { class: 'card' }, [E('p', { text: 'Не удалось загрузить урок.' }), E('a', { class: 'btn', href: '#/map', text: 'К карте' })])); });
   };
