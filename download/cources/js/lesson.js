@@ -12,8 +12,10 @@
     var course = D.course(code);
     if (!course) { root.appendChild(E('p', { class: 'lms-empty', text: 'Курс не найден.' })); return; }
     if (!D.hasAccess(course)) {
+      var g = A.isGuest();
       root.appendChild(E('div', { class: 'card' }, [E('h1', { text: course.title }),
-        E('p', { text: 'Этот курс пока закрыт. Откройте карту курсов, чтобы ввести промокод.' }),
+        E('p', { text: g ? 'Войдите, чтобы получить доступ к курсу.' : 'Этот курс пока закрыт. Откройте карту курсов, чтобы ввести промокод.' }),
+        g ? E('div', { class: 'row' }, A.loginButtons()) : null,
         E('a', { class: 'btn btn-primary', href: '#/map', text: 'К карте курсов' })]));
       return;
     }
@@ -31,7 +33,7 @@
     var ctx = {
       course: course.code, lesson: lesson,
       get: function (i) { return ans.tasks[i] || {}; },
-      update: function (i, obj) { ans.tasks[i] = Object.assign(ans.tasks[i] || {}, obj); return D.save(course.code, lesson.id, { ans: ans }); },
+      update: function (i, obj) { if (A.isGuest()) return Promise.resolve(); ans.tasks[i] = Object.assign(ans.tasks[i] || {}, obj); return D.save(course.code, lesson.id, { ans: ans }); },
       changed: function () { refresh(); }
     };
     var bar = E('header', { class: 'lesson-bar' }, [
@@ -47,14 +49,15 @@
       var r = A.tasks[t.kind === 'file' ? 'file' : t.kind];
       return r ? r(t, i, ctx) : { el: E('p', { class: 'muted', text: 'Неизвестное задание: ' + t.kind }), done: function () { return true; }, missing: '' };
     });
-    var comments = D.comments.filter(function (c) { return c['Курс'] === course.code && c['Урок'] === lesson.id; });
+    var comments = A.isGuest() ? [] : D.comments.filter(function (c) { return c['Курс'] === course.code && c['Урок'] === lesson.id; });
     var cbox = comments.length ? E('section', { class: 'task task-comments' }, [E('h3', { class: 'task-title', text: 'Комментарий куратора' })]
       .concat(comments.map(function (c) { return E('div', { class: 'comment' }, [E('div', { class: 'muted small', text: (c['Автор'] || 'Куратор') + ' · ' + (c['Дата и время'] || '') }), E('p', { text: c['Текст'] || c._main || '' })]); }))) : null;
     var miss = E('span', { class: 'next-miss' });
     var next = E('button', { class: 'btn btn-primary btn-next', type: 'button' });
     var isLast = !lesson.next;
     next.textContent = isLast ? 'Завершить курс' : 'Дальше →';
-    var foot = E('footer', { class: 'lesson-foot' }, [next, miss]);
+    var guest = A.isGuest();
+    var foot = guest ? E('footer', { class: 'guest-plate' }, [E('b', { text: 'Войдите, чтобы сохранять ответы и идти дальше' }), E('p', { class: 'muted', text: 'Вход в один клик, прогресс сохранится.' }), E('div', { class: 'row' }, A.loginButtons())]) : E('footer', { class: 'lesson-foot' }, [next, miss]);
 
     function missing() { return parts.filter(function (p) { return !p.done(); }).map(function (p) { return p.missing; }); }
     function refresh() {
@@ -86,9 +89,9 @@
       D.save(course.code, lesson.id, { ans: ans, done: true }).then(function () { finished = true; afterDone(false); go(); },
         function () { next.disabled = false; A.toast('Не удалось сохранить, попробуйте ещё раз'); });
     });
-    [bar, E('article', { class: 'lesson' }, [title, body, att].concat(parts.map(function (p) { return p.el; }), [cbox, foot]))].forEach(function (n) { if (n) root.appendChild(n); });
+    [bar, E('article', { class: 'lesson' }, [title, body, att].concat(guest ? [E('div', { class: 'guest-tasks', inert: true }, parts.map(function (p) { return p.el; }))] : parts.map(function (p) { return p.el; }), [cbox, foot]))].forEach(function (n) { if (n) root.appendChild(n); });
     A.fixLinks(root);
-    refresh();
+    if (!guest) refresh();
     ready = true;
     setTimeout(function () { title.scrollIntoView({ block: 'start' }); }, 0);
   }

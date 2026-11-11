@@ -90,3 +90,39 @@ html.lms-on,html.lms-on body{overflow:hidden}
 #lms-shell .btn-sm{padding:4px 10px;font-size:14px}
 #lms-shell .files{margin:10px 0}
 #lms-shell .file-row{padding:3px 0}
+#lms-shell .ld-in{max-width:980px;margin:0 auto;padding:0 16px}
+#lms-shell .lms-main.ld{max-width:none;padding:0 0 40px}
+#lms-shell .ld-hero{background:var(--grad);color:#fff;padding:44px 0 40px}
+#lms-shell .ld-hero h1{font-size:30px;line-height:1.2;margin:0 0 14px}
+#lms-shell .ld-hero h2{margin:0 0 16px;font-size:26px}
+#lms-shell .ld-lead{font-size:18px;opacity:.95;margin:0 0 20px;max-width:640px}
+#lms-shell .ld-hero .btn{border:0}
+#lms-shell .ld-hero .btn-primary{background:#fff;color:var(--ac2)}
+#lms-shell .ld-hero .btn:not(.btn-primary){background:rgba(255,255,255,.18);color:#fff}
+#lms-shell .ld-hero a{color:#fff}
+#lms-shell .ld-sub{margin:6px 0 0;font-size:15px}
+#lms-shell .ld-sec{padding:36px 0}
+#lms-shell .ld-sec h2{font-size:26px;margin:0 0 16px}
+#lms-shell .ld-alt{background:#fff;border-top:1px solid var(--bd);border-bottom:1px solid var(--bd)}
+#lms-shell .ld-cards{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(250px,1fr))}
+#lms-shell .ld-card{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:18px;display:flex;flex-direction:column;gap:6px}
+#lms-shell .ld-card h3{margin:0;font-size:21px}
+#lms-shell .ld-card p{flex:1;margin:4px 0 8px;color:var(--mut);font-size:16px}
+#lms-shell .ld-price{font-size:24px;font-weight:700;color:var(--ac2)}
+#lms-shell .ld-steps{list-style:none;margin:0;padding:0;display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));counter-reset:s}
+#lms-shell .ld-steps li{counter-increment:s;background:var(--bg);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:4px}
+#lms-shell .ld-steps li:before{content:counter(s);width:28px;height:28px;border-radius:50%;background:var(--grad);color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center}
+#lms-shell .ld-steps span{color:var(--mut);font-size:16px}
+#lms-shell .ld-rates{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+#lms-shell .ld-rate{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px 16px;display:flex;flex-direction:column}
+#lms-shell .ld-rate b{font-size:30px;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+#lms-shell .ld-faq{border-bottom:1px solid var(--bd);padding:10px 0}
+#lms-shell .ld-faq summary{cursor:pointer;font-weight:600}
+#lms-shell .ld-faq p{color:var(--mut);margin:8px 0 0}
+#lms-shell .ld-final{text-align:center}
+#lms-shell .ld-final .ld-cta{justify-content:center}
+#lms-shell .guest-plate{background:var(--card);border:1px solid var(--ac2);border-radius:14px;padding:18px;margin:24px 0}
+#lms-shell .guest-tasks{opacity:.85}
+#lms-shell .nav-login{margin-left:auto;min-height:36px;padding:6px 16px}
+@media (min-width:700px){#lms-shell .ld-hero h1{font-size:40px}#lms-shell .ld-hero{padding:72px 0 64px}}
+@media (max-width:520px){#lms-shell .lms-nav{flex-wrap:nowrap;gap:6px;padding:8px 12px}#lms-shell .lms-nav .links a{padding:6px 8px}#lms-shell .nav-login{padding:6px 14px}}
