@@ -41,6 +41,13 @@
       save(d);
       return Promise.resolve({});
     },
+    upload: function (name, main, fields, fileField, file) {
+      return this.create(name, main, Object.assign({}, fields, { 'Файл': '<a href="#">' + file.name + '</a>' }));
+    },
+    remove: function (name, id) {
+      var d = load(); d.t[name] = (d.t[name] || []).filter(function (r) { return r._id !== String(id); }); save(d);
+      return Promise.resolve({});
+    },
     report: function () { return Promise.resolve([]); }
   };
   A.mockReset = function () { try { localStorage.removeItem(KEY); } catch (e) { /* ignore */ } };

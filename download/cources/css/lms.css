@@ -83,3 +83,10 @@ html.lms-on,html.lms-on body{overflow:hidden}
 @media (max-width:520px){#lms-shell{position:fixed;inset:0;z-index:4000;overflow-y:auto;overflow-x:hidden;font-size:17px}#lms-shell .lesson-title{font-size:25px}#lms-shell .lms-nav .who{display:none}#lms-shell .btn-next{width:100%}}
 #lms-shell .sums{display:flex;gap:10px;flex-wrap:wrap;margin:10px 0}#lms-shell .sum{flex:1;min-width:100px;background:#f3f4fb;border-radius:10px;padding:10px 12px}#lms-shell .sum-v{font-size:21px;font-weight:700}
 #lms-shell .acc-row{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-top:1px solid var(--bd)}#lms-shell .acc-sum{text-align:right;flex:none}
+#lms-shell .file-list{list-style:none;margin:8px 0;padding:0}
+#lms-shell .file-list li{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:6px 0;border-bottom:1px solid var(--bd)}
+#lms-shell .file-progress{width:100%;height:8px;margin:6px 0}
+#lms-shell .file-link{margin-top:14px}
+#lms-shell .btn-sm{padding:4px 10px;font-size:14px}
+#lms-shell .files{margin:10px 0}
+#lms-shell .file-row{padding:3px 0}

@@ -2,7 +2,7 @@
 (function () {
   'use strict';
   var A = window.LMSApp, L = window.LMS || {};
-  var D = A.data = { courses: [], progress: {}, access: [], profile: null, requests: [], comments: [] };
+  var D = A.data = { courses: [], progress: {}, access: [], profile: null, requests: [], comments: [], files: [] };
   var uid = String(L.userId || '');
   var queues = {};
 
@@ -15,7 +15,8 @@
         A.list('Доступ', { 'Пользователь': uid }),
         A.list('Профиль', { 'Пользователь': uid }),
         A.list('Заявка', { 'Пользователь': uid }).catch(function () { return []; }),
-        A.list('Комментарий', { 'Пользователь': uid }).catch(function () { return []; })
+        A.list('Комментарий', { 'Пользователь': uid }).catch(function () { return []; }),
+        A.list('Файл ответа', { 'Пользователь': uid }).catch(function () { return []; })
       ]);
     }).then(function (r) {
       D.courses = r[0].courses || [];
@@ -25,6 +26,7 @@
       D.profile = r[3][0] || null;
       D.requests = r[4];
       D.comments = r[5];
+      D.files = r[6].filter(function (x) { return x['Файл']; });
     });
   };
 
@@ -79,6 +81,11 @@
     var p = (queues[key] || Promise.resolve()).then(run, run);
     queues[key] = p.catch(function () { /* ошибку получает вызывающий */ });
     return p;
+  };
+
+  // файлы ученика к заданию i урока
+  D.filesFor = function (course, lesson, i) {
+    return D.files.filter(function (f) { return f['Курс'] === course && f['Урок'] === lesson && String(f['Задание']) === String(i); });
   };
 
   D.saveProfile = function (patch) {
