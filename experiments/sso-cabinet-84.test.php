@@ -99,6 +99,27 @@ foreach(array("demo", "../x", "my") as $b){
 $r = child("back:");
 expect($r["back"] === "" && !count($r["cookies"]), "без куки sso_back: без возврата");
 
+# --- 9: гость в базе из SSO_DBS (лендинг с гостевым доступом)
+$r = child("guest_my");
+expect($r["login"] === "reenter" && isset($r["users"]["my77"]), "гость + idb_my: вход своим пользователем my77");
+expect(isset($r["cookies"]["idb_cources"]) && $r["cookies"]["idb_cources"]["v"] === "s.SESSION.".$r["users"]["my77"]["id"], "гость + idb_my: кука сессии вместо гостевой");
+$r = child("guest_nocookie_my");
+expect($r["login"] === "reenter" && isset($r["users"]["my77"]), "гость заведён, без куки базы + idb_my: вход своим пользователем");
+$r = child("guest_owner");
+expect($r["login"] === "reenter" && $r["cookies"]["idb_cources"]["v"] === "s.SESSION.800" && !count($r["inserts"]), "гость + idb_my владельца: вход владельцем, без новых строк");
+$r = child("anon_owner");
+expect($r["login"] === "reenter" && $r["cookies"]["idb_cources"]["v"] === "s.SESSION.800" && !count($r["inserts"]), "без гостя, idb_my владельца: вход владельцем, не учеником");
+$r = child("owner_role_refused");
+expect($r["login"] === "reenter" && $r["cookies"]["idb_cources"]["v"] === "s.SESSION.800", "владелец входит владельцем и при роли admin в SSO_DBS");
+$r = child("guest_stale");
+expect($r["user"] === "guest" && $r["login"] === null && $r["location"] === null, "гость + протухшая idb_my: остаётся гостем, без перенаправления");
+$r = child("guest_refused");
+expect($r["user"] === "guest" && $r["login"] === null && $r["location"] === null && !count($r["inserts"]), "гость + idb_my, роль admin: остаётся гостем");
+$r = child("guest_other_db");
+expect($r["user"] === "guest" && $r["login"] === null && !count($r["inserts"]), "база не из SSO_DBS, гость + idb_my: гость, как раньше");
+$r = child("guest_api");
+expect($r["user"] === "guest" && $r["login"] === null && !count($r["inserts"]), "JSON API гостя с idb_my: гость, как раньше");
+
 if($failures){ echo "\n$failures FAIL\n"; exit(1); }
 echo "\nOK\n";
 exit(0);
@@ -146,6 +167,15 @@ function run_case($case){
         case "stale_my": $_COOKIE["idb_my"] = "BAD"; break;
         case "api_anon": $_GET["JSON"] = ""; $_COOKIE["idb_my"] = "GOOD"; break;
         case "back": if($arg !== "") $_COOKIE["sso_back"] = $arg; break;
+        case "guest_my": $guest = TRUE; $_COOKIE["idb_cources"] = "gtuoeksetn"; $_COOKIE["idb_my"] = "GOOD"; break;
+        case "guest_nocookie_my": $guest = TRUE; $_COOKIE["idb_my"] = "GOOD"; break;
+        case "guest_owner": $guest = TRUE; $_COOKIE["idb_cources"] = "gtuoeksetn"; $_COOKIE["idb_my"] = "OWNER"; break;
+        case "anon_owner": $_COOKIE["idb_my"] = "OWNER"; break;
+        case "owner_role_refused": $_COOKIE["idb_my"] = "OWNER"; $sso = array("cources" => "admin"); break;
+        case "guest_stale": $guest = TRUE; $_COOKIE["idb_cources"] = "gtuoeksetn"; $_COOKIE["idb_my"] = "BAD"; break;
+        case "guest_refused": $guest = TRUE; $_COOKIE["idb_cources"] = "gtuoeksetn"; $_COOKIE["idb_my"] = "GOOD"; $sso = array("cources" => "admin"); break;
+        case "guest_other_db": $guest = TRUE; $z = "demo"; $_COOKIE["idb_demo"] = "gtuoeksetn"; $_COOKIE["idb_my"] = "GOOD"; break;
+        case "guest_api": $guest = TRUE; $_GET["JSON"] = ""; $_COOKIE["idb_cources"] = "gtuoeksetn"; $_COOKIE["idb_my"] = "GOOD"; break;
     }
     if($sso !== null)
         define("SSO_DBS", $sso);
@@ -155,12 +185,18 @@ function run_case($case){
     $GLOBALS["DB"] = $db;
     $GLOBALS["INSERTS"] = array();
     $GLOBALS["COOKIES"] = array();
+    $GLOBALS["DB"][800] = array(1, 18, $z);  # владелец базы
+    if(!empty($guest))
+        $GLOBALS["DB"][700] = array(1, 18, "guest");
+    $GLOBALS["GUEST"] = !empty($guest);
     $src = file_get_contents(__DIR__."/../index.php");
     $code = "";
     foreach(array("Validate_Token", "Sso_role", "Sso_enter", "Sso_back_redirect", "Restore_id", "Token_parse", "Token_stored_val",
                   "Token_db_val", "Token_idle_sql", "Token_match_sql", "Session_refresh_action", "Session_cookie_exp",
-                  "Auth_cookie_opts", "Auth_cookie", "qrLoginIsHttps", "Admin_token", "Admin_xsrf") as $fn)
+                  "Auth_cookie_opts", "Auth_cookie", "qrLoginIsHttps", "Admin_token", "Admin_xsrf", "Guest_session") as $fn)
         $code .= extract_function_source($src, $fn)."\n";
+    if(strpos($src, "function Sso_login_my(") !== false)
+        $code .= extract_function_source($src, "Sso_login_my")."\n";
     eval("namespace S84;\n".stubs()."\n".$code);
     register_shutdown_function("dump_state");
     if($case === "back")
@@ -188,6 +224,7 @@ function dump_state(){
         "cookies" => (object)$GLOBALS["COOKIES"],
         "inserts" => $GLOBALS["INSERTS"],
         "users" => (object)$users,
+        "user" => isset($GLOBALS["GLOBAL_VARS"]["user"]) ? $GLOBALS["GLOBAL_VARS"]["user"] : null,
         "back" => isset($GLOBALS["BACK"]) ? $GLOBALS["BACK"] : null,
     ), JSON_UNESCAPED_UNICODE);
 }
@@ -204,6 +241,7 @@ function Basic_auth_token($v){ return FALSE; }
 function xsrf($a, $b){ return "x"; }
 function Xsrf_is_legacy($x, $u){ return FALSE; }
 function getGrants($r){}
+function Update_Val($id, $val){ $GLOBALS["INSERTS"][] = array("update", $id, (string)$val); }
 function Session_new($uid){ return "s.SESSION.$uid"; }
 function setcookie($n, $v, $opts = 0){
     $GLOBALS["COOKIES"][$n] = array("v" => (string)$v, "exp" => is_array($opts) ? $opts["expires"] : $opts, "opts" => $opts);
@@ -220,8 +258,15 @@ function Exec_sql($sql, $msg){
     $rows = array();
     $one = function($id) use (&$rows){ $rows[] = array(0 => $id, "id" => $id); };
     preg_match("/val='([^']*)'/", $sql, $m);
+    $guestOn = $GLOBALS["GUEST"];
     if($msg === "SSO: cabinet user" && $_COOKIE["idb_my"] === "GOOD" && strpos($sql, " my ") !== false)
-        $rows[] = array(0 => 77, "id" => 77, "email" => "a@b.ru");
+        $rows[] = array(0 => 77, "id" => 77, "email" => "a@b.ru", "own" => null);
+    elseif($msg === "SSO: cabinet user" && $_COOKIE["idb_my"] === "OWNER" && strpos($sql, "db.val='{$GLOBALS["z"]}'") !== false)
+        $rows[] = array(0 => 66, "id" => 66, "email" => "o@b.ru", "own" => 5);
+    elseif($msg === "Validate token" && $guestOn && isset($_COOKIE["idb_".$GLOBALS["z"]]) && $_COOKIE["idb_".$GLOBALS["z"]] === "gtuoeksetn")
+        $rows[] = array("id" => 700, "val" => "guest", "r" => 300, "role" => "guest", "xsrf" => "x", "tok" => 701, "tok_ord" => 1, "xsrf_id" => 702, "act_id" => 703);
+    elseif($msg === "Get Guest credentials" && $guestOn)
+        $rows[] = array("u" => 700, "tok" => "gtuoeksetn", "token" => 701, "xsrf" => 702, "xsrf_val" => "x", "r" => 300, "role" => "guest");
     elseif($msg === "SSO: find the user"){
         foreach($GLOBALS["DB"] as $id => $r) if($r[1] === 18 && $r[2] === $m[1]) $one($id);
     }
