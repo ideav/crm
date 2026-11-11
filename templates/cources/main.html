@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Курсы Интеграм</title>
+<!-- Оболочка LMS: собственная страница без админского сайдбара (issue courses 84). Данные пользователя
+     попадают в window.LMS, дальше всё делает download/cources/js. Скобки в этом файле - только
+     точки вставки _global_. Версию ?v=N у js и css поднимать при каждой правке файла. -->
+<link rel="stylesheet" href="/download/cources/css/lms.css?v=1">
+<script>
+var LMS = window.LMS = Object.create(null);
+LMS.z = '{_global_.z}';
+LMS.user = '{_global_.user}';
+LMS.userId = '{_global_.user_id}';
+LMS.role = '{_global_.role}';
+LMS.xsrf = '{_global_.xsrf}';
+</script>
+</head>
+<body>
+<div id="lms-app"><p style="padding:24px;font-family:sans-serif">Загрузка…</p></div>
+<script src="/download/cources/js/util.js?v=1"></script>
+<script src="/download/cources/js/mock.js?v=1"></script>
+<script src="/download/cources/js/api.js?v=1"></script>
+<script src="/download/cources/js/data.js?v=1"></script>
+<script src="/download/cources/js/tasks.js?v=1"></script>
+<script src="/download/cources/js/quiz.js?v=1"></script>
+<script src="/download/cources/js/practicum.js?v=1"></script>
+<script src="/download/cources/js/lesson.js?v=1"></script>
+<script src="/download/cources/js/map.js?v=1"></script>
+<script src="/download/cources/js/me.js?v=1"></script>
+<script src="/download/cources/js/curator.js?v=1"></script>
+<script src="/download/cources/js/admin.js?v=1"></script>
+<script src="/download/cources/js/checks.js?v=1"></script>
+<script src="/download/cources/js/lms.js?v=1"></script>
+</body>
+</html>
