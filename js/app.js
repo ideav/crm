@@ -803,7 +803,9 @@ class App {
 
     _getPostLoginUriForDb(selectedDb) {
         if (!this._postLoginUri) return '';
-        if (!selectedDb || this._postLoginDb !== selectedDb) return '';
+        // ideav/courses#84: база со входом через кабинет (кука sso_back от сервера) — после входа в my назад в неё
+        const ssoBack = selectedDb === 'my' && !!this._postLoginDb && CookieUtil.get('sso_back') === this._postLoginDb;
+        if (!selectedDb || (this._postLoginDb !== selectedDb && !ssoBack)) return '';
         return this._postLoginUri;
     }
 
