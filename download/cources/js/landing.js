@@ -4,11 +4,12 @@
   var A = window.LMSApp, E = A.el, D = A.data;
   A.views = A.views || {};
 
-  var DESC = {
+  var DESC = A.courseDesc = {
     mini: 'Вводный мини-курс. За один-два вечера превратите рабочую таблицу в приложение и поймёте, что ИИ-агент делает сам, а где нужен человек.',
     adept: 'Делать приложения для заказчиков: от первого разговора до сданного проекта и ежемесячной поддержки. 8 модулей и практикум.',
     partner: 'Находить компании, которым нужно приложение вместо таблиц, доводить их до оплаты и получать партнёрский процент.'
   };
+  A.courseTags = { mini: ['ИИ-агент', 'Excel', 'для начинающих'], adept: ['ИИ-агент', 'разработка', 'заказчики'], partner: ['продажи', 'партнёрство'] };
   var STEPS = [
     ['Вход в один клик', 'Через Яндекс или по почте: без анкет и пароля для запоминания.'],
     ['Сразу урок', 'После входа вы попадаете прямо в первый урок мини-курса.'],
@@ -23,6 +24,12 @@
     ['Как получить доступ к платным курсам?', 'Войдите и введите промокод или оплатите курс; после этого он откроется в вашем кабинете.']
   ];
 
+  // поиск по каталогу прямо с первого экрана: ведёт в #/catalog?q=…
+  function searchBox() {
+    var inp = E('input', { class: 'inp', type: 'search', placeholder: 'Найти курс: тема, автор, урок', 'aria-label': 'Поиск по каталогу курсов' });
+    function go(e) { if (e) e.preventDefault(); var q = inp.value.trim(); location.hash = '#/catalog' + (q ? '?q=' + encodeURIComponent(q) : ''); }
+    return E('form', { class: 'ld-search', role: 'search', onsubmit: go }, [inp, E('button', { class: 'btn btn-primary', type: 'submit', text: 'Найти' })]);
+  }
   function sec(cls, kids) { return E('section', { class: 'ld-sec ' + cls }, [E('div', { class: 'ld-in' }, kids)]); }
   function price(c) { return c.free ? 'Бесплатно' : (c.price ? Number(c.price).toLocaleString('ru-RU') + ' ₽' : ''); }
 
@@ -32,14 +39,16 @@
       E('h1', { text: 'Приложения на Интеграме — без программирования' }),
       E('p', { class: 'ld-lead', text: 'Курсы Интеграма: учим собирать бизнес-приложения вместо таблиц с помощью ИИ-агента и находить для них клиентов.' }),
       E('div', { class: 'row ld-cta' }, A.loginButtons()),
-      E('p', { class: 'ld-sub' }, [E('a', { href: '#/c/mini/00-start', text: 'Сначала посмотреть первый урок' })])])]));
+      E('p', { class: 'ld-sub' }, [E('a', { href: '#/c/mini/00-start', text: 'Сначала посмотреть первый урок' })]),
+      searchBox()])]));
 
     var cards = (D.courses || []).map(function (c) {
       return E('div', { class: 'ld-card' }, [E('h3', { text: c.title }), E('div', { class: 'ld-price', text: price(c) }),
         E('p', { text: DESC[c.code] || '' }),
         c.free ? E('a', { class: 'btn', href: '#/c/mini/00-start', text: 'Посмотреть урок' }) : E('button', { class: 'btn', type: 'button', text: 'Войти и получить доступ', onclick: A.loginYandex })]);
     });
-    root.appendChild(sec('', [E('h2', { text: 'Курсы' }), E('div', { class: 'ld-cards' }, cards)]));
+    root.appendChild(sec('', [E('h2', { text: 'Курсы' }), E('div', { class: 'ld-cards' }, cards),
+      E('p', { class: 'ld-more' }, [E('a', { class: 'btn btn-primary', href: '#/catalog', text: 'Все курсы в каталоге' + (D.catalog && D.catalog.length ? ' (' + (D.catalogList().length) + ')' : '') })])]));
 
     root.appendChild(sec('ld-alt', [E('h2', { text: 'Как это устроено' }), E('ol', { class: 'ld-steps' }, STEPS.map(function (s) {
       return E('li', {}, [E('b', { text: s[0] }), E('span', { text: s[1] })]);

@@ -84,10 +84,35 @@
       return String((d && (d.id || d.obj)) || '');
     });
   };
-  A.update = function (name, id, fields) {
-    if (A.mock) return A.mockApi.update(name, id, fields);
-    return post('_m_set/' + id + '?JSON', toParams(tbl(name), fields));
+  // main (необязательно) — новое главное значение строки (t<id таблицы> в _m_set).
+  A.update = function (name, id, fields, main) {
+    if (A.mock) return A.mockApi.update(name, id, fields, main);
+    var t = tbl(name), p = toParams(t, fields);
+    if (main != null) p['t' + t.id] = main;
+    return post('_m_set/' + id + '?JSON', p);
   };
+  A.remove = function (name, id) {
+    if (A.mock) return A.mockApi.remove(name, id);
+    tbl(name);
+    return post('_m_del/' + id + '?JSON', {});
+  };
+  A.hasField = function (name, field) { var t = schema && schema.tables && schema.tables[name]; return !!(t && t.req && t.req[field]); };
+  function sendForm(url, fd, onProgress, needId) {
+    return new Promise(function (resolve, reject) {
+      var x = new XMLHttpRequest();
+      x.open('POST', url);
+      x.withCredentials = true;
+      x.upload.onprogress = function (e) { if (onProgress && e.lengthComputable) onProgress(e.loaded / e.total); };
+      x.onerror = function () { reject(new Error('нет связи с сервером')); };
+      x.onload = function () {
+        var d = null; try { d = JSON.parse(x.responseText); } catch (e) { /* не JSON */ }
+        var err = d && (Array.isArray(d) ? d[0] && d[0].error : d.error);
+        if (x.status >= 400 || err || !d || (needId && !(d.id || d.obj))) return reject(new Error(err || (d ? 'ошибка загрузки' : String(x.responseText || '').replace(/<[^>]+>/g, '').slice(0, 120)) || ('HTTP ' + x.status)));
+        resolve(String(d.obj || d.id || ''));
+      };
+      x.send(fd);
+    });
+  }
   // Загрузка файла: multipart в _m_new (поле t<id реквизита FILE>), XHR ради индикатора прогресса.
   // fields — реквизиты таблицы по именам (кроме FILE); file — File; onProgress(0..1).
   A.upload = function (name, main, fields, fileField, file, onProgress) {
@@ -98,20 +123,18 @@
     var fd = new FormData();
     Object.keys(p).forEach(function (k) { fd.append(k, p[k]); });
     fd.append('t' + t.req[fileField], file, file.name);
-    return new Promise(function (resolve, reject) {
-      var x = new XMLHttpRequest();
-      x.open('POST', '/' + A.z + '/_m_new/' + t.id + '?JSON&up=1');
-      x.withCredentials = true;
-      x.upload.onprogress = function (e) { if (onProgress && e.lengthComputable) onProgress(e.loaded / e.total); };
-      x.onerror = function () { reject(new Error('нет связи с сервером')); };
-      x.onload = function () {
-        var d = null; try { d = JSON.parse(x.responseText); } catch (e) { /* не JSON */ }
-        var err = d && (Array.isArray(d) ? d[0] && d[0].error : d.error);
-        if (x.status >= 400 || err || !d || !(d.id || d.obj)) return reject(new Error(err || (d ? 'ошибка загрузки' : String(x.responseText || '').replace(/<[^>]+>/g, '').slice(0, 120)) || ('HTTP ' + x.status)));
-        resolve(String(d.obj || d.id));
-      };
-      x.send(fd);
-    });
+    return sendForm('/' + A.z + '/_m_new/' + t.id + '?JSON&up=1', fd, onProgress, true);
+  };
+  // Загрузка файла в существующую строку (_m_set, multipart): ядро пишет в тот же реквизит FILE,
+  // поэтому адрес файла (хэш от id реквизита) остаётся прежним.
+  A.uploadTo = function (name, id, fileField, file, onProgress) {
+    if (A.mock) return A.mockApi.uploadTo(name, id, fileField, file);
+    var t = tbl(name);
+    if (!t.req[fileField]) return Promise.reject(new Error('Нет реквизита «' + fileField + '»'));
+    var fd = new FormData();
+    fd.append('_xsrf', L.xsrf || '');
+    fd.append('t' + t.req[fileField], file, file.name);
+    return sendForm('/' + A.z + '/_m_set/' + id + '?JSON', fd, onProgress, false).then(function () { return String(id); });
   };
   // Удаление строки с файлом: сначала очищаем реквизит FILE (так сервер стирает сам файл), потом строку.
   A.removeFile = function (name, id, fileField) {
