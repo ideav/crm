@@ -154,13 +154,6 @@
 
   // «Я оплатил»: заявка без промокода, админ сверяет оплату и выдаёт доступ
   D.requestPaid = function (course) { return D.requestPromo(course, ''); };
-  // бесплатный авторский курс: строка «Доступ» с основанием «бесплатно» (если роль не может её создать — курс открыт и так)
-  D.joinFree = function (course) {
-    if (A.isGuest() || !course.authored || !course.free || D.accessKey(course.code)) return Promise.resolve();
-    var f = { 'Пользователь': uid, 'Курс': course.code, 'Ключ': course.manifest, 'Основание': 'бесплатно', 'Дата и время': A.nowStr() };
-    return A.create('Доступ', uid + ':' + course.code, f).then(function (id) { D.access.push(Object.assign({ _id: id }, f)); }, function () { /* нет прав — не мешаем учиться */ });
-  };
-
   // первый невыполненный урок курса (или null)
   D.firstOpen = function (course) {
     var ls = course.lessons || [];

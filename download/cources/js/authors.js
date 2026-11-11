@@ -52,7 +52,7 @@
     return {
       code: String(row._main || ''), title: row['Название'] || row._main || '', free: price === 0, price: price,
       author: row['Автор'] || '', desc: row['Описание'] || '', forWhom: row['Для кого'] || '', tags: AU.tags(row['Теги']),
-      cover: AU.safeUrl(row['Обложка'], 'img'), payUrl: AU.safeUrl(row['Ссылка оплаты'], 'link'),
+      cover: AU.safeUrl(row['Адрес обложки'], 'img'), payUrl: AU.safeUrl(row['Ссылка оплаты'], 'link'),
       manifest: row['Манифест'] || '', visibility: row['Видимость'] === 'ссылка' ? 'ссылка' : 'каталог',
       lessons: Array.isArray(ls) ? ls : [], authored: true, _row: row._id
     };

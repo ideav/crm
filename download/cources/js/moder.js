@@ -4,6 +4,8 @@
    «Курс автора» и строка «Каталога». */
 (function () {
   'use strict';
+  // дата из базы приходит unix-временем или уже строкой «дд.мм.гггг чч:мм»
+  function when(v) { return /^\d{9,11}$/.test(String(v || '')) ? window.LMSApp.fmtUnix(v) : (v || ''); }
   var A = window.LMSApp, E = A.el, D = A.data, AU = A.au, F = AU.F;
   var PUB = 'Файл публикации';
 
@@ -63,7 +65,7 @@
       var f = { 'Код': code, 'Статус': vis === 'ссылка' ? AU.STATUS.link : AU.STATUS.catalog, 'Опубликован': now, 'Манифест': manUrl, 'Ссылка оплаты': pay || '', 'Замечание': '' };
       if (!String(row['Комиссия'] || '').trim()) f['Комиссия'] = '30';
       var cat = { 'Название': row._main, 'Описание': row['Описание'] || '', 'Автор': ctx.author, 'Теги': AU.tags(row['Теги']).join(', '), 'Цена': String(price),
-        'Обложка': (cf && cf.url) || '', 'Уроки': JSON.stringify(ctx.lessons.map(function (l) { return { id: l.id, n: l.n, title: l.title, task: l.task }; })),
+        'Адрес обложки': (cf && cf.url) || '', 'Уроки': JSON.stringify(ctx.lessons.map(function (l) { return { id: l.id, n: l.n, title: l.title, task: l.task }; })),
         'Видимость': vis, 'Ссылка оплаты': pay || '', 'Манифест': price ? '' : manUrl, 'Дата и время': now };
       if (A.hasField && A.hasField('Каталог', 'Для кого')) cat['Для кого'] = row['Для кого'] || '';
       var crow = ctx.catalog.filter(function (x) { return x._main === code; })[0];
@@ -152,7 +154,7 @@
     var st = AU.statusOf(r);
     return E('section', { class: 'card mod-card' }, [
       E('div', { class: 'course-head' }, [E('h3', { text: r._main || 'Без названия' }), E('span', { class: 'badge', text: st })]),
-      E('div', { class: 'muted small', text: 'Автор: ' + A.refText(r[F.owner]) + ' · ' + (price ? price.toLocaleString('ru-RU') + ' ₽' : 'бесплатно') + ' · отправлен ' + (r['На проверку'] || '—') + (r['Опубликован'] ? ' · опубликован ' + r['Опубликован'] : '') + (r['Код'] ? ' · код ' + r['Код'] : '') }),
+      E('div', { class: 'muted small', text: 'Автор: ' + A.refText(r[F.owner]) + ' · ' + (price ? price.toLocaleString('ru-RU') + ' ₽' : 'бесплатно') + ' · отправлен ' + (when(r['На проверку']) || '—') + (r['Опубликован'] ? ' · опубликован ' + when(r['Опубликован']) : '') + (r['Код'] ? ' · код ' + r['Код'] : '') }),
       r['Описание'] ? E('p', { class: 'pre small', text: r['Описание'] }) : null,
       E('div', { class: 'row' }, [preview]), pv,
       waiting ? pay : null, waiting ? note : null,
