@@ -748,6 +748,13 @@ class CabinetController {
             });
         }
 
+        // #5481: только что созданная база — первой при любой сортировке
+        const newDb = (this.newDbName || '').toLowerCase();
+        if (newDb) {
+            dbs = dbs.filter(db => (db.DB || '').toLowerCase() === newDb)
+                .concat(dbs.filter(db => (db.DB || '').toLowerCase() !== newDb));
+        }
+
         // Show DB limit warning if needed (free plan: max 3 DBs)
         const planId = parseInt(this.userData && this.userData.PlanID || '0', 10);
         const createForm = document.getElementById('create-db-form');
@@ -769,6 +776,8 @@ class CabinetController {
         dbs.forEach(db => {
             const card = document.createElement('div');
             card.className = 'database-card';
+            const isNew = !!newDb && (db.DB || '').toLowerCase() === newDb;
+            if (isNew) card.classList.add('database-card-new');
 
             const templateLabel = db.Template || 'default';
             const description = db.Description || '';
@@ -2189,8 +2198,12 @@ class CabinetController {
 
             showToast('База данных создана', 'success');
 
-            // Reload user data to refresh the list
+            // Reload user data to refresh the list; новая база — первой и подсвечена (#5481)
+            this.newDbName = dbName;
             await this.loadUserData();
+            const list = document.getElementById('databases-list');
+            const newCard = list && list.querySelector && list.querySelector('.database-card-new');
+            if (newCard && newCard.scrollIntoView) newCard.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
         } catch (err) {
             console.error('[cabinet] Error creating database:', err);
             showToast('Ошибка создания базы данных', 'error');

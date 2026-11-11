@@ -160,6 +160,12 @@ html[data-my-mode="cabinet"] body {
     padding: 1.25rem 1.4rem;
     margin-bottom: 1rem;
 }
+/* #5481: только что созданная база — первой в списке, подсвечена */
+.mc-content .database-card.database-card-new {
+    border-color: var(--mc-accent);
+    background: var(--mc-accent-soft);
+    box-shadow: 0 0 0 2px var(--mc-accent-soft), var(--mc-shadow);
+}
 .mc-card-head {
     display: flex;
     align-items: baseline;

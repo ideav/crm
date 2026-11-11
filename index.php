@@ -16615,7 +16615,8 @@ if(Validate_Token())
 			    my_die(t9n("[RU]Имя базы $db занято[EN]The DB name for $db is occupied"));
 			$template=strtolower($_REQUEST["template"]);
 			newDb($db, $template, $row["name"], $row["email"], "");
-            $id = Insert($GLOBALS["GLOBAL_VARS"]["user_id"], 1, DATABASE, $db, "Register extra DB");
+            # #5481: ord записи базы — счётчик «Расход» (updateBilling); новая база начинает с нуля
+            $id = Insert($GLOBALS["GLOBAL_VARS"]["user_id"], 0, DATABASE, $db, "Register extra DB");
             Insert($id, 1, 275, date("Ymd"), "Insert new DB date");
             Insert($id, 1, 283, $template, "Insert new DB template");
             Insert($id, 1, 276, $_POST["descr"], "Insert new DB notes");
