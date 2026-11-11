@@ -27,7 +27,7 @@
       }
       var list = E('ol', { class: 'lessons' }, ls.map(function (l) {
         var s = status(c, l);
-        var inner = [E('span', { class: 'ln', text: String(l.n || '') }), E('span', { class: 'lt', text: l.title }), E('span', { class: 'ls', text: LABEL[s] })];
+        var inner = [E('span', { class: 'ln', text: /^(Урок|Модуль|Кейс|Практикум)\s*[0-9П]/i.test(l.title || '') ? '' : String(l.n || '') }), E('span', { class: 'lt', text: l.title }), E('span', { class: 'ls', text: LABEL[s] })];
         return E('li', { class: 'l-' + s }, [access ? E('a', { href: '#/c/' + c.code + '/' + l.id }, inner) : E('span', { class: 'l-lock' }, inner)]);
       }));
       card.appendChild(list);

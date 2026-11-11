@@ -36,7 +36,7 @@
     };
     var bar = E('header', { class: 'lesson-bar' }, [
       E('div', { class: 'lesson-bar-row' }, [E('span', { class: 'lb-course', text: course.title }),
-        E('span', { class: 'lb-pos', text: 'Урок ' + (pos + 1) + ' из ' + total }),
+        E('span', { class: 'lb-pos', text: (pos + 1) + ' / ' + total }),
         E('a', { class: 'lb-map', href: '#/map', text: 'Карта' })]),
       E('div', { class: 'progress', role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': total, 'aria-valuenow': pos + 1 }, [E('i', { style: 'width:' + Math.round((pos + 1) / total * 100) + '%' })])]);
     var title = E('h1', { class: 'lesson-title', text: lesson.title });
