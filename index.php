@@ -3392,6 +3392,10 @@ function Validate_Token(){ # Validates the cookie token and gathers the user per
 			Auth_cookie($z, "", 0);  # кука с истёкшей или неизвестной сессией: скрипт её не снимет (HttpOnly)
 		$GLOBALS["tzone"] = isset($_COOKIE["tzone"]) ? (int)$_COOKIE["tzone"] : 0;  # PHP 8: "" + 1 — TypeError
 	}
+	# ideav/courses#84: в базе из SSO_DBS вошедший в my входит своим пользователем — и вместо гостя тоже
+	if((!isset($GLOBALS["GLOBAL_VARS"]["user"]) || ($GLOBALS["GLOBAL_VARS"]["user"] === "guest")) && !isApi()
+			&& defined("SSO_DBS") && (Sso_role($z) !== "") && isset($_COOKIE["idb_my"]) && is_string($_COOKIE["idb_my"]))
+		Sso_login_my();
 	if(!isset($GLOBALS["GLOBAL_VARS"]["user"])){ # Check, if we got a Guest user defined
 										  
 		$data_set = Exec_sql("SELECT u.id u, tok.val tok, tok.id token, xsrf.id xsrf, xsrf.val xsrf_val, role_def.id r, role_def.val role"
@@ -3455,36 +3459,46 @@ function Validate_Token(){ # Validates the cookie token and gathers the user per
     $GLOBALS["GLOBAL_VARS"]["token"] = $tok;
 	return isset($GLOBALS["GLOBAL_VARS"]["user"]);  # Return TRUE in case the token is OK
 }
-# ideav/courses#84: вход в базу $z из SSO_DBS через кабинет my (зовётся из Validate_Token для страницы
-# без входа; гость базы и JSON API сюда не доходят). Вошедший в my получает пользователя my<id my> этой
-# базы — при первом входе он заводится с почтой из my и ролью из SSO_DBS, без пароля; роль admin не
-# выдаётся. Дальше — сессия и повтор запроса. Без входа в my — на вход в кабинет с возвратом сюда
-# (кука sso_back, Sso_back_redirect); ?aff=<id агента> запоминается в куке _aff, регистрация в my пишет её
-# новому пользователю. Возврат из функции — отказ: обычный вход в базу.
+# ideav/courses#84: вход в базу $z из SSO_DBS по куке кабинета my (зовётся из Validate_Token для страницы без
+# входа или гостя). Владелец базы в my входит владельцем (пользователь $z). Прочий вошедший в my получает
+# пользователя my<id my> этой базы — при первом входе он заводится с почтой из my и ролью из SSO_DBS, без
+# пароля; роль admin не выдаётся. Дальше — сессия и повтор запроса (die). Возврат: FALSE — сессии my нет,
+# TRUE — сессия есть, но войти нельзя (нет роли или пользователя владельца).
+function Sso_login_my(){
+	global $z;
+	if(!isset($_COOKIE["idb_my"]) || !is_string($_COOKIE["idb_my"])
+			|| !($my = mysqli_fetch_array(Exec_sql("SELECT u.id, email.val email, db.id own FROM my tok, my u LEFT JOIN my email ON email.up=u.id AND email.t=".EMAIL
+				." LEFT JOIN my db ON db.up=u.id AND db.t=".DATABASE." AND db.val='$z'"
+				." WHERE u.t=".USER." AND tok.up=u.id AND ".Token_match_sql("tok", $_COOKIE["idb_my"])." AND tok.t=".TOKEN." LIMIT 1"
+				, "SSO: cabinet user"))))
+		return FALSE;
+	$login = $my["own"] ? $z : "my".(int)$my["id"];
+	$uid = Restore_id("SELECT id FROM $z WHERE t=".USER." AND val='$login' ORDER BY id LIMIT 1", "SSO: find the user");
+	if(!$uid){
+		if($my["own"])
+			return TRUE;
+		$role = Restore_id("SELECT id FROM $z WHERE t=".ROLE." AND up!=0 AND val='".addslashes(Sso_role($z))."' ORDER BY id LIMIT 1", "SSO: find the role");
+		$col = Restore_id("SELECT req.id FROM $z req JOIN $z ref ON ref.id=req.t AND ref.up=0 AND ref.t=".ROLE." WHERE req.up=".USER." LIMIT 1"
+			, "SSO: find the role column");
+		if(!$role || !$col || ((int)$role === ADMINROLE) || (mb_strtolower(Sso_role($z)) === "admin"))
+			return TRUE;
+		$uid = Insert(1, 1, USER, $login, "SSO: new user");
+		if((string)$my["email"] !== "")
+			Insert($uid, 1, EMAIL, $my["email"], "SSO: email");
+		Insert($uid, 1, $role, $col, "SSO: role");
+	}
+	if(isset($_COOKIE["sso_back"]))
+		setcookie("sso_back", "", Auth_cookie_opts(time() - 3600, FALSE));
+	Auth_cookie($z, Session_new($uid), NULL);
+	login($z, "", "reenter");
+}
+# ideav/courses#84: страница базы из SSO_DBS без входа и без гостя. Вошедший в my входит (Sso_login_my);
+# без входа в my — на вход в кабинет с возвратом сюда (кука sso_back, Sso_back_redirect); ?aff=<id агента>
+# запоминается в куке _aff, регистрация в my пишет её новому пользователю. Возврат — обычный вход в базу.
 function Sso_enter(){
 	global $z;
-	if(isset($_COOKIE["idb_my"]) && is_string($_COOKIE["idb_my"])
-			&& ($my = mysqli_fetch_array(Exec_sql("SELECT u.id, email.val email FROM my tok, my u LEFT JOIN my email ON email.up=u.id AND email.t=".EMAIL
-				." WHERE u.t=".USER." AND tok.up=u.id AND ".Token_match_sql("tok", $_COOKIE["idb_my"])." AND tok.t=".TOKEN." LIMIT 1"
-				, "SSO: cabinet user")))){
-		$login = "my".(int)$my["id"];
-		$uid = Restore_id("SELECT id FROM $z WHERE t=".USER." AND val='$login' ORDER BY id LIMIT 1", "SSO: find the user");
-		if(!$uid){
-			$role = Restore_id("SELECT id FROM $z WHERE t=".ROLE." AND up!=0 AND val='".addslashes(Sso_role($z))."' ORDER BY id LIMIT 1", "SSO: find the role");
-			$col = Restore_id("SELECT req.id FROM $z req JOIN $z ref ON ref.id=req.t AND ref.up=0 AND ref.t=".ROLE." WHERE req.up=".USER." LIMIT 1"
-				, "SSO: find the role column");
-			if(!$role || !$col || ((int)$role === ADMINROLE) || (mb_strtolower(Sso_role($z)) === "admin"))
-				return;
-			$uid = Insert(1, 1, USER, $login, "SSO: new user");
-			if((string)$my["email"] !== "")
-				Insert($uid, 1, EMAIL, $my["email"], "SSO: email");
-			Insert($uid, 1, $role, $col, "SSO: role");
-		}
-		if(isset($_COOKIE["sso_back"]))
-			setcookie("sso_back", "", Auth_cookie_opts(time() - 3600, FALSE));
-		Auth_cookie($z, Session_new($uid), NULL);
-		login($z, "", "reenter");
-	}
+	if(Sso_login_my())
+		return;
 	if(isset($_GET["aff"]) && is_string($_GET["aff"]) && preg_match('/^[1-9][0-9]{0,9}$/', $_GET["aff"]) && !isset($_COOKIE["_aff"]))
 		setcookie("_aff", $_GET["aff"], Auth_cookie_opts(time() + 180 * 86400, FALSE));
 	setcookie("sso_back", $z, Auth_cookie_opts(time() + 86400, FALSE));
