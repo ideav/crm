@@ -8,7 +8,7 @@
 $indexPhp = getenv("INDEX_PHP") ?: __DIR__."/../index.php";
 $mailPhp = __DIR__."/../include/mail.php";
 if(!isset($argv[1])){
-    $cases = array("A1","A2","A3","B1","B2","B3","B4","C1","C2","C3","D1","D2","D3","D4","E1","E2","E3","E4","E5","F1","F2","F3","F4","G1","G2","G3","G4","H1","H2","H3","H4","H5","H6","I1","I2","I3","I4","I5","I6","J1","J2","J3","J4","J5");
+    $cases = array("A1","A2","A3","B1","B2","B3","B4","B5","C1","C2","C3","D1","D2","D3","D4","E1","E2","E3","E4","E5","F1","F2","F3","F4","G1","G2","G3","G4","H1","H2","H3","H4","H5","H6","I1","I2","I3","I4","I5","I6","J1","J2","J3","J4","J5");
     $fail = 0;
     foreach($cases as $id){
         $out = array(); $code = 0;
@@ -59,6 +59,9 @@ $GLOBALS["ROWS"] = array();
 function Exec_sql($sql, $label){
     $r = new stdClass; $r->i = 0;
     $r->rows = isset($GLOBALS["ROWS"][$label]) ? $GLOBALS["ROWS"][$label] : array();
+    # IDROWS: ответ "SELECT t ... WHERE id=N" по id (цепочка реквизит -> тип -> базовый тип)
+    if(isset($GLOBALS["IDROWS"]) && preg_match('/WHERE id=(\d+)/', $sql, $m))
+        $r->rows = isset($GLOBALS["IDROWS"][(int)$m[1]]) ? array(array($GLOBALS["IDROWS"][(int)$m[1]])) : array();
     return $r;
 }
 function fk_fetch($r){ return $r->i < count($r->rows) ? $r->rows[$r->i++] : NULL; }
@@ -179,6 +182,15 @@ case "B1":
 case "B2":
     $GLOBALS["ROWS"]["Mail: base type"] = array(array(3));
     asrt(Skip_hidden_pwd(12346, PASSWORDSTARS) === FALSE, "stars hidden for SHORT req");
+    break;
+case "B5":
+    # как в базе: значение.t = реквизит 20211, реквизит.t = тип 20210, тип.t = PWD
+    $GLOBALS["REV_BT"] = array(PWD => "PWD", SHORT => "SHORT");
+    $GLOBALS["IDROWS"] = array(20211 => 20210, 20210 => PWD, 20205 => 20204, 20204 => SHORT);
+    asrt(Mail_req_base(20211) === "PWD", "B5 requisite -> type -> PWD not resolved: '".Mail_req_base(20211)."'");
+    asrt(Skip_hidden_pwd(20211, PASSWORDSTARS) === TRUE, "B5 stars not hidden for a real PWD requisite");
+    asrt(Mail_req_base(20205) === "SHORT", "B5 SHORT requisite resolved wrong");
+    asrt(Skip_hidden_pwd(20205, PASSWORDSTARS) === FALSE, "B5 stars hidden for SHORT requisite");
     break;
 case "B3":
     asrt(Skip_hidden_pwd(PASSWORD, PASSWORDSTARS) === TRUE, "system PASSWORD not hidden");

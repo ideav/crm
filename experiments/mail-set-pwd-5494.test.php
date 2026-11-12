@@ -66,7 +66,8 @@ define("MAIL_TABLE_NAME", "Почта для отправки");
 define("PWD_BASE", 6);
 define("MAIL_TABLE", 777);       # таблица «Почта для отправки»
 define("OTHER_TABLE", 888);      # другая таблица с реквизитом PWD
-define("PWD_REQ", 10213);        # реквизит «Пароль приложения»
+define("PWD_REQ", 10213);        # реквизит «Пароль приложения» (строка таблицы, up = таблица)
+define("PWD_TYPE", 10212);       # его тип (up = 0, t = PWD)
 
 function t9n($msg){ return preg_replace('/\[RU\](.*?)\[EN\].*/s', '$1', $msg); }
 function trace($msg){}
@@ -79,8 +80,11 @@ class FakeResult {
 function Exec_sql($sql, $err_msg, $log = TRUE, $fatal = TRUE){
     if($err_msg === "Get Attr Type")
         return new FakeResult($GLOBALS["ATTR_ROWS"]);
-    if($err_msg === "Mail: base type")
-        return new FakeResult(array(array(PWD_BASE, "t" => PWD_BASE)));
+    if($err_msg === "Mail: base type"){	# как в базе: значение.t = реквизит, реквизит.t = тип, тип.t = базовый PWD
+        $chain = array(PWD_REQ => PWD_TYPE, PWD_TYPE => PWD_BASE, PWD_BASE => PWD_BASE);
+        $id = preg_match('/id=(\d+)/', $sql, $m) ? (int)$m[1] : 0;
+        return new FakeResult(isset($chain[$id]) ? array(array($chain[$id], "t" => $chain[$id])) : array());
+    }
     if($err_msg === "Mail: settings-pwd record")
         return new FakeResult(array(array($GLOBALS["REC_TABLE"], "t" => $GLOBALS["REC_TABLE"])));
     return new FakeResult(array());

@@ -97,16 +97,30 @@ function Mail_ensure_record(){
 }
 
 # --- the stars mask and the password crypto -------------------------------------
+# Базовый тип реквизита. t строки значения = id реквизита (строка таблицы), t реквизита = id его
+# типа, t типа = базовый тип (PWD, SHORT, ...). Идём по цепочке, пока не встретим известный
+# REV_BT; результат кэшируется на время запроса (MAIL_BASE_CACHE).
 function Mail_req_base($t){
-    if(isset($GLOBALS["REV_BT"][$t]))
-        return $GLOBALS["REV_BT"][$t];
     global $z;
-    if(!$row = mysqli_fetch_array(Exec_sql("SELECT t FROM $z WHERE id=".(int)$t, "Mail: base type")))
-        return "";
-    $bt = (int)$row[0];
-    if(!isset($GLOBALS["REV_BT"][$bt]))
-        return "";
-    return $GLOBALS["REV_BT"][$bt];
+    $start = (int)$t;
+    if(isset($GLOBALS["MAIL_BASE_CACHE"][$start]))
+        return $GLOBALS["MAIL_BASE_CACHE"][$start];
+    $base = "";
+    $cur = $start;
+    for($hop = 0; $hop < 3; $hop++){
+        if(isset($GLOBALS["REV_BT"][$cur])){
+            $base = (string)$GLOBALS["REV_BT"][$cur];
+            break;
+        }
+        if(!$row = mysqli_fetch_array(Exec_sql("SELECT t FROM $z WHERE id=".$cur, "Mail: base type")))
+            break;
+        $next = (int)$row[0];
+        if($next <= 0 || $next === $cur)
+            break;
+        $cur = $next;
+    }
+    $GLOBALS["MAIL_BASE_CACHE"][$start] = $base;
+    return $base;
 }
 function Skip_hidden_pwd($t, $v){
     if($v !== PASSWORDSTARS)
