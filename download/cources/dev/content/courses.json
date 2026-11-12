@@ -1,0 +1,59 @@
+{
+ "version": "dev",
+ "courses": [
+  {
+   "code": "mini",
+   "title": "Мини-курс",
+   "free": true,
+   "path": "mini",
+   "lessons": [
+    {
+     "id": "00-start",
+     "n": 1,
+     "title": "Старт: знакомство",
+     "task": "text"
+    },
+    {
+     "id": "01-tables",
+     "n": 2,
+     "title": "Таблицы и реквизиты",
+     "task": "quiz"
+    },
+    {
+     "id": "02-final",
+     "n": 3,
+     "title": "Итоги мини-курса",
+     "task": "selfcheck"
+    }
+   ]
+  },
+  {
+   "code": "adept",
+   "title": "Адепт",
+   "free": false,
+   "price": 9900,
+   "lessons": [
+    {
+     "id": "p1-planner",
+     "n": 1,
+     "title": "Планировщик задач",
+     "task": "practicum"
+    }
+   ]
+  },
+  {
+   "code": "partner",
+   "title": "Партнёр",
+   "free": false,
+   "price": 19900,
+   "lessons": [
+    {
+     "id": "x1",
+     "n": 1,
+     "title": "Закрытый урок",
+     "task": "text"
+    }
+   ]
+  }
+ ]
+}

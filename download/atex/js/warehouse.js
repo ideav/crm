@@ -287,7 +287,7 @@
         var value = batch && batch.values ? batch.values.active : '';
         if (value == null || trimValue(value) === '') return true;
         var s = trimValue(value).toLowerCase();
-        return !(s === '0' || s === 'false' || s === 'нет' || s === 'no' || s === 'off' || s === 'неактивно');
+        return !(s === '0' || s === '-1' || s === 'false' || s === 'нет' || s === 'no' || s === 'off' || s === 'неактивно');   // #5475: "-1" = нет (#5442)
     }
 
     // #3433: фактический остаток партии для списания = «Кол-во факт» (реально
