@@ -14,13 +14,20 @@
 
   function render() {
     if (A.cleanup) A.cleanup();
-    var h = location.hash.replace(/^#/, '');
+    var full = location.hash.replace(/^#/, ''), qi = full.indexOf('?');
+    var h = qi < 0 ? full : full.slice(0, qi);
+    A.query = new URLSearchParams(qi < 0 ? '' : full.slice(qi + 1));
     var m;
-    if (A.isGuest() && (h === '/me' || h === '/curator')) { location.replace('#/'); return; }
+    if (A.isGuest() && (h === '/me' || h === '/curator' || /^\/author(\/|$)/.test(h) && h !== '/author/help')) { location.replace('#/'); return; }
     if (!h || h === '/') { if (A.isGuest()) { root.innerHTML = ''; A.views.landing(root); return; } location.replace(entry()); return; }
     root.innerHTML = '';
     [].forEach.call(nav.querySelectorAll('a'), function (a) { a.classList.toggle('on', a.getAttribute('href') === '#' + h.split('/').slice(0, 2).join('/')); });
-    if ((m = /^\/c\/([^/]+)\/([^/]+)$/.exec(h))) A.views.lesson(root, decodeURIComponent(m[1]), decodeURIComponent(m[2]));
+    if (h === '/catalog') A.views.catalog(root);
+    else if ((m = /^\/course\/([^/]+)$/.exec(h))) A.views.course(root, decodeURIComponent(m[1]));
+    else if (h === '/author') A.views.author(root);
+    else if (h === '/author/help') A.views.authorHelp(root);
+    else if ((m = /^\/author\/(\d+)(?:\/(\d+))?$/.exec(h))) A.views.authorCourse(root, m[1], m[2] || null);
+    else if ((m = /^\/c\/([^/]+)\/([^/]+)$/.exec(h))) A.views.lesson(root, decodeURIComponent(m[1]), decodeURIComponent(m[2]));
     else if ((m = /^\/c\/([^\/]+)\/?$/.exec(h))) { var cc = D.course(decodeURIComponent(m[1])), fl = cc && (D.firstOpen(cc) || (cc.lessons || [])[0]); if (fl) location.replace('#/c/' + cc.code + '/' + fl.id); else location.replace('#/map'); return; }
     else if (h === '/map') A.views.map(root);
     else if (h === '/me') A.views.me(root);
@@ -34,9 +41,9 @@
     var app = document.getElementById('lms-app');
     if (A.isGuest()) A.rememberAff();
     nav = A.isGuest() ? E('nav', { class: 'lms-nav' }, [E('a', { class: 'brand', href: '#/' }, [E('span', { class: 'dot' }), 'Курсы Интеграм']),
-      E('div', { class: 'links' }, [E('a', { href: '#/map', text: 'Курсы' })]),
+      E('div', { class: 'links' }, [E('a', { href: '#/catalog', text: 'Каталог' })]),
       E('button', { class: 'btn btn-primary nav-login', type: 'button', text: 'Войти', onclick: A.loginYandex })]) : E('nav', { class: 'lms-nav' }, [E('a', { class: 'brand', href: '#/' }, [E('span', { class: 'dot' }), 'Курсы Интеграм']),
-      E('div', { class: 'links' }, [E('a', { href: '#/map', text: 'Карта' }), E('a', { href: '#/me', text: 'Кабинет' }),
+      E('div', { class: 'links' }, [E('a', { href: '#/map', text: 'Карта' }), E('a', { href: '#/catalog', text: 'Каталог' }), E('a', { href: '#/author', text: 'Автор' }), E('a', { href: '#/me', text: 'Кабинет' }),
         A.isCurator() ? E('a', { href: '#/curator', text: 'Куратор' }) : null,
         A.isAdmin() ? E('a', { href: '/' + L.z + '/dict', target: '_self', text: 'Интерфейс базы' }) : null]),
       E('span', { class: 'who', text: L.user || '' })]);

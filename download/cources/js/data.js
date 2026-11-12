@@ -2,17 +2,19 @@
 (function () {
   'use strict';
   var A = window.LMSApp, L = window.LMS || {};
-  var D = A.data = { courses: [], progress: {}, access: [], profile: null, requests: [], comments: [], files: [] };
+  var D = A.data = { courses: [], catalog: [], progress: {}, access: [], profile: null, requests: [], comments: [], files: [] };
+  var AU = A.au, manifests = {};
   var uid = String(L.userId || '');
   var queues = {};
 
   D.uid = uid;
   D.init = function () {
-    if (A.isGuest()) { // гость: только публичный каталог, никаких запросов к API данных
-      return A.getJSON(A.contentRoot + 'courses.json').then(function (c) { D.courses = c.courses || []; });
+    if (A.isGuest()) { // гость: только публичный каталог (courses.json + таблица «Каталог»)
+      return Promise.all([A.getJSON(A.contentRoot + 'courses.json'), loadCatalog()]).then(function (r) { D.courses = r[0].courses || []; D.catalog = r[1]; });
     }
     return A.loadSchema().then(function () {
       return Promise.all([
+        loadCatalog(),
         A.getJSON(A.contentRoot + 'courses.json'),
         A.list('Прогресс', { 'Пользователь': uid }),
         A.list('Доступ', { 'Пользователь': uid }),
@@ -22,6 +24,7 @@
         A.list('Файл ответа', { 'Пользователь': uid }).catch(function () { return []; })
       ]);
     }).then(function (r) {
+      D.catalog = r.shift();
       D.courses = r[0].courses || [];
       D.progress = {};
       r[1].forEach(function (row) { D.progress[row.Курс + '/' + row.Урок] = row; });
@@ -30,16 +33,53 @@
       D.requests = r[4];
       D.comments = r[5];
       D.files = r[6].filter(function (x) { return x['Файл']; });
+      return orphans();
     });
   };
+  // строки «Каталога» (#93); нет таблицы или прав — каталог из одних встроенных курсов
+  function loadCatalog() {
+    return A.loadSchema().then(function () { return A.list('Каталог', {}); })
+      .then(function (rows) { return rows.map(AU.fromCatalog).filter(function (c) { return AU.isAuthored(c.code); }); }, function () { return []; });
+  }
+  // Курс снят с каталога, а у ученика есть платный доступ: собираем курс из его манифеста.
+  function orphans() {
+    var miss = D.access.filter(function (a) { return AU.isAuthored(a['Курс']) && a['Ключ'] && !D.course(a['Курс']); });
+    return Promise.all(miss.map(function (a) {
+      return D.manifest(a['Ключ']).then(function (m) {
+        D.catalog.push({ code: a['Курс'], title: m.title || a['Курс'], author: m.author || '', free: false, price: 0, tags: [], desc: '', authored: true, visibility: 'ссылка',
+          lessons: (m.lessons || []).map(function (l) { return { id: l.id, n: l.n, title: l.title, task: l.task }; }) });
+      }, function () { /* манифест недоступен — курса нет */ });
+    }));
+  }
 
-  D.course = function (code) { return D.courses.filter(function (c) { return c.code === code; })[0]; };
+  D.course = function (code) {
+    return D.courses.filter(function (c) { return c.code === code; })[0] || D.catalog.filter(function (c) { return c.code === code; })[0];
+  };
+  // все курсы для каталога: встроенные + видимые строки «Каталога»
+  D.catalogList = function () {
+    return D.courses.map(function (c) {
+      return Object.assign({ author: 'Интеграм', desc: (A.courseDesc || {})[c.code] || '', tags: (A.courseTags || {})[c.code] || [] }, c);
+    }).concat(D.catalog.filter(function (c) { return c.visibility === 'каталог'; }));
+  };
+  // курсы ученика для карты: встроенные + авторские, к которым есть доступ или прогресс
+  D.myCourses = function () {
+    return D.courses.concat(D.catalog.filter(function (c) {
+      return D.accessKey(c.code) || Object.keys(D.progress).some(function (k) { return k.indexOf(c.code + '/') === 0; });
+    }));
+  };
+  D.manifest = function (url) {
+    var u = AU.safeUrl(url, 'json');
+    if (!u) return Promise.reject(new Error('нет адреса манифеста'));
+    if (!manifests[u]) manifests[u] = A.getJSON(u).catch(function (e) { delete manifests[u]; throw e; });
+    return manifests[u];
+  };
   D.accessKey = function (code) {
     var a = D.access.filter(function (x) { return x['Курс'] === code && x['Ключ']; })[0];
     return a ? a['Ключ'] : null;
   };
   // путь к json уроков курса или null, если доступа нет
   D.contentPath = function (course) {
+    if (course.authored) return (course.free && course.manifest) || D.accessKey(course.code) || null; // URL манифеста
     if (course.free) return A.contentRoot + (course.path || course.code) + '/';
     var k = D.accessKey(course.code);
     return k ? A.contentRoot + course.code + '-' + k + '/' : null;
@@ -48,6 +88,13 @@
   D.loadLesson = function (course, id) {
     var p = D.contentPath(course);
     if (!p) return Promise.reject(new Error('locked'));
+    if (course.authored) {
+      return D.manifest(p).then(function (m) {
+        var l = (m.lessons || []).filter(function (x) { return x.id === id; })[0], u = l && AU.safeUrl(l.url, 'json');
+        if (!u) throw new Error('урока нет в манифесте');
+        return A.getJSON(u);
+      }).then(AU.cleanLesson);
+    }
     return A.getJSON(p + id + '.json');
   };
 
@@ -105,6 +152,8 @@
     });
   };
 
+  // «Я оплатил»: заявка без промокода, админ сверяет оплату и выдаёт доступ
+  D.requestPaid = function (course) { return D.requestPromo(course, ''); };
   // первый невыполненный урок курса (или null)
   D.firstOpen = function (course) {
     var ls = course.lessons || [];

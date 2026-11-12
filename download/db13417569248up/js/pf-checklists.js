@@ -25,7 +25,7 @@
                     id: x.i, name: x.r[0],
                     product: x.r[idx(CARD, 'Продукт')],
                     from: x.r[idx(CARD, 'Действует с')],
-                    active: x.r[idx(CARD, 'Активна')] === 'X',
+                    active: PF.bool(x.r[idx(CARD, 'Активна')]),
                     pack: PF.refVal(x.r[idx(CARD, 'Вид упаковки')]),
                     packId: PF.refId(x.r[idx(CARD, 'Вид упаковки')]),
                     lines: PF.num(x.r[idx(CARD, 'Строка карты')]) || 0
@@ -45,7 +45,7 @@
                     indId: PF.refId(r.r[idx(LINE, 'Показатель контроля')]),
                     ind: PF.refVal(r.r[idx(LINE, 'Показатель контроля')]),
                     ord: PF.num(r.r[idx(LINE, 'Порядок сортировки')]) || 0,
-                    required: r.r[idx(LINE, 'Обязателен')] === 'X',
+                    required: PF.bool(r.r[idx(LINE, 'Обязателен')]),
                     min: PF.num(r.r[idx(LINE, 'Норма мин карты')]),
                     max: PF.num(r.r[idx(LINE, 'Норма макс карты')])
                 };

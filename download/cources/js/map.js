@@ -35,11 +35,12 @@
   A.views.map = function (root) {
     root.appendChild(E('h1', { class: 'page-title', text: 'Карта курсов' }));
     payBanner(root);
-    D.courses.forEach(function (c) {
+    root.appendChild(E('p', { class: 'muted' }, ['Больше курсов — в ', E('a', { href: '#/catalog', text: 'каталоге' }), '.']));
+    D.myCourses().forEach(function (c) {
       var access = D.hasAccess(c), ls = c.lessons || [];
       var doneN = ls.filter(function (l) { return D.isDone(c.code, l.id); }).length;
       var card = E('section', { class: 'card course' + (access ? '' : ' locked') }, [
-        E('div', { class: 'course-head' }, [E('h2', { text: c.title }),
+        E('div', { class: 'course-head' }, [E('h2', {}, [E('a', { href: '#/course/' + encodeURIComponent(c.code), class: 'course-link', text: c.title })]),
           E('span', { class: 'badge', text: access ? doneN + ' из ' + ls.length : (c.price ? 'Закрыт · ' + c.price + ' ₽' : 'Закрыт') })])]);
       if (!access) {
         if (A.isGuest()) { card.appendChild(E('p', { class: 'muted', text: 'Войдите, чтобы получить доступ к курсу.' })); card.appendChild(E('div', { class: 'row' }, A.loginButtons())); }
