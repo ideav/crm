@@ -21,7 +21,7 @@ class El {
         this.options = [];
     }
     get className() { return [...this.cls].join(' '); }
-    set className(v) { this.cls = new Set(String(v).split(/s+/).filter(Boolean)); }
+    set className(v) { this.cls = new Set(String(v).split(/\s+/).filter(Boolean)); }
     addEventListener(t, h) { this.listeners[t] = h; }
     appendChild(c) { this.children.push(c); return c; }
     querySelector() { return new El('div'); }
