@@ -57,14 +57,56 @@
         if (tpl) doc.write(tpl.innerHTML);
     }
 
-    function loadCabData(base) {
-        return fetch(base + '/cabdata?JSON', { credentials: 'include' })
-            .then(function (r) { return r.ok ? r.json() : null; })
-            .then(readCabData)
-            .catch(function () { return readCabData(null); });
+    // Партнёрский раздел ЛК: блоки partnerLinks, partnerClients, partnerExam, partnerStats
+    // (отчёты с теми же именами, столбцы — точки вставки в templates/my/cabdata.html)
+    function readPartnerData(json) {
+        var links = blockRows(json, 'partnerLinks').filter(function (r) { return r.material || r.title; }).map(function (r) {
+            return { material: r.material || '', title: r.title || r.material, token: r.token || '', kind: r.kind || 'page' };
+        });
+        var clients = blockRows(json, 'partnerClients').filter(function (r) { return r.client; }).map(function (r) {
+            return { name: r.client, came: r.came || '', did: r.did || '', start: r.start || r.came || '', paid: r.paid === '1' };
+        });
+        var e = blockRows(json, 'partnerExam')[0];
+        var exam = e ? {
+            passed: e.passed === '1', score: num(e.score), date: e.examdate || '',
+            attemptsLeft: e.attemptsleft === '' || e.attemptsleft == null ? 3 : parseInt(e.attemptsleft, 10) || 0,
+            threshold: num(e.threshold) || 80
+        } : null;
+        var s = blockRows(json, 'partnerStats')[0];
+        var stats = s ? {
+            clients: num(s.clients), onSupport: num(s.onsupport), paidClients: num(s.paidclients), earned: num(s.earned),
+            opens: num(s.opens), people: num(s.people), videoPeople: num(s.videopeople),
+            presentationPeople: num(s.presentationpeople), kpPeople: num(s.kppeople),
+            botStarts: num(s.botstarts), flows: num(s.flows)
+        } : null;
+        return { links: links, clients: clients, exam: exam, stats: stats };
     }
 
-    root.MyMode = { getMode: getMode, blockRows: blockRows, readCabData: readCabData, put: put, loadCabData: loadCabData };
+    // Один запрос /cabdata?JSON кормит и тарифы, и партнёрский раздел: ответ держится 3 секунды,
+    // чтобы повторный вызов позже (после оплаты) читал свежие данные
+    var cabJsonCache = {};
+    function fetchCabJson(base) {
+        var hit = cabJsonCache[base];
+        if (hit && Date.now() - hit.t < 3000) return hit.p;
+        var p = fetch(base + '/cabdata?JSON', { credentials: 'include' })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .catch(function () { return null; });
+        cabJsonCache[base] = { t: Date.now(), p: p };
+        return p;
+    }
+
+    function loadCabData(base) {
+        return fetchCabJson(base).then(readCabData);
+    }
+
+    function loadPartnerData(base) {
+        return fetchCabJson(base).then(readPartnerData);
+    }
+
+    root.MyMode = {
+        getMode: getMode, blockRows: blockRows, readCabData: readCabData, put: put, loadCabData: loadCabData,
+        readPartnerData: readPartnerData, loadPartnerData: loadPartnerData
+    };
 
     if (root.document && root.document.documentElement) {
         // Гранты шаблонизатор отдаёт base64-строкой; у суперадмина их может не быть совсем

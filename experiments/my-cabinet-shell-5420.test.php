@@ -125,5 +125,29 @@ expect(isset($plans["price"]) && isset($plans["limit"]), "cabdata: цена и �
 expect(isset($api["&main.a.paidthismonth"]["payment"]), "cabdata: оплата текущего месяца");
 expect(isset($api["&main.a.noadmin"]["limit"]) && $api["&main.a.noadmin"]["limit"][0] === "5000", "cabdata: лимит тарифа пользователя");
 
+# Партнёрский раздел ЛК: блоки partnerLinks/Clients/Exam/Stats отдаются тем же ответом /my/cabdata?JSON
+$partner = array(
+    "partnerLinks" => array(array("Material"=>"video_excel", "Title"=>"Видео", "Token"=>"k7Qm2xVd9LpR4tWe", "Kind"=>"video"),
+                            array("Material"=>"bot", "Title"=>"Бот", "Token"=>"Gv2cN8yRq5TjW3mD", "Kind"=>"bot")),
+    "partnerClients" => array(array("Client"=>"ООО Пример", "Came"=>"03.11.2026", "Did"=>"2 дашборда", "Start"=>"03.11.2026", "Paid"=>"0")),
+    "partnerExam" => array(array("Passed"=>"1", "Score"=>"90", "ExamDate"=>"08.11.2026", "AttemptsLeft"=>"3", "Threshold"=>"80")),
+    "partnerStats" => array(array("Clients"=>"5", "OnSupport"=>"3", "PaidClients"=>"2", "Earned"=>"12500", "Opens"=>"41", "People"=>"17",
+                                  "VideoPeople"=>"17", "PresentationPeople"=>"9", "KpPeople"=>"6", "BotStarts"=>"5", "Flows"=>"4")));
+render(array_merge($user, array("action"=>"cabdata")), array_merge($cab, $partner), TRUE);
+$api = isset($GLOBALS["GLOBAL_VARS"]["api"]) ? $GLOBALS["GLOBAL_VARS"]["api"] : array();
+$pl = isset($api["&main.a.partnerlinks"]) ? $api["&main.a.partnerlinks"] : array();
+expect(isset($pl["token"]) && $pl["token"] === array("k7Qm2xVd9LpR4tWe", "Gv2cN8yRq5TjW3mD"), "cabdata: токены ссылок партнёра");
+expect(isset($pl["kind"]) && $pl["kind"] === array("video", "bot"), "cabdata: виды ссылок партнёра");
+expect(isset($api["&main.a.partnerclients"]["client"][0]) && $api["&main.a.partnerclients"]["client"][0] === "ООО Пример", "cabdata: клиенты партнёра");
+expect(isset($api["&main.a.partnerexam"]["score"][0]) && $api["&main.a.partnerexam"]["score"][0] === "90", "cabdata: экзамен партнёра");
+expect(isset($api["&main.a.partnerstats"]["videopeople"][0]) && $api["&main.a.partnerstats"]["videopeople"][0] === "17", "cabdata: статистика партнёра");
+
+# Отчётов партнёра нет (не созданы в базе): страница и cabdata не ломаются, тарифы на месте
+render(array_merge($user, array("action"=>"cabdata")), $cab, TRUE);
+$api = isset($GLOBALS["GLOBAL_VARS"]["api"]) ? $GLOBALS["GLOBAL_VARS"]["api"] : array();
+expect(isset($api["&main.a.plans"]["planid"]), "cabdata без отчётов партнёра: тарифы по-прежнему отдаются");
+$page = render($user, $cab);
+expect(strpos($page, 'id="partner-links"') !== FALSE && strpos($page, "{_block_.") === FALSE, "ЛК без отчётов партнёра: вкладки на месте, блоки не оборваны");
+
 echo $failures ? "\n$failures FAIL\n" : "\nALL PASS\n";
 exit($failures ? 1 : 0);
