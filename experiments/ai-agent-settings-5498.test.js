@@ -160,3 +160,7 @@ settle().then(function(){
     console.log(failures ? '\n' + failures + ' FAILED' : '\nALL PASS');
     process.exitCode = failures ? 1 : 0;
 });
+
+// P1: Polza.ai — первая в списке, с партнёрской ссылкой владельца (#5498).
+expect(S.PROVIDERS[0].id === 'polza' && S.PROVIDERS[0].url === 'https://polza.ai/api/v1'
+    && /referral=JZIhyXi2V0/.test(S.PROVIDERS[0].link), 'P1: Polza.ai первой, адрес API и партнёрская ссылка');

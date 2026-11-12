@@ -16,6 +16,8 @@
 
     // Известные OpenAI-совместимые прокси. link — куда вести за ключом (партнёрская ссылка).
     var PROVIDERS = [
+        { id: 'polza', name: 'Polza.ai (оплата из РФ)', url: 'https://polza.ai/api/v1',
+          model: 'openai/gpt-4o-mini', link: 'https://polza.ai/?referral=JZIhyXi2V0' },
         { id: 'openrouter', name: 'OpenRouter', url: 'https://openrouter.ai/api/v1',
           model: 'openai/gpt-4o-mini', link: 'https://openrouter.ai/keys' },
         { id: 'proxyapi', name: 'ProxyAPI (оплата из РФ)', url: 'https://api.proxyapi.ru/openai/v1',
