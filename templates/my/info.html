@@ -2,7 +2,7 @@
      в &main.a на корне базы. Разделы — пункты меню роли (menuData), модерация шаблонов баз —
      js/db-templates.js. Клиенты базы видят ЛК (режим cabinet в js/my-mode.js), эта страница
      у них в документ не попадает. -->
-<link rel="stylesheet" href="/css/my-cabinet.css?{_global_.version}.1">
+<link rel="stylesheet" href="/css/my-cabinet.css?{_global_.version}.2">
 <div id="my-admin-home" class="mc-admin-home">
     <div class="mc-section-head">
         <div>
@@ -13,6 +13,12 @@
     <div class="mc-card">
         <div class="mc-card-head"><h2>Разделы</h2></div>
         <div id="my-admin-sections" class="mc-tiles"><p class="mc-muted">Меню роли пусто.</p></div>
+    </div>
+    <div class="mc-card">
+        <div class="mc-card-head"><h2>Партнёры</h2></div>
+        <div class="mc-tiles">
+            <a class="mc-tile" href="/{_global_.z}/partners"><i class="pi pi-users"></i><span>Сводный кабинет партнёров</span></a>
+        </div>
     </div>
     <div id="tpl-moderation" class="tpl-moderation mc-card" style="display:none;"></div>
 </div>

@@ -1,0 +1,17 @@
+<!-- Сводный кабинет партнёров: рабочее место админа и директора базы my (страница /my/partners).
+     Три уровня: все партнёры, клиенты партнёра, карточка клиента. Данные — отчёты adminPartners,
+     adminClients, adminEvents (контракт — docs/partner-cabinet.md); рисует js/partner-admin.js.
+     Клиентам базы эта страница в документ не попадает: ЛК клиента — режим cabinet (js/my-mode.js). -->
+<link rel="stylesheet" href="/css/my-cabinet.css?{_global_.version}.2">
+<div id="my-partners" class="mc-admin-home">
+    <div class="mc-section-head">
+        <div>
+            <h1>Партнёры</h1>
+            <p class="mc-lead">Все зарегистрированные партнёры, их клиенты и активность. Показываются метрики и события, содержимое таблиц и дашбордов клиентов не показывается.</p>
+        </div>
+    </div>
+    <div id="partners-crumbs" class="partner-crumbs"></div>
+    <div id="partners-view"></div>
+</div>
+<script src="/js/partner-cabinet.js?{_global_.version}.1"></script>
+<script src="/js/partner-admin.js?{_global_.version}.2"></script>
