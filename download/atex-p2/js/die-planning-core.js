@@ -106,7 +106,7 @@
     // Значение BOOLEAN из базы: пусто, 0, «нет», false — выключено.
     function flagOn(v) {
         var t = String(v == null ? '' : v).trim().toLowerCase();
-        return t !== '' && t !== '0' && t !== 'нет' && t !== 'false';
+        return t !== '' && t !== '0' && t !== '-1' && t !== 'нет' && t !== 'false';   // #5475: "-1" = нет (#5442)
     }
     // Строки отчёта die_planning → задания (fixed — «Зафиксировано», #5376).
     function buildJobs(rows, tz) {

@@ -372,7 +372,8 @@ if(($z === "my") && ((isset($com[2]) ? $com[2] : "") === "register")){ # Registe
         			Exec_sql("UPDATE $z SET val='".$row["token"]."' WHERE id=".$row["pid"], "Update user's password");
         			updateTokens($row, array((string)$row["token"]));  # до подтверждения в токене лежал хеш пароля
                 	createDb($row["uid"], "", $row["email"], $row["pwd"]);
-            		header("Location: /$z");
+                	$back = Sso_back_redirect();  # ideav/courses#84: назад в базу, откуда отправили на регистрацию
+            		header("Location: ".($back !== "" ? $back : "/$z"));
             		die();
                 }
     	}
@@ -642,6 +643,8 @@ elseif(($z == "my") && !empty($_GET['code'])){
 		# #4667: телефон пришёл сюда со страницы подтверждения входа по QR — вернуть его
 		# туда же, а не в рабочее место (адрес собирается из куки, значения проверены).
 		$qrBack = qrLoginPendingRedirect();
+		if($qrBack === "")
+			$qrBack = Sso_back_redirect();  # ideav/courses#84: назад в базу, откуда отправили на вход в my
 		header("Location: ".($qrBack !== "" ? $qrBack : "/".(!$isYandex && strlen($db) ? $db : $z)));
     }
     else
@@ -1769,6 +1772,19 @@ function qrLoginPendingRedirect(){
         return "";
     return "/".$parts[0]."/qrlogin?c=".$parts[1];
 }
+# ideav/courses#84: базы со входом через кабинет my. Список задаётся на сервере в include/connection.php:
+# define("SSO_DBS", array("<база>" => "<роль новых пользователей>")); нет константы — вход как обычно.
+function Sso_role($db){
+    return defined("SSO_DBS") && is_array(SSO_DBS) && ($db !== "my") && isset(SSO_DBS[$db]) ? (string)SSO_DBS[$db] : "";
+}
+# После входа в кабинет — обратно в базу из SSO_DBS, откуда отправили на вход (кука sso_back, см. Sso_enter)
+function Sso_back_redirect(){
+    $db = isset($_COOKIE["sso_back"]) && is_string($_COOKIE["sso_back"]) ? $_COOKIE["sso_back"] : "";
+    if($db === "")
+        return "";
+    setcookie("sso_back", "", Auth_cookie_opts(time() - 3600, FALSE));
+    return preg_match(DB_MASK, $db) && (Sso_role($db) !== "") ? "/$db/" : "";
+}
 function login($z="", $u="", $message="", $details=""){
 	wlog(" @".$_SERVER["REMOTE_ADDR"], "log");
 	if(isApi())
@@ -2780,6 +2796,20 @@ function Construct_WHERE($key, $filter, $cur_typ, $join_req=0)
 			    # We might get a statement here, thus check if we got no letters and stuff
 			    if((double)str_replace(" ", "", $value) != 0)
     			    $value = str_replace(" ", "", $value);
+				# Issue #5471: «равно»/«не равно» по NUMBER/SIGNED — значение приводится так же, как при сохранении,
+				# и подставляется строкой в кавычках: число против longtext val не даёт использовать индекс (t, val).
+				# Ноль не трогаем: при сохранении 0 не приводится ("0.0"/"00" лежат как пришли) — прежнее числовое сравнение.
+				$num_eq = FALSE;
+				if(($EQ === "=") && !isset($in) && !isset($inID) && !isset($GLOBALS["REF_typs"][$key])
+						&& isset($GLOBALS["REV_BT"][$key]) && in_array($GLOBALS["REV_BT"][$key], array("NUMBER", "SIGNED"))
+						&& (strpos($value, "%") === FALSE) && !preg_match("/\[([^\[\]]+)\]/", $value)
+						&& (($canon = Normalize_Number($value)) !== FALSE)){
+					$canon = (string)Number_Storage_Val($GLOBALS["REV_BT"][$key], $canon);
+					if((double)$canon != 0){
+						$value = $canon;
+						$num_eq = TRUE;
+					}
+				}
 				$sql_value = Escape_Filter_Val($value); # значение изменилось — пересчитываем
 				# Check if we got only one range border, and then transform it into an exact match
 				if((!isset($filter["TO"])) || (!isset($filter["FR"])) || ($value === "%")){
@@ -2817,7 +2847,9 @@ function Construct_WHERE($key, $filter, $cur_typ, $join_req=0)
             						$GLOBALS["where"] .= " AND a$key.val $search_val ";
         					    elseif(isset($inID))
             						$GLOBALS["where"] .= " AND a$key.id $search_val ";
-							    elseif(is_numeric($value))
+							    elseif($is_date) # issue #5469: дата ггггммдд — строковым литералом, иначе приведение типа мимо индекса (t,val)
+    								$GLOBALS["where"] .= " AND a$key.val$NOT_EQ$EQ'$sql_value' ";
+							    elseif(is_numeric($value) && !$num_eq)
     								$GLOBALS["where"] .= " AND a$key.val$NOT_EQ$EQ$value ";
 							    else
     								$GLOBALS["where"] .= " AND a$key.val='$sql_value' ";
@@ -3361,6 +3393,10 @@ function Validate_Token(){ # Validates the cookie token and gathers the user per
 			Auth_cookie($z, "", 0);  # кука с истёкшей или неизвестной сессией: скрипт её не снимет (HttpOnly)
 		$GLOBALS["tzone"] = isset($_COOKIE["tzone"]) ? (int)$_COOKIE["tzone"] : 0;  # PHP 8: "" + 1 — TypeError
 	}
+	# ideav/courses#84: в базе из SSO_DBS вошедший в my входит своим пользователем — и вместо гостя тоже
+	if((!isset($GLOBALS["GLOBAL_VARS"]["user"]) || ($GLOBALS["GLOBAL_VARS"]["user"] === "guest")) && !isApi()
+			&& defined("SSO_DBS") && (Sso_role($z) !== "") && isset($_COOKIE["idb_my"]) && is_string($_COOKIE["idb_my"]))
+		Sso_login_my();
 	if(!isset($GLOBALS["GLOBAL_VARS"]["user"])){ # Check, if we got a Guest user defined
 										  
 		$data_set = Exec_sql("SELECT u.id u, tok.val tok, tok.id token, xsrf.id xsrf, xsrf.val xsrf_val, role_def.id r, role_def.val role"
@@ -3413,6 +3449,8 @@ function Validate_Token(){ # Validates the cookie token and gathers the user per
         		}
     		}
 		}
+		if(!isset($GLOBALS["GLOBAL_VARS"]["user"]) && defined("SSO_DBS") && (Sso_role($z) !== ""))
+			Sso_enter();  # ideav/courses#84: вход через кабинет my
 		if(!isset($GLOBALS["GLOBAL_VARS"]["user"])){
 			login($z, "", "InvalidToken");
 			die();
@@ -3421,6 +3459,52 @@ function Validate_Token(){ # Validates the cookie token and gathers the user per
 	$GLOBALS["GLOBAL_VARS"]["xsrf"] = isset($xsrf) ? $xsrf : xsrf($_SERVER["REMOTE_ADDR"], "guest");
     $GLOBALS["GLOBAL_VARS"]["token"] = $tok;
 	return isset($GLOBALS["GLOBAL_VARS"]["user"]);  # Return TRUE in case the token is OK
+}
+# ideav/courses#84: вход в базу $z из SSO_DBS по куке кабинета my (зовётся из Validate_Token для страницы без
+# входа или гостя). Владелец базы в my входит владельцем (пользователь $z). Прочий вошедший в my получает
+# пользователя my<id my> этой базы — при первом входе он заводится с почтой из my и ролью из SSO_DBS, без
+# пароля; роль admin не выдаётся. Дальше — сессия и повтор запроса (die). Возврат: FALSE — сессии my нет,
+# TRUE — сессия есть, но войти нельзя (нет роли или пользователя владельца).
+function Sso_login_my(){
+	global $z;
+	if(!isset($_COOKIE["idb_my"]) || !is_string($_COOKIE["idb_my"])
+			|| !($my = mysqli_fetch_array(Exec_sql("SELECT u.id, email.val email, db.id own FROM my tok, my u LEFT JOIN my email ON email.up=u.id AND email.t=".EMAIL
+				." LEFT JOIN my db ON db.up=u.id AND db.t=".DATABASE." AND db.val='$z'"
+				." WHERE u.t=".USER." AND tok.up=u.id AND ".Token_match_sql("tok", $_COOKIE["idb_my"])." AND tok.t=".TOKEN." LIMIT 1"
+				, "SSO: cabinet user"))))
+		return FALSE;
+	$login = $my["own"] ? $z : "my".(int)$my["id"];
+	$uid = Restore_id("SELECT id FROM $z WHERE t=".USER." AND val='$login' ORDER BY id LIMIT 1", "SSO: find the user");
+	if(!$uid){
+		if($my["own"])
+			return TRUE;
+		$role = Restore_id("SELECT id FROM $z WHERE t=".ROLE." AND up!=0 AND val='".addslashes(Sso_role($z))."' ORDER BY id LIMIT 1", "SSO: find the role");
+		$col = Restore_id("SELECT req.id FROM $z req JOIN $z ref ON ref.id=req.t AND ref.up=0 AND ref.t=".ROLE." WHERE req.up=".USER." LIMIT 1"
+			, "SSO: find the role column");
+		if(!$role || !$col || ((int)$role === ADMINROLE) || (mb_strtolower(Sso_role($z)) === "admin"))
+			return TRUE;
+		$uid = Insert(1, 1, USER, $login, "SSO: new user");
+		if((string)$my["email"] !== "")
+			Insert($uid, 1, EMAIL, $my["email"], "SSO: email");
+		Insert($uid, 1, $role, $col, "SSO: role");
+	}
+	if(isset($_COOKIE["sso_back"]))
+		setcookie("sso_back", "", Auth_cookie_opts(time() - 3600, FALSE));
+	Auth_cookie($z, Session_new($uid), NULL);
+	login($z, "", "reenter");
+}
+# ideav/courses#84: страница базы из SSO_DBS без входа и без гостя. Вошедший в my входит (Sso_login_my);
+# без входа в my — на вход в кабинет с возвратом сюда (кука sso_back, Sso_back_redirect); ?aff=<id агента>
+# запоминается в куке _aff, регистрация в my пишет её новому пользователю. Возврат — обычный вход в базу.
+function Sso_enter(){
+	global $z;
+	if(Sso_login_my())
+		return;
+	if(isset($_GET["aff"]) && is_string($_GET["aff"]) && preg_match('/^[1-9][0-9]{0,9}$/', $_GET["aff"]) && !isset($_COOKIE["_aff"]))
+		setcookie("_aff", $_GET["aff"], Auth_cookie_opts(time() + 180 * 86400, FALSE));
+	setcookie("sso_back", $z, Auth_cookie_opts(time() + 86400, FALSE));
+	header("Location: /start.html?".http_build_query(array("db" => "my", "r" => "InvalidToken", "uri" => $_SERVER["REQUEST_URI"])));
+	die();
 }
 # Вход гостем (#5221, #5231): посетитель без токена работает пользователем guest, если тот
 # заведён и его роль — guest. Токен гостя общий для всех посетителей, поэтому вход — в этом же запросе:
@@ -14155,7 +14239,9 @@ function RequireRefId($t, $val)
 # обычный минус; апостроф между разрядами (1'000) — разделитель. Запятая — десятичный знак;
 # если есть и точка, и запятая, десятичный — последний из них, а другой — разделитель групп
 # по три цифры (1.234,56 и 1,234.56). Возвращает число строкой без разделителей.
-function RequireNumber($t, $val)
+# Issue #5471: нормализация числа, общая для записи (RequireNumber) и фильтра (Construct_WHERE):
+# каноническая числовая строка или FALSE, если значение не число. Без my_die.
+function Normalize_Number($val)
 {
 	$num = is_array($val) ? "" : (string)preg_replace('/[\s\p{Z}\x{200B}-\x{200D}\x{2060}\x{FEFF}]+/u', "", (string)$val);
 	$num = (string)preg_replace('/[\x{2212}\x{2013}]/u', "-", $num);
@@ -14163,7 +14249,17 @@ function RequireNumber($t, $val)
 	if(preg_match('/^[+-]?\d{1,3}(?:([.,])\d{3})*(?!\1)[.,]\d*$/', $num, $m) && isset($m[1]) && ($m[1] !== ""))
 		$num = str_replace($m[1], "", $num);	# 1.234,56 / 1,234.56: разделитель групп — прочь
 	$num = str_replace(",", ".", $num);
-	if(!is_numeric($num))
+	return is_numeric($num) ? $num : FALSE;
+}
+# Как значение NUMBER/SIGNED приводится при сохранении: (int) для NUMBER, (double) для SIGNED.
+function Number_Storage_Val($base, $num)
+{
+	return $base === "NUMBER" ? (int)$num : (double)$num;
+}
+function RequireNumber($t, $val)
+{
+	$num = Normalize_Number($val);
+	if($num === FALSE)
 		my_die(t9n("[RU]Значение должно быть числом[EN]Value must be a number").": t$t = ".(is_array($val) ? "array" : $val));
 	return $num;
 }
@@ -14270,9 +14366,9 @@ function ApplyMSet($id, $req, $files)
 							if($t == PASSWORD) // Encrypt the password
         						$val = Pwd_hash($val);
         					elseif(($GLOBALS["REV_BT"][$row["t"]] == "NUMBER") && ($val != 0))
-        						$val = $val === "" ? "" : (int)RequireNumber($t, $val);
+        						$val = $val === "" ? "" : Number_Storage_Val("NUMBER", RequireNumber($t, $val));
         					elseif(($GLOBALS["REV_BT"][$row["t"]] == "SIGNED") && ($val != 0))
-        						$val = $val === "" ? "" : (double)RequireNumber($t, $val);
+        						$val = $val === "" ? "" : Number_Storage_Val("SIGNED", RequireNumber($t, $val));
         					else
         						$val = Format_Val($row["t"], $val);
         					if($cur_id){ # The Req exists
@@ -15589,6 +15685,13 @@ switch($a)  # Check actions, which don't require authentication
 		$lgU = isset($_GET["u"]) && is_string($_GET["u"]) ? $_GET["u"] : "";
 		header("Location: /start.html?".http_build_query($lgU === "" ? array("db" => $z) : array("db" => $z, "u" => $lgU)));
 		die();
+
+	# backlogram#930: нужна ли капча на start.html. Куки входа idb_* HttpOnly — страница их не видит,
+	# сервер видит: есть валидная не-гостевая кука хоть одной базы — капчу не показываем.
+	case "_captcha":
+		header("Content-Type: application/json; charset=utf-8");
+		header("Cache-Control: no-store");
+		die(json_encode(array("bypass" => hasValidTokenCookie())));
 
 	case "jwt":
         $params = verifyJWT($_POST["jwt"], JWT_PUBLIC_KEY);
