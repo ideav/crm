@@ -95,6 +95,8 @@ function Get_Current_Values($i, $typ){
 		$GLOBALS["REQ_TYPS"][$m["id"]] = 0;
 }
 function checkDuplicatedReqs($id, $t){}
+function Mail_is_settings_pwd($id, $t){ return FALSE; }	# #5494: таблицы почты в стенде нет
+function Skip_hidden_pwd($t, $v){ return $v === "******" && $t == PASSWORD; }	# #5494: прежнее правило маски
 function FetchAlias($attrs, $val){ return FieldAttrsAlias($attrs, $val); }
 function Insert($up, $ord, $t, $val, $msg){
 	$GLOBALS["WRITES"][] = "$msg: $t=$val";

@@ -108,6 +108,8 @@ function Get_Current_Values($i, $typ){
 		$GLOBALS["REQ_TYPS"][$m["id"]] = 0;
 }
 function checkDuplicatedReqs($id, $t){}
+function Mail_is_settings_pwd($id, $t){ return FALSE; }	# #5494: таблицы почты в стенде нет
+function Skip_hidden_pwd($t, $v){ return $v === "******" && $t == PASSWORD; }	# #5494: прежнее правило маски
 # Первый вызов ApplyMSave после проверки обязательных — дальше мерке идти незачем
 function UniqueKeyRequestHasSubmittedKeyReq(){ throw new PastCheck("unique keys"); }
 function Populate_Reqs(){ throw new PastCheck("copy"); }
