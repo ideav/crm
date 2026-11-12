@@ -710,6 +710,7 @@ require_once __DIR__ . "/include/delimiters.php";
 require_once __DIR__ . "/include/json_archive.php";
 require_once __DIR__ . "/include/import_reconcile.php";
 require_once __DIR__ . "/include/schema_json.php";	# #5242: схема одним JSON, поля по именам
+require_once __DIR__ . "/include/mail.php";	# #5494: отправка писем через SMTP ящика клиента
 require_once __DIR__ . "/include/ext_views.php";	# #5373: read-only вьюхи для внешнего SQL-клиента
 # Default LIMIT parameter for queries with no filter
 define("DEFAULT_LIMIT", isset($_COOKIE["default_limit"])&&(int)$_COOKIE["default_limit"]>4&&(int)$_COOKIE["default_limit"]<1001?(int)$_COOKIE["default_limit"]:20);
@@ -1070,6 +1071,8 @@ function isApi(){
 # и запрос без токена получает 401 JSON, а не страницу входа.
 function Api_always_json_mark($a){
     if($a === "_m_batch")
+        $GLOBALS["dumpAPI"] = 1;
+    if($a === "_mail")	# #5494: ответ всегда JSON, 401 без токена тоже JSON
         $GLOBALS["dumpAPI"] = 1;
 }
 # <bad-path-5186>
@@ -14746,6 +14749,8 @@ function ApplyMNew($id, $up, $files)
 					}
 					elseif($t == PASSWORD)
 						Insert($i, 1, $t, Pwd_hash($v), "Insert a first time password");
+					elseif(Mail_is_settings_pwd($i, $t))	# #5494: пароль приложения почты - шифротекст сервера
+						Insert($i, 1, $t, Mail_secret_encrypt($v), "Insert encrypted mail password");
 					else
 						Insert($i, 1, $t, $v, "Insert new non-empty req");
 				}
@@ -14854,7 +14859,7 @@ function ApplyMSave($id, $req, $files)
 				$hasSubmittedKeyReqs = $unique ? false : UniqueKeyRequestHasSubmittedKeyReq($req, $keyReqs);
 				if($unique || $hasSubmittedKeyReqs){
 					$uniqueVal = $cur_val;
-					if(isset($req["t$typ"]) && !(($typ == TOKEN || $typ == XSRF || $typ == PASSWORD) && $req["t$typ"] === PASSWORDSTARS))
+					if(isset($req["t$typ"]) && !Skip_hidden_pwd($typ, $req["t$typ"]))	# #5494: маска не перезаписывает PWD-реквизиты
 						$uniqueVal = UniqueKeyNormalizeValue($typ, $req["t$typ"]);
 					CheckUniqueRecordFromRequest($typ, $id, $up, $uniqueVal, $req, (bool)$unique);
 				}
@@ -14874,7 +14879,7 @@ function ApplyMSave($id, $req, $files)
 				    $v = Format_Val($t, $value);
 				else
 				    $v = $value;
-				if((($t == TOKEN) || ($t == XSRF) || ($t == PASSWORD)) && ($v === PASSWORDSTARS)) // Skip hidden PWDs
+				if(Skip_hidden_pwd($t, $v)) // Skip hidden PWDs (#5494: also PWD-typed requisites)
 			        continue;
 
 				if(isset($req["NEW_$t"]) && isset($GLOBALS["REF_typs"][$t]))
@@ -14983,6 +14988,8 @@ function ApplyMSave($id, $req, $files)
 						else{
         					if($t == PASSWORD) // Encrypt the password in case it's updated
         						$v = Pwd_hash($v);
+        					elseif(Mail_is_settings_pwd($id, $t))	# #5494: пароль приложения почты - шифротекст сервера
+        						$v = Mail_secret_encrypt($v);
             				trace("BuiltIn $v of ".$t." = ".BuiltIn($v));
             				trace(" base = ".$GLOBALS["REV_BT"][$t]);
         					#$v = Format_Val($t, BuiltIn($v));
@@ -16080,6 +16087,11 @@ if(Validate_Token())
 				break;
 			}
 			api_dump(json_encode(array("status" => "ok", "content" => base64_encode($fetchData), "length" => strlen($fetchData))), "fetchurl.json");
+			break;
+
+		# Issue #5494: отправка письма с вложением через SMTP ящика клиента.
+		case "_mail":
+			Mail_endpoint($com);
 			break;
 
 		case "_m_up":
