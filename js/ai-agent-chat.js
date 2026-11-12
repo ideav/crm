@@ -1160,14 +1160,35 @@
             this.newChatBtn = btn('pi-plus', 'Новый чат', function () { self.newConversation(); });
             this.chatsBtn = btn('pi-history', 'Чаты', function () { self.toggleChats(); });
             this.chatsBtn.setAttribute('aria-expanded', 'false');
+            this.settingsBtn = btn('pi-cog', 'Модель ИИ', function () { self.toggleSettings(); });
+            this.settingsBtn.setAttribute('aria-expanded', 'false');
             header.insertBefore(bar, this.closeBtn);
             bar.appendChild(this.closeBtn);
+
+            // crm#5498: окно выбора модели (js/ai-agent-settings.js грузится по первому нажатию).
+            this.settingsEl = this.el('div', 'ai-agent-settings');
+            this.settingsEl.hidden = true;
+            header.parentNode.insertBefore(this.settingsEl, header.nextSibling);
 
             this.chatsEl = this.el('div', 'ai-agent-chats');
             this.chatsEl.hidden = true;
             this.chatsEl.setAttribute('role', 'list');
             this.chatsEl.setAttribute('aria-label', 'Чаты');
             header.parentNode.insertBefore(this.chatsEl, header.nextSibling);
+        },
+
+        toggleSettings: function () {
+            var self = this;
+            if (!this.settingsEl) return;
+            var run = function () {
+                var open = window.AiAgentSettings.toggle(self, self.settingsEl);
+                self.settingsBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+            };
+            if (window.AiAgentSettings) return run();
+            var s = document.createElement('script');
+            s.src = '/js/ai-agent-settings.js?v=5498';
+            s.onload = run;
+            document.head.appendChild(s);
         },
 
         closeChats: function () {

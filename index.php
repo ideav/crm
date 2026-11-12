@@ -12108,11 +12108,63 @@ function handleAiAgentRequest($com){
     # восстановления результата при повторном открытии панели, в т.ч. с другого
     # браузера). Сам ответ агента сохраняется на сервере и переживает таймаут.
     $method = isset($_SERVER["REQUEST_METHOD"]) ? strtoupper((string)$_SERVER["REQUEST_METHOD"]) : "GET";
+    if((isset($com[4]) ? $com[4] : "") === "settings")
+        return aiAgentSettingsRequest();
     if($method === "GET")
         return aiAgentStatusRequest($com);
     if($method !== "POST")
         aiAgentError(t9n("[RU]ИИ-агент принимает GET (статус) или POST (запрос)[EN]The AI agent accepts GET (status) or POST (request)"), 405);
     return aiAgentSubmitRequest($com);
+}
+# Issue #5498: модель ИИ-чата — наш агент или свой LLM-прокси базы. Настройка — строки таблицы
+# «Настройка» (269) с «Тип» (271) = AI_LLM_*: значение — главное значение строки. Читает их сам
+# сервис агента токеном пользователя (python2node agent-chat, custom_llm.py); сюда приходит окно
+# шестерёнки чата. Ключ прокси во фронт не отдаётся: только «задан / не задан» и id строк, чтобы
+# окно сохранило правку штатными _m_set/_m_new (право записи в 269 проверяет ядро).
+function aiAgentSettingKeys(){
+    return array("AI_LLM_PROVIDER" => "provider", "AI_LLM_URL" => "url", "AI_LLM_MODEL" => "model", "AI_LLM_TOKEN" => "token");
+}
+# Строки «Настройки» AI_LLM_* → {provider, url, model, hasToken, ids{Тип: id}}.
+function aiAgentSettingsFromRows($rows){
+    $keys = aiAgentSettingKeys();
+    $out = array("provider" => "", "url" => "", "model" => "", "hasToken" => false, "ids" => (object)array());
+    $ids = array();
+    foreach($rows as $row){
+        $key = isset($row["k"]) ? (string)$row["k"] : "";
+        if(!isset($keys[$key]) || isset($ids[$key]))
+            continue;
+        $ids[$key] = (string)$row["id"];
+        $val = trim((string)$row["val"]);
+        if($keys[$key] === "token")
+            $out["hasToken"] = $val !== "";
+        else
+            $out[$keys[$key]] = $val;
+    }
+    if(count($ids))
+        $out["ids"] = $ids;
+    $out["mode"] = ($out["url"] !== "" && $out["hasToken"]) ? "custom" : "ours";
+    return $out;
+}
+# GET /{db}/ai/agent/settings — состояние настройки для окна шестерёнки.
+function aiAgentSettingsRequest(){
+    aiAgentRequireUser();
+    $grant = Grant_1level(269);   # доступ роли к таблице «Настройка»: READ | WRITE | FALSE
+    $canRead = $grant === "READ" || $grant === "WRITE";
+    $out = array("canRead" => $canRead, "canEdit" => $grant === "WRITE");
+    if($canRead)
+        $out = array_merge($out, aiAgentSettingsFromRows(aiAgentSettingRows()));
+    api_dump(json_encode($out, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "ai-agent-settings.json");
+}
+# Строки «Настройки» с «Тип» = AI_LLM_*: [{id, val, k}].
+function aiAgentSettingRows(){
+    global $z;
+    $in = "'".implode("','", array_keys(aiAgentSettingKeys()))."'";
+    $rows = array();
+    $data = Exec_sql("SELECT o.id, o.val, k.val k FROM $z o JOIN $z k ON k.up=o.id AND k.t=271"
+        ." WHERE o.t=269 AND k.val IN ($in) ORDER BY o.id", "AI agent settings");
+    while($row = mysqli_fetch_array($data))
+        $rows[] = $row;
+    return $rows;
 }
 # Имя текущего пользователя в нижнем регистре ("" — не вошёл).
 function aiAgentCurrentUser(){
