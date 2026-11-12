@@ -67,7 +67,17 @@ GET https://ideav.ru/{db}/dir_admin/?download=1&JSON=1                         #
   docker-конфиг (`docker/apache/integram.conf`) боевой сервер не покрывает — на хостинге
   вне Docker тот же запрет прописывается в vhost/панели отдельно;
 - доступ к файловому менеджеру гейтится объектом Files (синтетический id `10`),
-  WRITE на него = возможность подменить фронт — выдавать адресно (см. [roles.md](roles.md)).
+  WRITE на него = возможность подменить фронт — выдавать адресно (см. [roles.md](roles.md));
+- FILE-реквизиты складывают файлы в хэш-подкаталоги
+  `download/<база>/<цифры+8hex>/<NNN+8hex>.<ext>` — раздача там с заголовками:
+  всё, кроме растровых картинок, — `Content-Disposition: attachment`; html/svg/xml —
+  вдобавок `Content-Security-Policy: sandbox`. Правила: `download/.htaccess`
+  (прод-сервер; проверь, что vhost читает .htaccess) и зеркало в
+  `docker/apache/integram.conf`. Статика баз в корне `download/<база>`
+  (пульты, main.html) — attachment не ставится, но nosniff и общий sandbox
+  для html/svg действуют (правило выше);
+- восстановление файлов из архива `.code.zip` прогоняет каждое имя через тот же
+  BlackList, что и загрузка: php/sh-расширение в архиве — отказ до всякой записи.
 
 > Полный набор команд `dir_admin` (`del[]`/`mkdir`/`touch`/`gf`/`?JSON=1`) и их
 > JSON-ответ задокументированы в PR #3101; базовая загрузка шаблонов — в монолите
