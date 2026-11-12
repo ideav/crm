@@ -16791,6 +16791,9 @@ if(Validate_Token())
 			$template=strtolower($_REQUEST["template"]);
 			newDb($db, $template, $row["name"], $row["email"], "");
             $id = Insert($GLOBALS["GLOBAL_VARS"]["user_id"], 1, DATABASE, $db, "Register extra DB");
+            # #5481: ord записи базы — счётчик «Расход» (updateBilling); при вставке под пользователем
+            # он выставляется сам, новая база начинает с нуля
+            Exec_sql("UPDATE $z SET ord=0 WHERE id=$id", "Reset new DB counter");
             Insert($id, 1, 275, date("Ymd"), "Insert new DB date");
             Insert($id, 1, 283, $template, "Insert new DB template");
             Insert($id, 1, 276, $_POST["descr"], "Insert new DB notes");
