@@ -12816,6 +12816,15 @@ function callIntegramAgent($db, $message, $attachments, $payment, $jobId="", $ca
                 $request["core_token"] = $jwt.".".$b64($signature);
         }
     }
+    # python2node#1242: в «Настройке» задан адрес своей модели (crm#5498). Агент читает её правами
+    # пользователя и без доступа к 269 её не увидит — флаг даёт ему сказать, что модель не
+    # применена. Сам ключ не передаётся.
+    # Харнессы experiments/ гоняют callIntegramAgent без БД (нет Exec_sql) — там флага нет.
+    if(function_exists("Exec_sql") && function_exists("aiAgentSettingRows")){
+        $llm = aiAgentSettingsFromRows(aiAgentSettingRows());
+        if($llm["url"] !== "")
+            $request["llm_configured"] = true;
+    }
     # Где сейчас пользователь (python2node#847); без контекста поле не передаётся.
     if(is_array($context) && count($context))
         $request["context"] = $context;
