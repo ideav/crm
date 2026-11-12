@@ -14344,6 +14344,8 @@ function ApplyMSet($id, $req, $files)
         					# Format the value
 							if($t == PASSWORD) // Encrypt the password
         						$val = Pwd_hash($val);
+        					elseif(Mail_is_settings_pwd($obj, $t))	# #5494: пароль приложения почты - шифротекст сервера; маска ****** значение не трогает
+        						$val = ($val === PASSWORDSTARS) ? $cur_val : Mail_secret_encrypt($val);
         					elseif(($GLOBALS["REV_BT"][$row["t"]] == "NUMBER") && ($val != 0))
         						$val = $val === "" ? "" : Number_Storage_Val("NUMBER", RequireNumber($t, $val));
         					elseif(($GLOBALS["REV_BT"][$row["t"]] == "SIGNED") && ($val != 0))

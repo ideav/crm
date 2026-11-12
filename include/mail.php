@@ -44,8 +44,7 @@ function Mail_send_allowed($tid){
     $user = isset($gv["user"]) ? (string)$gv["user"] : "";
     if($user === "admin" || $user === (string)$GLOBALS["z"])
         return TRUE;
-    $g = isset($GLOBALS["GRANTS"][$tid]) ? $GLOBALS["GRANTS"][$tid] : "";
-    return $g === "READ" || $g === "WRITE";
+    return Check_Grant(1, (int)$tid, "READ", FALSE) === TRUE;	# как ядро: грант таблицы, BARRED, доступ роли к корню
 }
 
 # --- lazy schema: table + fields + admin grant, then the settings record --------
@@ -151,13 +150,18 @@ function Mail_secret_decrypt($stored){
 }
 
 # --- recipients and the hourly limit --------------------------------------------
+# Адрес идёт в RCPT TO / MAIL FROM как есть: без скобок, кавычек, пробелов и управляющих символов.
+function Mail_addr_ok($a){
+    return preg_match(MAIL_MASK, $a)
+        && preg_match('/^[^\s<>()\[\]",;:\\\\@\x00-\x1F\x7F]+@[\p{L}\p{N}](?:[\p{L}\p{N}-]*[\p{L}\p{N}])?(?:\.[\p{L}\p{N}](?:[\p{L}\p{N}-]*[\p{L}\p{N}])?)+$/u', $a) === 1;
+}
 function Mail_parse_recipients($to){
     $out = array();
     foreach(preg_split('/[,;\s]+/', trim((string)$to)) as $a){
         $a = trim((string)$a);
         if($a === "")
             continue;
-        if(!preg_match(MAIL_MASK, $a))
+        if(!Mail_addr_ok($a))
             my_die(t9n("[RU]Некорректный адрес получателя: ".htmlspecialchars($a)."[EN]invalid recipient: ".htmlspecialchars($a)), "400 Bad Request");
         $out[] = $a;
     }
@@ -172,23 +176,51 @@ function Mail_sent_last_hour(){
     $file = LOGS_DIR.$z."_mail.jsonl";
     if(!is_file($file))
         return 0;
-    $size = filesize($file);
-    $tail = (int)max(MAIL_HOURLY_DEFAULT, MAIL_MAX_RECIPIENTS) * 2400;
-    $start = (int)max(0, $size - $tail);
+    # Журнал читается с конца кусками, пока не встретится строка старше часа: счёт не зависит
+    # ни от длины строк, ни от величины лимита.
     $h = @fopen($file, "r");
     if(!$h)
         return 0;
-    if($start > -1 && $start > 0)
-        fseek($h, $start);
-    $n = 0;
+    clearstatcache(TRUE, $file);
+    $pos = (int)filesize($file);
     $cutoff = time() - 3600;
-    while(($line = fgets($h, 65536)) !== false){
-        $rec = json_decode($line, true);
-        if(is_array($rec) && !empty($rec["ok"]) && isset($rec["ts"]) && strtotime((string)$rec["ts"]) >= $cutoff)
-            $n++;
+    $n = 0;
+    $rest = "";
+    $done = FALSE;
+    while(!$done && $pos > 0){
+        $len = (int)min(65536, $pos);
+        $pos -= $len;
+        fseek($h, $pos);
+        $lines = explode("\n", fread($h, $len).$rest);
+        $rest = $pos > 0 ? array_shift($lines) : "";	# первая строка куска может быть неполной
+        for($i = count($lines) - 1; $i >= 0; $i--){
+            $rec = json_decode($lines[$i], true);
+            if(!is_array($rec) || !isset($rec["ts"]))
+                continue;
+            if(strtotime((string)$rec["ts"]) < $cutoff){
+                $done = TRUE;
+                break;
+            }
+            if(!empty($rec["ok"]))
+                $n++;
+        }
     }
     fclose($h);
     return $n;
+}
+# Блокировка на базу: проверка лимита, отправка и запись в журнал идут одним шагом,
+# параллельные запросы не проскакивают лимит.
+function Mail_lock(){
+    if(!defined("LOGS_DIR"))
+        return NULL;
+    $h = @fopen(LOGS_DIR.$GLOBALS["z"]."_mail.lock", "c");
+    if(!$h)
+        return NULL;
+    if(!flock($h, LOCK_EX)){
+        fclose($h);
+        return NULL;
+    }
+    return $h;
 }
 function Mail_rate_gate($limit){
     $limit = (int)$limit;
@@ -226,13 +258,14 @@ function Mail_smtp_session($cfg, $tos, $subject, $body, $attach, $conn){
         return array("ok" => FALSE, "error" => t9n("[RU]SMTP: EHLO не принят[EN]SMTP: EHLO rejected"), "code" => "502 Bad Gateway");
     $offer = FALSE;
     foreach($cap as $ln)
-        if(preg_match('/^250- ?STARTTLS/i', trim($ln)))
+        if(preg_match('/^250[- ]STARTTLS\b/i', trim($ln)))
             $offer = TRUE;
     $port = (int)$cfg["port"];
     $loop = in_array(strtolower((string)$cfg["host"]), array("127.0.0.1", "::1", "localhost"), TRUE);
     if($port !== 465){
         if($offer){
-            $conn["wr"]("STARTTLS");
+            if(!$conn["wr"]("STARTTLS"))
+                return array("ok" => FALSE, "error" => t9n("[RU]SMTP: соединение прервано[EN]SMTP: connection lost"), "code" => "502 Bad Gateway");
             $r = Mail_smtp_read($conn);
             if($r === FALSE || (int)substr($r[0], 0, 3) !== 220)
                 return array("ok" => FALSE, "error" => t9n("[RU]SMTP: сервер не дал подняться до TLS[EN]SMTP: STARTTLS refused"), "code" => "502 Bad Gateway");
@@ -346,7 +379,16 @@ function Mail_smtp_send($cfg, $tos, $subject, $body, $attach, $conn = NULL){
             $out = rtrim($out, "\r\n");
             return $out === "" ? FALSE : $out;
         },
-        "wr" => function($s) use ($socket){ return fwrite($socket, $s."\r\n"); },
+        "wr" => function($s) use ($socket){	# fwrite в TLS-сокет может записать только часть большого письма
+            $data = $s."\r\n";
+            $len = strlen($data);
+            for($done = 0; $done < $len; $done += $n){
+                $n = fwrite($socket, substr($data, $done, 65536));
+                if($n === FALSE || $n === 0)
+                    return FALSE;
+            }
+            return $len;
+        },
         "tls" => function() use ($socket){
             return stream_socket_enable_crypto($socket, TRUE, STREAM_CRYPTO_METHOD_TLS_CLIENT);
         },
@@ -376,15 +418,12 @@ function Mail_attach_record($rec, $req){
         my_die(t9n("[RU]Неверные параметры записи или реквизита[EN]wrong record or requisite id"), "400 Bad Request");
     if(!$row = mysqli_fetch_array(Exec_sql("SELECT t FROM $z WHERE id=$rec", "Mail: the record table for attach")))
         my_die(t9n("[RU]Запись не найдена[EN]record not found"), "400 Bad Request");
-    $rtid = (int)$row[0];
     $gv = isset($GLOBALS["GLOBAL_VARS"]) ? $GLOBALS["GLOBAL_VARS"] : array();
     $user = isset($gv["user"]) ? (string)$gv["user"] : "";
     $is_super = ($user === "admin" || $user === (string)$GLOBALS["z"]);
-    if(!$is_super){
-        $g = isset($GLOBALS["GRANTS"][$rtid]) ? $GLOBALS["GRANTS"][$rtid] : "";
-        if($g !== "READ" && $g !== "WRITE")
-            my_die(t9n("[RU]Нет права на чтение записи (нет доступа к её таблице)[EN]no permission to read the record (no access to its table)"), "403 Forbidden");
-    }
+    # Право как в ядре: грант столбца (в т.ч. BARRED), таблицы записи, родительской таблицы
+    if(!$is_super && (Check_Grant($rec, $req, "READ", FALSE) !== TRUE))
+        my_die(t9n("[RU]Нет права на чтение этого реквизита записи[EN]no permission to read this requisite of the record"), "403 Forbidden");
     Check_Rec_masks($rec);
     if(!$f = mysqli_fetch_array(Exec_sql("SELECT id, val FROM $z WHERE up=$rec AND t=$req ORDER BY id LIMIT 1", "Mail: the file of the record")))
         my_die(t9n("[RU]В реквизите записи нет файла[EN]no file in the record requisite"), "400 Bad Request");
@@ -435,7 +474,7 @@ function Mail_read_settings(){
     if($cfg["pwd"] === "")
         my_die(t9n("[RU]Не задан пароль приложения. Подсказка: ".MAIL_HINT."[EN]app password is not set. Hint: ".MAIL_HINT).$hint, "400 Bad Request");
     $from = Mail_parse_from($cfg["from"]);
-    if($from["addr"] === "" || !preg_match(MAIL_MASK, $from["addr"]))
+    if($from["addr"] === "" || !Mail_addr_ok($from["addr"]))
         my_die(t9n("[RU]Некорректный отправитель (От кого)[EN]wrong sender (From)"), "400 Bad Request");
     $plain = Mail_secret_decrypt($cfg["pwd"]);
     if($plain === NULL)
@@ -481,6 +520,7 @@ function Mail_endpoint($com, $conn = NULL){
         $attach = Mail_attach_upload();
     if($attach === NULL && isset($_POST["rec"]) && isset($_POST["req"]))
         $attach = Mail_attach_record((int)$_POST["rec"], (int)$_POST["req"]);
+    $lock = Mail_lock();	# лимит, отправка и журнал - один шаг на базу (снимается и при my_die - с концом процесса)
     Mail_rate_gate($cfg["limit"]);
     $res = Mail_smtp_send($cfg, $tos, $subject, $body, $attach, $conn);
     $j = array("act" => "mail", "to" => $tos, "from" => $cfg["addr"], "subject" => mb_substr((string)$subject, 0, 300),
@@ -492,6 +532,10 @@ function Mail_endpoint($com, $conn = NULL){
     if(is_array($attach))
         $j["attach"] = (string)$attach["name"];
     Mail_log($j);
+    if($lock){
+        flock($lock, LOCK_UN);
+        fclose($lock);
+    }
     if(empty($res["ok"]))
         my_die((string)$res["error"], (string)(isset($res["code"]) ? $res["code"] : "502 Bad Gateway"));
     api_dump(json_encode(array("status" => "ok", "message_id" => $res["message_id"], "to" => count($tos)), JSON_UNESCAPED_UNICODE), "mail.json");

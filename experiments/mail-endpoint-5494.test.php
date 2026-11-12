@@ -8,7 +8,7 @@
 $indexPhp = getenv("INDEX_PHP") ?: __DIR__."/../index.php";
 $mailPhp = __DIR__."/../include/mail.php";
 if(!isset($argv[1])){
-    $cases = array("A1","A2","A3","B1","B2","B3","B4","C1","D1","D2","D3","D4","E1","E2","E3","E4","F1","F2","F3","G1","G2","G3","G4","H1","H2","H3","H4","I1","I2","I3","I4","I5","I6","J1","J2","J3");
+    $cases = array("A1","A2","A3","B1","B2","B3","B4","C1","C2","C3","D1","D2","D3","D4","E1","E2","E3","E4","E5","F1","F2","F3","F4","G1","G2","G3","G4","H1","H2","H3","H4","H5","H6","I1","I2","I3","I4","I5","I6","J1","J2","J3","J4","J5");
     $fail = 0;
     foreach($cases as $id){
         $out = array(); $code = 0;
@@ -45,6 +45,7 @@ class Died extends Exception {
 }
 function asrt($cond, $msg){ if(!$cond){ echo "assert: $msg\n"; exit(1); } }
 function t9n($v){ return $v; }
+function trace($m){}
 function my_die($msg, $code = ""){ throw new Died($msg, $code); }
 function api_dump($json, $name = ""){ throw new Died(json_decode($json, true)); }
 function isApi(){ return TRUE; }
@@ -84,7 +85,8 @@ $extract = array("Skip_hidden_pwd","Mail_req_base","Mail_table_id","Mail_is_admi
                  "Mail_secret_encrypt","Mail_secret_decrypt","Mail_parse_recipients","Mail_sent_last_hour",
                  "Mail_rate_gate","Mail_parse_from","Mail_smtp_read","Mail_smtp_send","Mail_smtp_session",
                  "Mail_attach_upload","Mail_attach_record","Mail_read_settings","Mail_log","Mail_endpoint",
-                 "Mail_ensure_schema","Mail_ensure_record","Mail_spec","Api_always_json_mark","check","mime_word");
+                 "Mail_ensure_schema","Mail_ensure_record","Mail_spec","Api_always_json_mark","check","mime_word",
+                 "Mail_addr_ok","Mail_lock","Check_Grant");
 foreach($extract as $fn){
     $src = extract_src($allSrc, "function $fn(");
     if($src !== NULL)
@@ -221,6 +223,7 @@ case "C2": {
     $conn = smtp_conn_replay(array(
         "220 ok",
         $EHLO_TLS,
+        "220 go ahead",
         $EHLO_TLS,
         "334 Username:",
         "334 Password:",
@@ -235,6 +238,26 @@ case "C2": {
     asrt($GLOBALS["TLS_UP"] === 1, "STARTTLS not upgraded");
     asrt(smtp_sent(1) === "STARTTLS", "no STARTTLS command");
     asrt(smtp_sent(2) === "EHLO ya.ru", "no second EHLO after STARTTLS");
+    break; }
+case "C3": {
+    # STARTTLS последней строкой ответа EHLO ("250 STARTTLS", без дефиса)
+    $ehlo_last = "250-test.local\r\n250-AUTH LOGIN\r\n250 STARTTLS\r\n";
+    $conn = smtp_conn_replay(array(
+        "220 ok",
+        $ehlo_last,
+        "220 go ahead",
+        $ehlo_last,
+        "334 Username:",
+        "334 Password:",
+        "235 2.7.0 Accepted",
+        "250 OK",
+        "250 OK",
+        "354 go",
+        "250 OK"));
+    $res = Mail_smtp_session(mail_cfg(array("host" => "smtp.test.local", "port" => 587)), array("a@x.ru"),
+                             "T", "Body", NULL, $conn);
+    asrt($res["ok"] === TRUE, "C3 STARTTLS on the last EHLO line not seen: ".(isset($res["error"]) ? $res["error"] : "?"));
+    asrt($GLOBALS["TLS_UP"] === 1, "C3 STARTTLS not upgraded");
     break; }
 case "D1": {
     $conn = smtp_conn_replay(array(
@@ -296,6 +319,11 @@ case "E3":
 case "E4":
     asrt(died_of(function(){ Mail_parse_recipients(""); }) !== NULL, "empty recipients allowed");
     break;
+case "E5":
+    foreach(array("a@x.ru>NOTIFY=SUCCESS", "<a@x.ru>", "a\"b@x.ru", "a@x.ru(c)") as $bad)
+        asrt(died_of(function() use ($bad){ Mail_parse_recipients($bad); }) !== NULL, "E5 accepted: $bad");
+    asrt(count(Mail_parse_recipients("ivan.petrov+inv@почта.рф, a_b-c@sub.x-y.ru")) === 2, "E5 good addresses refused");
+    break;
 case "F1":
     for($i = 0; $i < 19; $i++) Mail_log(array("act" => "mail", "ok" => true));
     Mail_rate_gate(20);
@@ -308,6 +336,15 @@ case "F2":
     break;
 case "F3":
     asrt(died_of(function(){ Mail_rate_gate(0); }) !== NULL, "limit 0 not forbidden");
+    break;
+case "F4":
+    # длинные строки журнала (10 адресатов, длинная тема): лимит 150 считается по всему часу
+    $pad = str_repeat("Длинная тема письма ", 15);
+    for($i = 0; $i < 150; $i++) Mail_log(array("act" => "mail", "ok" => true, "subject" => $pad,
+        "to" => array("a1@x.ru","a2@x.ru","a3@x.ru","a4@x.ru","a5@x.ru","a6@x.ru","a7@x.ru","a8@x.ru","a9@x.ru","a10@x.ru")));
+    asrt(Mail_sent_last_hour() === 150, "F4 counted ".Mail_sent_last_hour()." of 150");
+    $d = died_of(function(){ Mail_rate_gate(150); });
+    asrt($d !== NULL && strpos((string)$d->code_http, "429") !== false, "F4 limit 150 not enforced");
     break;
 case "G1":
     $GLOBALS["SJ_TABLE"] = array("id" => 777);
@@ -370,6 +407,17 @@ case "H4":
     $GLOBALS["GLOBAL_VARS"] = array("user" => "abc", "z" => "abc");
     $GLOBALS["GRANTS"] = array();
     asrt(Mail_send_allowed(777) === TRUE, "owner not allowed");
+    break;
+case "H5":
+    # глобальный доступ роли (грант на корень) - как у Check_Grant
+    $GLOBALS["GLOBAL_VARS"] = array("user" => "petrov", "z" => "abc");
+    $GLOBALS["GRANTS"] = array(1 => "WRITE");
+    asrt(Mail_send_allowed(777) === TRUE, "H5 root WRITE grant did not allow");
+    break;
+case "H6":
+    $GLOBALS["GLOBAL_VARS"] = array("user" => "petrov", "z" => "abc");
+    $GLOBALS["GRANTS"] = array(1 => "WRITE", 777 => "BARRED");
+    asrt(Mail_send_allowed(777) !== TRUE, "H6 BARRED table allowed");
     break;
 case "I1":
     $_SERVER["REQUEST_METHOD"] = "GET";
@@ -450,6 +498,7 @@ case "J1":
     $GLOBALS["GLOBAL_VARS"] = array("user" => "petrov", "z" => "abc");
     $GLOBALS["GRANTS"] = array(555 => "READ");
     $GLOBALS["ROWS"]["Mail: the record table for attach"] = array(array(555, "t" => 555));
+    $GLOBALS["ROWS"]["Get Object info by Parent&Type"] = array(array("t" => 108, "par_typ" => 555, "par_id" => 6001, "arr" => -1, "ref" => -1));
     $GLOBALS["ROWS"]["Mail: the file of the record"] = array(array(6101, "act.pdf", "id" => 6101, "val" => "act.pdf"));
     $path = GetSubdir(6101)."/".GetFilename(6101).".pdf";
     @mkdir(dirname($path), 0777, true);
@@ -470,9 +519,34 @@ case "J3":
     $GLOBALS["GLOBAL_VARS"] = array("user" => "petrov", "z" => "abc");
     $GLOBALS["GRANTS"] = array(555 => "READ");
     $GLOBALS["ROWS"]["Mail: the record table for attach"] = array(array(555, "t" => 555));
+    $GLOBALS["ROWS"]["Get Object info by Parent&Type"] = array(array("t" => 108, "par_typ" => 555, "par_id" => 6001, "arr" => -1, "ref" => -1));
     $GLOBALS["ROWS"]["Mail: the file of the record"] = array();
     $d = died_of(function(){ Mail_attach_record(6001, 108); });
     asrt($d !== NULL && strpos((string)$d->payload, "no file") !== false, "J3: ".(string)$d->payload);
+    break;
+case "J4":
+    # столбец закрыт (BARRED) при доступе к таблице - файл не отдаётся
+    $GLOBALS["GLOBAL_VARS"] = array("user" => "petrov", "z" => "abc");
+    $GLOBALS["GRANTS"] = array(555 => "READ", 108 => "BARRED");
+    $GLOBALS["ROWS"]["Mail: the record table for attach"] = array(array(555, "t" => 555));
+    $GLOBALS["ROWS"]["Get Object info by Parent&Type"] = array(array("t" => 108, "par_typ" => 555, "par_id" => 6001, "arr" => -1, "ref" => -1));
+    $GLOBALS["ROWS"]["Mail: the file of the record"] = array(array(6101, "act.pdf", "id" => 6101, "val" => "act.pdf"));
+    $d = died_of(function(){ Mail_attach_record(6001, 108); });
+    asrt($d !== NULL && strpos((string)$d->code_http, "403") !== false, "J4 barred column file was attached");
+    break;
+case "J5":
+    # подчинённая запись (таблица 556 внутри 555): грант на родительскую таблицу даёт чтение
+    $GLOBALS["GLOBAL_VARS"] = array("user" => "petrov", "z" => "abc");
+    $GLOBALS["GRANTS"] = array(555 => "READ");
+    $GLOBALS["ROWS"]["Mail: the record table for attach"] = array(array(556, "t" => 556));
+    $GLOBALS["ROWS"]["Get Object info by Parent&Type"] = array(array("t" => 108, "par_typ" => 556, "par_id" => 6001, "arr" => -1, "ref" => -1));
+    $GLOBALS["ROWS"]["Get Object info by ID"] = array(array("t" => 556, "par_typ" => 555, "par_id" => 5001, "arr" => -1, "ref" => ""));
+    $GLOBALS["ROWS"]["Mail: the file of the record"] = array(array(6101, "act.pdf", "id" => 6101, "val" => "act.pdf"));
+    $path = GetSubdir(6101)."/".GetFilename(6101).".pdf";
+    @mkdir(dirname($path), 0777, true);
+    file_put_contents($path, "PDFBYTES-6101");
+    $d = died_of(function(){ return Mail_attach_record(6001, 108); });
+    asrt($d === NULL, "J5 subordinate record refused: ".($d ? (string)$d->payload : ""));
     break;
 }
 echo "OK\n";
