@@ -149,5 +149,13 @@ expect(isset($api["&main.a.plans"]["planid"]), "cabdata без отчётов п
 $page = render($user, $cab);
 expect(strpos($page, 'id="partner-links"') !== FALSE && strpos($page, "{_block_.") === FALSE, "ЛК без отчётов партнёра: вкладки на месте, блоки не оборваны");
 
+# Сводный кабинет партнёров: страница /my/partners (templates/my/partners.html) в рабочем месте админа
+$page = render(array_merge($admin, array("action"=>"partners")), array());
+expect(strpos($page, 'id="partners-view"') !== FALSE && strpos($page, "</body>") !== FALSE, "админ, действие partners: сводный кабинет партнёров на странице");
+expect(strpos($page, "{_block_.") === FALSE, "админ, действие partners: нет незаполненных вложенных блоков");
+expect(preg_match('/<script[^>]+src="\/js\/partner-admin\.js/', $page) === 1, "админ, действие partners: подключён js/partner-admin.js");
+$page = render($admin, array());
+expect(strpos($page, 'href="/my/partners"') !== FALSE, "стартовая страница админа: плитка «Сводный кабинет партнёров» ведёт на /my/partners");
+
 echo $failures ? "\n$failures FAIL\n" : "\nALL PASS\n";
 exit($failures ? 1 : 0);
