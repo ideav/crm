@@ -1910,8 +1910,8 @@
                     }
                     break;
                 case 'BOOLEAN':
-                    const boolA = valA !== null && valA !== undefined && valA !== '' && valA !== 0 && valA !== '0' && valA !== false;
-                    const boolB = valB !== null && valB !== undefined && valB !== '' && valB !== 0 && valB !== '0' && valB !== false;
+                    const boolA = integramBooleanIsTrue(valA);  // issue #5478: '-1' = нет
+                    const boolB = integramBooleanIsTrue(valB);
                     return (boolA === boolB) ? 0 : (boolA ? -1 : 1);
             }
 

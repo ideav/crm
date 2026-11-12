@@ -109,7 +109,7 @@
                     return {
                         indId: PF.refId(r.r[idx['Показатель контроля']]), indName: nm,
                         ord: PF.num(r.r[idx['Порядок сортировки']]) || 0,
-                        required: r.r[idx['Обязателен']] === 'X',
+                        required: PF.bool(r.r[idx['Обязателен']]),
                         min: PF.num(r.r[idx['Норма мин карты']]),
                         max: PF.num(r.r[idx['Норма макс карты']]),
                         type: (st.dicts.ind[nm] || {}).type || 'value'
