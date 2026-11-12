@@ -3,7 +3,11 @@
 // updateBilling() на каждом запросе к базе. При вставке записи под пользователем ord
 // выставляется сам (счётчик), поэтому _new_db обнуляет его отдельно. Новая база — с нуля.
 // Исполняется настоящий блок case "_new_db" из index.php; БД и создание базы — заглушки.
+// Заглушки — в своём неймспейсе (как в Test5104/Test4981): на CI у php загружен mysqli,
+// и глобальная function mysqli_fetch_array падала «Cannot redeclare» (PHP 8.4+).
+// Вызовы из блока ниже резолвятся неймспейс-заглушки первыми, глобальные — фолбэком.
 // rules: none (defect #5481)
+namespace Test5481;
 
 define("DATABASE", 271);
 define("EMAIL", 41);
@@ -17,7 +21,7 @@ $INSERTS = array();
 $NEXT_ID = 239153;
 
 function t9n($s) { return $s; }
-function my_die($m) { throw new Exception($m); }
+function my_die($m) { throw new \Exception($m); }
 function checkDbNameReserved($db) { return false; }
 function checkDbName($mask, $db) { return preg_match($mask, $db); }
 function isDbVacant($db) { return true; }
@@ -45,7 +49,9 @@ if ($from === false || $to === false) { fwrite(STDERR, "case _new_db не най
 $body = substr($src, $from, $to + strlen("break;") - $from);
 
 $a = "_new_db";
-eval("switch(\$a) {\n" . $body . "\n}");
+// eval() не наследует неймспейс файла — объявляем его явно, иначе заглушки не видны
+// из тела блока (вызовы ушли бы в глобальные/internal-функции).
+eval("namespace " . __NAMESPACE__ . "; switch(\$a) {\n" . $body . "\n}");
 
 $fail = 0;
 $dbRec = null;
