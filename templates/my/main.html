@@ -18,7 +18,7 @@
             roleId='{_global_.role_id}',action='{_global_.action}',grantsB64='{_global_.grants}',menu=[];
     </script>
     <script src="/js/app-view.js"></script>
-    <script src="/js/my-mode.js"></script>
+    <script src="/js/my-mode.js?{_global_.version}.1"></script>
 
     <template id="my-head-admin">
         <link rel="stylesheet" href="/css/main-app.css">
@@ -44,7 +44,7 @@
 
     <template id="my-head-cabinet">
         <link rel="stylesheet" href="/css/cabinet.css">
-        <link rel="stylesheet" href="/css/my-cabinet.css?v=5481">
+        <link rel="stylesheet" href="/css/my-cabinet.css?{_global_.version}.01">
     </template>
 
     <script>MyMode.put('head')</script>
@@ -478,11 +478,14 @@
                 <div class="mc-section-head">
                     <div>
                         <h1>Партнёрская программа</h1>
-                        <p class="mc-lead">15% с каждой оплаты клиента, пришедшего по вашей ссылке или промокоду, — и с продлений тоже.</p>
+                        <p class="mc-lead">15% с каждой оплаты клиента, пришедшего по вашей ссылке или промокоду, — и с продлений тоже. Сдали экзамен и сопровождаете клиента 14 дней: 5 000 ₽ с первой оплаты и 20% с последующих.</p>
                     </div>
                 </div>
                 <div class="referrals-tabs mc-tabs">
                     <button class="referrals-tab active" data-tab="about" type="button">О программе</button>
+                    <button class="referrals-tab" data-tab="materials" type="button">Материалы и ссылки</button>
+                    <button class="referrals-tab" data-tab="clients" type="button">Клиенты</button>
+                    <button class="referrals-tab" data-tab="exam" type="button">Обучение</button>
                     <button class="referrals-tab" data-tab="rules" type="button">Правила</button>
                     <button class="referrals-tab" data-tab="stats" type="button">Статистика</button>
                 </div>
@@ -502,6 +505,32 @@
                                 <button type="button" class="copy-btn" data-copy="referral-link-site" title="Копировать"><i class="pi pi-copy"></i></button>
                             </div>
                         </div>
+                    </div>
+                </div>
+                <div class="referrals-tab-content" id="referrals-tab-materials" style="display: none;">
+                    <div class="partner-summary" id="partner-summary"></div>
+                    <div class="referrals-subsection mc-card">
+                        <h3>Материалы и мои ссылки</h3>
+                        <p class="mc-muted">Ссылка у каждого материала персональная: по ней мы видим, что открывает именно ваш клиент. Отправляйте клиенту ссылку, а не файл.</p>
+                        <div id="partner-links"></div>
+                    </div>
+                </div>
+                <div class="referrals-tab-content" id="referrals-tab-clients" style="display: none;">
+                    <div class="referrals-subsection mc-card">
+                        <h3>Мои клиенты</h3>
+                        <div id="partner-clients"></div>
+                    </div>
+                    <div class="referrals-subsection mc-card">
+                        <h3>Моя активность</h3>
+                        <div class="partner-stats" id="partner-activity"></div>
+                    </div>
+                </div>
+                <div class="referrals-tab-content" id="referrals-tab-exam" style="display: none;">
+                    <div class="referrals-subsection mc-card">
+                        <h3>Обучение и экзамен</h3>
+                        <p>Курс «Первое web-приложение из Excel за вечер» на Stepik поможет подготовиться к экзамену.</p>
+                        <p><a href="https://stepik.org/course/305055/promo" target="_blank" rel="noopener">Открыть курс</a></p>
+                        <div id="partner-exam"></div>
                     </div>
                 </div>
                 <div class="referrals-tab-content" id="referrals-tab-rules" style="display: none;">
@@ -590,7 +619,8 @@
     <script src="/js/app.js"></script>
     <script src="/js/form-submit.js" defer></script>
     <script src="/js/db-templates.js?v=5452"></script>
-    <script src="/js/cabinet.js?v=5481"></script>
+    <script src="/js/partner-cabinet.js?{_global_.version}.01"></script>
+    <script src="/js/cabinet.js?{_global_.version}.01"></script>
     <script src="/js/my-cabinet.js"></script>
 </template>
 

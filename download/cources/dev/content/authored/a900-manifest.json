@@ -1,0 +1,21 @@
+{
+ "code": "a900",
+ "title": "Учёт заказов пекарни",
+ "author": "Мария Петрова",
+ "lessons": [
+  {
+   "id": "l1",
+   "n": 1,
+   "title": "Заказы и клиенты",
+   "task": "quiz",
+   "url": "/download/cources/dev/content/authored/a900-l1.json"
+  },
+  {
+   "id": "l2",
+   "n": 2,
+   "title": "Сроки и ёмкости",
+   "task": "selfcheck",
+   "url": "/download/cources/dev/content/authored/a900-l2.json"
+  }
+ ]
+}
