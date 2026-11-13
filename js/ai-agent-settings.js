@@ -156,7 +156,7 @@
             'Работает с данными базы: читает таблицы, готовит и применяет изменения.'));
         box.appendChild(custom.label);
         box.appendChild(chat.el('div', 'ai-agent-settings-note',
-            'OpenAI-совместимый адрес и ключ. Внешняя модель видит только вопрос и описание экрана, в базу не ходит.'));
+            'OpenAI-совместимый адрес и ключ. Модель работает с базой с вашими правами: читает таблицы и готовит изменения планом. Прочитанные данные уходят провайдеру модели.'));
 
         var fields = chat.el('div', 'ai-agent-settings-fields');
         var select = chat.el('select', 'ai-agent-settings-input');
