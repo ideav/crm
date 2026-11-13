@@ -1,0 +1,62 @@
+{
+ "_comment": "Диспетчер Фазы 2 (ideav/crm#5510): пункты меню и права рабочих мест «Импорт из 1С», «Ножи и валы», «Раскрой джамбо», «Склад мастер-рулонов». roles[] накатывается _d_schema, menu[] — записями таблицы Меню (151) роли. workplaces[] — какие таблицы рабочее место пишет и читает (по коду download/atex-p2/js/); тест experiments/atex-p2-5510-dispatcher-access.test.js сверяет с ними roles[] и menu[]. Применение — docs/scripts/apply_dispatcher_access_5510.py.",
+ "workplaces": [
+  {"href": "label-import", "name": "Импорт из 1С",
+   "writes": ["Заказ", "Заказанное количество", "Клиент", "Артикул", "Нож", "Движение пробега", "Вал"],
+   "reads": ["Основа сырья", "Марка ножа", "Состояние ножа", "Вид движения пробега", "Вид продукции", "Статус заказа", "Статус позиции", "Диаметр втулки", "Ед.изм.", "Сырьё этикетки", "Настройка"],
+   "reports": ["die_runs"]},
+  {"href": "dies", "name": "Ножи и валы",
+   "writes": ["Нож", "Вал"],
+   "reads": ["Станок высечки", "Состояние ножа", "Марка ножа", "Тип ножа", "Движение пробега", "Настройка"],
+   "reports": ["die_runs"]},
+  {"href": "jumbo-cutting", "name": "Раскрой джамбо",
+   "writes": ["Задание первичной резки", "Полоса раскроя"],
+   "deletes": ["Задание первичной резки"],
+   "reads": ["Сырьё этикетки", "Партия джамбо", "Мастер-рулон", "Настройка"],
+   "reports": ["jumbo_tasks", "die_tasks"]},
+  {"href": "master-rolls", "name": "Склад мастер-рулонов",
+   "writes": ["Мастер-рулон", "Движение мастер-рулона"],
+   "reads": ["Задание первичной резки", "Сырьё этикетки", "Склад", "Вид движения мастер-рулона", "Настройка"],
+   "reports": ["die_tasks"]}
+ ],
+ "menu": [
+  {"role": "Диспетчер", "name": "Импорт из 1С", "href": "label-import", "icon": "<i class=\"pi pi-file-import\"></i>"},
+  {"role": "Диспетчер", "name": "Ножи и валы", "href": "dies", "icon": "<i class=\"pi pi-wrench\"></i>"},
+  {"role": "Диспетчер", "name": "Раскрой джамбо", "href": "jumbo-cutting", "icon": "<i class=\"pi pi-th-large\"></i>"},
+  {"role": "Диспетчер", "name": "Склад мастер-рулонов", "href": "master-rolls", "icon": "<i class=\"pi pi-box\"></i>"}
+ ],
+ "roles": [
+  {"name": "Диспетчер", "grants": [
+   {"table": "Заказ", "level": "WRITE"},
+   {"table": "Заказанное количество", "level": "WRITE"},
+   {"table": "Клиент", "level": "WRITE"},
+   {"table": "Артикул", "level": "WRITE"},
+   {"table": "Нож", "level": "WRITE"},
+   {"table": "Движение пробега", "level": "WRITE"},
+   {"table": "Вал", "level": "WRITE"},
+   {"table": "Задание первичной резки", "level": "WRITE", "delete": true},
+   {"table": "Полоса раскроя", "level": "WRITE", "delete": true},
+   {"table": "Мастер-рулон", "level": "WRITE"},
+   {"table": "Движение мастер-рулона", "level": "WRITE"},
+   {"table": "Основа сырья", "level": "READ"},
+   {"table": "Марка ножа", "level": "READ"},
+   {"table": "Состояние ножа", "level": "READ"},
+   {"table": "Тип ножа", "level": "READ"},
+   {"table": "Вид движения пробега", "level": "READ"},
+   {"table": "Вид продукции", "level": "READ"},
+   {"table": "Статус заказа", "level": "READ"},
+   {"table": "Статус позиции", "level": "READ"},
+   {"table": "Диаметр втулки", "level": "READ"},
+   {"table": "Ед.изм.", "level": "READ"},
+   {"table": "Сырьё этикетки", "level": "READ"},
+   {"table": "Станок высечки", "level": "READ"},
+   {"table": "Партия джамбо", "level": "READ"},
+   {"table": "Склад", "level": "READ"},
+   {"table": "Вид движения мастер-рулона", "level": "READ"},
+   {"table": "Настройка", "level": "READ"},
+   {"report": "die_runs", "level": "READ"},
+   {"report": "jumbo_tasks", "level": "READ"},
+   {"report": "die_tasks", "level": "READ"}
+  ]}
+ ]
+}
