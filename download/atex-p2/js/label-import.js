@@ -300,7 +300,8 @@
             }).then(function(ctx) {
                 var plan = tab === 'knives' ? LI.planKnives(self.parsed.knives, ctx, {}) : LI.planOrders(self.parsed.orders, ctx, {});
                 self.plan[tab] = plan;
-                self.message('Сверено за ' + ((Date.now() - t0) / 1000).toFixed(1) + ' с. Проверьте предпросмотр и нажмите «Записать».');
+                var verdict = LI.planVerdict(tab, plan, self.parsed[tab]);
+                self.message('Сверено за ' + ((Date.now() - t0) / 1000).toFixed(1) + ' с. ' + verdict.text, verdict.kind);
                 self.render();
                 return plan;
             });
@@ -423,6 +424,7 @@
         this.$('atex-limp-file-name').textContent = this.files[tab] ? this.files[tab] : '';
         var btn = this.$('atex-limp-write');
         btn.disabled = this.busy || !plan || !plan.ops.length;
+        btn.title = !plan ? 'Сначала выберите файл' : (!plan.ops.length ? 'Записывать нечего: файл совпадает с базой' : '');
         btn.querySelector('span').textContent = plan && plan.ops.length ? 'Записать (' + plan.ops.length + ' операций)' : 'Записать';
 
         var kpi = this.$('atex-limp-kpi');

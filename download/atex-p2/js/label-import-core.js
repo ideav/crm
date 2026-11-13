@@ -699,6 +699,30 @@
         return { rows: rows, counts: counts, ops: ops };
     }
 
+    // Строка состояния после сверки (#5506). Пустой план — «записывать нечего» с причиной, а не
+    // приглашение нажать неактивную «Записать». → { text, kind }.
+    function planVerdict(tab, plan, parsed) {
+        var c = (plan && plan.counts) || counts0();
+        var ops = plan && plan.ops ? plan.ops.length : 0;
+        if (ops) {
+            return { text: 'Проверьте предпросмотр и нажмите «Записать»: новых ' + c.new + ', обновится ' + c.update + '.', kind: '' };
+        }
+        var why = [];
+        if (c.same) why.push(c.same + ' ' + (tab === 'knives' ? 'ножей' : 'позиций') + ' совпадают с базой');
+        if (c.error) why.push(c.error + ' строк с ошибками не пишутся');
+        if (c.duplicate) why.push(c.duplicate + ' дублей пропущено');
+        var text = 'Записывать нечего' + (why.length ? ': ' + why.join(', ') : ': в файле нет строк для записи') + '.';
+        if (tab === 'knives') {
+            var rows = (plan && plan.rows) || [];
+            var withMileage = rows.filter(function(r) { return r.mileage != null; }).length;
+            if (!withMileage) {
+                text += ' Пробега в файле нет: он берётся из колонки «Пробег» листа «Ножи» или из «Суммарного пробега ножа» листа «План»' +
+                    (parsed && parsed.planSheet === false ? ', а листа «План» в книге нет.' : '.');
+            }
+        }
+        return { text: text, kind: '' };
+    }
+
     function knifeSummary(v) {
         var parts = [];
         if (v.labelWidth != null && v.labelLength != null) parts.push(fmtNum(v.labelWidth) + '×' + fmtNum(v.labelLength));
@@ -1110,6 +1134,7 @@
         orderContext: orderContext,
         planKnives: planKnives,
         planOrders: planOrders,
+        planVerdict: planVerdict,
         runBatches: runBatches
     };
 });
