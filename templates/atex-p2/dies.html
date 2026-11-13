@@ -6,7 +6,7 @@
 <link rel="stylesheet" href="/download/{_global_.z}/css/dies.css?{_global_.version}.2">
 <script src="/js/integram-table.js?{_global_.version}.2" defer></script>
 <script src="/download/{_global_.z}/js/label-production.js?{_global_.version}.28" defer></script>
-<script src="/download/{_global_.z}/js/dies.js?{_global_.version}.7" defer></script>
+<script src="/download/{_global_.z}/js/dies.js?{_global_.version}.8" defer></script>
 
 <div id="atex-dies-app" class="atex-dies atex-brand"
      data-db="{_global_.z}"
@@ -14,6 +14,7 @@
     <div class="atex-dies-toolbar">
         <div class="atex-dies-tabs" role="tablist">
             <button class="atex-dies-tab is-active" type="button" data-tab="dies" role="tab">Ножи</button>
+            <button class="atex-dies-tab" type="button" data-tab="types" role="tab">Типы ножей</button>
             <button class="atex-dies-tab" type="button" data-tab="cylinders" role="tab">Валы</button>
         </div>
         <button id="atex-dies-refresh" class="atex-dies-btn" type="button" title="Перечитать ножи, валы и пробег">
@@ -39,6 +40,10 @@
                 </section>
             </aside>
         </div>
+    </section>
+
+    <section class="atex-dies-pane" data-pane="types" hidden>
+        <div id="atex-dies-type-grid" class="atex-dies-grid"></div>
     </section>
 
     <section class="atex-dies-pane" data-pane="cylinders" hidden>
