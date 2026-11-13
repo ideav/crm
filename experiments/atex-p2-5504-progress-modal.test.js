@@ -190,5 +190,86 @@ function recorder() {
     assert(reloaded6 && rec6.log.closed === 1 && !rec6.log.open, 'P6 окно закрыто после перечитывания');
     assert(lo.busy === false, 'P6 busy снят');
 
+    // ── P1d. Задержка показа: короткая операция окна не показывает ──────────────────────────
+    if (PG) {
+        var dd = fakeDoc();
+        var quick = PG.open('Запись', { document: dd, delay: 20, timer: false });
+        quick.close();
+        await new Promise(function(r) { setTimeout(r, 40); });
+        assert(dd.body.children.length === 0, 'P1d операция короче delay — окна нет');
+        var slow = PG.open('Запись', { document: dd, delay: 20, timer: false });
+        assert(dd.body.children.length === 0, 'P1d до delay окна ещё нет');
+        await new Promise(function(r) { setTimeout(r, 40); });
+        assert(dd.body.children.length === 1, 'P1d дольше delay — окно встало');
+        slow.close();
+        assert(dd.body.children.length === 0, 'P1d close убирает окно с задержкой');
+    }
+
+    // ── P7. Пульт высечки: запись съёмов ─────────────────────────────────────────────────────
+    var LPC = require('../download/atex/js/label-production.js').core;
+    var DC = require('../download/atex-p2/js/die-cutter.js');
+    var rec7 = recorder(), reloaded7 = false, created7 = 0, posted7 = 0, msg7 = null;
+    var dc = Object.create(DC.AtexDieCutter.prototype);
+    dc.progressUi = rec7.ui;
+    dc.state = {
+        tables: { dieRun: { id: '10', reqs: { revs: '11', job: '12' } }, finishedBatch: { id: '20', reqs: {} }, dieJob: { reqs: {} } },
+        jobs: [], runs: [], gps: [], events: [], runKinds: [{ id: 'K', val: LPC.RUN_KIND.CUT }]
+    };
+    dc.message = function(t, k) { msg7 = { t: t, k: k }; };
+    dc.client = {
+        serverNow: function() { return Promise.resolve(1700000000); },
+        create: function() { created7++; return Promise.resolve({ id: '1' }); },
+        post: function() { posted7++; return Promise.resolve({}); }
+    };
+    dc.reload = function() { return new Promise(function(r) { setTimeout(function() { reloaded7 = true; r(); }, 2); }); };
+    var job7 = { id: 'J1', dieId: 'D1', repeatMm: 300, status: 'Запланировано', pullsPlan: 10, pullsFact: 0 };
+    await dc.writePulls(job7, 4, 100);
+    var st7 = rec7.log.steps.filter(function(s) { return s.total > 0; })[0];
+    assert(rec7.log.opened === 1, 'P7 запись съёмов открывает окно прогресса', msg7 && msg7.t);
+    assert(st7 && st7.total === created7 + posted7 && st7.maxDone === st7.total,
+        'P7 счётчик записей = всем запросам записи (' + (created7 + posted7) + ')', st7 && (st7.maxDone + '/' + st7.total));
+    assert(reloaded7 && rec7.log.closed === 1 && !rec7.log.open, 'P7 окно закрыто после перечитывания');
+
+    // ── P8. Слиттер джамбо: приёмка мастер-рулонов ───────────────────────────────────────────
+    var JS = require('../download/atex-p2/js/jumbo-slitter.js');
+    var rec8 = recorder(), posted8 = 0;
+    var sl = Object.create(JS.AtexJumboSlitter.prototype);
+    sl.progressUi = rec8.ui;
+    sl.state = { tables: { masterRoll: { id: '30', reqs: {} }, jumboBatch: { reqs: { rest: '41' } } } };
+    sl.message = function() {};
+    sl.setStatus = function() { return Promise.resolve(); };
+    sl.client = { post: function() { posted8++; return Promise.resolve({}); } };
+    sl.reload = function() { return Promise.resolve(); };
+    var rows8 = Array.from({ length: 6 }, function(_, i) { return { no: 'MR-' + i, format: 330, length: 1000 }; });
+    var job8 = { id: 'JJ', strips: [{ format: 330, count: 6 }], pulls: 1, created: 0, batch: { id: 'B1', geometry: { length: 1000 } } };
+    await sl.accept(job8, 1, rows8);
+    var st8 = rec8.log.steps.filter(function(s) { return s.total > 0; })[0];
+    assert(rec8.log.opened === 1, 'P8 приёмка открывает окно прогресса');
+    assert(st8 && st8.maxDone >= 6 && st8.maxDone === st8.total, 'P8 счётчик дошёл до конца (рулонов 6 + остаток партии)', st8 && (st8.maxDone + '/' + st8.total));
+    assert(rec8.log.closed === 1 && !rec8.log.open && sl.busy === false, 'P8 окно закрыто, busy снят');
+
+    // ── P9. Первичная резка: задание с полосами (и откат при ошибке) ─────────────────────────
+    var JC = require('../download/atex-p2/js/jumbo-cutting.js');
+    for (var fail9 = 0; fail9 <= 1; fail9++) {
+        var rec9 = recorder(), posted9 = 0;
+        var jcApp = Object.create(JC.AtexJumboCutting.prototype);
+        jcApp.progressUi = rec9.ui;
+        jcApp.state = { tables: { jumboJob: { id: '50', reqs: {} }, jumboStrip: { id: '60', reqs: {} } } };
+        jcApp.message = function() {};
+        jcApp.reload = function() { return Promise.resolve(); };
+        jcApp.client = { post: function(path) {
+            posted9++;
+            if (fail9 && posted9 === 3) return Promise.reject(new Error('HTTP 500'));
+            return Promise.resolve(/^_m_new\/50/.test(path) ? { id: '777' } : {});
+        } };
+        var v9 = { edge: 10, strips: [330, 330, 250, 250, 100].map(function(f) { return { format: f, count: 1, purpose: '' }; }) };
+        await jcApp.create({ id: 'B1', no: 'П-1' }, v9, 1700000000, 30);
+        var st9 = rec9.log.steps.filter(function(s) { return s.total > 0; })[0];
+        var tag9 = fail9 ? ' (ошибка на 2-й полосе)' : '';
+        assert(rec9.log.opened === 1, 'P9 запись задания открывает окно' + tag9);
+        assert(st9 && st9.total === 6 && st9.maxDone === (fail9 ? 2 : 6), 'P9 счётчик: задание + 5 полос' + tag9, st9 && (st9.maxDone + '/' + st9.total));
+        assert(rec9.log.closed === 1 && !rec9.log.open && jcApp.busy === false, 'P9 окно закрыто, busy снят' + tag9);
+    }
+
     console.log('\n' + passed + '/' + total + ' passed');
 })().catch(function(e) { console.error(e); process.exitCode = 1; });

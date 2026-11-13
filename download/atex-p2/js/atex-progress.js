@@ -12,6 +12,7 @@
 //   p.close();
 //
 // total ≤ 0 — этап без счётчика: полоса «бежит», виден только секундомер.
+// delay (мс) — окно появляется, только если операция не закончилась за это время.
 // Стили — css/atex-progress.css.
 
 (function(root, factory) {
@@ -65,8 +66,11 @@
         box.appendChild(this.countEl);
         box.appendChild(this.detailEl);
         this.overlay.appendChild(box);
-        (doc.body || doc.documentElement).appendChild(this.overlay);
         this.open = true;
+        // delay, мс: окно встаёт, только если операция идёт дольше — одиночная запись не мигает.
+        var attach = function() { self.delayTimer = null; if (self.open) (doc.body || doc.documentElement).appendChild(self.overlay); };
+        if (o.delay > 0 && typeof setTimeout === 'function') this.delayTimer = setTimeout(attach, o.delay);
+        else attach();
         this.step(title, o.total, o.detail);
         // Секундомер идёт и тогда, когда счётчик стоит (долгий запрос) — видно, что страница жива.
         if (o.timer !== false && typeof setInterval === 'function') {
@@ -113,6 +117,7 @@
         if (!this.open) return;
         this.open = false;
         if (this.timer) { clearInterval(this.timer); this.timer = null; }
+        if (this.delayTimer) { clearTimeout(this.delayTimer); this.delayTimer = null; }
         if (this.overlay.parentNode) this.overlay.parentNode.removeChild(this.overlay);
     };
 
