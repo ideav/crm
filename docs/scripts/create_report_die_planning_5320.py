@@ -31,6 +31,7 @@ JOB = 'Задание высечки'
 POS = 'Заказанное количество'
 ORDER = 'Заказ'
 DIE = 'Нож'
+DIE_TYPE = 'Тип ножа'  # параметры ножа — у его типа (#5431)
 MR = 'Мастер-рулон'
 SLEEVE = 'Задача на втулки'
 MATERIAL = 'Сырьё этикетки'
@@ -51,14 +52,14 @@ REPORTS = {
         ('machine', ('req', JOB, 'Станок высечки'), None),
         ('die_id', ('req', JOB, 'Нож'), ABN_ID),
         ('die_no', ('req', JOB, 'Нож'), None),
-        ('die_streams', ('req', DIE, 'Ручьёв'), None),
+        ('die_streams', ('req', DIE_TYPE, 'Ручьёв'), None),
         ('cylinder_id', ('req', JOB, 'Вал'), ABN_ID),
         ('cylinder', ('req', JOB, 'Вал'), None),
         ('master_roll_id', ('req', JOB, 'Мастер-рулон'), ABN_ID),
         ('master_roll', ('req', JOB, 'Мастер-рулон'), None),
-        ('min_format', ('req', DIE, 'Минимальный формат, мм'), None),
-        ('opt_format', ('req', DIE, 'Оптимальный формат, мм'), None),
-        ('used_format', ('req', DIE, 'Исп. формат, мм'), None),
+        ('min_format', ('req', DIE_TYPE, 'Минимальный формат, мм'), None),
+        ('opt_format', ('req', DIE_TYPE, 'Оптимальный формат, мм'), None),
+        ('used_format', ('req', DIE_TYPE, 'Исп. формат, мм'), None),
         ('position_id', ('req', JOB, 'Позиция заказа'), ABN_ID),
         ('order_no', ('table', ORDER), None),
         ('due', ('req', POS, 'Срок изготовления'), None),

@@ -98,8 +98,9 @@
                 stopMaterials: 'Стоп-лист сырья',
                 packPlace: 'Упаковочное место'
             } },
-            die: { name: 'Нож', reqs: {
-                delivered: 'Дата поставки',
+            // Параметры ножа (размер, ручьи, вал, основа, форматы…) — у его типа: ножи одного
+            // типа взаимозаменяемы. У самого ножа — только то, что у каждого экземпляра своё.
+            dieType: { name: 'Тип ножа', reqs: {
                 labelWidth: 'Ширина этикетки, мм',
                 labelLength: 'Длина этикетки, мм',
                 streams: 'Ручьёв',
@@ -108,13 +109,18 @@
                 streamGap: 'Между ручьями, мм',
                 edge: 'Ширина кромки, мм',
                 cylinder: 'Вал',
-                base: 'Основа',
+                base: 'Основа сырья',
                 minFormat: 'Минимальный формат, мм',
                 optFormat: 'Оптимальный формат, мм',
                 usedFormat: 'Исп. формат, мм',
                 sleeveWidth: 'Ширина втулки, мм',
-                height: 'Высота ножа, мкм',
                 angle: 'Угол заточки',
+                code: 'Код 1С'
+            } },
+            die: { name: 'Нож', reqs: {
+                delivered: 'Дата поставки',
+                type: 'Тип ножа',
+                height: 'Высота ножа, мкм',
                 brand: 'Марка ножа',
                 state: 'Состояние ножа',
                 runs: 'Движение пробега'
@@ -235,7 +241,54 @@
             });
             tables[key] = { id: String(table.id), name: spec.name, reqs: reqs };
         });
+        linkDieParams(tables);
         return { ok: missing.length === 0, tables: tables, missing: missing };
+    }
+
+    // Параметры ножа, которые живут в его типе (ключи реквизитов «Типа ножа»).
+    var DIE_TYPE_PARAMS = ['labelWidth', 'labelLength', 'streams', 'labelsPerRepeat', 'labelGap', 'streamGap', 'edge',
+        'cylinder', 'base', 'minFormat', 'optFormat', 'usedFormat', 'sleeveWidth', 'angle'];
+
+    // Нож читается с параметрами своего типа: t.die.reqs[параметр] = id реквизита «Типа ножа»,
+    // а withDieTypes кладёт значения типа в записи ножей под теми же id. Читатели ножа
+    // (reqVal(rec, t.die.reqs.streams) и т. п.) так видят параметры типа, как свои колонки.
+    // Писать параметры в нож через t.die.reqs нельзя — у ножа этих колонок нет.
+    function linkDieParams(tables) {
+        var die = tables.die, type = tables.dieType;
+        if (!die || !type) return;
+        DIE_TYPE_PARAMS.forEach(function(k) { if (type.reqs[k]) die.reqs[k] = type.reqs[k]; });
+    }
+
+    // Записи ножей (kvRecords: { id, val, reqs }) + записи «Типа ножа» → копии ножей, в reqs
+    // которых добавлены значения реквизитов типа (вместе с ref_<id> у ссылок «Вал», «Основа
+    // сырья»). Нож без типа или с типом, которого нет в списке, параметров не получает.
+    // t — resolveProductionTables(...).tables.
+    function withDieTypes(dieRecs, t, typeRecs) {
+        var link = t && t.die && t.die.reqs ? t.die.reqs.type : '';
+        var byId = {};
+        (typeRecs || []).forEach(function(r) { byId[String(r.id)] = r; });
+        return (dieRecs || []).map(function(rec) {
+            var typeId = link ? dieTypeId(rec, link) : '';
+            var type = typeId ? byId[typeId] : null;
+            var reqs = {};
+            if (type) Object.keys(type.reqs || {}).forEach(function(k) { reqs[k] = type.reqs[k]; });
+            Object.keys((rec && rec.reqs) || {}).forEach(function(k) { reqs[k] = rec.reqs[k]; });
+            var out = {};
+            Object.keys(rec || {}).forEach(function(k) { out[k] = rec[k]; });
+            out.reqs = reqs;
+            out.typeId = type ? typeId : '';
+            out.typeName = type ? String(type.val == null ? '' : type.val) : '';
+            return out;
+        });
+    }
+
+    // id типа ножа: ссылка «Тип ножа» приходит как ref_<id> = «таблица:id» или сырым id.
+    function dieTypeId(rec, link) {
+        var reqs = (rec && rec.reqs) || {};
+        var raw = reqs['ref_' + link];
+        if (raw != null && String(raw).trim() !== '') return String(raw).replace(/^\s*\d+:/, '').split(',')[0].trim();
+        var v = reqs[link];
+        return v == null || !/^\s*\d+\s*$/.test(String(v)) ? '' : String(v).trim();
     }
 
     // Вид продукции по значению реквизита: «этикетка» / «рулон»; пусто — «рулон»
@@ -663,6 +716,8 @@
             PRODUCT_KIND_COLUMNS: PRODUCT_KIND_COLUMNS,
             PRODUCTION_CONFIGS: PRODUCTION_CONFIGS,
             resolveProductionTables: resolveProductionTables,
+            DIE_TYPE_PARAMS: DIE_TYPE_PARAMS,
+            withDieTypes: withDieTypes,
             RUN_KIND: RUN_KIND,
             runKindOf: runKindOf,
             dieMileage: dieMileage,

@@ -529,7 +529,8 @@
             this.getJson('object/' + t.productKind.id + '/?JSON_KV&LIMIT=0,20'),
             clientTable ? optional(this.getJson('object/' + clientTable + '/?JSON_KV&LIMIT=0,5000')) : Promise.resolve(null),
             sleeveTable ? optional(this.getJson('object/' + sleeveTable + '/?JSON_KV&LIMIT=0,500')) : Promise.resolve(null),
-            this.loadSettings()
+            this.loadSettings(),
+            t.dieType ? this.getJson('object/' + t.dieType.id + '/?JSON_KV&LIMIT=0,10000') : Promise.resolve(null)
         ]).then(function(res) {
             self.settings = res[10];
             self.mileageOk = Array.isArray(res[2]);
@@ -537,7 +538,7 @@
             var selectable = {};
             kvRecords(res[4]).forEach(function(s) { if (bool(reqVal(s, selCol))) selectable[s.id] = true; });
             var cylinders = cylinderRepeats(kvRecords(res[3]), t);
-            self.dies = buildDies(kvRecords(res[1]), t, selectable, cylinders, self.mileageOk ? mileageByDie(res[2]) : null);
+            self.dies = buildDies(lp.withDieTypes(kvRecords(res[1]), t, kvRecords(res[11])), t, selectable, cylinders, self.mileageOk ? mileageByDie(res[2]) : null);
             self.materials = materialIndex(kvRecords(res[5]), t);
             self.materialList = kvRecords(res[5]);
             self.orders = kvRecords(res[6]);

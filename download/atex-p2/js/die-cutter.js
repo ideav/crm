@@ -807,7 +807,8 @@
                 c.serverNow(), all(t.masterRoll && t.masterRoll.id),
                 // #5366: ресурс ножа — марка и настройка; прав на чтение нет — ресурс по умолчанию.
                 all(t.dieBrand && t.dieBrand.id).catch(function() { return []; }),
-                self.loadSettings(meta).catch(function() { return []; })
+                self.loadSettings(meta).catch(function() { return []; }),
+                all(t.dieType && t.dieType.id)
             ]).then(function(r) {
                 var dr = t.die.reqs, gr = t.finishedBatch.reqs;
                 // Колонки, которых нет в общем описании таблиц (label-production.js): ищутся по имени.
@@ -823,7 +824,7 @@
                 var brandRes = {};
                 r[12].forEach(function(b) { brandRes[b.id] = reqVal(b, brandCol); });
                 var defaultRes = settingValue(r[13], RESOURCE_KEY, self.db) || RESOURCE_DEFAULT_REV;
-                var dies = r[3].map(function(d) {
+                var dies = lp.withDieTypes(r[3], t, r[14]).map(function(d) {
                     var res = lp.dieResource(brandRes[refId(d, dr.brand)], defaultRes).revs;
                     return { id: d.id, val: d.val, width: num(reqVal(d, dr.labelWidth)), length: num(reqVal(d, dr.labelLength)), state: reqVal(d, dr.state), cylinderId: refId(d, dr.cylinder), labelsPerRepeat: num(reqVal(d, dr.labelsPerRepeat)), minFormat: num(reqVal(d, dr.minFormat)), resource: isFinite(res) ? res : 0 };
                 });
