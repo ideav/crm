@@ -39,6 +39,7 @@
     var LP = (root && root.AtexLabelProduction) ||
         (typeof require === 'function' ? require('../../atex/js/label-production.js') : null);
     var lp = LP ? LP.core : null;
+    var PG = (root && root.AtexProgress) || (typeof require === 'function' ? require('./atex-progress.js') : null);
 
     var REPORT = 'label_positions';
     // id позиции в отчёте: колонка «<Имя>ID» рядом с «<Имя>» — грид её скрывает.
@@ -726,16 +727,20 @@
             self.busy = true;
             var errors = [];
             var chain = Promise.resolve();
-            todo.forEach(function(x) {
+            // #5504: по запросу на позицию — окно прогресса со счётчиком, до конца перечитывания.
+            var pg = (self.progressUi || PG).open('Запись подбора ножей', { total: todo.length });
+            todo.forEach(function(x, i) {
                 chain = chain.then(function() {
                     return self.post('_m_set/' + encodeURIComponent(x.p.id) + '?JSON', self.fieldsOf(x.plan.write))
-                        .catch(function(err) { errors.push(x.p.orderNo + ': ' + err.message); });
+                        .catch(function(err) { errors.push(x.p.orderNo + ': ' + err.message); })
+                        .then(function() { pg.set(i + 1, x.p.orderNo ? 'Заказ ' + x.p.orderNo : ''); });
                 });
             });
             return chain.then(function() {
                 self.message(errors.length ? 'Записано ' + (todo.length - errors.length) + ' из ' + todo.length + '; ошибки: ' + errors.join('; ') : 'Подбор записан в ' + todo.length + ' позиций.', errors.length ? 'error' : 'ok');
+                pg.step('Обновляю данные', 0);
                 return self.reload(true);
-            }).then(function() { self.busy = false; });
+            }).then(function() { pg.close(); self.busy = false; }, function(err) { pg.close(); self.busy = false; throw err; });
         });
     };
 

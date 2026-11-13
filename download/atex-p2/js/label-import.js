@@ -29,6 +29,9 @@
 
     var LI = (root && root.AtexLabelImport) ||
         (typeof require === 'function' ? require('./label-import-core.js') : null);
+    // Окно прогресса длительных операций (#5504): сверка читает позиции каждого заказа файла.
+    var PG = (root && root.AtexProgress) ||
+        (typeof require === 'function' ? require('./atex-progress.js') : null);
 
     var RUNS_REPORT = 'die_runs';
     var CONCURRENCY = 5;        // ТЗ atex §15: не больше 5 запросов разом
@@ -116,7 +119,27 @@
         this.loading = '';
         this.loadingSince = 0;
         this.loadingTimer = null;
+        this.progressUi = PG;
     }
+
+    // Отдать кадр браузеру: окно прогресса успевает отрисоваться перед синхронным расчётом.
+    function yieldFrame() {
+        return new Promise(function(resolve) { setTimeout(resolve, 0); });
+    }
+
+    // Выполнить fn(p) в окне прогресса: своё окно открывается и закрывается здесь (и при ошибке),
+    // переданное снаружи только продолжается (запись + повторная сверка — одно окно).
+    AtexLabelImport.prototype.withProgress = function(p, title, fn) {
+        if (p) return fn(p);
+        var own = this.progressUi.open(title);
+        return Promise.resolve().then(function() { return fn(own); }).then(function(v) {
+            own.close();
+            return v;
+        }, function(err) {
+            own.close();
+            throw err;
+        });
+    };
 
     // Начать/закончить показ индикатора загрузки в таблице предпросмотра.
     AtexLabelImport.prototype.setLoading = function(text) {
@@ -176,15 +199,6 @@
         el.textContent = text || '';
     };
 
-    AtexLabelImport.prototype.progress = function(done, total, text) {
-        var el = this.$('atex-limp-progress');
-        if (!el) return;
-        el.hidden = total == null;
-        if (total == null) return;
-        el.querySelector('.atex-limp-progress-bar').style.width = (total ? Math.round(done / total * 100) : 0) + '%';
-        el.querySelector('span').textContent = text || '';
-    };
-
     AtexLabelImport.prototype.start = function() {
         var self = this;
         this.root.addEventListener('click', function(e) {
@@ -238,6 +252,8 @@
         this.message('Читаю «' + file.name + '»…');
         this.plan[tab] = null;
         this.setLoading('Читаю «' + file.name + '»');
+        var p = this.progressUi.open('Импорт «' + file.name + '»');
+        p.step('Читаю файл', 0);
         return Promise.all([this.withXlsx(), file.arrayBuffer()]).then(function(r) {
             var XLSX = r[0];
             var wb = XLSX.read(new Uint8Array(r[1]), { type: 'array' });
@@ -256,11 +272,11 @@
             self.parsed[tab] = parsed;
             self.files[tab] = file.name;
             self.setLoading('Сверяю с базой' + (tab === 'knives' ? ' (база ножей — до 10 с)' : ''));
-            return self.replan(tab);
+            return self.replan(tab, p);
         }).catch(function(err) {
             console.error('[label-import] ❌', err);
             self.message('Файл не разобран: ' + err.message, 'error');
-        }).then(function() { self.setLoading(''); });
+        }).then(function() { p.close(); self.setLoading(''); });
     };
 
     AtexLabelImport.prototype.checkTables = function(tab) {
@@ -270,19 +286,25 @@
     };
 
     // Сверка с базой: читает, что нужно для ключей файла, и строит план.
-    AtexLabelImport.prototype.replan = function(tab) {
+    // p — окно прогресса вызывающего (загрузка файла, запись); без него сверка открывает своё.
+    AtexLabelImport.prototype.replan = function(tab, p) {
         var self = this;
         this.checkTables(tab);
         this.message('Сверяю с базой…');
         var t0 = Date.now();
-        var load = tab === 'knives' ? this.loadKnifeContext() : this.loadOrderContext(this.parsed.orders);
-        return load.then(function(ctx) {
-            var plan = tab === 'knives' ? LI.planKnives(self.parsed.knives, ctx, {}) : LI.planOrders(self.parsed.orders, ctx, {});
-            self.plan[tab] = plan;
-            var verdict = LI.planVerdict(tab, plan, self.parsed[tab]);
-            self.message('Сверено за ' + ((Date.now() - t0) / 1000).toFixed(1) + ' с. ' + verdict.text, verdict.kind);
-            self.render();
-            return plan;
+        return this.withProgress(p, 'Сверка с базой', function(pg) {
+            var load = tab === 'knives' ? self.loadKnifeContext(pg) : self.loadOrderContext(self.parsed.orders, pg);
+            return load.then(function(ctx) {
+                pg.step('Сверяю файл с базой', 0);
+                return yieldFrame().then(function() { return ctx; });
+            }).then(function(ctx) {
+                var plan = tab === 'knives' ? LI.planKnives(self.parsed.knives, ctx, {}) : LI.planOrders(self.parsed.orders, ctx, {});
+                self.plan[tab] = plan;
+                var verdict = LI.planVerdict(tab, plan, self.parsed[tab]);
+                self.message('Сверено за ' + ((Date.now() - t0) / 1000).toFixed(1) + ' с. ' + verdict.text, verdict.kind);
+                self.render();
+                return plan;
+            });
         });
     };
 
@@ -290,12 +312,14 @@
         return this.getJson('object/' + this.tables[key].id + '/?JSON_KV&LIMIT=0,100000' + (extra || '')).then(LI.kvRecords);
     };
 
-    AtexLabelImport.prototype.loadKnifeContext = function() {
+    AtexLabelImport.prototype.loadKnifeContext = function(p) {
         var self = this;
-        return Promise.all([
+        var reads = [
             this.objects('die'), this.getJson('report/' + RUNS_REPORT + '?JSON_KV&LIMIT=0,1000000'),
             this.objects('cylinder'), this.objects('base'), this.objects('brand'), this.objects('state'), this.objects('runKind')
-        ]).then(function(r) {
+        ];
+        p.step('Читаю базу ножей и пробег (до 10 с)', reads.length);
+        return Promise.all(reads.map(function(r) { return p.track(r); })).then(function(r) {
             var runs = Array.isArray(r[1]) ? r[1] : [];
             var runsCol = self.tables.die.reqs && self.tables.dieRun ? self.tables.dieRun.id : '';
             var withRuns = r[0].filter(function(d) { return Number(d.reqs[runsCol]) > 0; }).length;
@@ -308,17 +332,26 @@
         });
     };
 
-    AtexLabelImport.prototype.loadOrderContext = function(parsed) {
+    AtexLabelImport.prototype.loadOrderContext = function(parsed, p) {
         var self = this;
         var opt = function(key) { return self.tables[key] ? self.objects(key) : Promise.resolve([]); };
-        return Promise.all([
+        var reads = [
             this.objects('order'), this.objects('client'), this.objects('article'), this.objects('productKind'),
             opt('orderStatus'), opt('positionStatus'), opt('core'), opt('unit'), opt('material'), opt('setting')
-        ]).then(function(r) {
+        ];
+        p.step('Читаю заказы и справочники', reads.length);
+        return Promise.all(reads.map(function(r) { return p.track(r); })).then(function(r) {
             var numbers = {};
             (parsed.items || []).forEach(function(i) { numbers[i.order] = true; });
             var hit = r[0].filter(function(o) { return numbers[String(o.val).trim()]; });
-            return pool(hit, CONCURRENCY, function(o) { return self.objects('position', '&F_U=' + encodeURIComponent(o.id)); }).then(function(lists) {
+            // Позиции читаются по заказу — на выгрузку сотни запросов, отсюда счётчик в окне.
+            p.step('Читаю позиции заказов из файла', hit.length);
+            return pool(hit, CONCURRENCY, function(o) {
+                return p.track(self.objects('position', '&F_U=' + encodeURIComponent(o.id))).then(function(list) {
+                    p.set(p.done, 'Заказ ' + String(o.val).trim());
+                    return list;
+                });
+            }).then(function(lists) {
                 var positions = [];
                 lists.forEach(function(list, i) { (list || []).forEach(function(p) { p.up = hit[i].id; positions.push(p); }); });
                 return LI.orderContext(self.tables, {
@@ -348,7 +381,7 @@
     };
 
     AtexLabelImport.prototype.write = function() {
-        var self = this, tab = this.tab, plan = this.plan[tab];
+        var self = this, tab = this.tab, plan = this.plan[tab], pg = null;
         if (this.busy || !plan || !plan.ops.length) return;
         var c = plan.counts;
         var what = tab === 'knives' ? 'ножей' : 'позиций';
@@ -359,15 +392,15 @@
             if (!yes) return;
             self.busy = true;
             self.render();
-            self.progress(0, plan.ops.length, 'Запись…');
+            pg = self.progressUi.open('Запись в базу «' + self.db + '»', { total: plan.ops.length, detail: 'Отправляю первый пакет' });
             return LI.runBatches(plan.ops, function(ops) { return self.sendBatch(ops); }, {
                 batchSize: BATCH_SIZE,
-                onProgress: function(p) { self.progress(p.done, p.total, 'Пакет ' + p.batch + ' из ' + p.batches + ': ' + p.done + ' / ' + p.total + ' операций'); }
+                onProgress: function(p) { pg.set(p.done, 'Пакет ' + p.batch + ' из ' + p.batches); }
             }).then(function(res) {
                 var sec = (res.ms / 1000).toFixed(1);
                 console.log('[label-import] ✅ запись ' + tab + ': ' + plan.ops.length + ' операций, ' + res.batches + ' пакетов, ' + sec + ' с, ошибок ' + res.failed.length);
                 if (res.failed.length) console.error('[label-import] ❌ не записано', res.failed);
-                return self.replan(tab).then(function(after) {
+                return self.replan(tab, pg).then(function(after) {
                     var a = after.counts;
                     self.message('Записано за ' + sec + ' с (' + res.batches + ' пакет.)' +
                         (res.failed.length ? '; не записано операций: ' + res.failed.length + ' — первая: ' + res.failed[0].error : '') +
@@ -379,8 +412,8 @@
             console.error('[label-import] ❌', err);
             self.message('Запись прервана: ' + err.message + '. Перечитайте файл — сверка покажет, что уже записано.', 'error');
         }).then(function() {
+            if (pg) pg.close();
             self.busy = false;
-            self.progress(0, null);
             self.render();
         });
     };

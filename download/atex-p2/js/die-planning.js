@@ -24,6 +24,7 @@
     'use strict';
 
     var DP = (root && root.AtexDiePlanning) || (typeof require === 'function' ? require('./die-planning-core.js') : null);
+    var PG = (root && root.AtexProgress) || (typeof require === 'function' ? require('./atex-progress.js') : null);
     var C = DP ? DP.core : null;
     var MRA = (root && root.AtexMasterRolls) || (typeof require === 'function' ? require('./master-rolls-core.js') : null);
     var MR = MRA ? MRA.core : null;
@@ -680,13 +681,18 @@
         if (this.busy) return;
         this.busy = true;
         this.$('atex-dp-modal-ok').disabled = true;
-        steps.reduce(function(p, step) { return p.then(function() { return step().then(function() { done++; }); }); }, Promise.resolve()).then(function() {
+        // #5504: шаги идут цепочкой по запросу — окно прогресса со счётчиком, до конца перечитывания.
+        var pg = (this.progressUi || PG).open('Запись в базу', { total: steps.length });
+        steps.reduce(function(p, step) { return p.then(function() { return step().then(function() { done++; pg.set(done); }); }); }, Promise.resolve()).then(function() {
             self.busy = false;
             self.closeModal();
+            pg.step('Обновляю данные', 0);
             var r = self.reload(doneText);
+            Promise.resolve(r).then(function() { pg.close(); }, function() { pg.close(); });
             if (after && r && r.then) r.then(function() { if (self.state) after(); });
         }).catch(function(err) {
             console.error('[die-planning] ❌ запись', err);
+            pg.close();
             self.busy = false;
             self.$('atex-dp-modal-ok').disabled = false;
             self.$('atex-dp-modal-error').textContent = 'Ошибка записи (выполнено шагов: ' + done + ' из ' + steps.length + '): ' + err.message;
