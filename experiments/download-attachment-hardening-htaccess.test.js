@@ -24,15 +24,34 @@ if (ht[0] !== cf[0] || ht[1] !== cf[1] || cf[0] !== cf[2] || cf[1] !== cf[3]) {
 }
 console.log('PASS: mirrors identical (htaccess == docker conf, both vhosts)');
 
-function evalIf(cond, uri) {
-    const u = uri.toLowerCase();
-    let v = true;
-    for (const m of cond.matchAll(/(!~|=~) \/(.*?)\/(?=\)|"|$)/g)) {
-        const neg = m[1] === '!~';
-        const re = new RegExp(m[2].replace(/\(\?i:/g, '(?:'), '');
-        v = neg ? (v && !re.test(u)) : (v && re.test(u));
+// Regexes are parsed the way the ap_expr lexer does: /.../ ends at the FIRST '/', a backslash does
+// not escape it ("\/" inside /.../ = "Failed to compile regular expression" -> 500 on every file
+// under download/). So rules use m#...#, and a /.../ regex containing "\/" is a failure here.
+// Parens must balance: a stray ")" is a parse error as well.
+function regexesOf(cond) {
+    const out = [];
+    const rx = /(!~|=~)\s+(?:m#([^#]*)#|\/([^\/]*)\/)/g;
+    for (const m of cond.matchAll(rx)) {
+        const body = m[2] !== undefined ? m[2] : m[3];
+        if (m[3] !== undefined && body.endsWith('\\')) throw new Error('"\\/" inside /.../ — Apache cannot compile it: ' + cond);
+        // (?i:...) — case-insensitive group (PCRE); Node 20 lacks modifiers, so spell letters as [xX].
+        // Outside the group matching stays case-sensitive, as in Apache.
+        const src = body.replace(/\(\?i:([^()]*)\)/g, (_, g) => '(?:' + g.replace(/[a-z]/gi, c => '[' + c.toLowerCase() + c.toUpperCase() + ']') + ')');
+        out.push({ neg: m[1] === '!~', re: new RegExp(src) });
     }
-    return v;
+    const rest = cond.replace(rx, 'R');
+    if (/\\\//.test(rest)) throw new Error('"\\/" inside /.../ — Apache cannot compile it: ' + cond);
+    let depth = 0;
+    for (const ch of rest) { depth += ch === '(' ? 1 : ch === ')' ? -1 : 0; if (depth < 0) break; }
+    if (depth !== 0) throw new Error('unbalanced parens in <If>: ' + cond);
+    if (!out.length) throw new Error('no regex parsed in <If>: ' + cond);
+    return out;
+}
+for (const c of ht) regexesOf(c);
+console.log('PASS: <If> conditions are in a form the ap_expr lexer compiles');
+
+function evalIf(cond, uri) {
+    return regexesOf(cond).every(({ neg, re }) => neg !== re.test(uri));
 }
 
 const samples = [
@@ -44,6 +63,10 @@ const samples = [
     ['/download/cources/0a1b2c3d4/001e4f6a789.jpg',  false, false],
     ['/download/cources/0a1b2c3d4/001e4f6a789.',     true,  false],
     ['/download/cources/12a1b2c3d4/001e4f6a789.html', true, true],
+    // extension with non-alnum chars passes BlackList and is stored as-is — still attachment
+    ['/download/cources/0a1b2c3d4/001e4f6a789.ht-ml', true,  false],
+    ['/download/cources/0a1b2c3d4/001e4f6a789.svg_',  true,  false],
+    ['/download/cources/0a1b2c3d4/001e4f6a789.файл',  true,  false],
     ['/download/atex/main.html',  false, false],
     ['/download/atex/js/05-invariants.js', false, false],
     ['/download/cources/file.html', false, false],

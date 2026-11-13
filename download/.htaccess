@@ -11,10 +11,10 @@
 # (index.php GetSubdir/GetFilename). There everything except raster images is served
 # as attachment, and html/svg/xml additionally get a hard sandbox (no allow-scripts):
 # an uploaded page must not run on the bases' origin. Mirrors docker/apache/integram.conf.
-    <If "(%{REQUEST_URI} =~ /^\/download\/[^\/]+\/[0-9]+[0-9a-f]{8}\/[0-9]{3}[0-9a-f]{8}\.[0-9a-zA-Z]*$/) && (%{REQUEST_URI} !~ /\.(?i:jpe?g|png|gif|webp|bmp|ico|avif|heic|tiff?)$/)">
+    <If "(%{REQUEST_URI} =~ m#^/download/[^/]+/[0-9]+[0-9a-f]{8}/[0-9]{3}[0-9a-f]{8}\.[^/]*$#) && (%{REQUEST_URI} !~ m#\.(?i:jpe?g|png|gif|webp|bmp|ico|avif|heic|tiff?)$#)">
         Header set Content-Disposition "attachment"
     </If>
-    <If "%{REQUEST_URI} =~ /^\/download\/[^\/]+\/[0-9]+[0-9a-f]{8}\/[0-9]{3}[0-9a-f]{8}\.(?i:html?|xhtml|svg|xml)$/)">
+    <If "%{REQUEST_URI} =~ m#^/download/[^/]+/[0-9]+[0-9a-f]{8}/[0-9]{3}[0-9a-f]{8}\.(?i:html?|xhtml|svg|xml)$#">
         Header set Content-Security-Policy "sandbox"
     </If>
 </IfModule>

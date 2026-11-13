@@ -130,6 +130,25 @@ zip_make("templates/custom/tb/backups/case4.zip", $GLOBALS["__names"], $GLOBALS[
 try{ Code_restore_apply("case4.zip"); }catch(Exception $e){ $thrown = $e->getMessage(); }
 expect(strpos($thrown, "MY_DIE") !== FALSE, "SHELL.PHP uppercase rejected");
 
+# case 5: double extension — every dot-segment of the name is checked, not only the last one
+# (with AddHandler-style php mapping Apache executes shell.php.jpg)
+foreach(array("download/shell.php.jpg", "templates/x.PHP.png", "download/000a1b2c/a.phtml.txt") as $bad){
+    $dir = sandbox();
+    $GLOBALS["__names"] = array($bad);
+    $GLOBALS["__entries"] = array($bad => "<?php evil();");
+    $thrown = "";
+    zip_make("templates/custom/tb/backups/case5.zip", $GLOBALS["__names"], $GLOBALS["__entries"]);
+    try{ Code_restore_apply("case5.zip"); }catch(Exception $e){ $thrown = $e->getMessage(); }
+    expect(strpos($thrown, "MY_DIE") !== FALSE, "$bad (double extension) rejected");
+}
+# case 6: multi-dot names without blacklisted segments still restore
+$dir = sandbox();
+$GLOBALS["__names"] = array("download/js/jquery.min.js", "download/dir.v2/app.bundle.css");
+$GLOBALS["__entries"] = array("download/js/jquery.min.js" => "1", "download/dir.v2/app.bundle.css" => "2");
+zip_make("templates/custom/tb/backups/case6.zip", $GLOBALS["__names"], $GLOBALS["__entries"]);
+$res = Code_restore_apply("case6.zip");
+expect(isset($res["result"]) && $res["result"] === "ok" && $res["files"] === 2, "jquery.min.js / app.bundle.css restore fine");
+
 # direct BlackList checks
 $ok = TRUE;
 try{ BlackList("php"); $ok = FALSE; }catch(Exception $e){}

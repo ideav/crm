@@ -11665,9 +11665,10 @@ function Code_restore_apply($source){
 			return array("error" => t9n("[RU]В архиве чужой путь $n — восстановление не начато, файлы не тронуты"
 				."[EN]Foreign path $n in the archive — the restore has not started, the files are intact"));
 		}
-		$ext = strrchr($n, ".");
-		if($ext !== FALSE)  # имена из архива проходят тот же BlackList, что и загрузка
-			BlackList(substr($ext, 1));  # иначе в download/ и templates/custom/ попадают php/sh-файлы
+		# имена из архива проходят тот же BlackList, что и загрузка, — каждый сегмент после точки,
+		# не только последний: при php через AddHandler Apache исполняет и shell.php.jpg
+		foreach(array_slice(explode(".", basename($n)), 1) as $ext)
+			BlackList($ext);
 		$names[] = $n;
 	}
 	$zip->close();
