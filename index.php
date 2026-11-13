@@ -12709,6 +12709,21 @@ function aiAgentScreenContext($raw){
         if($v !== "" && ($k !== "url" || $v[0] === "/"))
             $ctx[$k] = $v;
     }
+    # python2node#1252: скрипты страницы — только статика своей базы /download/<база>/…js
+    # (без ?версии и ..), до 10 штук: агент читает по ним алгоритм кнопок.
+    if(isset($src["scripts"]) && is_array($src["scripts"])){
+        $scripts = array();
+        foreach($src["scripts"] as $v){
+            if(!is_string($v) || count($scripts) >= 10)
+                continue;
+            $p = preg_replace('/[?#].*$/s', "", trim($v));
+            if(preg_match('~^/download/[A-Za-z0-9_]{1,64}/(?:[A-Za-z0-9_.-]{1,100}/){0,4}[A-Za-z0-9_.-]{1,100}\.js$~', $p)
+                    && !preg_match('~/\.{1,2}/~', $p) && !in_array($p, $scripts, true))
+                $scripts[] = $p;
+        }
+        if(count($scripts))
+            $ctx["scripts"] = $scripts;
+    }
     # crm#5113: экран рабочего места — плоский объект: строки (text — до 3000 символов),
     # числа, логические, списки скаляров до 30. Не больше 20 полей и 6000 символов JSON.
     if($page === "workplace" && isset($src["screen"]) && is_array($src["screen"])){

@@ -563,7 +563,27 @@
                 selection: this.collectSelection()
             });
             if (ctx && ctx.page === 'workplace') ctx = this.mergePageScreen(ctx, this.pageScreen());
+            if (ctx) {
+                var scripts = this.collectPageScripts(typeof document !== 'undefined' ? document : null, loc);
+                if (scripts.length) ctx.scripts = scripts;
+            }
             return ctx;
+        },
+
+        // python2node#1252: скрипты страницы из статики базы (/download/<база>/…js) — по ним агент
+        // читает, как работают кнопки и расчёты рабочего места. Только свой хост, без ?версии, до 10.
+        collectPageScripts: function (doc, loc) {
+            var out = [];
+            var list = doc && doc.scripts ? doc.scripts : [];
+            var host = (loc && loc.host) || '';
+            for (var i = 0; i < list.length && out.length < 10; i++) {
+                var src = list[i] && list[i].src;
+                if (!src || typeof src !== 'string') continue;
+                var m = /^(?:https?:\/\/([^\/?#]+))?(\/download\/[A-Za-z0-9_]{1,64}\/[^?#]+\.js)(?:[?#]|$)/.exec(src);
+                if (!m || (m[1] && host && m[1] !== host) || /\/\.\.?\//.test(m[2])) continue;
+                if (out.indexOf(m[2]) < 0) out.push(m[2]);
+            }
+            return out;
         },
 
         // Строка «Контекст: Сделка №5231» над полем ввода; крестик снимает контекст.
