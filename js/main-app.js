@@ -1935,18 +1935,24 @@ class MainAppController {
             const hrefParts = dataHrefPath.split('/').filter(p => p);
             const lastPart = hrefParts[hrefParts.length - 1];
 
+            // Issue #5508: адрес пункта ищем в пути целыми сегментами — иначе
+            // "/ateh1/label-orders" зажигал и пункт "orders"
+            const pathMatches = hrefParts.length > 0 &&
+                ('/' + currentPath.split('/').filter(p => p).join('/') + '/')
+                    .includes('/' + hrefParts.join('/') + '/');
+
             let isActive = false;
             // When dataHref contains a query string (e.g. "forms?EDIT"), match against both
             // the current path action and the current URL query string
             if (dataHrefQuery) {
                 if (currentAction && lastPart === currentAction && currentSearch === dataHrefQuery) {
                     isActive = true;
-                } else if (currentPath.includes(dataHrefPath) && currentSearch === dataHrefQuery) {
+                } else if (pathMatches && currentSearch === dataHrefQuery) {
                     isActive = true;
                 }
             } else if (currentAction && lastPart === currentAction) {
                 isActive = true;
-            } else if (currentPath.includes(dataHref)) {
+            } else if (pathMatches) {
                 isActive = true;
             }
 
