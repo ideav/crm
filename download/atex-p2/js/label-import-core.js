@@ -699,6 +699,17 @@
         return { rows: rows, counts: counts, ops: ops };
     }
 
+    // Номера заказов, которые трогает план (группа операции «order:<номер>»): после записи
+    // повторная сверка перечитывает позиции только этих заказов (#5512).
+    function touchedOrders(ops) {
+        var out = {};
+        (ops || []).forEach(function(op) {
+            var g = op && typeof op.group === 'string' ? op.group : '';
+            if (g.indexOf('order:') === 0) out[g.slice(6)] = true;
+        });
+        return out;
+    }
+
     // Строка состояния после сверки (#5506). Пустой план — «записывать нечего» с причиной, а не
     // приглашение нажать неактивную «Записать». → { text, kind }.
     function planVerdict(tab, plan, parsed) {
@@ -1134,6 +1145,7 @@
         orderContext: orderContext,
         planKnives: planKnives,
         planOrders: planOrders,
+        touchedOrders: touchedOrders,
         planVerdict: planVerdict,
         runBatches: runBatches
     };

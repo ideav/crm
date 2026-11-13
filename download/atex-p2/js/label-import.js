@@ -114,6 +114,9 @@
         this.parsed = { orders: null, knives: null };
         this.files = { orders: '', knives: '' };
         this.plan = { orders: null, knives: null };
+        // Позиции по id заказа из последней сверки: повторная сверка после записи берёт их
+        // для заказов, которых запись не касалась (#5512).
+        this.positionsByOrder = {};
         this.filter = '';
         this.busy = false;
         this.loading = '';
@@ -287,13 +290,15 @@
 
     // Сверка с базой: читает, что нужно для ключей файла, и строит план.
     // p — окно прогресса вызывающего (загрузка файла, запись); без него сверка открывает своё.
-    AtexLabelImport.prototype.replan = function(tab, p) {
+    // touched — номера заказов, тронутых записью (LI.touchedOrders): позиции остальных заказов
+    // берутся из прошлой сверки. Без него читаются позиции всех заказов файла.
+    AtexLabelImport.prototype.replan = function(tab, p, touched) {
         var self = this;
         this.checkTables(tab);
         this.message('Сверяю с базой…');
         var t0 = Date.now();
         return this.withProgress(p, 'Сверка с базой', function(pg) {
-            var load = tab === 'knives' ? self.loadKnifeContext(pg) : self.loadOrderContext(self.parsed.orders, pg);
+            var load = tab === 'knives' ? self.loadKnifeContext(pg) : self.loadOrderContext(self.parsed.orders, pg, touched);
             return load.then(function(ctx) {
                 pg.step('Сверяю файл с базой', 0);
                 return yieldFrame().then(function() { return ctx; });
@@ -332,7 +337,7 @@
         });
     };
 
-    AtexLabelImport.prototype.loadOrderContext = function(parsed, p) {
+    AtexLabelImport.prototype.loadOrderContext = function(parsed, p, touched) {
         var self = this;
         var opt = function(key) { return self.tables[key] ? self.objects(key) : Promise.resolve([]); };
         var reads = [
@@ -344,16 +349,24 @@
             var numbers = {};
             (parsed.items || []).forEach(function(i) { numbers[i.order] = true; });
             var hit = r[0].filter(function(o) { return numbers[String(o.val).trim()]; });
+            var cache = touched ? self.positionsByOrder : {};
+            var fetch = hit.filter(function(o) { return !cache[o.id] || touched[String(o.val).trim()]; });
             // Позиции читаются по заказу — на выгрузку сотни запросов, отсюда счётчик в окне.
-            p.step('Читаю позиции заказов из файла', hit.length);
-            return pool(hit, CONCURRENCY, function(o) {
+            p.step(touched ? 'Перечитываю позиции изменённых заказов' : 'Читаю позиции заказов из файла', fetch.length);
+            return pool(fetch, CONCURRENCY, function(o) {
                 return p.track(self.objects('position', '&F_U=' + encodeURIComponent(o.id))).then(function(list) {
                     p.set(p.done, 'Заказ ' + String(o.val).trim());
                     return list;
                 });
             }).then(function(lists) {
-                var positions = [];
-                lists.forEach(function(list, i) { (list || []).forEach(function(p) { p.up = hit[i].id; positions.push(p); }); });
+                var fresh = {};
+                fetch.forEach(function(o, i) { fresh[o.id] = lists[i] || []; });
+                var positions = [], byOrder = {};
+                hit.forEach(function(o) {
+                    var list = byOrder[o.id] = fresh[o.id] || cache[o.id] || [];
+                    list.forEach(function(p) { p.up = o.id; positions.push(p); });
+                });
+                self.positionsByOrder = byOrder;
                 return LI.orderContext(self.tables, {
                     orders: r[0], positions: positions, clients: r[1], articles: r[2], productKinds: r[3],
                     orderStatuses: r[4], positionStatuses: r[5], cores: r[6], units: r[7], materials: r[8], settings: r[9], db: self.db
@@ -400,7 +413,7 @@
                 var sec = (res.ms / 1000).toFixed(1);
                 console.log('[label-import] ✅ запись ' + tab + ': ' + plan.ops.length + ' операций, ' + res.batches + ' пакетов, ' + sec + ' с, ошибок ' + res.failed.length);
                 if (res.failed.length) console.error('[label-import] ❌ не записано', res.failed);
-                return self.replan(tab, pg).then(function(after) {
+                return self.replan(tab, pg, tab === 'orders' ? LI.touchedOrders(plan.ops) : null).then(function(after) {
                     var a = after.counts;
                     self.message('Записано за ' + sec + ' с (' + res.batches + ' пакет.)' +
                         (res.failed.length ? '; не записано операций: ' + res.failed.length + ' — первая: ' + res.failed[0].error : '') +
