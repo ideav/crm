@@ -119,7 +119,8 @@
                 optional(c.getJson('report/die_planning_sleeves?JSON_KV&LIMIT=0,100000')),
                 MRA.loadState(c),
                 optional(JCA.loadState(c, LP, {})),
-                c.serverNow()
+                c.serverNow(),
+                t.dieType ? kv(t.dieType.id) : Promise.resolve([])
             ]).then(function(r) {
                 self.build(meta, res, { settingsTable: settingsTable, cutterTable: cutterTable, sreq: sreq }, r);
                 var missing = res.missing.filter(function(m) { return /^(Задание высечки|Нож|Станок высечки|Вал)/.test(m); });
@@ -144,7 +145,7 @@
         r[4].forEach(function(s) { if (LO.bool(s.reqs[t.dieState.reqs.selectable])) selectable[s.id] = true; });
         var cylinders = LO.cylinderRepeats(r[3], t);
         var mileage = Array.isArray(r[10]) ? LO.mileageByDie(r[10]) : null;
-        var dies = C.buildDieIndex(r[2], t, selectable, cylinders, mileage);
+        var dies = C.buildDieIndex(LP.withDieTypes(r[2], t, r[15]), t, selectable, cylinders, mileage);
         var brandRes = {};
         r[7].forEach(function(b) { brandRes[b.id] = (b.reqs[t.dieBrand.reqs.resource] || ''); });
         var mr = r[12], jc = r[13];

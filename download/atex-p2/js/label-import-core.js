@@ -12,6 +12,9 @@
 //      пакете у ядра; запись и её подчинённые — в одном пакете, ссылки внутри пакета — ":idN").
 //
 // Правила повторного импорта (ТЗ Фазы 2 §5.6, docs/atex_phase2_labels_tz.md):
+//   - параметры ножа (размер, ручьи, вал, основа, форматы, угол…) — свойства его «Типа ножа»
+//     (#5431): у ножа с типом они не пишутся, расхождение файла с типом — предупреждение строки;
+//     ножу без типа тип подбирается по размеру, углу, ручьям, м/э и валу, не нашёлся — заводится;
 //   - пустое значение в файле поле не стирает: вал, заполненный в Интеграме у ножа с валом «0»
 //     в 1С, переживает повторный импорт;
 //   - состояние ножа пишется только при создании ножа — дальше его ведёт рабочее место «Ножи и
@@ -39,13 +42,17 @@
     // ключ → { name: имя таблицы, reqs: { ключ: имя колонки | [имена] } }. Имя колонки —
     // псевдоним или имя реквизита (для ссылки без псевдонима — имя таблицы-цели).
     var IMPORT_TABLES = {
+        // Параметры ножа живут в его типе (#5427, #5431); у ножа — номер, тип и то, что у экземпляра своё.
         die: { name: 'Нож', reqs: {
-            delivered: 'Дата поставки', labelWidth: 'Ширина этикетки, мм', labelLength: 'Длина этикетки, мм',
-            streams: 'Ручьёв', labelsPerRepeat: 'Этикеток на раппорте', labelGap: 'М/э расстояние, мм',
-            streamGap: 'Между ручьями, мм', edge: 'Ширина кромки, мм', cylinder: 'Вал', base: ['Основа', 'Основа сырья'],
-            minFormat: 'Минимальный формат, мм', optFormat: 'Оптимальный формат, мм', usedFormat: 'Исп. формат, мм',
-            sleeveWidth: 'Ширина втулки, мм', height: 'Высота ножа, мкм', angle: 'Угол заточки',
+            delivered: 'Дата поставки', type: 'Тип ножа', height: 'Высота ножа, мкм',
             brand: 'Марка ножа', state: 'Состояние ножа'
+        } },
+        dieType: { name: 'Тип ножа', reqs: {
+            labelWidth: 'Ширина этикетки, мм', labelLength: 'Длина этикетки, мм',
+            streams: 'Ручьёв', labelsPerRepeat: 'Этикеток на раппорте', labelGap: 'М/э расстояние, мм',
+            streamGap: 'Между ручьями, мм', edge: 'Ширина кромки, мм', cylinder: 'Вал', base: ['Основа сырья', 'Основа'],
+            minFormat: 'Минимальный формат, мм', optFormat: 'Оптимальный формат, мм', usedFormat: 'Исп. формат, мм',
+            sleeveWidth: 'Ширина втулки, мм', angle: 'Угол заточки'
         } },
         dieRun: { name: 'Движение пробега', reqs: { revs: 'Обороты пробега', kind: 'Вид движения пробега' } },
         cylinder: { name: 'Вал', reqs: { repeat: 'Раппорт, мм' } },
@@ -76,8 +83,8 @@
 
     // Без этих таблиц и колонок вкладка не работает; остальные — необязательные (поле не пишется).
     var REQUIRED = {
-        knives: ['die', 'dieRun', 'cylinder', 'base', 'brand', 'state', 'runKind',
-            'die.labelWidth', 'die.labelLength', 'dieRun.revs', 'dieRun.kind'],
+        knives: ['die', 'dieType', 'dieRun', 'cylinder', 'base', 'brand', 'state', 'runKind',
+            'die.type', 'dieType.labelWidth', 'dieType.labelLength', 'dieRun.revs', 'dieRun.kind'],
         orders: ['order', 'position', 'client', 'article', 'productKind',
             'order.client', 'position.productKind', 'position.article', 'position.labelWidth', 'position.labelLength']
     };
@@ -244,15 +251,23 @@
 
     var PLAN_COLS = { no: ['номер ножа'], total: ['Суммарный пробег ножа'] };
 
-    // Поля ножа: ключ реквизита, вид значения, только при создании.
+    // Поля строки листа «Ножи»: ключ реквизита, вид значения, только при создании; type — параметр
+    // «Типа ножа», а не самого ножа.
     var KNIFE_FIELDS = [
-        { key: 'delivered', kind: 'date' }, { key: 'labelWidth', kind: 'num' }, { key: 'labelLength', kind: 'num' },
-        { key: 'streams', kind: 'int' }, { key: 'labelsPerRepeat', kind: 'int' }, { key: 'labelGap', kind: 'num' },
-        { key: 'streamGap', kind: 'num' }, { key: 'edge', kind: 'num' }, { key: 'cylinder', kind: 'ref' },
-        { key: 'base', kind: 'ref' }, { key: 'minFormat', kind: 'int' }, { key: 'optFormat', kind: 'int' },
-        { key: 'usedFormat', kind: 'int' }, { key: 'sleeveWidth', kind: 'num' }, { key: 'height', kind: 'int' },
-        { key: 'angle', kind: 'text' }, { key: 'brand', kind: 'ref' }, { key: 'state', kind: 'ref', createOnly: true }
+        { key: 'delivered', kind: 'date' }, { key: 'labelWidth', kind: 'num', type: true }, { key: 'labelLength', kind: 'num', type: true },
+        { key: 'streams', kind: 'int', type: true }, { key: 'labelsPerRepeat', kind: 'int', type: true }, { key: 'labelGap', kind: 'num', type: true },
+        { key: 'streamGap', kind: 'num', type: true }, { key: 'edge', kind: 'num', type: true }, { key: 'cylinder', kind: 'ref', type: true },
+        { key: 'base', kind: 'ref', type: true }, { key: 'minFormat', kind: 'int', type: true }, { key: 'optFormat', kind: 'int', type: true },
+        { key: 'usedFormat', kind: 'int', type: true }, { key: 'sleeveWidth', kind: 'num', type: true }, { key: 'height', kind: 'int' },
+        { key: 'angle', kind: 'text', type: true }, { key: 'brand', kind: 'ref' }, { key: 'state', kind: 'ref', createOnly: true }
     ];
+    var DIE_FIELDS = KNIFE_FIELDS.filter(function(f) { return !f.type; });
+    var TYPE_FIELDS = KNIFE_FIELDS.filter(function(f) { return f.type; });
+
+    // По этим параметрам новый нож узнаёт свой тип (те же, что у подбора типов в
+    // docs/scripts/knife_types_5427.py, плюс ручьи и вал — от них зависит производство).
+    // Остальные параметры типа на выбор не влияют; расхождение с файлом — предупреждение.
+    var TYPE_MATCH_KEYS = ['labelWidth', 'labelLength', 'angle', 'streamGap', 'labelGap', 'streams', 'cylinder'];
 
     var NUM_LABEL = {
         labelWidth: 'ширина этикетки', labelLength: 'длина этикетки', streams: 'ручьёв', labelsPerRepeat: 'этикеток на раппорте',
@@ -556,15 +571,22 @@
         return out;
     }
 
-    // Данные базы для сверки ножей. data — { dies, runs (строки отчёта die_runs), cylinders, bases,
-    // brands, states, runKinds }: записи — kvRecords.
+    // Данные базы для сверки ножей. data — { dies, types (записи «Типа ножа»), runs (строки отчёта
+    // die_runs), cylinders, bases, brands, states, runKinds }: записи — kvRecords.
     function knifeContext(tables, data) {
         var d = data || {};
-        var dies = {}, dupInBase = {};
+        var dies = {}, dupInBase = {}, dieCount = {};
         (d.dies || []).forEach(function(r) {
             var key = String(r.val).trim();
+            var typeId = tables.die.reqs.type ? refId(r, tables.die.reqs.type) : '';
+            if (typeId) dieCount[typeId] = (dieCount[typeId] || 0) + 1;
             if (dies[key]) dupInBase[key] = true;
-            else dies[key] = { id: r.id, values: valuesOf(r, tables.die, KNIFE_FIELDS), labels: r.reqs };
+            else dies[key] = { id: r.id, typeId: typeId, values: valuesOf(r, tables.die, DIE_FIELDS), labels: r.reqs };
+        });
+        var types = [], typeById = {}, typeNames = {};
+        (d.types || []).forEach(function(r) {
+            var tp = { id: r.id, name: String(r.val).trim(), values: tables.dieType ? valuesOf(r, tables.dieType, TYPE_FIELDS) : {}, dies: dieCount[r.id] || 0 };
+            types.push(tp); typeById[tp.id] = tp; typeNames[norm(tp.name)] = true;
         });
         var runsByDie = {};
         (d.runs || []).forEach(function(r) {
@@ -579,6 +601,7 @@
         (d.runKinds || []).forEach(function(r) { if (lp && lp.runKindOf(r.val) === lp.RUN_KIND.INITIAL) initialKindId = r.id; });
         return {
             tables: tables, dies: dies, dupInBase: dupInBase, runsByDie: runsByDie, initialKindId: initialKindId,
+            types: types, typeById: typeById, typeNames: typeNames,
             dict: { cylinder: cylinder, base: dictByLabel(d.bases), brand: dictByLabel(d.brands), state: state },
             labels: {
                 cylinder: labelIndex(d.cylinders), base: labelIndex(d.bases), brand: labelIndex(d.brands), state: labelIndex(d.states)
@@ -604,6 +627,77 @@
 
     function counts0() { return { new: 0, update: 0, same: 0, duplicate: 0, error: 0, warnings: 0 }; }
 
+    function fieldOf(key) { return KNIFE_FIELDS.filter(function(f) { return f.key === key; })[0]; }
+
+    // Параметры файла, которые расходятся с типом: [«Ручьёв» 4, у типа 3]. Новый вал (его ещё нет
+    // в справочнике) у типа быть не может — тоже расхождение.
+    function typeDiff(tp, target, labels, ctx) {
+        var names = (ctx.tables.dieType && ctx.tables.dieType.reqNames) || {};
+        var out = [];
+        TYPE_FIELDS.forEach(function(f) {
+            if (!(f.key in target)) return;
+            var want = target[f.key], have = tp.values[f.key];
+            if (typeof want !== 'object' && sameValue(f.kind, have, want)) return;
+            var haveLabel = f.kind === 'ref' ? ((ctx.labels[f.key] || {})[have] || have) : have;
+            out.push('«' + (names[f.key] || f.key) + '» ' + labels[f.key] + ', у типа ' + (haveLabel || 'пусто'));
+        });
+        return out;
+    }
+
+    // Число для имени типа — как в каталоге 1С: без хвостовых нулей, с запятой; «70°» → «70».
+    function typeNamePart(v) {
+        if (v == null || v === '') return '?';
+        var n = cellNum(String(v).replace(/°/g, ''));
+        return n == null || isNaN(n) ? String(v) : fmtNum(n).replace('.', ',');
+    }
+
+    // Значения типа подходят к файлу по TYPE_MATCH_KEYS: параметр, которого в файле нет, не
+    // сравнивается; новый вал файла ({ ref }) подходит только к типу с тем же новым валом.
+    function typeFits(values, target) {
+        return TYPE_MATCH_KEYS.every(function(k) {
+            if (!(k in target)) return true;
+            var want = target[k], have = values[k];
+            if (typeof want === 'object') return !!have && typeof have === 'object' && have.ref === want.ref;
+            return typeof have !== 'object' && sameValue(fieldOf(k).kind, have, want);
+        });
+    }
+
+    // Тип для ножа без типа: подходящий из справочника (из нескольких — тот, у которого больше
+    // ножей, затем меньший id), затем — заведённый этим же импортом, иначе — новый тип с
+    // параметрами файла. Новый тип называется как типы, заведённые по ножам без каталога:
+    // «Ш х Д (угол/между ручьями/м.э)»; имя занято — с номером ножа в скобках.
+    // pending — типы, заведённые этим импортом: [{ value: { ref }, name, values }].
+    // → { value: id | { ref }, name } | null (в базе нет «Типа ножа»); операция нового типа — в ops.
+    function knifeType(item, target, labels, ctx, pending, ops, row) {
+        var t = ctx.tables;
+        if (!t.dieType || !t.die.reqs.type) return null;
+        var cands = (ctx.types || []).filter(function(tp) { return typeFits(tp.values, target); })
+            .sort(function(a, b) { return (b.dies - a.dies) || (Number(a.id) - Number(b.id)); });
+        if (cands.length) {
+            var tp = cands[0];
+            if (cands.length > 1) row.warnings.push('подходит типов: ' + cands.length + ', выбран «' + tp.name + '» — у него больше ножей');
+            var diff = typeDiff(tp, target, labels, ctx);
+            if (diff.length) row.warnings.push('параметры в файле расходятся с типом «' + tp.name + '»: ' + diff.join('; ') + ' — актуален тип');
+            return { value: tp.id, name: tp.name };
+        }
+        var mine = pending.filter(function(x) { return typeFits(x.values, target); })[0];
+        if (mine) return mine;
+        var name = typeNamePart(target.labelWidth) + ' х ' + typeNamePart(target.labelLength) + ' (' +
+            [target.angle, target.streamGap, target.labelGap].map(typeNamePart).join('/') + ')';
+        var taken = function(n) {
+            return (ctx.typeNames || {})[norm(n)] || pending.some(function(x) { return norm(x.name) === norm(n); });
+        };
+        if (taken(name)) name += ' [' + item.key + ']';
+        var op = { op: 'new', table: t.dieType.id, up: 1, ref: 'type:' + name, group: 'type:' + name, fields: {} };
+        op.fields['t' + t.dieType.id] = name;
+        TYPE_FIELDS.forEach(function(f) { if (f.key in target) op.fields['t' + t.dieType.reqs[f.key]] = target[f.key]; });
+        ops.push(op);
+        row.warnings.push('типа с такими параметрами нет — будет создан «' + name + '»');
+        var made = { value: { ref: op.ref }, name: name, values: target };
+        pending.push(made);
+        return made;
+    }
+
     // План импорта ножей. → { rows, counts, ops }. rows — по строкам файла: { row, key, status
     // ('new'|'update'|'same'|'duplicate'|'error'), summary, changes: [{ field, from, to }], warnings,
     // errors, mileage, mileageSource }. ops — операции для runBatches; значение ссылки на запись,
@@ -613,7 +707,7 @@
         var now = String(o.now != null ? o.now : Math.floor(Date.now() / 1000));
         var t = ctx.tables;
         var rows = [], ops = [], counts = counts0();
-        var newCyl = {};
+        var newCyl = {}, newTypes = [];
 
         (parsed.items || []).forEach(function(item) {
             var row = { row: item.row, key: item.key, status: '', summary: knifeSummary(item.values), changes: [],
@@ -631,13 +725,18 @@
             }
             if (row.errors.length) { row.status = 'error'; counts.error++; return; }
 
+            // Тип ножа: у ножа с типом параметры не трогаются — актуален тип (#5431), расхождение
+            // файла с типом — предупреждение. Ножу без типа тип подбирается или заводится.
+            var curType = existing && existing.typeId ? (ctx.typeById || {})[existing.typeId] : null;
             var target = {}, labels = {};
             KNIFE_FIELDS.forEach(function(f) {
                 var val = item.values[f.key];
-                if (val == null || val === '' || !t.die.reqs[f.key]) return;
+                var owner = f.type ? t.dieType : t.die;
+                if (val == null || val === '' || !owner || !owner.reqs[f.key]) return;
                 if (f.kind !== 'ref') { target[f.key] = f.kind === 'date' || f.kind === 'text' ? String(val) : fmtNum(val); labels[f.key] = target[f.key]; return; }
                 var id = f.key === 'cylinder' ? ctx.dict.cylinder[val] : ctx.dict[f.key][norm(val)];
                 if (id) { target[f.key] = id; labels[f.key] = val; return; }
+                if (f.key === 'cylinder' && curType) { target[f.key] = { ref: 'cylinder:' + val }; labels[f.key] = val; return; }
                 if (f.key === 'cylinder') {
                     if (!newCyl[val]) {
                         newCyl[val] = { op: 'new', table: t.cylinder.id, up: 1, ref: 'cylinder:' + val, group: 'cylinder:' + val, fields: {} };
@@ -655,15 +754,23 @@
 
             var dieRef = 'die:' + item.key;
             var group = dieRef;
+            var typeLink = null;
+            if (curType) {
+                var diff = typeDiff(curType, target, labels, ctx);
+                if (diff.length) row.warnings.push('параметры в файле расходятся с типом «' + curType.name + '»: ' + diff.join('; ') + ' — актуален тип, он не меняется');
+            } else {
+                typeLink = knifeType(item, target, labels, ctx, newTypes, ops, row);
+            }
             if (!existing) {
                 var op = { op: 'new', table: t.die.id, up: 1, ref: dieRef, group: group, fields: {} };
                 op.fields['t' + t.die.id] = item.key;
-                Object.keys(target).forEach(function(k) { op.fields['t' + t.die.reqs[k]] = target[k]; });
+                DIE_FIELDS.forEach(function(f) { if (f.key in target) op.fields['t' + t.die.reqs[f.key]] = target[f.key]; });
+                if (typeLink) op.fields['t' + t.die.reqs.type] = typeLink.value;
                 ops.push(op);
                 row.status = 'new';
             } else {
                 var set = { op: 'set', id: existing.id, group: group, fields: {} };
-                KNIFE_FIELDS.forEach(function(f) {
+                DIE_FIELDS.forEach(function(f) {
                     if (f.createOnly || !(f.key in target)) return;
                     var want = target[f.key];
                     if (typeof want !== 'object' && sameValue(f.kind, existing.values[f.key], want)) return;
@@ -671,6 +778,10 @@
                     var from = f.kind === 'ref' ? ((ctx.labels[f.key] || {})[existing.values[f.key]] || existing.values[f.key]) : existing.values[f.key];
                     row.changes.push({ field: t.die.reqNames[f.key], from: from || '—', to: labels[f.key] });
                 });
+                if (typeLink) {
+                    set.fields['t' + t.die.reqs.type] = typeLink.value;
+                    row.changes.push({ field: t.die.reqNames.type, from: '—', to: typeLink.name });
+                }
                 if (Object.keys(set.fields).length) ops.push(set);
             }
             if (runPlan && runPlan.op === 'new') {

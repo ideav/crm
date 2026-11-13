@@ -9,8 +9,10 @@
 //      «вырубка» не трогаются: пробег = новое значение + вырубка;
 //   5. решения по данным ножей (#5308): вал «0» → нож без вала + предупреждение; раппорт 1С не
 //      сходится с валом → вал по номеру, предупреждение; состояние «нет данных» → пустое;
-//   6. пустое значение в файле поле не стирает (вал, заполненный в Интеграме, переживает повторный
-//      импорт); состояние ножа пишется только при создании — дальше его ведёт «Ножи и валы»;
+//   6. параметры ножа — у его «Типа ножа» (#5431): новый нож получает подходящий тип или новый,
+//      у ножа с типом параметры не пишутся — расхождение с файлом только предупреждение; правка
+//      типа в Интеграме переживает повторный импорт; состояние ножа пишется только при создании —
+//      дальше его ведёт «Ножи и валы»;
 //   7. ~2 350 ножей: план быстрый, пакеты не длиннее предела _m_batch (1000 операций), нож и его
 //      «начальный остаток» — в одном пакете.
 //
@@ -36,10 +38,10 @@ if (!LI) { console.log('\n' + passed + '/' + total + ' passed'); return; }
 // ── Поддельная база: метаданные, object/JSON_KV, отчёт die_runs и _m_batch ──────────────────
 
 var SCHEMA = [
-    ['Нож', ['Дата поставки', 'Ширина этикетки, мм', 'Длина этикетки, мм', 'Ручьёв', 'Этикеток на раппорте',
-        'М/э расстояние, мм', 'Между ручьями, мм', 'Ширина кромки, мм', ['Вал', 'Вал'], ['Основа сырья', 'Основа сырья', 'Основа'],
-        'Минимальный формат, мм', 'Оптимальный формат, мм', 'Исп. формат, мм', 'Ширина втулки, мм', 'Высота ножа, мкм',
-        'Угол заточки', ['Состояние ножа', 'Состояние ножа'], ['Марка ножа', 'Марка ножа']]],
+    ['Нож', ['Дата поставки', ['Тип ножа', 'Тип ножа'], 'Высота ножа, мкм', ['Состояние ножа', 'Состояние ножа'], ['Марка ножа', 'Марка ножа']]],
+    ['Тип ножа', ['Ширина этикетки, мм', 'Длина этикетки, мм', 'Ручьёв', 'Этикеток на раппорте',
+        'М/э расстояние, мм', 'Между ручьями, мм', 'Ширина кромки, мм', ['Вал', 'Вал'], ['Основа сырья', 'Основа сырья'],
+        'Минимальный формат, мм', 'Оптимальный формат, мм', 'Исп. формат, мм', 'Ширина втулки, мм', 'Угол заточки', 'Код 1С']],
     ['Движение пробега', ['Обороты пробега', ['Вид движения пробега', 'Вид движения пробега']]],
     ['Вал', ['Раппорт, мм']],
     ['Основа сырья', []], ['Марка ножа', ['Ресурс, об']], ['Состояние ножа', ['Нож подбирается']],
@@ -184,7 +186,7 @@ function seedDirectories(db) {
 function knifeCtx(db) {
     var res = LI.resolveImportTables(db.meta);
     return LI.knifeContext(res.tables, {
-        dies: db.records('Нож'), runs: db.dieRuns(), cylinders: db.records('Вал'), bases: db.records('Основа сырья'),
+        dies: db.records('Нож'), types: db.records('Тип ножа'), runs: db.dieRuns(), cylinders: db.records('Вал'), bases: db.records('Основа сырья'),
         brands: db.records('Марка ножа'), states: db.records('Состояние ножа'), runKinds: db.records('Вид движения пробега')
     });
 }
@@ -274,30 +276,42 @@ seedDirectories(db);
     assert(noNum && /номер/i.test(noNum.errors.join(' ')), 'нож с размером, но без номера — ошибка строки «нет номера ножа», а не пустая строка');
 
     var row = function(no) { return plan.rows.filter(function(r) { return r.key === no && r.status !== 'duplicate'; })[0] || {}; };
-    var cylReq = res.tables.die.reqs.cylinder, stateReq = res.tables.die.reqs.state;
+    var cylReq = res.tables.dieType.reqs.cylinder, stateReq = res.tables.die.reqs.state, linkReq = res.tables.die.reqs.type;
     var newOp = function(no) {
         return plan.ops.filter(function(o) { return o.op === 'new' && o.table === res.tables.die.id && o.fields['t' + res.tables.die.id] === no; })[0];
     };
+    // Поля нового типа, на который ссылается новый нож.
+    var typeOf = function(no) {
+        var link = newOp(no) && newOp(no).fields['t' + linkReq];
+        var op = link && plan.ops.filter(function(o) { return o.op === 'new' && o.ref === link.ref; })[0];
+        return op ? op.fields : {};
+    };
+    var typeOps = plan.ops.filter(function(o) { return o.op === 'new' && o.table === res.tables.dieType.id; });
+    assert(typeOps.length === 4, 'типов заведено 4: 85×38 на валах 96, 104 и новом 142, круглый 40×40', 'типов ' + typeOps.length);
+    var paramInDie = plan.ops.filter(function(o) {
+        return o.table === res.tables.die.id && Object.keys(o.fields).some(function(k) { return k === 't' + res.tables.dieType.reqs.labelWidth || k === 't' + cylReq; });
+    });
+    assert(paramInDie.length === 0, 'параметры ножа в «Нож» не пишутся — только в его тип');
     assert(row('900008').status === 'error' && /ширина этикетки/i.test(row('900008').errors.join(' ')),
         'нечисловая ширина — ошибка строки, нож не записывается');
     assert(!newOp('900008'), 'для строки с ошибкой операции нет');
 
-    assert(newOp('900002') && !('t' + cylReq in newOp('900002').fields) && /вал/i.test(row('900002').warnings.join(' ')),
-        'вал «0» → нож без вала и предупреждение (решение 1 #5308)');
+    assert(newOp('900002') && newOp('900002').fields['t' + linkReq] === newOp('900001').fields['t' + linkReq] && /вал/i.test(row('900002').warnings.join(' ')),
+        'вал «0» → вал из файла не берётся, предупреждение (решение 1 #5308); тип — по прочим параметрам, тот же, что у 900001');
     var cyl104 = db.records('Вал').filter(function(v) { return v.val === '104'; })[0].id;
-    assert(newOp('900003') && newOp('900003').fields['t' + cylReq] === cyl104 && /раппорт/i.test(row('900003').warnings.join(' ')),
+    assert(typeOf('900003')['t' + cylReq] === cyl104 && /раппорт/i.test(row('900003').warnings.join(' ')),
         'раппорт 1С не сходится с валом → вал по номеру, предупреждение (решение 2)');
     assert(newOp('900004') && !('t' + stateReq in newOp('900004').fields),
         'состояние «нет данных» → пустое (решение 3)');
-    assert(newOp('900009') && newOp('900009').fields['t' + res.tables.die.reqs.labelWidth] === '40',
+    assert(typeOf('900009')['t' + res.tables.dieType.reqs.labelWidth] === '40',
         'круглый нож «D»: ширина = длине (диаметр)');
 
     var cylNew = plan.ops.filter(function(o) { return o.op === 'new' && o.table === res.tables.cylinder.id; });
     assert(cylNew.length === 1 && cylNew[0].fields['t' + res.tables.cylinder.id] === '142' &&
         cylNew[0].fields['t' + res.tables.cylinder.reqs.repeat] === String(LP.cylinderRepeatMm(142)),
         'вала 142 нет в справочнике → создаётся один раз, раппорт = зубья × 3.175');
-    assert(newOp('900005') && newOp('900005').fields['t' + cylReq] && newOp('900005').fields['t' + cylReq].ref === cylNew[0].ref,
-        'новый нож ссылается на создаваемый вал');
+    assert(typeOf('900005')['t' + cylReq] && typeOf('900005')['t' + cylReq].ref === cylNew[0].ref,
+        'тип нового ножа ссылается на создаваемый вал');
 
     var runs = plan.ops.filter(function(o) { return o.op === 'new' && o.table === res.tables.dieRun.id; });
     assert(runs.length === 3, 'начальный остаток — у трёх ножей с пробегом в «Плане»', 'runs=' + runs.length);
@@ -310,7 +324,7 @@ var flow = Promise.resolve().then(function() {
     var plan = LI.planKnives(LI.parseKnifeSheet(KNIVES, planRows(12000)), knifeCtx(db), { now: 1790000000 });
     return LI.runBatches(plan.ops, send(db), { batchSize: 1000 }).then(function(r) {
         assert(r.ok && r.failed.length === 0, 'запись прошла без ошибок', JSON.stringify(r.failed).slice(0, 200));
-        assert(db.records('Нож').length === 6, 'в базе 6 ножей');
+        assert(db.records('Нож').length === 6 && db.records('Тип ножа').length === 4, 'в базе 6 ножей и 4 типа');
         var again = LI.planKnives(LI.parseKnifeSheet(KNIVES, planRows(12000)), knifeCtx(db), { now: 1790090000 });
         assert(again.counts.new === 0 && again.counts.update === 0 && again.counts.same === 6,
             'повторный импорт того же файла: 0 новых, 0 обновлённых, 6 без изменений', JSON.stringify(again.counts));
@@ -338,22 +352,22 @@ var flow = Promise.resolve().then(function() {
 }).then(function() {
     // ── 6. Ручная правка в Интеграме переживает повторный импорт ──
     var res = LI.resolveImportTables(db.meta);
-    var die2 = db.find(db.records('Нож').filter(function(d) { return d.val === '900002'; })[0].id);
     var die1 = db.find(db.records('Нож').filter(function(d) { return d.val === '900001'; })[0].id);
-    var cyl96 = db.records('Вал').filter(function(v) { return v.val === '96'; })[0].id;
+    var type1 = db.find(die1.reqs[res.tables.die.reqs.type]);
     var off = db.records('Состояние ножа').filter(function(s) { return s.val === 'Списан'; })[0].id;
-    die2.reqs[res.tables.die.reqs.cylinder] = cyl96;
+    type1.reqs[res.tables.dieType.reqs.edge] = '3';
     die1.reqs[res.tables.die.reqs.state] = off;
     var plan = LI.planKnives(LI.parseKnifeSheet(KNIVES, planRows(15000)), knifeCtx(db), { now: 1790300000 });
     assert(plan.counts.update === 0 && plan.ops.length === 0,
-        'вал, заполненный вручную при «0» в 1С, и списание ножа повторный импорт не трогает', JSON.stringify(plan.counts));
-    // а изменённая геометрия в 1С — обновление с перечнем изменений
+        'правку типа в Интеграме и списание ножа повторный импорт не трогает', JSON.stringify(plan.counts));
+    // изменённая геометрия в 1С: актуален тип — нож и тип не меняются, строка предупреждает
     var k = KNIVES.slice(); k[1] = knifeRow({ no: '900001', streams: 4 });
     var p2 = LI.planKnives(LI.parseKnifeSheet(k, planRows(15000)), knifeCtx(db), { now: 1790300000 });
-    var r1 = p2.rows.filter(function(r) { return r.key === '900001' && r.status === 'update'; })[0];
-    assert(p2.counts.update === 1 && r1 && r1.changes.length === 1 && /ручь/i.test(r1.changes[0].field) &&
-        String(r1.changes[0].from) === '3' && String(r1.changes[0].to) === '4',
-        'изменение в 1С → обновление с «было → стало»', r1 ? JSON.stringify(r1.changes) : '');
+    var r1 = p2.rows.filter(function(r) { return r.key === '900001'; })[0];
+    var w1 = r1 ? r1.warnings.join(' ') : '';
+    assert(p2.counts.update === 0 && p2.ops.length === 0 && r1 && r1.status === 'same' &&
+        w1.indexOf('«Ручьёв» 4, у типа 3') >= 0 && w1.indexOf('актуален тип') >= 0,
+        'ручьи в 1С расходятся с типом → без записи, предупреждение «Ручьёв» 4, у типа 3', w1);
 });
 
 // ── 1, 2, 3. Заказы: ключ «Заказ поставщику» + артикул ──────────────────────────────────

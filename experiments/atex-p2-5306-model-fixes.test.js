@@ -6,8 +6,8 @@
 //   2. раппорт хранится только у вала (зубья × 3.175 мм); пара «зубья ↔ раппорт» вала и
 //      раппорт ножа из базы 1С против раппорта его вала проверяются;
 //   3. без модуля label-production.js позиции этикетки всё равно не уходят в резки Фазы 1;
-//   4. у ножа хранится основа (бумага / ПП) — справочник «Основа сырья», тот же, что у
-//      «Сырья этикетки».
+//   4. у ножа есть основа (бумага / ПП) — справочник «Основа сырья», тот же, что у
+//      «Сырья этикетки»; хранится она в «Типе ножа», как и прочие параметры ножа (#5431).
 //
 // Run with: node experiments/atex-p2-5306-model-fixes.test.js
 
@@ -42,16 +42,18 @@ function field(t, name) { return ((t && t.fields) || []).filter(function(f) { re
     assert(baseDict && baseDict.unique === true, 'справочник «Основа сырья» объявлен');
     var matBase = field(table('Сырьё этикетки'), 'Основа');
     assert(matBase && matBase.ref === 'Основа сырья', '«Сырьё этикетки» → «Основа» — ссылка на «Основа сырья»', '(получено ' + JSON.stringify(matBase) + ')');
-    var die = table('Нож');
-    var dieBase = field(die, 'Основа');
-    assert(dieBase && dieBase.ref === 'Основа сырья', '«Нож» → «Основа» — ссылка на «Основа сырья»', '(получено ' + JSON.stringify(dieBase) + ')');
-    assert(!field(die, 'Сырьё этикетки'), 'у ножа нет ссылки на конкретное сырьё');
-    assert(!field(die, 'Раппорт, мм'), 'у ножа нет своего раппорта — он у вала');
+    var die = table('Нож'), dieType = table('Тип ножа');
+    var dieBase = field(dieType, 'Основа сырья');
+    assert(dieBase && dieBase.ref === 'Основа сырья', '«Тип ножа» → «Основа сырья» — ссылка на справочник основ', '(получено ' + JSON.stringify(dieBase) + ')');
+    [die, dieType].forEach(function(tb) {
+        assert(!field(tb, 'Сырьё этикетки'), 'у «' + tb.name + '» нет ссылки на конкретное сырьё');
+        assert(!field(tb, 'Раппорт, мм'), 'у «' + tb.name + '» нет своего раппорта — он у вала');
+    });
     assert(field(table('Вал'), 'Раппорт, мм'), 'раппорт хранится у вала');
 
     var cfg = LP.PRODUCTION_CONFIGS[LP.PRODUCT_KIND.LABEL].tables;
-    assert(cfg.die.reqs.base === 'Основа' && !cfg.die.reqs.material && !cfg.die.reqs.repeat,
-        'конфигурация ножа: основа есть, сырья и раппорта нет', '(reqs: ' + JSON.stringify(cfg.die.reqs) + ')');
+    assert(cfg.dieType.reqs.base === 'Основа сырья' && !cfg.dieType.reqs.material && !cfg.dieType.reqs.repeat && !cfg.die.reqs.repeat,
+        'конфигурация типа ножа: основа есть, сырья и раппорта нет', '(reqs: ' + JSON.stringify(cfg.dieType.reqs) + ')');
     assert(cfg.material.reqs.base === 'Основа', 'конфигурация сырья: основа');
     assert(cfg.runKind && cfg.runKind.name === 'Вид движения пробега', 'конфигурация: справочник видов движения пробега');
     assert(cfg.materialBase && cfg.materialBase.name === 'Основа сырья', 'конфигурация: справочник основ сырья');

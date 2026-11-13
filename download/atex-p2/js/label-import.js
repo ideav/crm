@@ -321,7 +321,8 @@
         var self = this;
         var reads = [
             this.objects('die'), this.getJson('report/' + RUNS_REPORT + '?JSON_KV&LIMIT=0,1000000'),
-            this.objects('cylinder'), this.objects('base'), this.objects('brand'), this.objects('state'), this.objects('runKind')
+            this.objects('cylinder'), this.objects('base'), this.objects('brand'), this.objects('state'), this.objects('runKind'),
+            this.objects('dieType')
         ];
         p.step('Читаю базу ножей и пробег (до 10 с)', reads.length);
         return Promise.all(reads.map(function(r) { return p.track(r); })).then(function(r) {
@@ -332,7 +333,7 @@
                 throw new Error('отчёт «' + RUNS_REPORT + '» вернул 0 движений, а у ' + withRuns + ' ножей они есть — повторный импорт задвоил бы пробег');
             }
             return LI.knifeContext(self.tables, {
-                dies: r[0], runs: runs, cylinders: r[2], bases: r[3], brands: r[4], states: r[5], runKinds: r[6]
+                dies: r[0], types: r[7], runs: runs, cylinders: r[2], bases: r[3], brands: r[4], states: r[5], runKinds: r[6]
             });
         });
     };

@@ -33,6 +33,7 @@ JOB = 'Задание высечки'
 POS = 'Заказанное количество'
 ORDER = 'Заказ'
 DIE = 'Нож'
+DIE_TYPE = 'Тип ножа'  # параметры ножа — у его типа (#5431)
 RUN = 'Движение пробега'
 MR = 'Мастер-рулон'
 
@@ -51,7 +52,7 @@ REPORTS = {
         ('machine', ('req', JOB, 'Станок высечки'), None),
         ('die_id', ('req', JOB, 'Нож'), ABN_ID),
         ('die_no', ('req', JOB, 'Нож'), None),
-        ('die_streams', ('req', DIE, 'Ручьёв'), None),
+        ('die_streams', ('req', DIE_TYPE, 'Ручьёв'), None),
         ('cylinder_id', ('req', JOB, 'Вал'), ABN_ID),
         ('cylinder', ('req', JOB, 'Вал'), None),
         ('master_roll_id', ('req', JOB, 'Мастер-рулон'), ABN_ID),
