@@ -1,11 +1,13 @@
 // Рабочее место atex «Ножи и валы» (роли Технолог, Диспетчер; ideav/crm#5314).
 //
-// Справочник ножей и валов — компонент integram-table над таблицами «Нож» и «Вал»
+// Справочник ножей, типов ножей и валов — компонент integram-table над таблицами «Нож», «Тип ножа» и «Вал»
 // (поиск, фильтры, правка, «+ запись», экспорт). Рядом с гридом — то, чего в таблице нет:
 //   - пробег ножей: отчёт `die_runs` (все движения пробега одной выборкой) →
 //     `dieMileageIndex` из label-production.js: сумма движений за всю жизнь ножа;
 //   - ресурс ножа: у его марки (справочник «Марка ножа», «Ресурс, об»), без марки — настройка
 //     DIE_RESOURCE_DEFAULT_REV таблицы «Настройка»; ресурса нет нигде — «у ресурса» не считается;
+//   - параметры ножа (ширина×длина, ручьи, вал, основа) — из его «Типа ножа»; колонка ножа —
+//     запасная, если у типа значение пустое (#5514);
 //   - показатели: ножей всего / рабочих / у ресурса / резерв, экспертиза / списано;
 //   - карточка ножа: марка, пробег и % ресурса, история движений с «Накоплено», кнопки смены
 //     состояния (`dieStateActions`). Ножи не затачиваются: выработавший ресурс нож списывается;
@@ -38,6 +40,16 @@
     var RUNS_REPORT = 'die_runs';
     var MAX_CYLINDER = 'Макс. вал';   // реквизиты станка высечки: диапазон валов, зубьев (#5344, #5428)
     var MIN_CYLINDER = 'Мин. вал';
+    // Справочник «Тип ножа» (#5427): параметры ножа живут в типе, нож ссылается на тип (#5514).
+    var TYPE_TABLE = 'Тип ножа';
+    var BASE_NAMES = ['Основа сырья', 'Основа'];
+    var TYPE_REQS = {
+        labelWidth: ['Ширина этикетки, мм'],
+        labelLength: ['Длина этикетки, мм'],
+        streams: ['Ручьёв'],
+        cylinder: ['Вал'],
+        base: BASE_NAMES
+    };
 
     // ── Чистые функции (покрыты experiments/atex-p2-5314-dies.test.js) ──────────
 
@@ -91,24 +103,69 @@
         return out;
     }
 
+    function reqByName(table, names) {
+        var list = (table && table.reqs) || [];
+        for (var i = 0; i < names.length; i++) {
+            var hit = list.filter(function(x) { return String(x.val).trim() === names[i]; })[0];
+            if (hit) return String(hit.id);
+        }
+        return '';
+    }
+
+    // Колонка основы у ножа: в базе она «Основа сырья» (конфиг планирования ищет «Основа»).
+    function dieBaseReq(meta, dieTableId) {
+        var die = (meta || []).filter(function(x) { return String(x.id) === String(dieTableId); })[0];
+        return reqByName(die, BASE_NAMES);
+    }
+
+    // Справочник «Тип ножа» (#5427) по /metadata → { table: { id, reqs: { ключ: id } }, link, dieBase }:
+    // link — ссылка «Тип ножа» в «Ноже», dieBase — «Основа сырья» ножа. Справочника нет — null.
+    function dieTypeSchema(meta, dieTableId) {
+        var type = (meta || []).filter(function(x) { return String(x.val).trim() === TYPE_TABLE; })[0];
+        var die = (meta || []).filter(function(x) { return String(x.id) === String(dieTableId); })[0];
+        if (!type || !die) return null;
+        var link = ((die.reqs || []).filter(function(x) { return String(x.ref || '') === String(type.id); })[0] || {}).id ||
+            reqByName(die, [TYPE_TABLE]);
+        if (!link) return null;
+        var reqs = {};
+        Object.keys(TYPE_REQS).forEach(function(k) {
+            var id = reqByName(type, TYPE_REQS[k]);
+            if (id) reqs[k] = id;
+        });
+        return { table: { id: String(type.id), name: TYPE_TABLE, reqs: reqs }, link: String(link), dieBase: dieBaseReq(meta, dieTableId) };
+    }
+
     // Строки ножей для показателей и карточки.
     // t — resolveProductionTables(...).tables; mileage — dieMileageIndex(...);
-    // brands — brandResources(...); defaultResource — настройка DIE_RESOURCE_DEFAULT_REV.
-    function buildDieRows(dieRecs, t, mileage, brands, defaultResource) {
+    // brands — brandResources(...); defaultResource — настройка DIE_RESOURCE_DEFAULT_REV;
+    // types — { schema: dieTypeSchema(...), recs: kvRecords(«Тип ножа») }: параметры ножа берутся
+    // из его типа, колонка ножа — запасная, пока её не удалили (#5431).
+    function buildDieRows(dieRecs, t, mileage, brands, defaultResource, types) {
         var r = (t.die && t.die.reqs) || {};
+        var sc = types && types.schema;
+        var tr = (sc && sc.table.reqs) || {};
+        var byId = {};
+        ((types && types.recs) || []).forEach(function(x) { byId[x.id] = x; });
+        var baseCol = r.base || (sc && sc.dieBase) || '';
         return (dieRecs || []).map(function(rec) {
             var m = (mileage || {})[rec.id] || { revs: 0, runs: 0, errors: [] };
             var brandId = refIds(rec, r.brand)[0] || '';
             var res = lp.dieResource(brandId ? (brands || {})[brandId] : '', defaultResource);
+            var typeId = sc ? (refIds(rec, sc.link)[0] || '') : '';
+            var typeRec = typeId ? byId[typeId] : null;
+            var fromType = function(key) { return typeRec && tr[key] && reqVal(typeRec, tr[key]).trim() !== ''; };
+            var pick = function(key, dieCol) { return fromType(key) ? reqVal(typeRec, tr[key]) : reqVal(rec, dieCol); };
             return {
                 id: rec.id,
                 no: rec.val,
-                width: reqVal(rec, r.labelWidth),
-                length: reqVal(rec, r.labelLength),
-                streams: reqVal(rec, r.streams),
-                cylinderId: refIds(rec, r.cylinder)[0] || '',
-                cylinder: reqVal(rec, r.cylinder),
-                base: reqVal(rec, r.base),
+                typeId: typeId,
+                type: typeRec ? typeRec.val : (typeId ? reqVal(rec, sc.link) : ''),
+                width: pick('labelWidth', r.labelWidth),
+                length: pick('labelLength', r.labelLength),
+                streams: pick('streams', r.streams),
+                cylinderId: (fromType('cylinder') ? refIds(typeRec, tr.cylinder)[0] : refIds(rec, r.cylinder)[0]) || '',
+                cylinder: pick('cylinder', r.cylinder),
+                base: pick('base', baseCol),
                 brandId: brandId,
                 brand: reqVal(rec, r.brand),
                 resource: res.revs,
@@ -201,6 +258,7 @@
         refIds: refIds,
         settingValue: settingValue,
         brandResources: brandResources,
+        dieTypeSchema: dieTypeSchema,
         buildDieRows: buildDieRows,
         dieKpi: dieKpi,
         wearList: wearList,
@@ -297,6 +355,12 @@
             var minReq = ((machineMeta && machineMeta.reqs) || []).filter(function(x) { return String(x.val).trim() === MIN_CYLINDER; })[0];
             self.minCylinderReq = minReq ? String(minReq.id) : '';
             self.settingsTable = (meta || []).filter(function(t) { return String(t.val).trim() === 'Настройка'; })[0] || null;
+            self.typeSchema = dieTypeSchema(meta, res.tables.die.id);
+            if (!self.typeSchema) console.warn('[dies] нет справочника «' + TYPE_TABLE + '» или ссылки на него из «Ножа» — параметры берутся из ножа');
+            if (!res.tables.die.reqs.base) {
+                var baseCol = dieBaseReq(meta, res.tables.die.id);
+                if (baseCol) res.tables.die.reqs.base = baseCol;
+            }
             self.mountGrids();
             return self.reload(false);
         });
@@ -329,6 +393,9 @@
             if (rec && rec.i != null) self.selectDie(String(rec.i));
         });
         this.cylGrid = make('atex-dies-cyl-grid', this.tables.cylinder, 'atexCylindersTable', null);
+        if (this.typeSchema) this.typeGrid = make('atex-dies-type-grid', this.typeSchema.table, 'atexDieTypesTable', null);
+        var typeTab = this.root.querySelector('[data-tab="types"]');
+        if (typeTab) typeTab.hidden = !this.typeSchema;
     };
 
     AtexDies.prototype.loadSettings = function() {
@@ -355,7 +422,8 @@
             this.getJson('object/' + t.machine.id + '/?JSON_KV&LIMIT=0,100'),
             this.getJson('object/' + t.dieState.id + '/?JSON_KV&LIMIT=0,100'),
             this.getJson('object/' + t.dieBrand.id + '/?JSON_KV&LIMIT=0,100'),
-            this.loadSettings()
+            this.loadSettings(),
+            this.typeSchema ? this.getJson('object/' + this.typeSchema.table.id + '/?JSON_KV&LIMIT=0,10000') : Promise.resolve(null)
         ]).then(function(res) {
             var dies = kvRecords(res[0]);
             self.runRows = Array.isArray(res[1]) ? res[1] : [];
@@ -371,7 +439,8 @@
             self.brands = brandResources(kvRecords(res[5]), t.dieBrand);
             self.defaultResource = res[6] || '';
             var mileage = lp.dieMileageIndex(self.runRows);
-            self.dieRows = buildDieRows(dies, t, mileage, self.brands, self.defaultResource);
+            self.dieRows = buildDieRows(dies, t, mileage, self.brands, self.defaultResource,
+                self.typeSchema ? { schema: self.typeSchema, recs: kvRecords(res[7]) } : null);
             self.cylRows = cylinderRows(kvRecords(res[2]), kvRecords(res[3]), self.dieRows, t, self.maxCylinderReq, self.minCylinderReq);
             self.renderKpi();
             self.renderWear();
@@ -380,6 +449,7 @@
             if (withGrids) {
                 if (self.dieGrid && self.dieGrid.refreshData) self.dieGrid.refreshData();
                 if (self.cylGrid && self.cylGrid.refreshData) self.cylGrid.refreshData();
+                if (self.typeGrid && self.typeGrid.refreshData) self.typeGrid.refreshData();
             }
         });
     };
@@ -469,6 +539,7 @@
         var html = '<h2 class="atex-dies-panel-title">Нож № ' + esc(d.no) + '</h2>' +
             '<div class="atex-dies-card-meta">' +
             '<span class="atex-dies-state" data-state="' + esc(d.state || 'none') + '">' + esc(d.state || (d.stateRaw ? d.stateRaw : 'состояние не задано')) + '</span>' +
+            (this.typeSchema ? '<span>' + (d.type ? 'тип ' + esc(d.type) : 'тип не задан') + '</span>' : '') +
             '<span>' + esc(num(d.width) + '×' + num(d.length) + ' мм') + (d.streams ? ', ручьёв ' + esc(d.streams) : '') + '</span>' +
             (d.cylinder ? '<span>вал ' + esc(d.cylinder) + '</span>' : '') + (d.base ? '<span>' + esc(d.base) + '</span>' : '') +
             '<span>' + (d.brand ? 'марка ' + esc(d.brand) : 'марка не задана') + '</span></div>' +
