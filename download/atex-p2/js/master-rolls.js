@@ -27,6 +27,7 @@
     'use strict';
 
     var MR = (root && root.AtexMasterRolls) || (typeof require === 'function' ? require('./master-rolls-core.js') : null);
+    var PG = (root && root.AtexProgress) || (typeof require === 'function' ? require('./atex-progress.js') : null);
     var C = MR ? MR.core : null;
 
     function esc(s) {
@@ -288,12 +289,16 @@
         this.busy = true;
         this.$('atex-mr-modal-ok').disabled = true;
         var done = 0;
-        var chain = steps.reduce(function(p, step) { return p.then(function() { return step().then(function() { done++; }); }); }, Promise.resolve());
+        // #5504: шаги идут цепочкой по запросу — окно прогресса со счётчиком, до конца перечитывания.
+        var pg = (this.progressUi || PG).open('Запись в базу', { total: steps.length });
+        var chain = steps.reduce(function(p, step) { return p.then(function() { return step().then(function() { done++; pg.set(done); }); }); }, Promise.resolve());
         chain.then(function() {
             self.busy = false;
             self.closeModal();
-            self.reload(doneText);
+            pg.step('Обновляю данные', 0);
+            Promise.resolve(self.reload(doneText)).then(function() { pg.close(); }, function() { pg.close(); });
         }).catch(function(err) {
+            pg.close();
             self.busy = false;
             self.$('atex-mr-modal-ok').disabled = false;
             self.modalError('Ошибка записи (выполнено шагов: ' + done + ' из ' + steps.length + '): ' + err.message);

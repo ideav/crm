@@ -1,0 +1,60 @@
+/* Окно прогресса длительных операций рабочих мест Фазы 2 (ideav/crm#5504), js/atex-progress.js. */
+.atex-progress {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(15, 23, 42, 0.45);
+    cursor: progress;
+}
+.atex-progress-box {
+    width: min(440px, calc(100vw - 32px));
+    padding: 18px 20px;
+    border-radius: 10px;
+    background: var(--bg-secondary, #ffffff);
+    color: var(--text-primary, #111827);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+    box-sizing: border-box;
+}
+.atex-progress-title { font-weight: 600; margin-bottom: 12px; }
+.atex-progress-bar {
+    position: relative;
+    height: 8px;
+    border-radius: 4px;
+    background: var(--border-color, #e5e7eb);
+    overflow: hidden;
+}
+.atex-progress-fill {
+    height: 100%;
+    width: 0;
+    background: var(--atex-navy, #134174);
+    transition: width 0.2s;
+}
+.atex-progress-bar.is-indeterminate .atex-progress-fill {
+    position: absolute;
+    width: 35% !important;
+    animation: atex-progress-run 1.2s ease-in-out infinite;
+}
+@keyframes atex-progress-run {
+    from { left: -35%; }
+    to { left: 100%; }
+}
+.atex-progress-count {
+    margin-top: 8px;
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-secondary, #6b7280);
+}
+.atex-progress-detail {
+    margin-top: 4px;
+    min-height: 1.3em;
+    font-size: 13px;
+    color: var(--text-secondary, #6b7280);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+[data-theme="dark"] .atex-progress-box { background: var(--bg-secondary, #1f2937); color: var(--text-primary, #f3f4f6); }
+[data-theme="dark"] .atex-progress-fill { background: var(--atex-sky, #60a5fa); }
