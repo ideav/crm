@@ -1186,7 +1186,7 @@
             };
             if (window.AiAgentSettings) return run();
             var s = document.createElement('script');
-            s.src = '/js/ai-agent-settings.js?v=5498';
+            s.src = '/js/ai-agent-settings.js?v=1251';
             s.onload = run;
             document.head.appendChild(s);
         },
