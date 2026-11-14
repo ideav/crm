@@ -55,21 +55,21 @@ function evalIf(cond, uri) {
 }
 
 const samples = [
-    ['/download/cources/0a1b2c3d4/001e4f6a789.html', true,  true],
-    ['/download/cources/0a1b2c3d4/001e4f6a789.HTML', true,  true],
-    ['/download/cources/0a1b2c3d4/001e4f6a789.svg',  true,  true],
-    ['/download/cources/0a1b2c3d4/001e4f6a789.PDF',  true,  false],
-    ['/download/cources/0a1b2c3d4/001e4f6a789.PNG',  false, false],
-    ['/download/cources/0a1b2c3d4/001e4f6a789.jpg',  false, false],
-    ['/download/cources/0a1b2c3d4/001e4f6a789.',     true,  false],
-    ['/download/cources/12a1b2c3d4/001e4f6a789.html', true, true],
+    ['/download/courses/0a1b2c3d4/001e4f6a789.html', true,  true],
+    ['/download/courses/0a1b2c3d4/001e4f6a789.HTML', true,  true],
+    ['/download/courses/0a1b2c3d4/001e4f6a789.svg',  true,  true],
+    ['/download/courses/0a1b2c3d4/001e4f6a789.PDF',  true,  false],
+    ['/download/courses/0a1b2c3d4/001e4f6a789.PNG',  false, false],
+    ['/download/courses/0a1b2c3d4/001e4f6a789.jpg',  false, false],
+    ['/download/courses/0a1b2c3d4/001e4f6a789.',     true,  false],
+    ['/download/courses/12a1b2c3d4/001e4f6a789.html', true, true],
     // extension with non-alnum chars passes BlackList and is stored as-is — still attachment
-    ['/download/cources/0a1b2c3d4/001e4f6a789.ht-ml', true,  false],
-    ['/download/cources/0a1b2c3d4/001e4f6a789.svg_',  true,  false],
-    ['/download/cources/0a1b2c3d4/001e4f6a789.файл',  true,  false],
+    ['/download/courses/0a1b2c3d4/001e4f6a789.ht-ml', true,  false],
+    ['/download/courses/0a1b2c3d4/001e4f6a789.svg_',  true,  false],
+    ['/download/courses/0a1b2c3d4/001e4f6a789.файл',  true,  false],
     ['/download/atex/main.html',  false, false],
     ['/download/atex/js/05-invariants.js', false, false],
-    ['/download/cources/file.html', false, false],
+    ['/download/courses/file.html', false, false],
     ['/templates/custom/x.html',   false, false]
 ];
 let bad = 0;

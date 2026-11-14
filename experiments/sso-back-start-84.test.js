@@ -49,13 +49,13 @@ function afterLogin(cookies, search, selectedDb) {
     return app._getPostLoginUriForDb(selectedDb);
 }
 
-const fromSso = 'db=my&r=InvalidToken&uri=' + encodeURIComponent('/cources/?aff=42');
+const fromSso = 'db=my&r=InvalidToken&uri=' + encodeURIComponent('/courses/?aff=42');
 const cases = [
-    ['кука sso_back=cources: вход в my возвращает в базу', { sso_back: 'cources' }, fromSso, 'my', '/cources/?aff=42'],
+    ['кука sso_back=courses: вход в my возвращает в базу', { sso_back: 'courses' }, fromSso, 'my', '/courses/?aff=42'],
     ['без куки sso_back: вход в my — в /my, как раньше', {}, fromSso, 'my', ''],
     ['sso_back другой базы: вход в my — в /my', { sso_back: 'demo' }, fromSso, 'my', ''],
-    ['вход в саму базу из uri — возврат, как раньше', {}, 'db=cources&r=InvalidToken&uri=%2Fcources%2Fx', 'cources', '/cources/x'],
-    ['вход в другую базу, не my — без возврата, как раньше', { sso_back: 'cources' }, fromSso, 'demo', ''],
+    ['вход в саму базу из uri — возврат, как раньше', {}, 'db=courses&r=InvalidToken&uri=%2Fcourses%2Fx', 'courses', '/courses/x'],
+    ['вход в другую базу, не my — без возврата, как раньше', { sso_back: 'courses' }, fromSso, 'demo', ''],
 ];
 let failed = 0;
 for (const [name, cookies, search, db, want] of cases) {

@@ -1,10 +1,10 @@
 // rules: none (defect #5492)
-// LMS cources: ядро не отдаёт в JSON_OBJ поле, закрытое роли грантом BARRED, и остальные значения
+// LMS courses: ядро не отдаёт в JSON_OBJ поле, закрытое роли грантом BARRED, и остальные значения
 // строки сдвигаются. api.js раскладывает r[] по именам реквизитов, поэтому для роли из schema.json
 // `hide[<роль>]` такие поля пропускаются. Иначе у автора «Опубликован» читается пустым,
 // и опубликованный курс выглядит «на проверке».
 //
-// Run with: node experiments/cources-row-order-93.test.js
+// Run with: node experiments/courses-row-order-93.test.js
 
 const assert = require('assert');
 const fs = require('fs');
@@ -24,15 +24,15 @@ const schema = {
 function load(role, rec) {
     const ctx = { console, Promise, URLSearchParams };
     ctx.window = ctx;
-    ctx.LMS = { role, z: 'cources' };
+    ctx.LMS = { role, z: 'courses' };
     ctx.LMSApp = {
-        root: '/download/cources/', z: 'cources', mock: false,
+        root: '/download/courses/', z: 'courses', mock: false,
         getJSON: () => Promise.resolve(schema),
         fmtUnix: v => 'unix:' + v,
     };
     ctx.fetch = () => Promise.resolve({ ok: true, json: () => Promise.resolve([rec]) });
     vm.createContext(ctx);
-    vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'download', 'cources', 'js', 'api.js'), 'utf8'), ctx);
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'download', 'courses', 'js', 'api.js'), 'utf8'), ctx);
     const A = ctx.LMSApp;
     return A.loadSchema().then(() => A.list('Курс автора', {})).then(rows => rows[0]);
 }
@@ -48,5 +48,5 @@ function load(role, rec) {
     const adm = await load('admin', { i: 1, r: ['Курс', '5:lmstest', 'в каталоге', '/m.json', 'Тест'] });
     assert.strictEqual(adm['Манифест'], '/m.json');
     assert.strictEqual(adm['Опубликован'], 'Тест');
-    console.log('ok   cources-row-order-93');
+    console.log('ok   courses-row-order-93');
 })().catch(e => { console.log('FAIL ' + e.message); process.exit(1); });

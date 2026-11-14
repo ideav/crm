@@ -14,7 +14,7 @@ define("EMAIL", 41);
 define("USER_DB_MASK", "/^[a-z][a-z0-9]{2,14}$/");
 $GLOBALS["GLOBAL_VARS"] = array("user_id" => 777);
 $z = "my";
-$_GET = array("db" => "cources");
+$_GET = array("db" => "courses");
 $_REQUEST = array("template" => "ru");
 $_POST = array("descr" => "");
 $INSERTS = array();
@@ -58,7 +58,7 @@ $dbRec = null;
 foreach ($INSERTS as $r)
     if ($r["t"] === DATABASE) $dbRec = $r;
 if (!$dbRec) { echo "✖ запись базы (t=DATABASE) не вставлена\n"; exit(1); }
-if ($dbRec["up"] !== 777 || $dbRec["val"] !== "cources") { echo "✖ запись базы не того пользователя/имени\n"; $fail = 1; }
+if ($dbRec["up"] !== 777 || $dbRec["val"] !== "courses") { echo "✖ запись базы не того пользователя/имени\n"; $fail = 1; }
 $ord = $ORD[$dbRec["id"]];
 if ($ord !== 0) { echo "✖ счётчик (ord) новой базы = " . $ord . ", ожидается 0\n"; $fail = 1; }
 else echo "✔ счётчик (ord) новой базы = 0\n";

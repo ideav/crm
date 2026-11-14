@@ -10,7 +10,7 @@
   }
   var LABEL = { done: 'Пройден', open: 'В процессе', new: '' };
 
-  // Возврат со страницы оплаты Точки: ?paid=<код> / ?payfail=<код> (cources-pay.php, courses#92)
+  // Возврат со страницы оплаты Точки: ?paid=<код> / ?payfail=<код> (courses-pay.php, courses#92)
   function payReturn() {
     var m = /[?&](paid|payfail)=([a-z0-9_-]+)/.exec(location.search);
     return m ? { ok: m[1] === 'paid', code: m[2] } : null;
@@ -45,7 +45,7 @@
       if (!access) {
         if (A.isGuest()) { card.appendChild(E('p', { class: 'muted', text: 'Войдите, чтобы получить доступ к курсу.' })); card.appendChild(E('div', { class: 'row' }, A.loginButtons())); }
         var req = A.isGuest() ? null : D.requests.filter(function (r) { return r['Курс'] === c.code; })[0];
-        if (!A.isGuest() && c.price) card.appendChild(E('div', { class: 'row' }, [E('a', { class: 'btn btn-primary', href: '/cources-pay.php?course=' + encodeURIComponent(c.code),
+        if (!A.isGuest() && c.price) card.appendChild(E('div', { class: 'row' }, [E('a', { class: 'btn btn-primary', href: '/courses-pay.php?course=' + encodeURIComponent(c.code),
           text: 'Оплатить ' + Number(c.price).toLocaleString('ru-RU') + ' ₽' })]));
         if (!A.isGuest()) card.appendChild(E('p', { class: 'muted', text: 'Курс откроется сразу после оплаты картой или СБП. Если у вас есть промокод — введите его, и мы откроем курс.' }));
         if (req && req['Статус'] !== 'reject') {

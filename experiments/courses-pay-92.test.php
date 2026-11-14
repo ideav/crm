@@ -1,6 +1,6 @@
 <?php
-# Оплата курсов портала ideav.ru/cources через эквайринг Точки (ideav/courses#92).
-# Мерка: include/cources_pay.php с подменённым HTTP (Точка и API базы cources — заглушки),
+# Оплата курсов портала ideav.ru/courses через эквайринг Точки (ideav/courses#92).
+# Мерка: include/courses_pay.php с подменённым HTTP (Точка и API базы courses — заглушки),
 # заказы и каталог — во временной папке.
 #   1) гость и бесплатный курс ссылку не получают; цена — из каталога, не из запроса;
 #   2) в purpose нет цифр: twh.php берёт число из конца purpose как id пользователя my
@@ -10,7 +10,7 @@
 #   5) сбой записи → false (twh.php ответит 500, Точка повторит), заказ не закрыт;
 #   6) сумма меньше цены → «Оплата» есть, «Доступа» нет.
 
-require __DIR__ . '/../include/cources_pay.php';
+require __DIR__ . '/../include/courses_pay.php';
 
 $failures = 0;
 function expect($cond, $name){
@@ -49,15 +49,15 @@ function fake_http($method, $url, $headers, $body){
         $net['tochka'][] = array('url' => $url, 'headers' => $headers, 'body' => json_decode($body, true));
         return array(200, json_encode(array('Data' => array('operationId' => $net['op'], 'paymentLink' => 'https://merch.securepaytb.ru/order/?uuid=' . $net['op']))));
     }
-    if($path === '/cources/xsrf'){
+    if($path === '/courses/xsrf'){
         $isAdmin = false;
-        foreach($headers as $h) if(stripos($h, 'Cookie:') === 0 && strpos($h, 'idb_cources=ADMIN') !== false) $isAdmin = true;
+        foreach($headers as $h) if(stripos($h, 'Cookie:') === 0 && strpos($h, 'idb_courses=ADMIN') !== false) $isAdmin = true;
         return array(200, json_encode($isAdmin ? array('_xsrf' => 'X', 'user' => 'admin', 'role' => 'admin', 'id' => 0) : array('_xsrf' => 'U') + $net['whoami']));
     }
-    if($path === '/cources/object/18/') return array(200, json_encode(array(array('i' => 1102, 'r' => array('my236968', '541:Ученик', 'student@example.com', '')))));
-    if($path === '/cources/object/535/') return array(200, json_encode($net['access']));
-    if($path === '/cources/object/474/') return array(200, json_encode($net['pay']));
-    if(preg_match('~^/cources/_m_new/(\d+)$~', $path, $m)){
+    if($path === '/courses/object/18/') return array(200, json_encode(array(array('i' => 1102, 'r' => array('my236968', '541:Ученик', 'student@example.com', '')))));
+    if($path === '/courses/object/535/') return array(200, json_encode($net['access']));
+    if($path === '/courses/object/474/') return array(200, json_encode($net['pay']));
+    if(preg_match('~^/courses/_m_new/(\d+)$~', $path, $m)){
         if($net['fail_write']) return array(200, json_encode(array(array('error' => 'нет доступа'))));
         parse_str($body, $f);
         $net['writes'][] = array('table' => (int)$m[1], 'fields' => $f);
@@ -78,24 +78,24 @@ $cfg = array(
 
 # 1) гость
 $net['whoami'] = array('id' => '1114', 'user' => 'guest', 'role' => 'guest');
-$r = Cp_start_payment($cfg, 'idb_cources=G', 'adept');
+$r = Cp_start_payment($cfg, 'idb_courses=G', 'adept');
 expect(isset($r['error']) && $r['error'] === 'login' && count($net['tochka']) === 0, 'гость: ссылку не создаём, ведём на вход');
 $net['whoami'] = array('id' => '1102', 'user' => 'my236968', 'role' => 'Ученик');
 
 # бесплатный и неизвестный курс
-$r = Cp_start_payment($cfg, 'idb_cources=U', 'mini');
+$r = Cp_start_payment($cfg, 'idb_courses=U', 'mini');
 expect(isset($r['error']) && count($net['tochka']) === 0, 'бесплатный курс не продаём');
-$r = Cp_start_payment($cfg, 'idb_cources=U', '../adept');
+$r = Cp_start_payment($cfg, 'idb_courses=U', '../adept');
 expect(isset($r['error']) && count($net['tochka']) === 0, 'неизвестный код курса отклонён');
 
 # ссылка на «Адепт»
-$r = Cp_start_payment($cfg, 'idb_cources=U', 'adept');
+$r = Cp_start_payment($cfg, 'idb_courses=U', 'adept');
 $t = $net['tochka'][0]['body']['Data'] ?? array();
 expect(($r['redirect'] ?? '') === 'https://merch.securepaytb.ru/order/?uuid=op-1', 'ученик получает ссылку Точки (домен страницы оплаты — не tochka.com)');
 expect(($t['amount'] ?? '') === '9900.00' && ($t['Items'][0]['amount'] ?? '') === '9900.00', 'сумма — цена из каталога: 9900.00');
 expect(isset($t['purpose']) && !preg_match('/\d/', $t['purpose']) && !preg_match('/\d/', $t['Items'][0]['name']), 'в purpose и позиции чека нет цифр: «' . ($t['purpose'] ?? '') . '»');
 expect(($t['Client']['email'] ?? '') === 'student@example.com', 'чек — на почту ученика');
-expect(strpos($t['redirectUrl'] ?? '', 'https://ideav.ru/cources/?paid=adept') === 0 && strpos($t['failRedirectUrl'] ?? '', 'https://ideav.ru/cources/?payfail=adept') === 0, 'возврат после оплаты — в кабинет курсов');
+expect(strpos($t['redirectUrl'] ?? '', 'https://ideav.ru/courses/?paid=adept') === 0 && strpos($t['failRedirectUrl'] ?? '', 'https://ideav.ru/courses/?payfail=adept') === 0, 'возврат после оплаты — в кабинет курсов');
 expect(!isset($t['saveCard']) && !isset($t['consumerId']), 'карту не сохраняем, общего consumerId нет');
 expect(in_array('Authorization: Bearer TT', $net['tochka'][0]['headers'], true), 'запрос к Точке с токеном из конфига');
 $o = json_decode(@file_get_contents("$root/orders/op-1.json"), true);
@@ -126,12 +126,12 @@ $n = count($net['writes']);
 expect(Cp_webhook($cfg, array('operationId' => 'op-1', 'purpose' => $t['purpose'], 'amount' => '9900.00', 'status' => 'APPROVED')) === true && count($net['writes']) === $n, 'повтор вебхука — без дублей');
 
 # уже есть доступ → без оплаты, сразу в курс
-$r = Cp_start_payment($cfg, 'idb_cources=U', 'adept');
-expect(count($net['tochka']) === 1 && strpos($r['redirect'] ?? '', '/cources/#/map') !== false, 'доступ уже есть — вторую ссылку не создаём');
+$r = Cp_start_payment($cfg, 'idb_courses=U', 'adept');
+expect(count($net['tochka']) === 1 && strpos($r['redirect'] ?? '', '/courses/#/map') !== false, 'доступ уже есть — вторую ссылку не создаём');
 
 # 6) недоплата: «Партнёр» за 100 ₽
 $net['op'] = 'op-2';
-$r = Cp_start_payment($cfg, 'idb_cources=U', 'partner');
+$r = Cp_start_payment($cfg, 'idb_courses=U', 'partner');
 $n = count($net['writes']);
 expect(Cp_webhook($cfg, array('operationId' => 'op-2', 'purpose' => 'x', 'amount' => '100.00', 'status' => 'APPROVED')) === true, 'недоплата подтверждена Точке');
 $w = array_slice($net['writes'], $n);

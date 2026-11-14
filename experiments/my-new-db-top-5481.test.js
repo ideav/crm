@@ -35,7 +35,7 @@ class El {
 
 const DBS = [
     { DB: 'alpha', DBID: '101', Count: '900', Date: '01.01.2026', User: 'u1' },
-    { DB: 'cources', DBID: '239153', Count: '0', Date: '11.11.2026', User: 'u1' },
+    { DB: 'courses', DBID: '239153', Count: '0', Date: '11.11.2026', User: 'u1' },
     { DB: 'zeta', DBID: '103', Count: '50', Date: '05.05.2026', User: 'u1' }
 ];
 
@@ -78,7 +78,7 @@ function setup() {
     const c = new ctx.CabinetController();
     c.apiConfig = { host: 'app.test' };
     c.showSection = () => {};
-    byId('new-db-name').value = 'Cources';
+    byId('new-db-name').value = 'Courses';
     byId('new-db-template').value = 'ru';
     return { c, list: byId('databases-list'), calls };
 }

@@ -75,7 +75,7 @@
     root.appendChild(E('p', {}, [E('a', { href: A.isGuest() ? '#/catalog' : '#/author', text: '← Назад' })]));
     var box = E('article', { class: 'card lesson-html', text: 'Загружаем…' });
     root.appendChild(box);
-    fetch('/download/cources/author-guide.md', { credentials: 'same-origin', cache: 'no-cache' }).then(function (r) { if (!r.ok) throw new Error(r.status); return r.text(); })
+    fetch('/download/courses/author-guide.md', { credentials: 'same-origin', cache: 'no-cache' }).then(function (r) { if (!r.ok) throw new Error(r.status); return r.text(); })
       .then(function (md) { box.innerHTML = AU.md(md); A.fixLinks(box); }, function () {
         box.innerHTML = '';
         [E('h1', { text: 'Как сделать курс' }), E('p', { text: 'Подробная инструкция скоро появится. Коротко:' }),

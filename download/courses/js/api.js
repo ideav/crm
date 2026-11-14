@@ -1,4 +1,4 @@
-/* LMS: доступ к данным базы cources по id из schema.json (или к localStorage-моку при ?mock=1). */
+/* LMS: доступ к данным базы courses по id из schema.json (или к localStorage-моку при ?mock=1). */
 (function () {
   'use strict';
   var A = window.LMSApp, L = window.LMS || {};

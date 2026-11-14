@@ -4,7 +4,7 @@
  *   LMSChecks.run(db, spec, opts) -> Promise<[{id,title,ok,hint,details}]>
  *   LMSChecks.listMyDbs()         -> Promise<string[]>
  * opts (необязательно): {fetch: function(url, init) -> Promise<Response-like>, base: ''}.
- * Спецификации: download/cources/content/checks/p1..p5.json (из репо courses).
+ * Спецификации: download/courses/content/checks/p1..p5.json (из репо courses).
  */
 (function (global) {
   'use strict';

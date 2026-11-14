@@ -5,9 +5,9 @@
 # Validate_Token, Sso_enter, Sso_role, Sso_back_redirect берутся из index.php как есть и исполняются
 # в пространстве имён S84: заглушки Exec_sql/Insert/setcookie/header/login этого пространства находят
 # раньше встроенных. База — массив строк. Каждый случай — отдельный процесс: ветки ядра завершаются die().
-#   1) SSO_DBS не задан — аноним в cources идёт на обычный вход, ничего не заводится;
+#   1) SSO_DBS не задан — аноним в courses идёт на обычный вход, ничего не заводится;
 #   2) база не из списка — то же;
-#   3) кука idb_my — заводится my<id> с ролью «Ученик» и почтой, сессия idb_cources, повтор запроса;
+#   3) кука idb_my — заводится my<id> с ролью «Ученик» и почтой, сессия idb_courses, повтор запроса;
 #   4) повторный вход — без дубля, роль не трогается;
 #   5) роль admin (по имени или ADMINROLE) и незаведённая роль — отказ, обычный вход;
 #   6) аноним с ?aff=<число> — кука _aff; существующая не перезаписывается; мусор в aff — без куки;
@@ -51,30 +51,30 @@ expect(isset($r["users"]["my77"]), "idb_my: заведён пользовате�
 expect($r["users"]["my77"]["role_link"] === array("t" => 500, "val" => "115"), "idb_my: роль «Ученик» ссылкой через колонку роли");
 expect($r["users"]["my77"]["email"] === "a@b.ru", "idb_my: почта из кабинета");
 expect(!isset($r["users"]["my77"]["pwd"]), "idb_my: пароль не заводится");
-expect($r["cookies"]["idb_cources"]["v"] === "s.SESSION.".$r["users"]["my77"]["id"] && $r["cookies"]["idb_cources"]["exp"] > time(), "idb_my: кука сессии idb_cources");
+expect($r["cookies"]["idb_courses"]["v"] === "s.SESSION.".$r["users"]["my77"]["id"] && $r["cookies"]["idb_courses"]["exp"] > time(), "idb_my: кука сессии idb_courses");
 expect(isset($r["cookies"]["sso_back"]) && $r["cookies"]["sso_back"]["exp"] < time(), "idb_my: кука возврата sso_back гасится");
 expect(count($r["inserts"]) === 3, "idb_my: три строки — пользователь, почта, роль");
 
 # --- 4: повторный вход
 $r = child("existing_user");
 expect($r["login"] === "reenter" && !count($r["inserts"]), "повторный вход: без дубля и без правки роли");
-expect($r["cookies"]["idb_cources"]["v"] === "s.SESSION.900", "повторный вход: сессия прежнему пользователю");
+expect($r["cookies"]["idb_courses"]["v"] === "s.SESSION.900", "повторный вход: сессия прежнему пользователю");
 
 # --- 5: отказы
 foreach(array("role_admin_name" => "роль admin по имени", "role_admin_id" => "роль с id ADMINROLE", "role_missing" => "роль не заведена",
               "role_col_missing" => "нет колонки роли") as $c => $title){
     $r = child($c);
     expect($r["login"] === "InvalidToken" && !count($r["inserts"]), "$title: отказ, обычный вход");
-    expect(!isset($r["cookies"]["idb_cources"]), "$title: сессии нет");
+    expect(!isset($r["cookies"]["idb_courses"]), "$title: сессии нет");
 }
 
 # --- 6: аноним
 $r = child("anon_aff");
-expect($r["login"] === null && $r["location"] === "/start.html?db=my&r=InvalidToken&uri=%2Fcources%2F%3Faff%3D42",
+expect($r["login"] === null && $r["location"] === "/start.html?db=my&r=InvalidToken&uri=%2Fcourses%2F%3Faff%3D42",
     "аноним: на вход в кабинет my с возвратом в базу");
 expect($r["cookies"]["_aff"]["v"] === "42" && $r["cookies"]["_aff"]["exp"] > time() + 179 * 86400, "аноним ?aff=42: кука _aff на 180 дней");
 expect($r["cookies"]["_aff"]["opts"]["path"] === "/" && $r["cookies"]["_aff"]["opts"]["samesite"] === "Lax", "аноним ?aff: путь / и SameSite=Lax");
-expect($r["cookies"]["sso_back"]["v"] === "cources" && $r["cookies"]["sso_back"]["exp"] > time() + 86000, "аноним: кука sso_back на сутки");
+expect($r["cookies"]["sso_back"]["v"] === "courses" && $r["cookies"]["sso_back"]["exp"] > time() + 86000, "аноним: кука sso_back на сутки");
 expect(!count($r["inserts"]), "аноним: ничего не заведено");
 $r = child("anon_aff_kept");
 expect(!isset($r["cookies"]["_aff"]) && isset($r["cookies"]["sso_back"]), "аноним с кукой _aff: прежняя не перезаписывается");
@@ -90,8 +90,8 @@ $r = child("api_anon");
 expect(strpos($r["out"], "No authorization token provided") !== false && !count($r["cookies"]), "JSON API без входа: 401, как было");
 
 # --- 8: возврат после входа в кабинет
-$r = child("back:cources");
-expect($r["back"] === "/cources/" && $r["cookies"]["sso_back"]["exp"] < time(), "sso_back=cources: возврат в базу, кука гасится");
+$r = child("back:courses");
+expect($r["back"] === "/courses/" && $r["cookies"]["sso_back"]["exp"] < time(), "sso_back=courses: возврат в базу, кука гасится");
 foreach(array("demo", "../x", "my") as $b){
     $r = child("back:$b");
     expect($r["back"] === "" && $r["cookies"]["sso_back"]["exp"] < time(), "sso_back=$b: не из списка — без возврата, кука гасится");
@@ -102,15 +102,15 @@ expect($r["back"] === "" && !count($r["cookies"]), "без куки sso_back: б
 # --- 9: гость в базе из SSO_DBS (лендинг с гостевым доступом)
 $r = child("guest_my");
 expect($r["login"] === "reenter" && isset($r["users"]["my77"]), "гость + idb_my: вход своим пользователем my77");
-expect(isset($r["cookies"]["idb_cources"]) && $r["cookies"]["idb_cources"]["v"] === "s.SESSION.".$r["users"]["my77"]["id"], "гость + idb_my: кука сессии вместо гостевой");
+expect(isset($r["cookies"]["idb_courses"]) && $r["cookies"]["idb_courses"]["v"] === "s.SESSION.".$r["users"]["my77"]["id"], "гость + idb_my: кука сессии вместо гостевой");
 $r = child("guest_nocookie_my");
 expect($r["login"] === "reenter" && isset($r["users"]["my77"]), "гость заведён, без куки базы + idb_my: вход своим пользователем");
 $r = child("guest_owner");
-expect($r["login"] === "reenter" && $r["cookies"]["idb_cources"]["v"] === "s.SESSION.800" && !count($r["inserts"]), "гость + idb_my владельца: вход владельцем, без новых строк");
+expect($r["login"] === "reenter" && $r["cookies"]["idb_courses"]["v"] === "s.SESSION.800" && !count($r["inserts"]), "гость + idb_my владельца: вход владельцем, без новых строк");
 $r = child("anon_owner");
-expect($r["login"] === "reenter" && $r["cookies"]["idb_cources"]["v"] === "s.SESSION.800" && !count($r["inserts"]), "без гостя, idb_my владельца: вход владельцем, не учеником");
+expect($r["login"] === "reenter" && $r["cookies"]["idb_courses"]["v"] === "s.SESSION.800" && !count($r["inserts"]), "без гостя, idb_my владельца: вход владельцем, не учеником");
 $r = child("owner_role_refused");
-expect($r["login"] === "reenter" && $r["cookies"]["idb_cources"]["v"] === "s.SESSION.800", "владелец входит владельцем и при роли admin в SSO_DBS");
+expect($r["login"] === "reenter" && $r["cookies"]["idb_courses"]["v"] === "s.SESSION.800", "владелец входит владельцем и при роли admin в SSO_DBS");
 $r = child("guest_stale");
 expect($r["user"] === "guest" && $r["login"] === null && $r["location"] === null, "гость + протухшая idb_my: остаётся гостем, без перенаправления");
 $r = child("guest_refused");
@@ -146,8 +146,8 @@ function run_case($case){
                   "SESSION_TOUCH"=>86400, "SESSION_ROTATE"=>604800, "DB_MASK"=>"/^[a-z][a-z0-9_]{0,14}$/i") as $k=>$v)
         define($k, $v);
     list($case, $arg) = array_pad(explode(":", $case, 2), 2, "");
-    $z = "cources";
-    $sso = array("cources" => "Ученик");
+    $z = "courses";
+    $sso = array("courses" => "Ученик");
     # строки базы: id => [up, t, val]; роль «Ученик» 500, admin 145, колонка роли 115 у Пользователя (ссылка 116 на роль)
     $db = array(145 => array(1, 42, "admin"), 500 => array(1, 42, "Ученик"), 116 => array(0, 42, ""), 115 => array(18, 116, ""));
     switch($case){
@@ -155,27 +155,27 @@ function run_case($case){
         case "off_my": $sso = null; $_COOKIE["idb_my"] = "GOOD"; break;
         case "other_db": $z = "demo"; $_COOKIE["idb_my"] = "GOOD"; break;
         case "list_has_my": $z = "my"; $sso = array("my" => "Ученик"); break;
-        case "new_user": $_COOKIE["idb_my"] = "GOOD"; $_COOKIE["sso_back"] = "cources"; break;
+        case "new_user": $_COOKIE["idb_my"] = "GOOD"; $_COOKIE["sso_back"] = "courses"; break;
         case "existing_user": $_COOKIE["idb_my"] = "GOOD"; $db[900] = array(1, 18, "my77"); $db[901] = array(900, 500, "115"); break;
-        case "role_admin_name": $_COOKIE["idb_my"] = "GOOD"; $sso = array("cources" => "Admin"); break;
+        case "role_admin_name": $_COOKIE["idb_my"] = "GOOD"; $sso = array("courses" => "Admin"); break;
         case "role_admin_id": $_COOKIE["idb_my"] = "GOOD"; unset($db[500]); $db[145] = array(1, 42, "Ученик"); break;
-        case "role_missing": $_COOKIE["idb_my"] = "GOOD"; $sso = array("cources" => "Куратор"); break;
+        case "role_missing": $_COOKIE["idb_my"] = "GOOD"; $sso = array("courses" => "Куратор"); break;
         case "role_col_missing": $_COOKIE["idb_my"] = "GOOD"; unset($db[115]); break;
-        case "anon_aff": $_GET["aff"] = "42"; $_SERVER["REQUEST_URI"] = "/cources/?aff=42"; break;
+        case "anon_aff": $_GET["aff"] = "42"; $_SERVER["REQUEST_URI"] = "/courses/?aff=42"; break;
         case "anon_aff_kept": $_GET["aff"] = "42"; $_COOKIE["_aff"] = "7"; break;
         case "anon_badaff": $_GET["aff"] = $arg; break;
         case "stale_my": $_COOKIE["idb_my"] = "BAD"; break;
         case "api_anon": $_GET["JSON"] = ""; $_COOKIE["idb_my"] = "GOOD"; break;
         case "back": if($arg !== "") $_COOKIE["sso_back"] = $arg; break;
-        case "guest_my": $guest = TRUE; $_COOKIE["idb_cources"] = "gtuoeksetn"; $_COOKIE["idb_my"] = "GOOD"; break;
+        case "guest_my": $guest = TRUE; $_COOKIE["idb_courses"] = "gtuoeksetn"; $_COOKIE["idb_my"] = "GOOD"; break;
         case "guest_nocookie_my": $guest = TRUE; $_COOKIE["idb_my"] = "GOOD"; break;
-        case "guest_owner": $guest = TRUE; $_COOKIE["idb_cources"] = "gtuoeksetn"; $_COOKIE["idb_my"] = "OWNER"; break;
+        case "guest_owner": $guest = TRUE; $_COOKIE["idb_courses"] = "gtuoeksetn"; $_COOKIE["idb_my"] = "OWNER"; break;
         case "anon_owner": $_COOKIE["idb_my"] = "OWNER"; break;
-        case "owner_role_refused": $_COOKIE["idb_my"] = "OWNER"; $sso = array("cources" => "admin"); break;
-        case "guest_stale": $guest = TRUE; $_COOKIE["idb_cources"] = "gtuoeksetn"; $_COOKIE["idb_my"] = "BAD"; break;
-        case "guest_refused": $guest = TRUE; $_COOKIE["idb_cources"] = "gtuoeksetn"; $_COOKIE["idb_my"] = "GOOD"; $sso = array("cources" => "admin"); break;
+        case "owner_role_refused": $_COOKIE["idb_my"] = "OWNER"; $sso = array("courses" => "admin"); break;
+        case "guest_stale": $guest = TRUE; $_COOKIE["idb_courses"] = "gtuoeksetn"; $_COOKIE["idb_my"] = "BAD"; break;
+        case "guest_refused": $guest = TRUE; $_COOKIE["idb_courses"] = "gtuoeksetn"; $_COOKIE["idb_my"] = "GOOD"; $sso = array("courses" => "admin"); break;
         case "guest_other_db": $guest = TRUE; $z = "demo"; $_COOKIE["idb_demo"] = "gtuoeksetn"; $_COOKIE["idb_my"] = "GOOD"; break;
-        case "guest_api": $guest = TRUE; $_GET["JSON"] = ""; $_COOKIE["idb_cources"] = "gtuoeksetn"; $_COOKIE["idb_my"] = "GOOD"; break;
+        case "guest_api": $guest = TRUE; $_GET["JSON"] = ""; $_COOKIE["idb_courses"] = "gtuoeksetn"; $_COOKIE["idb_my"] = "GOOD"; break;
     }
     if($sso !== null)
         define("SSO_DBS", $sso);

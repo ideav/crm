@@ -1,26 +1,26 @@
 <?php
-# Оплата курсов портала ideav.ru/cources через интернет-эквайринг Точки (ideav/courses#92).
+# Оплата курсов портала ideav.ru/courses через интернет-эквайринг Точки (ideav/courses#92).
 #
-# Ссылка: cources-pay.php?course=<код> → Cp_start_payment(): ученик определяется ядром по его
-# cookie (/cources/xsrf), цена берётся из каталога courses.json, Точка создаёт платёж
+# Ссылка: courses-pay.php?course=<код> → Cp_start_payment(): ученик определяется ядром по его
+# cookie (/courses/xsrf), цена берётся из каталога courses.json, Точка создаёт платёж
 # (payments_with_receipt), заказ сохраняется файлом <store_dir>/<operationId>.json, ученик уходит
-# на страницу оплаты. После оплаты Точка возвращает его в /cources/?paid=<код>.
+# на страницу оплаты. После оплаты Точка возвращает его в /courses/?paid=<код>.
 #
 # Вебхук: у мерчанта один адрес — twh.php (он же обслуживает пополнение счёта в my). twh.php после
-# проверки подписи зовёт Cp_webhook(): платёж с нашим operationId записывается в базу cources —
+# проверки подписи зовёт Cp_webhook(): платёж с нашим operationId записывается в базу courses —
 # «Оплата» (с неё считаются партнёрские начисления) и «Доступ» (основание «оплата», ключ курса).
 # Чужой operationId → null, и twh.php продолжает путь my.
 #
 # В purpose и названии позиции нет цифр: twh.php берёт число из purpose как id пользователя my
 # и пополнил бы его счёт, если курсовой платёж попадёт в старую ветку.
 #
-# Секреты (токен Точки, админ-токен cources) — в конфиге вне webroot, путь — COURCES_PAY_CONFIG.
+# Секреты (токен Точки, админ-токен courses) — в конфиге вне webroot, путь — COURSES_PAY_CONFIG.
 
-if (!defined('COURCES_PAY_CONFIG')) define('COURCES_PAY_CONFIG', '/var/www/www-root/data/cources-pay.json');
+if (!defined('COURSES_PAY_CONFIG')) define('COURSES_PAY_CONFIG', '/var/www/www-root/data/courses-pay.json');
 
-function Cp_load_config($path = COURCES_PAY_CONFIG){
+function Cp_load_config($path = COURSES_PAY_CONFIG){
     $cfg = is_readable($path) ? json_decode(file_get_contents($path), true) : null;
-    if (!is_array($cfg)) throw new Exception('cources-pay: нет конфига ' . $path);
+    if (!is_array($cfg)) throw new Exception('courses-pay: нет конфига ' . $path);
     $cfg += array('site' => 'https://ideav.ru', 'tax_system' => 'usn_income', 'ttl' => 1440);
     return $cfg;
 }
@@ -76,26 +76,26 @@ function Cp_content_key($cfg, $code){
 
 function Cp_schema($cfg){
     $s = json_decode(@file_get_contents($cfg['schema_file']), true);
-    if (!isset($s['tables']['Доступ']['id'], $s['tables']['Оплата']['id'])) throw new Exception('cources-pay: нет schema.json');
+    if (!isset($s['tables']['Доступ']['id'], $s['tables']['Оплата']['id'])) throw new Exception('courses-pay: нет schema.json');
     return $s['tables'];
 }
 
-# ---- API базы cources ----
-function Cp_url($cfg, $path){ return rtrim($cfg['site'], '/') . '/cources/' . $path; }
+# ---- API базы courses ----
+function Cp_url($cfg, $path){ return rtrim($cfg['site'], '/') . '/courses/' . $path; }
 
 function Cp_admin_get($cfg, $path){
-    return Cp_json($cfg, 'GET', Cp_url($cfg, $path), array('Cookie: idb_cources=' . $cfg['admin_token']));
+    return Cp_json($cfg, 'GET', Cp_url($cfg, $path), array('Cookie: idb_courses=' . $cfg['admin_token']));
 }
 
 function Cp_admin_create($cfg, &$xsrf, $table, $main, $fields){
     if ($xsrf === null) { $x = Cp_admin_get($cfg, 'xsrf?JSON'); $xsrf = isset($x['_xsrf']) ? $x['_xsrf'] : ''; }
     $p = array('_xsrf' => $xsrf, 't' . $table['id'] => $main);
     foreach ($fields as $k => $v) {
-        if (!isset($table['req'][$k])) throw new Exception('cources-pay: нет реквизита «' . $k . '»');
+        if (!isset($table['req'][$k])) throw new Exception('courses-pay: нет реквизита «' . $k . '»');
         $p['t' . $table['req'][$k]] = (string)$v;
     }
     $d = Cp_json($cfg, 'POST', Cp_url($cfg, '_m_new/' . $table['id'] . '?JSON&up=1'),
-        array('Cookie: idb_cources=' . $cfg['admin_token'], 'Content-Type: application/x-www-form-urlencoded'), http_build_query($p));
+        array('Cookie: idb_courses=' . $cfg['admin_token'], 'Content-Type: application/x-www-form-urlencoded'), http_build_query($p));
     return isset($d['id']) ? $d['id'] : (isset($d['obj']) ? $d['obj'] : null);
 }
 
@@ -142,7 +142,7 @@ function Cp_order_save($cfg, $op, $o){
 # Возвращает ['redirect' => url] или ['error' => код, 'redirect' => url]
 function Cp_start_payment($cfg, $cookie, $code){
     $site = rtrim($cfg['site'], '/');
-    $back = $site . '/cources/#/map';
+    $back = $site . '/courses/#/map';
     $course = Cp_course($cfg, $code);
     if (!$course) return array('error' => 'course', 'redirect' => $back);
     try {
@@ -159,14 +159,14 @@ function Cp_start_payment($cfg, $cookie, $code){
         if (Cp_has_access($cfg, $tables, $uid, $code)) return array('redirect' => $back);
         $email = Cp_user_email($cfg, $uid);
         $amount = number_format((float)$course['price'], 2, '.', '');
-        $title = 'Доступ к курсу «' . $course['title'] . '» — ideav.ru/cources';
+        $title = 'Доступ к курсу «' . $course['title'] . '» — ideav.ru/courses';
         $data = array(
             'customerCode' => $cfg['customer_code'],
             'merchantId' => $cfg['merchant_id'],
             'amount' => $amount,
             'purpose' => $title,
-            'redirectUrl' => $site . '/cources/?paid=' . $code . '#/map',
-            'failRedirectUrl' => $site . '/cources/?payfail=' . $code . '#/map',
+            'redirectUrl' => $site . '/courses/?paid=' . $code . '#/map',
+            'failRedirectUrl' => $site . '/courses/?payfail=' . $code . '#/map',
             'paymentMode' => array('sbp', 'card', 'tinkoff'),
             'ttl' => (int)($cfg['ttl'] ?? 1440),
             'taxSystemCode' => $cfg['tax_system'] ?? 'usn_income',
@@ -191,7 +191,7 @@ function Cp_start_payment($cfg, $cookie, $code){
         return array('redirect' => $link);
     } catch (Exception $e) {
         Cp_log($cfg, 'link_failed', array('user' => $uid, 'course' => $code, 'error' => $e->getMessage()));
-        return array('error' => 'pay', 'redirect' => $site . '/cources/?payfail=' . $code . '#/map');
+        return array('error' => 'pay', 'redirect' => $site . '/courses/?payfail=' . $code . '#/map');
     }
 }
 

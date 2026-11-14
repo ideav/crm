@@ -1,4 +1,4 @@
-/* LMS ideav.ru/cources: оболочка и hash-роутер (#/c/<курс>/<урок>, #/map, #/me, #/curator). */
+/* LMS ideav.ru/courses: оболочка и hash-роутер (#/c/<курс>/<урок>, #/map, #/me, #/curator). */
 (function () {
   'use strict';
   var A = window.LMSApp, E = A.el, D = A.data, L = window.LMS || {};
