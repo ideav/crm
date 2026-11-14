@@ -1,6 +1,6 @@
 /* LMS: авторские курсы (ideav/courses#93) — общее ядро: поиск по каталогу, разбор строк «Каталога»,
    markdown → HTML (marked + DOMPurify), сборка lesson.json из черновика урока, даты.
-   Без DOM-разметки экрана: файл грузится и в тестах (experiments/cources-authors-93.test.js). */
+   Без DOM-разметки экрана: файл грузится и в тестах (experiments/courses-authors-93.test.js). */
 (function () {
   'use strict';
   var A = window.LMSApp = window.LMSApp || {};

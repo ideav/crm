@@ -4,7 +4,7 @@
   var A = window.LMSApp, E = A.el, D = A.data, L = window.LMS || {};
   A.views = A.views || {};
 
-  A.refLink = function () { var id = A.myId(); return id ? 'https://ideav.ru/cources/?aff=' + id : null; };
+  A.refLink = function () { var id = A.myId(); return id ? 'https://ideav.ru/courses/?aff=' + id : null; };
 
   A.views.me = function (root) {
     root.appendChild(E('h1', { class: 'page-title', text: 'Кабинет' }));

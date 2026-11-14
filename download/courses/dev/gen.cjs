@@ -24,7 +24,7 @@ w('content/courses.json',{version:'dev',courses:[
  {code:'partner',title:'Партнёр',free:false,price:19900,lessons:[les('x1',1,'Закрытый урок','text')]}]});
 
 // #93: опубликованный авторский курс a900 (как его собирает публикация в SPA: манифест + lesson.json по url).
-const au='content/authored/', U='/download/cources/dev/'+au;
+const au='content/authored/', U='/download/courses/dev/'+au;
 const aq={kind:'quiz',pass:0.5,questions:[{q:'Где хранить заказы?',options:[{k:'а',text:'В одной таблице «Заказы»'},{k:'б',text:'В пяти файлах'}],hash:h('l1',0,'а'),explain:'Одна таблица — один источник правды.'}]};
 w(au+'a900-l1.json',{id:'l1',course:'a900',n:1,title:'Заказы и клиенты',html:'<p>Заказы ведём в одной таблице. <a href="https://example.com/doc" target="_blank" rel="noopener">Пример</a>.</p>',tasks:[aq],attachments:[],prev:null,next:'l2'});
 w(au+'a900-l2.json',{id:'l2',course:'a900',n:2,title:'Сроки и ёмкости',html:'<p>Срок готовности — реквизит заказа.</p>',tasks:[{kind:'selfcheck',items:['Я завёл реквизит «Срок»']}],attachments:[],prev:'l1',next:null});

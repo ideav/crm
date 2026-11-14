@@ -1,11 +1,11 @@
-// ideav/courses#93: авторские курсы в LMS ideav.ru/cources — поиск по каталогу и сборка lesson.json
-// из черновика урока (download/cources/js/authors.js).
+// ideav/courses#93: авторские курсы в LMS ideav.ru/courses — поиск по каталогу и сборка lesson.json
+// из черновика урока (download/courses/js/authors.js).
 // - поиск: без регистра, ё = е, все слова запроса (И), по названию/описанию/автору/тегам/урокам;
 // - хэш правильного ответа теста = sha256(<id урока>:<номер вопроса>:<буква>) — ровно то, что сверяет quiz.js;
 // - в собранном уроке нет поля answer, внешние ссылки открываются в новой вкладке, файлы ответа — по белому списку;
 // - курс ждёт модератора, пока «На проверку» позже «Опубликован».
 //
-// Run with: node experiments/cources-authors-93.test.js
+// Run with: node experiments/courses-authors-93.test.js
 
 const assert = require('assert');
 const fs = require('fs');
@@ -13,7 +13,7 @@ const path = require('path');
 const vm = require('vm');
 const crypto = require('crypto');
 
-const dir = path.join(__dirname, '..', 'download', 'cources', 'js');
+const dir = path.join(__dirname, '..', 'download', 'courses', 'js');
 const sha = s => crypto.createHash('sha256').update(s).digest('hex');
 const ctx = {
     console,
@@ -81,7 +81,7 @@ async function t(name, fn) {
     await t('сборка урока: хэш теста как в quiz.js, без answer, prev/next', async () => {
         const rows = [
             { _id: '31', _main: 'Второй', 'Порядок': '2', 'Текст': 'b', 'Задания': '[]' },
-            { _id: '30', _main: 'Первый', 'Порядок': '1', 'Текст': '## Привет\n\n[сайт](https://example.com) и [свой](/cources/)<script>alert(1)</script>',
+            { _id: '30', _main: 'Первый', 'Порядок': '1', 'Текст': '## Привет\n\n[сайт](https://example.com) и [свой](/courses/)<script>alert(1)</script>',
               'Задания': JSON.stringify([{ kind: 'quiz', pass: 0.5, questions: [
                   { q: 'Где **заказы**?', options: [{ k: 'а', text: 'В таблице' }, { k: 'б', text: 'В файлах' }, { k: 'в', text: '' }], answer: 'б', explain: 'Так' }] },
                   { kind: 'file', prompt: 'Файл', accept: '.html,.pdf,svg', max: 50 },
@@ -101,7 +101,7 @@ async function t(name, fn) {
         assert.ok(/<strong>заказы<\/strong>/.test(q.questions[0].q), 'markdown в вопросе');
         assert.ok(!/<script/i.test(lj.html), 'html прошёл санитайзер');
         assert.ok(/href="https:\/\/example\.com" target="_blank" rel="noopener"/.test(lj.html), 'внешняя ссылка — в новой вкладке: ' + lj.html);
-        assert.ok(!/href="\/cources\/"[^>]*target/.test(lj.html), 'своя ссылка — без target');
+        assert.ok(!/href="\/courses\/"[^>]*target/.test(lj.html), 'своя ссылка — без target');
         assert.strictEqual(lj.tasks[1].accept, '.pdf', '.html/.svg выброшены из белого списка');
         assert.strictEqual(lj.tasks[1].max, 10);
         assert.deepStrictEqual(Array.from(lj.tasks[2].items), ['Сделал']);

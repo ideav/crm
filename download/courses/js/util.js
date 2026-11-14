@@ -1,13 +1,13 @@
-/* LMS ideav.ru/cources: общие помощники (issue ideav/courses#84). Ванильный JS, без сборки. */
+/* LMS ideav.ru/courses: общие помощники (issue ideav/courses#84). Ванильный JS, без сборки. */
 (function () {
   'use strict';
   var A = window.LMSApp = window.LMSApp || {};
   var L = window.LMS || {};
 
   A.mock = /[?&]mock=1(&|$)/.test(location.search);
-  A.root = A.mock ? '/download/cources/dev/' : '/download/cources/';
+  A.root = A.mock ? '/download/courses/dev/' : '/download/courses/';
   A.contentRoot = A.root + 'content/';
-  A.z = L.z || 'cources';
+  A.z = L.z || 'courses';
 
   A.esc = function (s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -123,13 +123,13 @@
     var m = /[?&]aff=([0-9]+)/.exec(location.search);
     if (m && !A.hasCookie('_aff')) setCookie('_aff', m[1], 15552000);
   };
-  A.beforeLogin = function () { setCookie('sso_back', 'cources', 86400); A.rememberAff(); };
+  A.beforeLogin = function () { setCookie('sso_back', 'courses', 86400); A.rememberAff(); };
   A.loginYandex = function () {
     A.beforeLogin();
     location.href = 'https://oauth.yandex.ru/authorize?response_type=code&client_id=959da92b09364e42bf4c7704db0b992f&redirect_uri=' +
       encodeURIComponent(location.origin + '/auth.asp') + '&state=yandex';
   };
-  A.loginMail = function () { A.beforeLogin(); location.href = '/start.html?db=my&uri=%2Fcources%2F'; };
+  A.loginMail = function () { A.beforeLogin(); location.href = '/start.html?db=my&uri=%2Fcourses%2F'; };
   A.loginButtons = function () {
     return [A.el('button', { class: 'btn btn-primary', type: 'button', text: 'Войти через Яндекс', onclick: A.loginYandex }),
       A.el('button', { class: 'btn', type: 'button', text: 'Войти по почте', onclick: A.loginMail })];

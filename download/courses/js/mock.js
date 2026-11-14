@@ -17,7 +17,7 @@
   function save(d) { A.store.set(KEY, JSON.stringify(d)); }
   // #93: опубликованные авторские курсы для проверки каталога (файлы — dev/content/authored/).
   function SEED_CATALOG() {
-    var dir = '/download/cources/dev/content/authored/';
+    var dir = '/download/courses/dev/content/authored/';
     return [
       { _id: '2', _main: 'a900', 'Название': 'Учёт заказов пекарни', 'Описание': 'Как вести заказы, ёмкости и сроки в одной базе вместо пяти таблиц.', 'Автор': 'Мария Петрова',
         'Теги': 'пекарня, учёт, малый бизнес', 'Цена': '0', 'Адрес обложки': '', 'Уроки': JSON.stringify([{ id: 'l1', n: 1, title: 'Заказы и клиенты', task: 'quiz' }, { id: 'l2', n: 2, title: 'Сроки и ёмкости', task: 'selfcheck' }]),
