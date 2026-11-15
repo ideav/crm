@@ -10,7 +10,6 @@ Frontend templates, components, and tooling for the [Integram](https://ideav.ru)
 | `css/` | Stylesheets for all UI components |
 | `templates/` | HTML workspace templates deployed to the Integram server |
 | `crm/` | CRM-specific page templates |
-| `mcp-server/` | MCP server exposing Integram API to AI assistants (60+ tools) |
 | `experiments/` | Developer experiment scripts and prototypes |
 | `examples/` | Working usage examples |
 | `docs/` | Additional documentation |
@@ -40,12 +39,6 @@ Application shell controller managing:
 - Modal dialogs (use `showDeleteConfirmModal()` and `showErrorModal()` — **never** `alert()`/`confirm()`/`prompt()`)
 - Internationalization (RU/EN)
 - Theme management
-
-### MCP Server (`mcp-server/`)
-
-Model Context Protocol server that exposes the Integram API as tools for AI assistants (Claude, etc.). Supports DDL, DML, queries, and high-level helpers.
-
-See [mcp-server/README.md](mcp-server/README.md) for setup and available tools.
 
 ## Deployment
 
@@ -93,4 +86,3 @@ issue (`issue #NNN`) and/or code location (`file:line`).
 - [docs/integram-article-reviews/README.md](docs/integram-article-reviews/README.md) — Workspace for article-review drafts, screenshot folders, and per-article tracking issues
 - [docs/INTEGRAM_DASHBOARD_TRAINING_GUIDE.md](docs/INTEGRAM_DASHBOARD_TRAINING_GUIDE.md) — Dashboard capability overview for training videos and articles
 - [docs/VUE_INTEGRAM_REWRITE_PLAN.md](docs/VUE_INTEGRAM_REWRITE_PLAN.md) — Vue + Integram rewrite plan
-- [mcp-server/README.md](mcp-server/README.md) — MCP server setup and tools

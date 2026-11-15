@@ -1,5 +1,8 @@
 # Оценка переноса `index.php` 1-в-1 на Node.js и Python с БД PostgreSQL
 
+> **Примечание (#5521):** упомянутый ниже `mcp-server/` удалён из репозитория; разбор
+> оставлен как есть — это снимок на момент оценки. Сетевой контракт API — `docs/MCP.md` и `docs/kb/`.
+
 ## Задача
 
 Issue [#3141](https://github.com/ideav/crm/issues/3141): «`index.php` — оцени перевод
