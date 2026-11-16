@@ -16,10 +16,15 @@
  */
 
 // ---------- Настройки ----------
-const YTDLP_BIN   = '/usr/local/bin/yt-dlp';
+define('YTDLP_BIN', getenv('VIDGET_YTDLP') ?: '/usr/local/bin/yt-dlp');
 const FFMPEG_BIN  = '/usr/bin/ffmpeg';
 const MAX_RUNTIME = 600;     // секунд
 const STALE_AFTER = 3600;    // недоотданные файлы старше часа удаляются
+
+// Прокси для yt-dlp (YouTube недоступен с серверов в РФ): одна строка вида
+// socks5://127.0.0.1:1080 или http://user:pass@host:port в файле вне docroot
+// (на ideav.ru — /var/www/www-root/data/vidget.proxy). Путь меняется переменной VIDGET_PROXY_FILE.
+define('PROXY_FILE', getenv('VIDGET_PROXY_FILE') ?: dirname(__DIR__, 2) . '/vidget.proxy');
 
 // Временная папка вне docroot: файлы в процессе загрузки не должны быть доступны по URL.
 define('DOWNLOAD_DIR', rtrim(sys_get_temp_dir(), '/') . '/vidget');
@@ -38,6 +43,12 @@ function isYoutubeUrl(string $url): bool
     }
     $host = strtolower($parts['host']);
     return (bool) preg_match('/^(www\.|m\.|music\.)?(youtube\.com|youtu\.be)$/', $host);
+}
+
+function proxyUrl(): string
+{
+    $raw = is_readable(PROXY_FILE) ? trim((string) file_get_contents(PROXY_FILE)) : '';
+    return preg_match('~^(socks5h?|socks4a?|https?)://\S+$~', $raw) ? $raw : '';
 }
 
 function cleanupStale(): void
@@ -76,6 +87,10 @@ function downloadVideo(string $url, string $format = 'mp4'): array
         '--no-cache-dir',
         '-o', $template,
     ];
+    $proxy = proxyUrl();
+    if ($proxy !== '') {
+        array_push($args, '--proxy', $proxy);
+    }
     if (is_executable(FFMPEG_BIN)) {
         array_push($args, '--ffmpeg-location', FFMPEG_BIN);
     }
