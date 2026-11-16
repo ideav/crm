@@ -1,6 +1,7 @@
 <?php
 /**
- * vidget.php — скачивание видео/аудио с YouTube через yt-dlp (ideav/crm#5523).
+ * vidget.php — скачивание видео/аудио через yt-dlp: YouTube, VK, Rutube, Яндекс, Дзен, ОК
+ * и другие сайты, которые yt-dlp знает (ideav/crm#5523, #5525).
  *
  * Страница скрыта от поисковиков: заголовок X-Robots-Tag и meta robots = noindex.
  * В robots.txt её НЕ вписываем — Disallow выдал бы адрес любому, кто его откроет.
@@ -32,17 +33,53 @@ define('DOWNLOAD_DIR', rtrim(sys_get_temp_dir(), '/') . '/vidget');
 set_time_limit(MAX_RUNTIME);
 
 // ---------- Функции ----------
-function isYoutubeUrl(string $url): bool
+function urlHost(string $url): string
 {
     $parts = parse_url($url);
     if (!$parts || !isset($parts['scheme'], $parts['host'])) {
-        return false;
+        return '';
     }
-    if (!in_array($parts['scheme'], ['http', 'https'], true)) {
-        return false;
+    if (!in_array(strtolower($parts['scheme']), ['http', 'https'], true)) {
+        return '';
     }
-    $host = strtolower($parts['host']);
-    return (bool) preg_match('/^(www\.|m\.|music\.)?(youtube\.com|youtu\.be)$/', $host);
+    return strtolower(trim($parts['host'], '[]'));
+}
+
+function isYoutubeHost(string $host): bool
+{
+    return (bool) preg_match('/(^|\.)(youtube\.com|youtu\.be|youtube-nocookie\.com)$/', $host);
+}
+
+/**
+ * Ссылка годится, если хост — публичный адрес: имя или IP, все адреса которого вне
+ * частных/служебных диапазонов. Иначе yt-dlp пошёл бы за ссылкой во внутреннюю сеть сервера.
+ */
+function checkUrl(string $url): string
+{
+    $host = urlHost($url);
+    if ($host === '') {
+        return 'Нужна ссылка вида https://…';
+    }
+    if (filter_var($host, FILTER_VALIDATE_IP)) {
+        $ips = [$host];
+    } else {
+        $ips = array_merge(gethostbynamel($host) ?: [], dnsAaaa($host));
+        if (!$ips) {
+            return 'Сайт ' . $host . ' не найден.';
+        }
+    }
+    foreach ($ips as $ip) {
+        if (!filter_var($ip, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE)) {
+            return 'Адрес ' . $host . ' недоступен для скачивания.';
+        }
+    }
+    return '';
+}
+
+function dnsAaaa(string $host): array
+{
+    $recs = function_exists('dns_get_record') ? @dns_get_record($host, DNS_AAAA) : [];
+    return array_column($recs ?: [], 'ipv6');
 }
 
 function proxyUrl(): string
@@ -65,8 +102,9 @@ function cleanupStale(): void
  */
 function downloadVideo(string $url, string $format = 'mp4'): array
 {
-    if (!isYoutubeUrl($url)) {
-        return ['ok' => false, 'error' => 'Некорректная ссылка YouTube.'];
+    $bad = checkUrl($url);
+    if ($bad !== '') {
+        return ['ok' => false, 'error' => $bad];
     }
     if (!is_executable(YTDLP_BIN)) {
         return ['ok' => false, 'error' => 'На сервере не установлен yt-dlp.'];
@@ -82,12 +120,16 @@ function downloadVideo(string $url, string $format = 'mp4'): array
     $args = [
         YTDLP_BIN,
         '--no-playlist',
-        '--restrict-filenames',
         '--no-progress',
         '--no-cache-dir',
+        // только сайты, для которых в yt-dlp есть свой модуль (YouTube, VK, Rutube, Яндекс,
+        // Дзен, ОК, Mail.ru и ещё ~1800); «generic» выключен — он пошёл бы по любой ссылке
+        '--use-extractors', 'default,-generic',
+        '--trim-filenames', '120',
         '-o', $template,
     ];
-    $proxy = proxyUrl();
+    // прокси — только для YouTube: российские сайты из-за рубежа часто не отдают видео
+    $proxy = isYoutubeHost(urlHost($url)) ? proxyUrl() : '';
     if ($proxy !== '') {
         array_push($args, '--proxy', $proxy);
     }
@@ -98,7 +140,7 @@ function downloadVideo(string $url, string $format = 'mp4'): array
     if ($format === 'mp3') {
         array_push($args, '-x', '--audio-format', 'mp3');
     } else {
-        array_push($args, '-f', 'bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/b', '--merge-output-format', 'mp4');
+        array_push($args, '-f', 'bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b', '--merge-output-format', 'mp4');
     }
     // "--" — дальше только URL, даже если он начинается с дефиса
     array_push($args, '--', $url);
@@ -115,7 +157,11 @@ function downloadVideo(string $url, string $format = 'mp4'): array
         foreach (glob(DOWNLOAD_DIR . '/' . $id . '_*') ?: [] as $f) {
             @unlink($f);
         }
-        return ['ok' => false, 'error' => 'Ошибка yt-dlp: ' . implode("\n", array_slice($output, -5))];
+        $tail = implode("\n", array_slice($output, -5));
+        if (stripos($tail, 'Unsupported URL') !== false) {
+            return ['ok' => false, 'error' => 'Этот сайт не поддерживается.'];
+        }
+        return ['ok' => false, 'error' => 'Ошибка yt-dlp: ' . $tail];
     }
     return ['ok' => true, 'file' => $files[0]];
 }
@@ -127,7 +173,9 @@ function sendFile(string $path): void
         ob_end_clean();
     }
     header('Content-Type: application/octet-stream');
-    header('Content-Disposition: attachment; filename="' . $name . '"; filename*=UTF-8\'\'' . rawurlencode($name));
+    // имя может быть кириллицей: ASCII-запасной вариант + filename* в UTF-8 (RFC 6266)
+    $ascii = preg_replace('/[^A-Za-z0-9._-]+/', '_', $name);
+    header('Content-Disposition: attachment; filename="' . $ascii . '"; filename*=UTF-8\'\'' . rawurlencode($name));
     header('Content-Length: ' . filesize($path));
     readfile($path);
     unlink($path); // удаляем файл после отдачи
@@ -181,9 +229,10 @@ header('Content-Type: text/html; charset=utf-8');
     </style>
 </head>
 <body>
-    <h2>Скачать видео с YouTube</h2>
+    <h2>Скачать видео</h2>
+    <p class="hint">YouTube, VK Видео, Rutube, Яндекс, Дзен, Одноклассники, Mail.ru и <a href="https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md" rel="noreferrer" target="_blank">другие сайты</a>.</p>
     <form method="post" onsubmit="document.getElementById('wait').hidden=false">
-        <input type="text" name="url" placeholder="https://www.youtube.com/watch?v=..." required>
+        <input type="text" name="url" placeholder="Ссылка на видео: https://…" required>
         <p>
             <label><input type="radio" name="format" value="mp4" checked> Видео (MP4)</label>
             <label><input type="radio" name="format" value="mp3"> Только аудио (MP3)</label>
