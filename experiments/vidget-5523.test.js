@@ -120,6 +120,14 @@ async function waitUp(port) {
     const withProxy = runWithProxy('socks5h://127.0.0.1:1080\n');
     check('прокси из файла передан yt-dlp', () => assert.match(withProxy, /--proxy\W+socks5h:\/\/127\.0\.0\.1:1080/));
     check('ссылка идёт после "--"', () => assert.match(withProxy, /--\W+https:\/\/www\.youtube\.com\/watch\?v=jNQXAC9IVRw/));
+    // заглушка из подсказки, записанная вместо адреса (16.11 так и случилось на ideav.ru)
+    const placeholder = runWithProxy('socks5h://…\n');
+    check('заглушка «socks5h://…» не передаётся как прокси', () => {
+        assert.ok(placeholder.length > 0, 'yt-dlp не был вызван');
+        assert.doesNotMatch(placeholder, /--proxy/);
+    });
+    const withAuth = runWithProxy('socks5h://u:p@proxy.example.com:1080\n');
+    check('прокси с логином и паролем передан', () => assert.match(withAuth, /--proxy\W+socks5h:\/\/u:p@proxy\.example\.com:1080/));
     const garbage = runWithProxy('rm -rf / ; echo\n');
     check('мусор в файле прокси не передаётся', () => {
         assert.ok(garbage.length > 0, 'yt-dlp не был вызван');

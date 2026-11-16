@@ -85,7 +85,8 @@ function dnsAaaa(string $host): array
 function proxyUrl(): string
 {
     $raw = is_readable(PROXY_FILE) ? trim((string) file_get_contents(PROXY_FILE)) : '';
-    return preg_match('~^(socks5h?|socks4a?|https?)://\S+$~', $raw) ? $raw : '';
+    // схема://[логин:пароль@]хост:порт — хост из латиницы/цифр/точек/дефисов (заглушка «…» не пройдёт)
+    return preg_match('~^(socks5h?|socks4a?|https?)://([^\s@/]+@)?[A-Za-z0-9.-]+:\d{1,5}/?$~', $raw) ? $raw : '';
 }
 
 function cleanupStale(): void
