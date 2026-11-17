@@ -54,6 +54,14 @@
       return d;
     });
   }
+  // чтение: тело — JSON и при ошибке (ядро отдаёт {error:…}); не JSON — только статус
+  function answerJson(r) {
+    return r.json().catch(function () { return null; }).then(function (d) {
+      var err = errOf(d);
+      if (!r.ok || err) throw new Error(err || ('HTTP ' + r.status));
+      return d;
+    });
+  }
   function post(path, params) {
     var f = new URLSearchParams(), x = A.xsrf();
     f.append('_xsrf', x);
@@ -71,7 +79,7 @@
     // ссылки сервер фильтрует по тексту, не по id; чужие строки и так режет маска роли — отбор на клиенте
     var client = filter || {};
     return fetch(A.base + 'object/' + t.id + '/?' + q.join('&'), { credentials: 'same-origin' })
-      .then(answer)
+      .then(answerJson)
       .then(function (arr) {
         return (Array.isArray(arr) ? arr : []).map(function (rec) { return parseRow(t, rec); }).filter(function (row) {
           return Object.keys(client).every(function (k) { return A.refId(row[k]) === String(client[k]) || row[k] === String(client[k]); });
@@ -161,6 +169,6 @@
     var id = schema.reports && schema.reports[name];
     if (!id) return Promise.reject(new Error('Нет отчёта «' + name + '»'));
     return fetch(A.base + 'report/' + (id.id || id) + '?JSON_KV', { credentials: 'same-origin' })
-      .then(answer);
+      .then(answerJson);
   };
 })();
