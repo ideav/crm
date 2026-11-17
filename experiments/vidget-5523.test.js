@@ -109,11 +109,15 @@ async function waitUp(port) {
     fs.writeFileSync(fake, '#!/bin/sh\necho "$@" > "' + argsOut + '"\nexit 1\n');
     fs.chmodSync(fake, 0o755);
     const proxyFile = path.join(tmp, 'vidget.proxy');
-    const runWithProxy = (content, url) => {
+    const cookiesFile = path.join(tmp, 'vidget.cookies');
+    const runWithProxy = (content, url, cookies) => {
         fs.writeFileSync(proxyFile, content);
         try { fs.unlinkSync(argsOut); } catch (e) { /* нет — и ладно */ }
+        try { fs.unlinkSync(cookiesFile); } catch (e) { /* нет — и ладно */ }
+        if (cookies) fs.writeFileSync(cookiesFile, cookies);
         spawnSync('php', [page, url || 'https://www.youtube.com/watch?v=jNQXAC9IVRw'], {
-            encoding: 'utf8', env: Object.assign({}, process.env, { VIDGET_YTDLP: fake, VIDGET_PROXY_FILE: proxyFile }),
+            encoding: 'utf8',
+            env: Object.assign({}, process.env, { VIDGET_YTDLP: fake, VIDGET_PROXY_FILE: proxyFile, VIDGET_COOKIES_FILE: cookiesFile }),
         });
         return fs.existsSync(argsOut) ? fs.readFileSync(argsOut, 'utf8') : '';
     };
@@ -140,6 +144,26 @@ async function waitUp(port) {
     check('не-YouTube идёт без прокси', () => {
         assert.match(other, /--\W+https:\/\/1\.1\.1\.1\/video\/123/);
         assert.doesNotMatch(other, /--proxy/);
+    });
+    // #5530: YouTube режет адрес выхода проверкой на бота — нужны cookies аккаунта из файла вне docroot
+    const netscape = '# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t0\tSID\tx\n';
+    const ytCookies = runWithProxy('socks5h://127.0.0.1:1080\n', null, netscape);
+    check('cookies из файла переданы yt-dlp для YouTube', () =>
+        assert.ok(ytCookies.includes('--cookies ' + cookiesFile), ytCookies));
+    check('без файла cookies --cookies не передаётся', () => {
+        assert.ok(withProxy.length > 0, 'yt-dlp не был вызван');
+        assert.doesNotMatch(withProxy, /--cookies/);
+    });
+    const otherCookies = runWithProxy('socks5h://127.0.0.1:1080\n', 'https://1.1.1.1/video/123', netscape);
+    check('не-YouTube идёт без cookies YouTube', () => {
+        assert.ok(otherCookies.length > 0, 'yt-dlp не был вызван');
+        assert.doesNotMatch(otherCookies, /--cookies/);
+    });
+    // через туннель TLS-рукопожатие иногда рвётся — закачка повторяется, а не бросается на 10-й попытке
+    check('повторы закачки увеличены', () => {
+        const m = ytCookies.match(/--retries (\d+)/);
+        assert.ok(m && Number(m[1]) >= 30, ytCookies);
+        assert.match(ytCookies, /--fragment-retries \d+/);
     });
     fs.rmSync(tmp, { recursive: true, force: true });
     }

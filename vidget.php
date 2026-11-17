@@ -27,6 +27,12 @@ const STALE_AFTER = 3600;    // недоотданные файлы старше
 // (на ideav.ru — /var/www/www-root/data/vidget.proxy). Путь меняется переменной VIDGET_PROXY_FILE.
 define('PROXY_FILE', getenv('VIDGET_PROXY_FILE') ?: dirname(__DIR__, 2) . '/vidget.proxy');
 
+// Cookies YouTube-аккаунта в формате Netscape (cookies.txt), файл вне docroot
+// (на ideav.ru — /var/www/www-root/data/vidget.cookies, владелец www-root, 600: yt-dlp
+// дописывает в него обновлённые cookies). Без них YouTube на адресе выхода отвечает
+// «Sign in to confirm you're not a bot». Путь меняется переменной VIDGET_COOKIES_FILE.
+define('COOKIES_FILE', getenv('VIDGET_COOKIES_FILE') ?: dirname(__DIR__, 2) . '/vidget.cookies');
+
 // Временная папка вне docroot: файлы в процессе загрузки не должны быть доступны по URL.
 define('DOWNLOAD_DIR', rtrim(sys_get_temp_dir(), '/') . '/vidget');
 
@@ -127,12 +133,21 @@ function downloadVideo(string $url, string $format = 'mp4'): array
         // Дзен, ОК, Mail.ru и ещё ~1800); «generic» выключен — он пошёл бы по любой ссылке
         '--use-extractors', 'default,-generic',
         '--trim-filenames', '120',
+        // TLS-рукопожатие через прокси иногда рвётся: повторять и докачивать, а не бросать
+        '--retries', '30',
+        '--fragment-retries', '30',
+        '--socket-timeout', '30',
         '-o', $template,
     ];
+    $youtube = isYoutubeHost(urlHost($url));
     // прокси — только для YouTube: российские сайты из-за рубежа часто не отдают видео
-    $proxy = isYoutubeHost(urlHost($url)) ? proxyUrl() : '';
+    $proxy = $youtube ? proxyUrl() : '';
     if ($proxy !== '') {
         array_push($args, '--proxy', $proxy);
+    }
+    // cookies аккаунта YouTube — только YouTube, другим сайтам их не отдаём
+    if ($youtube && is_readable(COOKIES_FILE)) {
+        array_push($args, '--cookies', COOKIES_FILE);
     }
     if (is_executable(FFMPEG_BIN)) {
         array_push($args, '--ffmpeg-location', FFMPEG_BIN);
