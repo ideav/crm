@@ -343,7 +343,8 @@
         var opt = function(key) { return self.tables[key] ? self.objects(key) : Promise.resolve([]); };
         var reads = [
             this.objects('order'), this.objects('client'), this.objects('article'), this.objects('productKind'),
-            opt('orderStatus'), opt('positionStatus'), opt('core'), opt('unit'), opt('material'), opt('setting')
+            opt('orderStatus'), opt('positionStatus'), opt('core'), opt('unit'), opt('material'), opt('setting'),
+            opt('dieType'), opt('cylinder')   // сверка МР из комментария 1С с расчётом (#5551)
         ];
         p.step('Читаю заказы и справочники', reads.length);
         return Promise.all(reads.map(function(r) { return p.track(r); })).then(function(r) {
@@ -370,7 +371,7 @@
                 self.positionsByOrder = byOrder;
                 return LI.orderContext(self.tables, {
                     orders: r[0], positions: positions, clients: r[1], articles: r[2], productKinds: r[3],
-                    orderStatuses: r[4], positionStatuses: r[5], cores: r[6], units: r[7], materials: r[8], settings: r[9], db: self.db
+                    orderStatuses: r[4], positionStatuses: r[5], cores: r[6], units: r[7], materials: r[8], settings: r[9], dieTypes: r[10], cylinders: r[11], db: self.db
                 });
             });
         });

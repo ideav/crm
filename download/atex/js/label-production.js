@@ -60,7 +60,9 @@
                 diePick: 'Подбор ножа',
                 minBatch: 'Мин. партия, шт',
                 itsNeeded: 'Нужно подтверждение ИТС',
-                itsConfirmed: 'Подтверждено ИТС'
+                itsConfirmed: 'Подтверждено ИТС',
+                // Расчётное (дробное) число мастер-рулонов позиции (ideav/crm#5551): метраж вырубки / длина МР.
+                mrCalc: 'Мастер-рулонов расчётное'
             } },
             sleeveTask: { name: 'Задача на втулки', reqs: {} },
             productKind: { name: 'Вид продукции', reqs: {} },
@@ -104,7 +106,7 @@
                 labelWidth: 'Ширина этикетки, мм',
                 labelLength: 'Длина этикетки, мм',
                 streams: 'Ручьёв',
-                labelsPerRepeat: 'Этикеток на раппорте',
+                labelsPerRepeat: ['Ручьев / (этикеток) на раппорте', 'Этикеток на раппорте'],
                 labelGap: 'М/э расстояние, мм',
                 streamGap: 'Между ручьями, мм',
                 edge: 'Ширина кромки, мм',
@@ -235,9 +237,12 @@
             if (!table) { missing.push(spec.name); return; }
             var reqs = {};
             Object.keys(spec.reqs).forEach(function(rk) {
-                var req = findByName(table.reqs, spec.reqs[rk]);
+                // Имя колонки — строка или список прежних/новых имён (переименование без разрыва выкладки).
+                var names = Array.isArray(spec.reqs[rk]) ? spec.reqs[rk] : [spec.reqs[rk]];
+                var req = null;
+                for (var ni = 0; ni < names.length && !req; ni++) req = findByName(table.reqs, names[ni]);
                 if (req) reqs[rk] = String(req.id);
-                else missing.push(spec.name + ' → ' + spec.reqs[rk]);
+                else missing.push(spec.name + ' → ' + names[0]);
             });
             tables[key] = { id: String(table.id), name: spec.name, reqs: reqs };
         });
@@ -664,7 +669,7 @@
         var rep = numOrNaN(die.repeatMm), per = numOrNaN(die.labelsPerRepeat), st = numOrNaN(die.streams);
         var len = numOrNaN(mrLengthM);
         if (!(rep > 0)) return { ok: false, error: 'у ножа нет раппорта (вал не задан)' };
-        if (!(per > 0)) return { ok: false, error: 'у ножа не задано «Этикеток на раппорте»' };
+        if (!(per > 0)) return { ok: false, error: 'у ножа не задано «Ручьев / (этикеток) на раппорте»' };
         if (!(st > 0)) return { ok: false, error: 'у ножа не задано «Ручьёв»' };
         if (!(len > 0)) return { ok: false, error: 'длина мастер-рулона не задана' };
         var repeats = Math.floor(len * 1000 / rep + 1e-9);
@@ -673,9 +678,10 @@
 
     // Потребность позиции: этикеток = рулонов × этикеток в рулоне; раппортов =
     // ceil(этикеток / (этикеток на раппорте × ручьёв ножа)); метраж вырубки = раппорты ×
-    // раппорт; мастер-рулонов = ceil(метраж / длина МР); коэффициент использования сырья =
+    // раппорт; мастер-рулонов расчётное (дробное, masterRollsExact, 2 знака) = метраж / длина МР;
+    // мастер-рулонов = ceil этого числа (целых рулонов под резерв); коэффициент использования сырья =
     // ширина этикетки × ручьёв ножа / исп. формат ножа (3 знака).
-    // → { ok: true, labels, repeats, meters, masterRolls, useRatio } | { ok: false, labels, error }.
+    // → { ok: true, labels, repeats, meters, masterRolls, masterRollsExact, useRatio } | { ok: false, labels, error }.
     function labelPositionDemand(pos, die, mrLengthM) {
         var p = pos || {};
         var labels = (numOrNaN(p.rolls) || 0) * (numOrNaN(p.labelsPerRoll) || 0);
@@ -692,6 +698,7 @@
             repeats: repeats,
             meters: meters,
             masterRolls: len > 0 ? Math.ceil(meters / len - 1e-9) : null,
+            masterRollsExact: len > 0 ? Math.round(meters / len * 100) / 100 : null,
             useRatio: fmt > 0 && w > 0 ? Math.round(w * st / fmt * 1000) / 1000 : null
         };
     }
