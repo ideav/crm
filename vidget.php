@@ -105,9 +105,12 @@ function cleanupStale(): void
 }
 
 /**
- * @return array{ok:bool, file?:string, error?:string}
+ * Проверки и командная строка yt-dlp для задания $id.
+ * $progress — печатать прогресс построчно (для фоновой закачки со страницы).
+ *
+ * @return array{ok:bool, cmd?:string, error?:string}
  */
-function downloadVideo(string $url, string $format = 'mp4'): array
+function prepareJob(string $url, string $format, string $id, bool $progress): array
 {
     $bad = checkUrl($url);
     if ($bad !== '') {
@@ -121,13 +124,17 @@ function downloadVideo(string $url, string $format = 'mp4'): array
     }
     cleanupStale();
 
-    $id       = bin2hex(random_bytes(6));
     $template = DOWNLOAD_DIR . '/' . $id . '_%(title).80s.%(ext)s';
 
-    $args = [
+    $args = [];
+    // фоновая закачка не ограничена set_time_limit запроса — её обрывает timeout
+    if ($progress && is_executable('/usr/bin/timeout')) {
+        array_push($args, '/usr/bin/timeout', (string) MAX_RUNTIME);
+    }
+    array_push($args,
         YTDLP_BIN,
         '--no-playlist',
-        '--no-progress',
+        $progress ? '--newline' : '--no-progress',
         '--no-cache-dir',
         // только сайты, для которых в yt-dlp есть свой модуль (YouTube, VK, Rutube, Яндекс,
         // Дзен, ОК, Mail.ru и ещё ~1800); «generic» выключен — он пошёл бы по любой ссылке
@@ -137,8 +144,8 @@ function downloadVideo(string $url, string $format = 'mp4'): array
         '--retries', '30',
         '--fragment-retries', '30',
         '--socket-timeout', '30',
-        '-o', $template,
-    ];
+        '-o', $template
+    );
     $youtube = isYoutubeHost(urlHost($url));
     // прокси — только для YouTube: российские сайты из-за рубежа часто не отдают видео
     $proxy = $youtube ? proxyUrl() : '';
@@ -162,9 +169,16 @@ function downloadVideo(string $url, string $format = 'mp4'): array
     array_push($args, '--', $url);
 
     // Каждый аргумент экранируется — защита от command injection
-    $cmd = implode(' ', array_map('escapeshellarg', $args)) . ' 2>&1';
-    exec($cmd, $output, $code);
+    return ['ok' => true, 'cmd' => implode(' ', array_map('escapeshellarg', $args))];
+}
 
+/**
+ * Итог закачки $id по коду выхода и выводу yt-dlp.
+ *
+ * @return array{ok:bool, file?:string, error?:string}
+ */
+function jobResult(string $id, int $code, array $output): array
+{
     $files = array_values(array_filter(
         glob(DOWNLOAD_DIR . '/' . $id . '_*') ?: [],
         function ($f) { return !preg_match('/\.(part|ytdl|temp)$/', $f); }
@@ -173,13 +187,108 @@ function downloadVideo(string $url, string $format = 'mp4'): array
         foreach (glob(DOWNLOAD_DIR . '/' . $id . '_*') ?: [] as $f) {
             @unlink($f);
         }
+        // строки прогресса в причину ошибки не берём
+        $output = array_filter($output, function ($l) { return !preg_match('/^\[download\]\s+[\d.]+%/', $l); });
         $tail = implode("\n", array_slice($output, -5));
         if (stripos($tail, 'Unsupported URL') !== false) {
             return ['ok' => false, 'error' => 'Этот сайт не поддерживается.'];
         }
+        if ($code === 124) {
+            return ['ok' => false, 'error' => 'Закачка не уложилась в ' . intdiv(MAX_RUNTIME, 60) . ' минут.'];
+        }
         return ['ok' => false, 'error' => 'Ошибка yt-dlp: ' . $tail];
     }
     return ['ok' => true, 'file' => $files[0]];
+}
+
+/**
+ * Синхронная закачка (CLI и форма без JavaScript).
+ *
+ * @return array{ok:bool, file?:string, error?:string}
+ */
+function downloadVideo(string $url, string $format = 'mp4'): array
+{
+    $id  = bin2hex(random_bytes(6));
+    $job = prepareJob($url, $format, $id, false);
+    if (!$job['ok']) {
+        return $job;
+    }
+    exec($job['cmd'] . ' 2>&1', $output, $code);
+    return jobResult($id, $code, $output);
+}
+
+// ---------- Фоновая закачка с прогрессом (страница опрашивает статус) ----------
+function jobPath(string $id, string $ext): string
+{
+    return DOWNLOAD_DIR . '/' . $id . '.' . $ext; // без «_» — не попадает в glob файлов результата
+}
+
+function validJobId(string $id): bool
+{
+    return (bool) preg_match('/^[0-9a-f]{12}$/', $id);
+}
+
+/**
+ * @return array{ok:bool, id?:string, error?:string}
+ */
+function startJob(string $url, string $format): array
+{
+    $id  = bin2hex(random_bytes(6));
+    $job = prepareJob($url, $format, $id, true);
+    if (!$job['ok']) {
+        return $job;
+    }
+    $log  = escapeshellarg(jobPath($id, 'log'));
+    $code = jobPath($id, 'code');
+    // код выхода пишется через временный файл и mv — опрос не прочтёт его наполовину
+    $inner = $job['cmd'] . ' > ' . $log . ' 2>&1; echo $? > ' . escapeshellarg($code . '.tmp')
+        . ' && mv ' . escapeshellarg($code . '.tmp') . ' ' . escapeshellarg($code);
+    exec('nohup sh -c ' . escapeshellarg($inner) . ' > /dev/null 2>&1 &');
+    return ['ok' => true, 'id' => $id];
+}
+
+function dropJob(string $id): void
+{
+    foreach (['log', 'code', 'code.tmp'] as $ext) {
+        @unlink(jobPath($id, $ext));
+    }
+}
+
+/**
+ * @return array{state:string, percent?:float, stage?:string, error?:string}
+ */
+function jobStatus(string $id): array
+{
+    $logFile = jobPath($id, 'log');
+    $log     = is_readable($logFile) ? (string) file_get_contents($logFile) : '';
+    $codeRaw = @file_get_contents(jobPath($id, 'code'));
+    if ($codeRaw === false && $log === '') {
+        // yt-dlp ещё ничего не написал; зависшее задание страница бросает по своему таймеру
+        return ['state' => 'running', 'stage' => 'Запускаем…'];
+    }
+    if ($codeRaw !== false && trim($codeRaw) !== '') {
+        $res = jobResult($id, (int) trim($codeRaw), preg_split('/\r?\n/', trim($log)));
+        if (!$res['ok']) {
+            dropJob($id);
+            return ['state' => 'error', 'error' => $res['error']];
+        }
+        return ['state' => 'done'];
+    }
+
+    $lines = preg_split('/\r?\n/', trim($log));
+    $parts = count(preg_grep('/^\[download\] Destination:/', $lines));
+    $last  = (string) end($lines);
+    if (preg_match('/^\[(Merger|VideoConvertor|FixupM3u8)\]/', $last)) {
+        return ['state' => 'running', 'stage' => 'Склеиваем видео и звук…'];
+    }
+    if (preg_match('/^\[ExtractAudio\]/', $last)) {
+        return ['state' => 'running', 'stage' => 'Конвертируем в MP3…'];
+    }
+    if (preg_match_all('/^\[download\]\s+([\d.]+)%/m', $log, $m)) {
+        $stage = $parts > 1 ? 'Качаем звук' : 'Качаем';
+        return ['state' => 'running', 'percent' => (float) end($m[1]), 'stage' => $stage];
+    }
+    return ['state' => 'running', 'stage' => 'Получаем сведения о видео…'];
 }
 
 function sendFile(string $path): void
@@ -216,10 +325,41 @@ header('X-Robots-Tag: noindex, nofollow, noarchive, nosnippet');
 header('Cache-Control: no-store');
 header('Referrer-Policy: no-referrer');
 
+function sendJson(array $data): void
+{
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode($data, JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+// статус фоновой закачки: ?job=<id>
+if (isset($_GET['job'])) {
+    $id = (string) $_GET['job'];
+    sendJson(validJobId($id) ? jobStatus($id) : ['state' => 'error', 'error' => 'Задание не найдено.']);
+}
+// готовый файл фоновой закачки: ?file=<id>
+if (isset($_GET['file'])) {
+    $id  = (string) $_GET['file'];
+    $res = validJobId($id) && trim((string) @file_get_contents(jobPath($id, 'code'))) === '0'
+        ? jobResult($id, 0, []) : ['ok' => false];
+    if ($res['ok']) {
+        dropJob($id);
+        sendFile($res['file']);
+    }
+    http_response_code(404);
+    header('Content-Type: text/plain; charset=utf-8');
+    echo 'Файл не найден или уже скачан.';
+    exit;
+}
+
 $error = '';
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
     $url    = trim($_POST['url'] ?? '');
     $format = ($_POST['format'] ?? 'mp4') === 'mp3' ? 'mp3' : 'mp4';
+    if (!empty($_POST['async'])) {
+        sendJson(startJob($url, $format));
+    }
+    // без JavaScript: закачка в этом же запросе, файл — ответом
     $res    = downloadVideo($url, $format);
     if ($res['ok']) {
         sendFile($res['file']);
@@ -242,22 +382,71 @@ header('Content-Type: text/html; charset=utf-8');
         button { margin-top: 12px; padding: 8px 16px; }
         .err { color: #b00020; white-space: pre-wrap; margin-top: 12px; }
         .hint { color: #666; font-size: 13px; margin-top: 12px; }
+        #wait { display: flex; align-items: center; gap: 10px; }
+        #wait[hidden] { display: none; }
+        .spin { flex: none; width: 18px; height: 18px; border: 3px solid #ddd; border-top-color: #1a73e8;
+                border-radius: 50%; animation: spin .8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .bar { height: 6px; background: #eee; border-radius: 3px; margin-top: 8px; overflow: hidden; }
+        .bar[hidden] { display: none; }
+        .bar > div { height: 100%; width: 0; background: #1a73e8; transition: width .4s; }
+        .ok { color: #137333; margin-top: 12px; }
+        .err:empty { display: none; }
     </style>
 </head>
 <body>
     <h2>Скачать видео</h2>
     <p class="hint">YouTube, VK Видео, Rutube, Яндекс, Дзен, Одноклассники, Mail.ru и <a href="https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md" rel="noreferrer" target="_blank">другие сайты</a>.</p>
-    <form method="post" onsubmit="document.getElementById('wait').hidden=false">
+    <form method="post" id="form">
         <input type="text" name="url" placeholder="Ссылка на видео: https://…" required>
         <p>
             <label><input type="radio" name="format" value="mp4" checked> Видео (MP4)</label>
             <label><input type="radio" name="format" value="mp3"> Только аудио (MP3)</label>
         </p>
-        <button type="submit">Скачать</button>
+        <button type="submit" id="go">Скачать</button>
     </form>
-    <div id="wait" class="hint" hidden>Качаем на сервер, потом браузер предложит сохранить файл. Длинное видео — до нескольких минут.</div>
-    <?php if ($error): ?>
-        <div class="err"><?= htmlspecialchars($error, ENT_QUOTES, 'UTF-8') ?></div>
-    <?php endif; ?>
+    <div id="wait" class="hint" hidden><span class="spin"></span><span id="stage">Качаем на сервер, потом браузер предложит сохранить файл. Длинное видео — до нескольких минут.</span></div>
+    <div class="bar" id="bar" hidden><div id="fill"></div></div>
+    <div class="ok" id="done" hidden>Готово — браузер сохраняет файл.</div>
+    <div class="err" id="err"><?= htmlspecialchars($error, ENT_QUOTES, 'UTF-8') ?></div>
+<script>
+(function () {
+    var form = document.getElementById('form'), go = document.getElementById('go');
+    var wait = document.getElementById('wait'), stage = document.getElementById('stage');
+    var bar = document.getElementById('bar'), fill = document.getElementById('fill');
+    var done = document.getElementById('done'), err = document.getElementById('err');
+    var LIMIT_MS = <?= (MAX_RUNTIME + 60) * 1000 ?>;
+
+    function finish(msg) {
+        wait.hidden = true; bar.hidden = true; go.disabled = false;
+        if (msg) err.textContent = msg; else done.hidden = false;
+    }
+    function poll(id, started) {
+        if (Date.now() - started > LIMIT_MS) return finish('Сервер не ответил, попробуйте ещё раз.');
+        fetch('?job=' + id, { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (s) {
+            if (s.state === 'error') return finish(s.error);
+            if (s.state === 'done') { finish(''); location.href = '?file=' + id; return; }
+            var pct = typeof s.percent === 'number' ? s.percent : null;
+            stage.textContent = (s.stage || 'Качаем') + (pct !== null ? ' — ' + pct.toFixed(1) + '%' : '');
+            bar.hidden = pct === null;
+            if (pct !== null) fill.style.width = pct + '%';
+            setTimeout(function () { poll(id, started); }, 1000);
+        }).catch(function () { setTimeout(function () { poll(id, started); }, 2000); });
+    }
+    form.addEventListener('submit', function (e) {
+        if (!window.fetch) { wait.hidden = false; return; } // старый браузер — обычная отправка
+        e.preventDefault();
+        var data = new FormData(form);
+        data.append('async', '1');
+        err.textContent = ''; done.hidden = true; go.disabled = true;
+        wait.hidden = false; bar.hidden = true; fill.style.width = '0';
+        stage.textContent = 'Проверяем ссылку…';
+        fetch(location.pathname, { method: 'POST', body: data }).then(function (r) { return r.json(); }).then(function (r) {
+            if (!r.ok) return finish(r.error);
+            poll(r.id, Date.now());
+        }).catch(function () { finish('Сервер не ответил, попробуйте ещё раз.'); });
+    });
+})();
+</script>
 </body>
 </html>
