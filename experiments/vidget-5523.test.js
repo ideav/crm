@@ -191,6 +191,17 @@ async function waitUp(port) {
         assert.ok(qJunk.length > 0, 'yt-dlp не был вызван');
         assert.doesNotMatch(qJunk, /9999|height<=/);
     });
+    // #5542: AV1/VP9 в mp4 стандартный плеер Windows не декодирует — играет только звук.
+    // Первым вариантом -f должно идти H.264 (avc1), и при выборе качества тоже.
+    const firstAlt = (args) => {
+        const m = args.match(/-f ([^ ]+)/);
+        return m ? m[1].split('/')[0] : '';
+    };
+    check('видео — сначала H.264 (avc1)', () => {
+        assert.match(firstAlt(qBest), /\[vcodec\^=avc1\]/, qBest);
+        assert.match(firstAlt(q720), /\[vcodec\^=avc1\]/, q720);
+        assert.match(firstAlt(q720), /\[height<=720\]/, q720);
+    });
     fs.rmSync(tmp, { recursive: true, force: true });
     }
 

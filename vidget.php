@@ -101,11 +101,16 @@ function quality(string $q): string
     return in_array($q, ['1080', '720', '480'], true) ? $q : 'best';
 }
 
-/** Выбор формата yt-dlp: mp4 c m4a, иначе что есть; с ограничением высоты кадра, если задано. */
+/**
+ * Выбор формата yt-dlp: H.264 (avc1) с m4a, затем любой mp4, иначе что есть;
+ * с ограничением высоты кадра, если задано. H.264 первым: AV1/VP9 в mp4 стандартный
+ * плеер Windows без расширения кодека не декодирует и играет только звук (#5542).
+ */
 function videoFormat(string $quality): string
 {
     $h = $quality === 'best' ? '' : '[height<=' . $quality . ']';
-    $f = 'bv*' . $h . '[ext=mp4]+ba[ext=m4a]/b' . $h . '[ext=mp4]/bv*' . $h . '+ba/b' . $h;
+    $f = 'bv*' . $h . '[vcodec^=avc1]+ba[ext=m4a]/b' . $h . '[vcodec^=avc1]'
+        . '/bv*' . $h . '[ext=mp4]+ba[ext=m4a]/b' . $h . '[ext=mp4]/bv*' . $h . '+ba/b' . $h;
     // сайт не сообщил высоту ни одного формата — берём лучшее, а не падаем
     return $h === '' ? $f : $f . '/b';
 }
