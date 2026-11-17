@@ -207,7 +207,7 @@ var DIES = [
         plan.write.minBatch === String(Math.floor(2000000 / 666.75) * 3 * 2), 'в позицию пишется нож, «подобран», мин. партия; признак ИТС не пишется (ручной)', JSON.stringify(plan.write));
     assert(plan.write.sleeveWidth === '80', 'ширины втулки в позиции нет — берётся из ножа');
     assert(LO.writeDiffers(pos, plan.write) === true, 'записанное отличается от расчёта — нужно записать');
-    var written = LO.positionFromRow(Object.assign({}, row, { 'Подбор ножа': 'подобран', 'НожID': '2', 'Мин. партия': plan.write.minBatch, 'Втулка, мм': '80.00' }), materials);
+    var written = LO.positionFromRow(Object.assign({}, row, { 'Подбор ножа': 'подобран', 'НожID': '2', 'Мин. партия': plan.write.minBatch, 'МР расчётное': plan.write.mrCalc, 'Втулка, мм': '80.00' }), materials);
     assert(LO.writeDiffers(written, LO.planPosition(written, dies, { mrLength: '2000' }).write) === false,
         'после записи повторный подбор ничего не меняет');
 

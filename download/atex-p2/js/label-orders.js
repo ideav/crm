@@ -187,6 +187,7 @@
             dieId: String(x['НожID'] || ''),
             dieNo: x['Нож'] || '',
             minBatch: x['Мин. партия'],
+            mrCalc: x['МР расчётное'],
             itsNeeded: bool(x['ИТС нужен']),
             itsConfirmed: bool(x['ИТС подтв.']),
             sleeveWidth: x['Втулка, мм'] || '',
@@ -227,6 +228,8 @@
                 minBatch: min.ok ? String(min.labels) : ''
             }
         };
+        // Расчётное (дробное) МР — только когда расчёт состоялся (#5551); без ножа прежнее значение не трогаем.
+        if (demand.ok && demand.masterRollsExact != null) out.write.mrCalc = String(demand.masterRollsExact);
         // Ширина втулки — из ножа, если в позиции её нет (её читает втулкорез).
         if (dieRes.ok && !(num(pos.sleeveWidth) > 0) && num(dieRes.die.sleeveWidth) > 0) out.write.sleeveWidth = String(num(dieRes.die.sleeveWidth));
         return out;
@@ -259,6 +262,7 @@
             die: pos.dieId || '',
             diePick: pos.pick || '',
             minBatch: num(pos.minBatch) > 0 ? String(num(pos.minBatch)) : '',
+            mrCalc: num(pos.mrCalc) > 0 ? String(num(pos.mrCalc)) : '',
             sleeveWidth: num(pos.sleeveWidth) > 0 ? String(num(pos.sleeveWidth)) : ''
         };
         return Object.keys(write).some(function(k) { return String(cur[k]) !== String(write[k]); });
@@ -623,7 +627,7 @@
         html += '<h3 class="atex-lo-sub">Нож</h3>';
         if (d) {
             html += row('Нож', '№ ' + esc(d.no) + ' <span class="atex-lo-badge ' + (plan.die.pick === lp.DIE_PICK.MANUAL ? 'is-warn' : 'is-ok') + '">' + esc(plan.die.pick) + '</span>') +
-                row('Ручьёв / на раппорте', esc((d.streams || '—') + ' / ' + (d.labelsPerRepeat || '—'))) +
+                row('Ручьев / (этикеток) на раппорте', esc((d.streams || '—') + ' / ' + (d.labelsPerRepeat || '—'))) +
                 row('Вал / раппорт', esc((d.cylinder || '—') + ' / ' + (d.repeatMm ? d.repeatMm + ' мм' : '—'))) +
                 row('Исп. формат', esc(d.usedFormat ? d.usedFormat + ' мм' : '—')) +
                 row('Пробег', esc(this.mileageOk ? fmtInt(d.revs) + ' об' : 'не прочитан'));
@@ -653,7 +657,9 @@
             html += '<h3 class="atex-lo-sub">Потребность позиции</h3>' +
                 row('Раппортов', esc(fmtInt(plan.demand.repeats))) +
                 row('Метраж вырубки', esc(fmtInt(plan.demand.meters) + ' м')) +
-                row('Мастер-рулонов ' + plan.mrLength + ' м', esc(plan.demand.masterRolls == null ? '—' : plan.demand.masterRolls)) +
+                row('Мастер-рулонов ' + plan.mrLength + ' м, расчётное', esc(plan.demand.masterRollsExact == null ? '—' : plan.demand.masterRollsExact) +
+                    '<small>метраж / длина МР (дробное, сверяется с 1С)</small>') +
+                row('Мастер-рулонов, целых', esc(plan.demand.masterRolls == null ? '—' : plan.demand.masterRolls) + '<small>округление вверх — под резерв</small>') +
                 row('Коэф. использования сырья', esc(plan.demand.useRatio == null ? '—' : plan.demand.useRatio));
         }
 
