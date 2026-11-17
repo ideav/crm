@@ -3,7 +3,8 @@
 // - чтение и запись идут в /nav-api/<база>/..., xsrf берётся из куки idx_<база> (поле _xsrf и заголовок);
 // - ошибки ядра обоих видов ({error:{message}} у чтения, [{error}] у записи) доходят до вызывающего;
 // - DATETIME приходит unix-секундами, в том числе с дробной частью;
-// - загрузка файлов на новом ядре отклоняется понятной ошибкой, удаление строки с файлом — один _m_del;
+// - загрузка файлов на новом ядре — multipart в /nav-api/<база>/_m_new|_m_set с X-XSRF-Token (python2node#1286),
+//   значение FILE «<id>/<имя>» — ссылка на защищённый /api/v1/<база>/object/<строка>/file/<реквизит>;
 // - без LMS.core адреса прежние (/<база>/...);
 // - core.js по /api/v1/<база>/session и своей строке таблицы «Пользователь» узнаёт id и роль.
 //
@@ -28,13 +29,21 @@ function json(status, body) {
 }
 
 // util.js + api.js в песочнице; route(url, init) -> ответ
-function portal(lms, route) {
-    const calls = [];
+// xhrRoute(xhr) -> {status, body} — ответ на multipart-загрузку (XMLHttpRequest)
+function portal(lms, route, xhrRoute) {
+    const calls = [], xhr = [];
     const ctx = {
         console, URLSearchParams, Promise, Date,
         location: { search: '', origin: 'https://ai.ideav.online', href: 'https://ai.ideav.online/download/courses/core.html' },
         document: { cookie: 'idb_courses=; idx_courses=XS-145; other=1', addEventListener() {} },
         LMS: lms,
+        FormData: class { constructor() { this.e = []; } append(...a) { this.e.push(a); } },
+        XMLHttpRequest: class {
+            constructor() { this.headers = {}; this.upload = {}; xhr.push(this); }
+            open(m, url) { this.method = m; this.url = url; }
+            setRequestHeader(k, v) { this.headers[k] = v; }
+            send(fd) { this.fd = fd.e; const r = xhrRoute ? xhrRoute(this) : { status: 200, body: {} }; this.status = r.status; this.responseText = JSON.stringify(r.body); Promise.resolve().then(() => this.onload()); }
+        },
     };
     ctx.window = ctx;
     ctx.fetch = (url, init) => {
@@ -44,7 +53,7 @@ function portal(lms, route) {
     };
     vm.createContext(ctx);
     for (const f of ['util.js', 'api.js']) vm.runInContext(fs.readFileSync(path.join(dir, 'js', f), 'utf8'), ctx);
-    return { A: ctx.LMSApp, calls, get api() { return calls.filter(c => !/schema\.json$/.test(c.url)); } };
+    return { A: ctx.LMSApp, calls, xhr, get api() { return calls.filter(c => !/schema\.json$/.test(c.url)); } };
 }
 
 let failed = 0;
@@ -88,12 +97,53 @@ async function t(name, fn) {
         await assert.rejects(r.A.list('Прогресс'), /Authentication token required/);
     });
 
-    await t('core: загрузка файла отклоняется без запроса, удаление строки с файлом — один _m_del', async () => {
+    await t('core: загрузка — multipart в /nav-api/<база>/_m_new с заголовком X-XSRF-Token, файл в t<id реквизита>', async () => {
+        const p = portal({ core: true, z: 'courses' }, () => json(200, {}), () => ({ status: 200, body: { id: '', obj: 77 } }));
+        await p.A.loadSchema();
+        const file = { name: 'отчёт.pdf' };
+        const id = await p.A.upload('Файл ответа', 'k1', { 'Пользователь': '600' }, 'Файл', file);
+        assert.strictEqual(id, '77');
+        const x = p.xhr[0];
+        assert.strictEqual(x.url, '/nav-api/courses/_m_new/308?JSON&up=1');
+        assert.strictEqual(x.headers['X-XSRF-Token'], 'XS-145');
+        assert.strictEqual(x.withCredentials, true);
+        assert.deepStrictEqual(x.fd.find(e => e[0] === 't384'), ['t384', file, 'отчёт.pdf']);
+        assert.strictEqual(x.fd.find(e => e[0] === 't308')[1], 'k1');
+        assert.strictEqual(x.fd.find(e => e[0] === 't380')[1], '600');
+    });
+
+    await t('core: загрузка в строку — multipart в /nav-api/<база>/_m_set/<id>; ошибка ядра {error:{message}} доходит', async () => {
+        const p = portal({ core: true, z: 'courses' }, () => json(200, {}), () => ({ status: 415, body: { error: { code: 'err_bad_request', message: 'File type is not allowed' } } }));
+        await p.A.loadSchema();
+        await assert.rejects(p.A.uploadTo('Файл ответа', 5, 'Файл', { name: 'a.html' }), /File type is not allowed/);
+        assert.strictEqual(p.xhr[0].url, '/nav-api/courses/_m_set/5?JSON');
+        assert.strictEqual(p.xhr[0].headers['X-XSRF-Token'], 'XS-145');
+    });
+
+    await t('core: значение FILE «<id>/<имя>» — ссылка на /api/v1/<база>/object/<строка>/file/<реквизит>', async () => {
+        const p = portal({ core: true, z: 'courses' }, () => json(200, [
+            { i: 9, u: 1, o: 1, r: ['k', '600:lmstest', '0123456789abcdef0123456789abcdef/отчёт <1>&.pdf'] },
+            { i: 10, u: 1, o: 1, r: ['k2', '600:lmstest', ''] }]));
+        await p.A.loadSchema();
+        const rows = await p.A.list('Файл ответа');
+        assert.deepStrictEqual(Object.assign({}, p.A.fileInfo(rows[0]['Файл'])), { url: '/api/v1/courses/object/9/file/384', name: 'отчёт <1>&.pdf' });
+        assert.strictEqual(p.A.fileInfo(rows[1]['Файл']), null);
+    });
+
+    await t('без LMS.core значение FILE не переписывается, загрузка — в /<база>/_m_new', async () => {
+        const p = portal({ z: 'courses' }, () => json(200, [{ i: 9, u: 1, o: 1, r: ['k', '600:lmstest', '<a href="/download/courses/x/a.pdf">a.pdf</a>'] }]),
+            () => ({ status: 200, body: { obj: 3 } }));
+        await p.A.loadSchema();
+        const rows = await p.A.list('Файл ответа');
+        assert.strictEqual(p.A.fileInfo(rows[0]['Файл']).url, '/download/courses/x/a.pdf');
+        await p.A.upload('Файл ответа', 'k1', {}, 'Файл', { name: 'a.pdf' });
+        assert.strictEqual(p.xhr[0].url, '/courses/_m_new/308?JSON&up=1');
+        assert.strictEqual(p.xhr[0].headers['X-XSRF-Token'], undefined);
+    });
+
+    await t('core: удаление строки с файлом — один _m_del', async () => {
         const p = portal({ core: true, z: 'courses' }, () => json(200, { id: '', obj: 5 }));
         await p.A.loadSchema();
-        await assert.rejects(p.A.upload('Файл ответа', 'f', {}, 'Файл', { name: 'a.txt' }), /python2node#1286/);
-        await assert.rejects(p.A.uploadTo('Файл ответа', 5, 'Файл', { name: 'a.txt' }), /python2node#1286/);
-        assert.strictEqual(p.api.length, 0);
         await p.A.removeFile('Файл ответа', 5, 'Файл');
         assert.deepStrictEqual(p.api.map(c => c.url), ['/nav-api/courses/_m_del/5?JSON']);
     });

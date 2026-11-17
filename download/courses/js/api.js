@@ -21,11 +21,23 @@
     return hide.length ? all.filter(function (n) { return hide.indexOf(n) < 0; }) : all;
   }
 
+  // Значение FILE на новом ядре — «<id файла>/<имя>» (python2node#1286); файл отдаёт только
+  // GET /api/v1/<база>/object/<строка>/file/<реквизит> с проверкой прав. Переводим в вид старого ядра
+  // (<a href>имя</a>), чтобы A.fileInfo и все, кто его зовёт, работали одинаково.
+  var CORE_FILE = /^[0-9a-f]{32}\/([\s\S]+)$/;
+  function esc(x) { return String(x).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+  function coreFile(t, rowId, name, v) {
+    var m = CORE_FILE.exec(v);
+    if (!m) return v;
+    return '<a href="/api/v1/' + A.z + '/object/' + rowId + '/file/' + t.req[name] + '">' + esc(m[1]) + '</a>';
+  }
+
   function parseRow(t, rec) {
     var row = { _id: String(rec.i), _main: rec.r && rec.r[0] };
     order(t).forEach(function (name, i) {
       var v = rec.r ? rec.r[i + 1] : '';
       v = v == null ? '' : v;
+      if (A.core) v = coreFile(t, rec.i, name, v);
       if (/^[0-9]{9,11}(.[0-9]+)?$/.test(v) && /^(Дата|Доступно)/.test(name)) v = A.fmtUnix(v);
       row[name] = v;
     });
@@ -70,7 +82,6 @@
     if (A.core) h['X-XSRF-Token'] = x;
     return fetch(A.base + path, { method: 'POST', credentials: 'same-origin', headers: h, body: f.toString() }).then(answer);
   }
-  var NO_FILES = 'Загрузка файлов на новом ядре пока недоступна (python2node#1286)';
 
   // list('Прогресс', {Пользователь: 5}) -> [{_id,_main,Курс,...}]
   A.list = function (name, filter) {
@@ -121,46 +132,47 @@
       var x = new XMLHttpRequest();
       x.open('POST', url);
       x.withCredentials = true;
+      if (A.core) x.setRequestHeader('X-XSRF-Token', A.xsrf()); // ядро требует заголовок на записи
       x.upload.onprogress = function (e) { if (onProgress && e.lengthComputable) onProgress(e.loaded / e.total); };
       x.onerror = function () { reject(new Error('нет связи с сервером')); };
       x.onload = function () {
         var d = null; try { d = JSON.parse(x.responseText); } catch (e) { /* не JSON */ }
-        var err = d && (Array.isArray(d) ? d[0] && d[0].error : d.error);
+        var err = errOf(d);
         if (x.status >= 400 || err || !d || (needId && !(d.id || d.obj))) return reject(new Error(err || (d ? 'ошибка загрузки' : String(x.responseText || '').replace(/<[^>]+>/g, '').slice(0, 120)) || ('HTTP ' + x.status)));
         resolve(String(d.obj || d.id || ''));
       };
       x.send(fd);
     });
   }
+  // multipart: на новом ядре — /nav-api/<база>/ (A.base), на старом — /<база>/
+  function formBase() { return A.core ? A.base : '/' + A.z + '/'; }
   // Загрузка файла: multipart в _m_new (поле t<id реквизита FILE>), XHR ради индикатора прогресса.
   // fields — реквизиты таблицы по именам (кроме FILE); file — File; onProgress(0..1).
   A.upload = function (name, main, fields, fileField, file, onProgress) {
     if (A.mock) return A.mockApi.upload(name, main, fields, fileField, file);
-    if (A.core) return Promise.reject(new Error(NO_FILES));
     var t = tbl(name), p = toParams(t, fields);
     if (!t.req[fileField]) return Promise.reject(new Error('Нет реквизита «' + fileField + '»'));
     p['t' + t.id] = main; p._xsrf = A.xsrf();
     var fd = new FormData();
     Object.keys(p).forEach(function (k) { fd.append(k, p[k]); });
     fd.append('t' + t.req[fileField], file, file.name);
-    return sendForm('/' + A.z + '/_m_new/' + t.id + '?JSON&up=1', fd, onProgress, true);
+    return sendForm(formBase() + '_m_new/' + t.id + '?JSON&up=1', fd, onProgress, true);
   };
   // Загрузка файла в существующую строку (_m_set, multipart): ядро пишет в тот же реквизит FILE,
   // поэтому адрес файла (хэш от id реквизита) остаётся прежним.
   A.uploadTo = function (name, id, fileField, file, onProgress) {
     if (A.mock) return A.mockApi.uploadTo(name, id, fileField, file);
-    if (A.core) return Promise.reject(new Error(NO_FILES));
     var t = tbl(name);
     if (!t.req[fileField]) return Promise.reject(new Error('Нет реквизита «' + fileField + '»'));
     var fd = new FormData();
     fd.append('_xsrf', A.xsrf());
     fd.append('t' + t.req[fileField], file, file.name);
-    return sendForm('/' + A.z + '/_m_set/' + id + '?JSON', fd, onProgress, false).then(function () { return String(id); });
+    return sendForm(formBase() + '_m_set/' + id + '?JSON', fd, onProgress, false).then(function () { return String(id); });
   };
   // Удаление строки с файлом: сначала очищаем реквизит FILE (так сервер стирает сам файл), потом строку.
   A.removeFile = function (name, id, fileField) {
     if (A.mock) return A.mockApi.remove(name, id);
-    if (A.core) return post('_m_del/' + id + '?JSON', {}); // хранилища FILE на новом ядре нет (python2node#1286)
+    if (A.core) return post('_m_del/' + id + '?JSON', {}); // байты удалённой строки ядро с диска пока не убирает (сборщика нет)
     var f = {}; f[fileField] = '';
     return post('_m_set/' + id + '?JSON', toParams(tbl(name), f)).then(function () { return post('_m_del/' + id + '?JSON', {}); });
   };
