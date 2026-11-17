@@ -177,6 +177,13 @@ async function t(name, fn) {
         assert.deepStrictEqual(JSON.parse(seen.init.body), { user: 'lmstest', password: 'x' });
     });
 
+    await t('core.js: вход из ЛК — /my/coresso на ideav.ru, база и путь возврата закодированы', async () => {
+        const c = core(() => json(200, {}));
+        assert.strictEqual(c.S.cabinetUrl('courses', '/download/courses/core.html?db=courses&x=1'),
+            'https://ideav.ru/my/coresso?db=courses&back=%2Fdownload%2Fcourses%2Fcore.html%3Fdb%3Dcourses%26x%3D1');
+        assert.strictEqual(c.S.cabinetUrl('courses'), 'https://ideav.ru/my/coresso?db=courses&back=%2F');
+    });
+
     console.log(failed ? `\n${failed} FAIL` : '\nall ok');
     process.exit(failed ? 1 : 0);
 })();
