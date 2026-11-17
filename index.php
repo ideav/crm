@@ -6500,25 +6500,13 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 				    trace("A new record under ".$value["up"][$n]);
 					if(isset($new_id_needed[$value["up"][$n]])) # Fetch the new ID of our parent
 						$value["up"][$n] = $new_id_needed[$value["up"][$n]];
-					if(preg_match_all('/[а-яА-Яa-zA-Z0-9\s]+/u', $value["val"][$n], $items) === 0){
-						$items = [$value["val"][$n]];
-						$batch = false;
-					}
-					else{
-						$items = $items[0];
-						$cache = [];
-						$batch = true;
-					}
+					# One row with the prepared value as is: text is never split (issue #5463),
+					# a Ref carries its target in t, extra multi-ref targets come from tList
+					$items = [$value["val"][$n]];
 					$ord = $value["ord"][$n] == 0 ? Calc_Order($value["up"][$n], $value["t"][$n]) : $value["ord"][$n];
 					foreach($items as $k => $v){
 						if(($k === 0) && isset($new_id_needed[$key."_".$value["new_id"][$n]]))	# Save the new ID in case some Reqs need to know it
 							$new_id_needed[$key."_".$value["new_id"][$n]] = Insert($value["up"][$n], $ord++, $value["t"][$n], $v, "INSERT new rec, get ID");
-						elseif($batch){
-							if(!isset($cache[$value["t"][$n].":$v"])){ // Do not create duplicates
-								Insert_batch($value["up"][$n], $ord++, $value["t"][$n], $v, "INSERT new rec ($n)");
-								$cache[$value["t"][$n].":$v"] = 1;
-							}
-						}
 						else
 							Insert_batch($value["up"][$n], $ord++, $value["t"][$n], $v, "INSERT new rec ($n)");
 						trace("  ref ".$GLOBALS["STORED_REPS"][$id]["ref_typ"][$v]);
@@ -6538,8 +6526,7 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 							}
 						}
 					}
-					if($batch)
-						Insert_batch("", "", "", "", "Flush Insert new Ref by val");
+					Insert_batch("", "", "", "", "Flush Insert new Ref by val");
 				}
 				elseif(substr($fields[$key],-4)===".ord")
 					Exec_sql("UPDATE $z SET ord=".(int)$value["val"][$n]." WHERE id=$i", "UPDATE Ord");
