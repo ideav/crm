@@ -436,7 +436,7 @@
         var material = mat && !/^(намотка|вт\.?|каучук|акрил)/i.test(mat[1]) ? mat[1] : '';
         var gl = /(каучук|акрил\S*|hot\s*melt)/i.exec(s);
         return { width: width, length: length, perRoll: perRoll, core: core ? core[1] : '', winding: winding,
-            material: material, glue: gl ? gl[1] : '', perRollRaw: perRollRaw, qtyIn: qtyIn };
+            material: material, glue: gl ? gl[1] : '', matte: /матов/i.test(s), perRollRaw: perRollRaw, qtyIn: qtyIn };
     }
 
     // Марка мастер-рулона из комментария 1С: «MONOCHROME 0043 SG/HM/YG 0,300 х 2000 (П) - 41 шт» →
@@ -901,6 +901,22 @@
         return '';
     }
 
+    // Номер марки сырья по правилу планировщика («Сырье» в «Плане на производство»: 43, 44, 45, 47, 52, 53, 55, 56):
+    // П/Гл — 43, ЭКО — 44, ТОП — 45, Vellum — 56; П/П — по клею и «матовый»: каучук 47 / матовый 55, акрил 52 / матовый 53.
+    // Совпадает с «Планом» в 98 % строк; исключения («ТОП» → 46) задаёт марка в комментарии 1С. → число или 0.
+    function materialNumber(label) {
+        var t = label && label.material ? norm(label.material).replace(/\s+/g, '') : '';
+        if (/^п\/гл|^пгл/.test(t)) return 43;
+        if (t === 'эко') return 44;
+        if (t === 'топ') return 45;
+        if (/^vellum/.test(t)) return 56;
+        if (t === 'п/п' || t === 'пп') {
+            var acryl = /^акрил/.test(norm(label.glue));
+            return acryl ? (label.matte ? 53 : 52) : (label.matte ? 55 : 47);
+        }
+        return 0;
+    }
+
     // Сырьё позиции по обозначению и клею из номенклатуры. materials — [{ id, name, base, glue }].
     // code — марка мастер-рулона из комментария 1С («0043 SG/HM/YG»): если есть, сырьё ищется только
     // по ней (название записи = марка), обозначение «П/Гл» уже не угадывается.
@@ -920,6 +936,12 @@
         if (!list.length) return { ok: false, reason: 'справочник «Сырьё этикетки» пуст' };
         var exact = list.filter(function(m) { return norm(m.name) === norm(token) || (glue && norm(m.name) === norm(token + ' ' + glue)); });
         if (exact.length === 1) return { ok: true, id: exact[0].id, name: exact[0].name, base: exact[0].base };
+        var no = materialNumber(label);
+        if (no) {
+            var prefix = '00' + no + ' ';
+            var byNo = list.filter(function(m) { return norm(m.name).indexOf(prefix) === 0; });
+            if (byNo.length === 1) return { ok: true, id: byNo[0].id, name: byNo[0].name, base: byNo[0].base };
+        }
         var hint = baseHint(token);
         if (!hint) return { ok: false, reason: 'материал «' + token + '» из 1С не опознан' };
         var cand = list.filter(function(m) { return norm(m.base) === hint; });
@@ -1243,6 +1265,7 @@
         findHeader: findHeader,
         parseNomenclature: parseNomenclature,
         matchMaterial: matchMaterial,
+        materialNumber: materialNumber,
         addDays: addDays,
         settingValue: settingValue,
         groupWarnings: groupWarnings,
