@@ -27,6 +27,8 @@
 //   E — дописывание в конец очереди зачёта не получает (разрушать нечего).
 //
 // Run with: node experiments/atex-pp-4510-marginal-seam-cost.test.js
+//
+// rules: PEN-seam-credit, PEN-no-sequence-weight
 
 process.env.TZ = 'UTC';
 global.window = { db: 'ateh1', xsrf: 'x' };

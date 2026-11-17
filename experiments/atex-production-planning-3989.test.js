@@ -5,6 +5,8 @@
 // Аддитивная фаза: движок раскладки не менялся, эти функции проверяются изолированно.
 //
 // Run with: node experiments/atex-production-planning-3989.test.js
+//
+// rules: PEN-knives-decrease, PEN-knives-increase, PEN-material, PEN-late, PEN-max-distance
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;
