@@ -1262,13 +1262,17 @@
     // ── Число мастер-рулонов из комментария 1С и сверка с расчётом (#5551) ────────────────
 
     // «MONOCHROME 0043 SG/HM/YG 0,300 х 2000 (П) - 41 шт» → [41]: количество МР по каждой марке
-    // комментария. Опора — толщина «0,300» перед «х длина МР»: «58 х 40 1500 шт.» не подходит.
-    var MR_COUNT_RE = /\d[,.]\d+\s*[хХxX]\s*\d{3,5}\s*(?:\([^)]*\))?\s*[-–—]?\s*(\d+(?:[.,]\d+)?)\s*шт/gi;
-    function mrCountFromComment(comment) {
+    // комментария. Опора — толщина «0,300» (или диапазон «0,246-270») перед «х длина МР»:
+    // «58 х 40 1500 шт.» не подходит. Строка без количества («со склада высечки») не считается.
+    var MR_COUNT_RE = /\d[,.]\d+(?:\s*[-–]\s*\d+)?\s*[хХxX]\s*(\d{3,5})\s*(?:\([^)]*\))?\s*[-–—]?\s*(\d+(?:[.,]\d+)?)\s*шт/gi;
+    function mrRollsFromComment(comment) {
         var out = [], m;
         MR_COUNT_RE.lastIndex = 0;
-        while ((m = MR_COUNT_RE.exec(String(comment == null ? '' : comment)))) out.push(Number(m[1].replace(',', '.')));
+        while ((m = MR_COUNT_RE.exec(String(comment == null ? '' : comment)))) out.push({ count: Number(m[2].replace(',', '.')), lengthM: Number(m[1]) });
         return out;
+    }
+    function mrCountFromComment(comment) {
+        return mrRollsFromComment(comment).map(function(r) { return r.count; });
     }
 
     // Допуск количества МР от 1С к расчёту (владелец, #5551).
@@ -1309,9 +1313,10 @@
         var labels = item.rolls * item.label.perRoll;
         var meters = Math.round(Math.ceil(labels / (type.perRepeat * type.streams) - 1e-9) * type.repeatMm) / 1000;
         res.calc = Math.round(meters / mr.mrLength * 100) / 100;
-        var counts = mrCountFromComment(item.comment);
-        if (!counts.length) return res;
-        res.file = counts.reduce(function(a, b) { return a + b; }, 0);
+        // Рулоны другой длины («0,240 х 1000 - 1 шт») — в МР длины из настройки: 1 × 1000 м = 0,5 МР по 2000 м.
+        var rolls = mrRollsFromComment(item.comment);
+        if (!rolls.length) return res;
+        res.file = Math.round(rolls.reduce(function(a, r) { return a + r.count * (r.lengthM || mr.mrLength) / mr.mrLength; }, 0) * 100) / 100;
         var lo = res.calc * (1 - MR_TOLERANCE), hi = res.calc * (1 + MR_TOLERANCE);
         // Целое «вверх» — штатный запас: 21 при расчёте 20,64 — не ошибка.
         var inTol = res.file >= lo - 1e-9 && res.file <= hi + 1e-9;
