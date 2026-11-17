@@ -125,7 +125,7 @@ async function t(name, fn) {
         vm.runInContext(fs.readFileSync(path.join(dir, 'js', 'core.js'), 'utf8'), ctx);
         const calls = [];
         const f = (url, init) => { calls.push(url); return Promise.resolve(route(url, init)); };
-        return { S: ctx.LMSCore, f, calls };
+        return { S: ctx.LMSCore, f, calls, ctx };
     }
     const meta = { id: '18', val: 'Пользователь', reqs: [{ id: 115, val: 'Роль' }, { id: 33, val: 'Имя' }] };
 
@@ -182,6 +182,23 @@ async function t(name, fn) {
         assert.strictEqual(c.S.cabinetUrl('courses', '/download/courses/core.html?db=courses&x=1'),
             'https://ideav.ru/my/coresso?db=courses&back=%2Fdownload%2Fcourses%2Fcore.html%3Fdb%3Dcourses%26x%3D1');
         assert.strictEqual(c.S.cabinetUrl('courses'), 'https://ideav.ru/my/coresso?db=courses&back=%2F');
+    });
+
+    // util.js открывает ссылки на чужой домен без target в новой вкладке (window.open): вход из ЛК
+    // тогда ставит сессию в новой вкладке, а портал остаётся гостем. Ссылка входа — в этой же вкладке.
+    await t('core.js: кнопка входа из ЛК — в этой же вкладке (target=_self) и с путём возврата', async () => {
+        const c = core(() => json(200, {}));
+        const made = [];
+        const el = (tag, attrs, kids) => { const e = { tag, attrs: attrs || {}, kids: [].concat(kids || []), remove() {}, focus() {},
+            querySelector() { return e; }, appendChild() {} }; made.push(e); return e; };
+        c.ctx.location.pathname = '/download/courses/core.html';
+        c.ctx.document.getElementById = () => null;
+        c.ctx.document.body = { appendChild() {} };
+        c.S.showLogin({ el }, 'courses');
+        const link = made.find(e => e.tag === 'a' && /coresso/.test(e.attrs.href || ''));
+        assert.ok(link, 'нет ссылки входа из ЛК');
+        assert.strictEqual(link.attrs.href, 'https://ideav.ru/my/coresso?db=courses&back=%2Fdownload%2Fcourses%2Fcore.html');
+        assert.strictEqual(link.attrs.target, '_self');
     });
 
     console.log(failed ? `\n${failed} FAIL` : '\nall ok');
