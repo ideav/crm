@@ -13,7 +13,7 @@
  *
  * Использование:
  *   Браузер: открыть /vidget.php, вставить ссылку
- *   CLI:     php vidget.php "https://www.youtube.com/watch?v=XXXX" [mp4|mp3]
+ *   CLI:     php vidget.php "https://www.youtube.com/watch?v=XXXX" [mp4|mp3] [best|1080|720|480]
  */
 
 // ---------- Настройки ----------
@@ -95,6 +95,26 @@ function proxyUrl(): string
     return preg_match('~^(socks5h?|socks4a?|https?)://([^\s@/]+@)?[A-Za-z0-9.-]+:\d{1,5}/?$~', $raw) ? $raw : '';
 }
 
+/** Качество видео из формы: высота кадра (не выше) или best. Чужое значение — best. */
+function quality(string $q): string
+{
+    return in_array($q, ['1080', '720', '480'], true) ? $q : 'best';
+}
+
+/**
+ * Выбор формата yt-dlp: H.264 (avc1) с m4a, затем любой mp4, иначе что есть;
+ * с ограничением высоты кадра, если задано. H.264 первым: AV1/VP9 в mp4 стандартный
+ * плеер Windows без расширения кодека не декодирует и играет только звук (#5542).
+ */
+function videoFormat(string $quality): string
+{
+    $h = $quality === 'best' ? '' : '[height<=' . $quality . ']';
+    $f = 'bv*' . $h . '[vcodec^=avc1]+ba[ext=m4a]/b' . $h . '[vcodec^=avc1]'
+        . '/bv*' . $h . '[ext=mp4]+ba[ext=m4a]/b' . $h . '[ext=mp4]/bv*' . $h . '+ba/b' . $h;
+    // сайт не сообщил высоту ни одного формата — берём лучшее, а не падаем
+    return $h === '' ? $f : $f . '/b';
+}
+
 function cleanupStale(): void
 {
     foreach (glob(DOWNLOAD_DIR . '/*') ?: [] as $f) {
@@ -105,9 +125,12 @@ function cleanupStale(): void
 }
 
 /**
- * @return array{ok:bool, file?:string, error?:string}
+ * Проверки и командная строка yt-dlp для задания $id.
+ * $progress — печатать прогресс построчно (для фоновой закачки со страницы).
+ *
+ * @return array{ok:bool, cmd?:string, error?:string}
  */
-function downloadVideo(string $url, string $format = 'mp4'): array
+function prepareJob(string $url, string $format, string $id, bool $progress, string $quality = 'best'): array
 {
     $bad = checkUrl($url);
     if ($bad !== '') {
@@ -121,13 +144,17 @@ function downloadVideo(string $url, string $format = 'mp4'): array
     }
     cleanupStale();
 
-    $id       = bin2hex(random_bytes(6));
     $template = DOWNLOAD_DIR . '/' . $id . '_%(title).80s.%(ext)s';
 
-    $args = [
+    $args = [];
+    // фоновая закачка не ограничена set_time_limit запроса — её обрывает timeout
+    if ($progress && is_executable('/usr/bin/timeout')) {
+        array_push($args, '/usr/bin/timeout', (string) MAX_RUNTIME);
+    }
+    array_push($args,
         YTDLP_BIN,
         '--no-playlist',
-        '--no-progress',
+        $progress ? '--newline' : '--no-progress',
         '--no-cache-dir',
         // только сайты, для которых в yt-dlp есть свой модуль (YouTube, VK, Rutube, Яндекс,
         // Дзен, ОК, Mail.ru и ещё ~1800); «generic» выключен — он пошёл бы по любой ссылке
@@ -136,9 +163,9 @@ function downloadVideo(string $url, string $format = 'mp4'): array
         // TLS-рукопожатие через прокси иногда рвётся: повторять и докачивать, а не бросать
         '--retries', '30',
         '--fragment-retries', '30',
-        '--socket-timeout', '30',
-        '-o', $template,
-    ];
+        '--socket-timeout', '15',
+        '-o', $template
+    );
     $youtube = isYoutubeHost(urlHost($url));
     // прокси — только для YouTube: российские сайты из-за рубежа часто не отдают видео
     $proxy = $youtube ? proxyUrl() : '';
@@ -156,15 +183,22 @@ function downloadVideo(string $url, string $format = 'mp4'): array
     if ($format === 'mp3') {
         array_push($args, '-x', '--audio-format', 'mp3');
     } else {
-        array_push($args, '-f', 'bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b', '--merge-output-format', 'mp4');
+        array_push($args, '-f', videoFormat($quality), '--merge-output-format', 'mp4');
     }
     // "--" — дальше только URL, даже если он начинается с дефиса
     array_push($args, '--', $url);
 
     // Каждый аргумент экранируется — защита от command injection
-    $cmd = implode(' ', array_map('escapeshellarg', $args)) . ' 2>&1';
-    exec($cmd, $output, $code);
+    return ['ok' => true, 'cmd' => implode(' ', array_map('escapeshellarg', $args))];
+}
 
+/**
+ * Итог закачки $id по коду выхода и выводу yt-dlp.
+ *
+ * @return array{ok:bool, file?:string, error?:string}
+ */
+function jobResult(string $id, int $code, array $output): array
+{
     $files = array_values(array_filter(
         glob(DOWNLOAD_DIR . '/' . $id . '_*') ?: [],
         function ($f) { return !preg_match('/\.(part|ytdl|temp)$/', $f); }
@@ -173,13 +207,121 @@ function downloadVideo(string $url, string $format = 'mp4'): array
         foreach (glob(DOWNLOAD_DIR . '/' . $id . '_*') ?: [] as $f) {
             @unlink($f);
         }
+        // строки прогресса в причину ошибки не берём
+        $output = array_filter($output, function ($l) { return !preg_match('/^\[download\]\s+[\d.]+%/', $l); });
         $tail = implode("\n", array_slice($output, -5));
         if (stripos($tail, 'Unsupported URL') !== false) {
             return ['ok' => false, 'error' => 'Этот сайт не поддерживается.'];
         }
+        if ($code === 124) {
+            return ['ok' => false, 'error' => 'Закачка не уложилась в ' . intdiv(MAX_RUNTIME, 60) . ' минут.'];
+        }
         return ['ok' => false, 'error' => 'Ошибка yt-dlp: ' . $tail];
     }
     return ['ok' => true, 'file' => $files[0]];
+}
+
+/**
+ * Синхронная закачка (CLI и форма без JavaScript).
+ *
+ * @return array{ok:bool, file?:string, error?:string}
+ */
+function downloadVideo(string $url, string $format = 'mp4', string $quality = 'best'): array
+{
+    $id  = bin2hex(random_bytes(6));
+    $job = prepareJob($url, $format, $id, false, $quality);
+    if (!$job['ok']) {
+        return $job;
+    }
+    exec($job['cmd'] . ' 2>&1', $output, $code);
+    return jobResult($id, $code, $output);
+}
+
+// ---------- Фоновая закачка с прогрессом (страница опрашивает статус) ----------
+function jobPath(string $id, string $ext): string
+{
+    return DOWNLOAD_DIR . '/' . $id . '.' . $ext; // без «_» — не попадает в glob файлов результата
+}
+
+function validJobId(string $id): bool
+{
+    return (bool) preg_match('/^[0-9a-f]{12}$/', $id);
+}
+
+/**
+ * @return array{ok:bool, id?:string, error?:string}
+ */
+function startJob(string $url, string $format, string $quality = 'best'): array
+{
+    $id  = bin2hex(random_bytes(6));
+    $job = prepareJob($url, $format, $id, true, $quality);
+    if (!$job['ok']) {
+        return $job;
+    }
+    $log  = escapeshellarg(jobPath($id, 'log'));
+    $code = jobPath($id, 'code');
+    // код выхода пишется через временный файл и mv — опрос не прочтёт его наполовину
+    $inner = $job['cmd'] . ' > ' . $log . ' 2>&1; echo $? > ' . escapeshellarg($code . '.tmp')
+        . ' && mv ' . escapeshellarg($code . '.tmp') . ' ' . escapeshellarg($code);
+    exec('nohup sh -c ' . escapeshellarg($inner) . ' > /dev/null 2>&1 &');
+    return ['ok' => true, 'id' => $id];
+}
+
+function dropJob(string $id): void
+{
+    foreach (['log', 'code', 'code.tmp'] as $ext) {
+        @unlink(jobPath($id, $ext));
+    }
+}
+
+/**
+ * @return array{state:string, percent?:float, stage?:string, error?:string}
+ */
+function jobStatus(string $id): array
+{
+    $logFile = jobPath($id, 'log');
+    $log     = is_readable($logFile) ? (string) file_get_contents($logFile) : '';
+    $codeRaw = @file_get_contents(jobPath($id, 'code'));
+    if ($codeRaw === false && $log === '') {
+        // yt-dlp ещё ничего не написал; зависшее задание страница бросает по своему таймеру
+        return ['state' => 'running', 'stage' => 'Запускаем…'];
+    }
+    if ($codeRaw !== false && trim($codeRaw) !== '') {
+        $res = jobResult($id, (int) trim($codeRaw), preg_split('/\r?\n/', trim($log)));
+        if (!$res['ok']) {
+            dropJob($id);
+            return ['state' => 'error', 'error' => $res['error']];
+        }
+        return ['state' => 'done'];
+    }
+
+    $lines = preg_split('/\r?\n/', trim($log));
+    $parts = count(preg_grep('/^\[download\] Destination:/', $lines));
+    $last  = (string) end($lines);
+    if (preg_match('/^\[(Merger|VideoConvertor|FixupM3u8)\]/', $last)) {
+        return ['state' => 'running', 'stage' => 'Склеиваем видео и звук…'];
+    }
+    if (preg_match('/^\[ExtractAudio\]/', $last)) {
+        return ['state' => 'running', 'stage' => 'Конвертируем в MP3…'];
+    }
+    $res = ['state' => 'running'];
+    // обрыв связи: yt-dlp ждёт до --socket-timeout и повторяет — без этой строки страница «висит»
+    if (preg_match('/Retrying \((\d+)\/(\d+)\)/', $last, $r)) {
+        $res['note'] = 'связь с сайтом оборвалась, повтор ' . $r[1] . ' из ' . $r[2];
+    }
+    if (preg_match_all('/^\[download\]\s+([\d.]+)% of\s+~?\s*([\d.]+)(\w+)(?:.*ETA\s+([\d:]+))?/m', $log, $m, PREG_SET_ORDER)) {
+        $p = end($m);
+        $res['percent'] = (float) $p[1];
+        $res['size']    = $p[2] . ' ' . strtr($p[3], ['GiB' => 'ГБ', 'MiB' => 'МБ', 'KiB' => 'КБ']);
+        if (!empty($p[4]) && !isset($res['note'])) {
+            $res['eta'] = $p[4];
+        }
+        $res['stage'] = $parts > 1 ? 'Качаем звук' : 'Качаем';
+        return $res;
+    }
+    $res['stage'] = preg_grep('/Solving JS challenges/', $lines)
+        ? 'Проходим проверку сайта…' : 'Получаем сведения о видео…';
+    return $res;
 }
 
 function sendFile(string $path): void
@@ -202,7 +344,7 @@ function sendFile(string $path): void
 if (PHP_SAPI === 'cli') {
     $url    = $argv[1] ?? '';
     $format = ($argv[2] ?? 'mp4') === 'mp3' ? 'mp3' : 'mp4';
-    $res    = downloadVideo($url, $format);
+    $res    = downloadVideo($url, $format, quality($argv[3] ?? 'best'));
     if ($res['ok']) {
         echo "Готово: {$res['file']}\n";
         exit(0);
@@ -216,11 +358,43 @@ header('X-Robots-Tag: noindex, nofollow, noarchive, nosnippet');
 header('Cache-Control: no-store');
 header('Referrer-Policy: no-referrer');
 
+function sendJson(array $data): void
+{
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode($data, JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+// статус фоновой закачки: ?job=<id>
+if (isset($_GET['job'])) {
+    $id = (string) $_GET['job'];
+    sendJson(validJobId($id) ? jobStatus($id) : ['state' => 'error', 'error' => 'Задание не найдено.']);
+}
+// готовый файл фоновой закачки: ?file=<id>
+if (isset($_GET['file'])) {
+    $id  = (string) $_GET['file'];
+    $res = validJobId($id) && trim((string) @file_get_contents(jobPath($id, 'code'))) === '0'
+        ? jobResult($id, 0, []) : ['ok' => false];
+    if ($res['ok']) {
+        dropJob($id);
+        sendFile($res['file']);
+    }
+    http_response_code(404);
+    header('Content-Type: text/plain; charset=utf-8');
+    echo 'Файл не найден или уже скачан.';
+    exit;
+}
+
 $error = '';
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
     $url    = trim($_POST['url'] ?? '');
     $format = ($_POST['format'] ?? 'mp4') === 'mp3' ? 'mp3' : 'mp4';
-    $res    = downloadVideo($url, $format);
+    $quality = quality($_POST['quality'] ?? 'best');
+    if (!empty($_POST['async'])) {
+        sendJson(startJob($url, $format, $quality));
+    }
+    // без JavaScript: закачка в этом же запросе, файл — ответом
+    $res    = downloadVideo($url, $format, $quality);
     if ($res['ok']) {
         sendFile($res['file']);
     }
@@ -242,22 +416,84 @@ header('Content-Type: text/html; charset=utf-8');
         button { margin-top: 12px; padding: 8px 16px; }
         .err { color: #b00020; white-space: pre-wrap; margin-top: 12px; }
         .hint { color: #666; font-size: 13px; margin-top: 12px; }
+        #wait { display: flex; align-items: center; gap: 10px; }
+        #wait[hidden] { display: none; }
+        .spin { flex: none; width: 18px; height: 18px; border: 3px solid #ddd; border-top-color: #1a73e8;
+                border-radius: 50%; animation: spin .8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .bar { height: 6px; background: #eee; border-radius: 3px; margin-top: 8px; overflow: hidden; }
+        .bar[hidden] { display: none; }
+        .bar > div { height: 100%; width: 0; background: #1a73e8; transition: width .4s; }
+        .ok { color: #137333; margin-top: 12px; }
+        .err:empty { display: none; }
     </style>
 </head>
 <body>
     <h2>Скачать видео</h2>
     <p class="hint">YouTube, VK Видео, Rutube, Яндекс, Дзен, Одноклассники, Mail.ru и <a href="https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md" rel="noreferrer" target="_blank">другие сайты</a>.</p>
-    <form method="post" onsubmit="document.getElementById('wait').hidden=false">
+    <form method="post" id="form">
         <input type="text" name="url" placeholder="Ссылка на видео: https://…" required>
         <p>
             <label><input type="radio" name="format" value="mp4" checked> Видео (MP4)</label>
             <label><input type="radio" name="format" value="mp3"> Только аудио (MP3)</label>
         </p>
-        <button type="submit">Скачать</button>
+        <p>
+            <label>Качество видео:
+                <select name="quality">
+                    <option value="best">Лучшее</option>
+                    <option value="1080">До 1080p</option>
+                    <option value="720" selected>До 720p — быстрее</option>
+                    <option value="480">До 480p</option>
+                </select>
+            </label>
+        </p>
+        <button type="submit" id="go">Скачать</button>
     </form>
-    <div id="wait" class="hint" hidden>Качаем на сервер, потом браузер предложит сохранить файл. Длинное видео — до нескольких минут.</div>
-    <?php if ($error): ?>
-        <div class="err"><?= htmlspecialchars($error, ENT_QUOTES, 'UTF-8') ?></div>
-    <?php endif; ?>
+    <div id="wait" class="hint" hidden><span class="spin"></span><span id="stage">Качаем на сервер, потом браузер предложит сохранить файл. Длинное видео — до нескольких минут.</span></div>
+    <div class="bar" id="bar" hidden><div id="fill"></div></div>
+    <div class="ok" id="done" hidden>Готово — браузер сохраняет файл.</div>
+    <div class="err" id="err"><?= htmlspecialchars($error, ENT_QUOTES, 'UTF-8') ?></div>
+<script>
+(function () {
+    var form = document.getElementById('form'), go = document.getElementById('go');
+    var wait = document.getElementById('wait'), stage = document.getElementById('stage');
+    var bar = document.getElementById('bar'), fill = document.getElementById('fill');
+    var done = document.getElementById('done'), err = document.getElementById('err');
+    var LIMIT_MS = <?= (MAX_RUNTIME + 60) * 1000 ?>;
+
+    function finish(msg) {
+        wait.hidden = true; bar.hidden = true; go.disabled = false;
+        if (msg) err.textContent = msg; else done.hidden = false;
+    }
+    function poll(id, started) {
+        if (Date.now() - started > LIMIT_MS) return finish('Сервер не ответил, попробуйте ещё раз.');
+        fetch('?job=' + id, { cache: 'no-store' }).then(function (r) { return r.json(); }).then(function (s) {
+            if (s.state === 'error') return finish(s.error);
+            if (s.state === 'done') { finish(''); location.href = '?file=' + id; return; }
+            var pct = typeof s.percent === 'number' ? s.percent : null;
+            stage.textContent = (s.stage || 'Качаем')
+                + (pct !== null ? ' — ' + pct.toFixed(1) + '%' + (s.size ? ' из ' + s.size : '') : '')
+                + (s.eta ? ', осталось ' + s.eta : '')
+                + (s.note ? ' (' + s.note + '…)' : '');
+            bar.hidden = pct === null;
+            if (pct !== null) fill.style.width = pct + '%';
+            setTimeout(function () { poll(id, started); }, 1000);
+        }).catch(function () { setTimeout(function () { poll(id, started); }, 2000); });
+    }
+    form.addEventListener('submit', function (e) {
+        if (!window.fetch) { wait.hidden = false; return; } // старый браузер — обычная отправка
+        e.preventDefault();
+        var data = new FormData(form);
+        data.append('async', '1');
+        err.textContent = ''; done.hidden = true; go.disabled = true;
+        wait.hidden = false; bar.hidden = true; fill.style.width = '0';
+        stage.textContent = 'Проверяем ссылку…';
+        fetch(location.pathname, { method: 'POST', body: data }).then(function (r) { return r.json(); }).then(function (r) {
+            if (!r.ok) return finish(r.error);
+            poll(r.id, Date.now());
+        }).catch(function () { finish('Сервер не ответил, попробуйте ещё раз.'); });
+    });
+})();
+</script>
 </body>
 </html>

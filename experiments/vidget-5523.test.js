@@ -57,6 +57,7 @@ async function waitUp(port) {
             assert.match(get.body, /<meta name="robots" content="noindex/));
         check('форма с полем url и выбором mp4/mp3', () => {
             assert.match(get.body, /name="url"/);
+            assert.match(get.body, /name="quality"/);
             assert.match(get.body, /value="mp3"/);
         });
 
@@ -164,6 +165,42 @@ async function waitUp(port) {
         const m = ytCookies.match(/--retries (\d+)/);
         assert.ok(m && Number(m[1]) >= 30, ytCookies);
         assert.match(ytCookies, /--fragment-retries \d+/);
+    });
+    // #5535: каждый обрыв связи ждёт --socket-timeout — 15 с, а не 30
+    check('таймаут сокета 15 с', () => assert.match(ytCookies, /--socket-timeout 15( |$)/, ytCookies));
+    // #5535: выбор качества — высота кадра не выше заданной; без выбора и при мусоре — лучшее
+    const withQuality = (q) => {
+        try { fs.unlinkSync(argsOut); } catch (e) { /* нет — и ладно */ }
+        spawnSync('php', [page, 'https://1.1.1.1/video/123', 'mp4'].concat(q ? [q] : []), {
+            encoding: 'utf8', env: Object.assign({}, process.env, { VIDGET_YTDLP: fake, VIDGET_PROXY_FILE: proxyFile }),
+        });
+        return fs.existsSync(argsOut) ? fs.readFileSync(argsOut, 'utf8') : '';
+    };
+    const q720 = withQuality('720');
+    check('качество 720p ограничивает высоту кадра', () => {
+        assert.match(q720, /-f [^ ]*\[height<=720\]/, q720);
+        assert.doesNotMatch(q720, /height<=1080/);
+    });
+    const qBest = withQuality(null);
+    check('без выбора качества — без ограничения высоты', () => {
+        assert.ok(qBest.length > 0, 'yt-dlp не был вызван');
+        assert.doesNotMatch(qBest, /height<=/);
+    });
+    const qJunk = withQuality('9999]+ba/b[x');
+    check('мусор вместо качества не попадает в -f', () => {
+        assert.ok(qJunk.length > 0, 'yt-dlp не был вызван');
+        assert.doesNotMatch(qJunk, /9999|height<=/);
+    });
+    // #5542: AV1/VP9 в mp4 стандартный плеер Windows не декодирует — играет только звук.
+    // Первым вариантом -f должно идти H.264 (avc1), и при выборе качества тоже.
+    const firstAlt = (args) => {
+        const m = args.match(/-f ([^ ]+)/);
+        return m ? m[1].split('/')[0] : '';
+    };
+    check('видео — сначала H.264 (avc1)', () => {
+        assert.match(firstAlt(qBest), /\[vcodec\^=avc1\]/, qBest);
+        assert.match(firstAlt(q720), /\[vcodec\^=avc1\]/, q720);
+        assert.match(firstAlt(q720), /\[height<=720\]/, q720);
     });
     fs.rmSync(tmp, { recursive: true, force: true });
     }
