@@ -142,7 +142,7 @@ assert(c9 && c9.dieId === 'k1' && c9.positionWrite && c9.positionWrite.die === '
     'D9: у позиции «нет ножа» планирование подобрало нож — он пишется в позицию («Подбор ножа» = подобран)', JSON.stringify(c9 && c9.positionWrite));
 // позиция с этим же ножом, уже записанным, — писать нечего
 var probe = LO.planPosition(pos9[1], dies9, { mrLength: 2000 }).write;
-var pos9b = [LO.positionFromRow(prow('p3', { 'НожID': 'k1', 'Нож': '111', 'Подбор ножа': 'подобран', 'Мин. партия': probe.minBatch, 'Втулка, мм': probe.sleeveWidth }), mats)];
+var pos9b = [LO.positionFromRow(prow('p3', { 'НожID': 'k1', 'Нож': '111', 'Подбор ножа': 'подобран', 'Мин. партия': probe.minBatch, 'МР расчётное': probe.mrCalc, 'Втулка, мм': probe.sleeveWidth }), mats)];
 var f9b = C.formJobs({ positions: pos9b, dies: dies9, jobs: [], settings: S, mrLength: 2000 });
 assert(f9b.create.length === 1 && !f9b.create[0].positionWrite, 'D9: в позиции уже записан этот нож — позиция не переписывается', JSON.stringify(f9b.create[0] && f9b.create[0].positionWrite));
 var TP = { position: { id: '70', reqs: { die: '71', diePick: '72', minBatch: '73', itsNeeded: '74' } } };

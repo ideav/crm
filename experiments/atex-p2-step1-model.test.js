@@ -84,7 +84,8 @@ function buildMetadata(base) {
         var spec = cfg.tables[key];
         if (!declared[spec.name]) { notDeclared.push(spec.name); return; }
         Object.keys(spec.reqs || {}).forEach(function(rk) {
-            if (!declared[spec.name][spec.reqs[rk]]) notDeclared.push(spec.name + ' → ' + spec.reqs[rk]);
+            var names = [].concat(spec.reqs[rk]);   // список — прежнее и новое имя колонки
+            if (!names.some(function(n) { return declared[spec.name][n]; })) notDeclared.push(spec.name + ' → ' + names[0]);
         });
     });
     assert(notDeclared.length === 0, 'все таблицы и поля конфигурации «этикетка» объявлены в docs/atex_phase2_schema.json',

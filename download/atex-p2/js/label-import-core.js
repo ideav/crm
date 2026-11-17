@@ -49,7 +49,7 @@
         } },
         dieType: { name: 'Тип ножа', reqs: {
             labelWidth: 'Ширина этикетки, мм', labelLength: 'Длина этикетки, мм',
-            streams: 'Ручьёв', labelsPerRepeat: 'Этикеток на раппорте', labelGap: 'М/э расстояние, мм',
+            streams: 'Ручьёв', labelsPerRepeat: ['Ручьев / (этикеток) на раппорте', 'Этикеток на раппорте'], labelGap: 'М/э расстояние, мм',
             streamGap: 'Между ручьями, мм', edge: 'Ширина кромки, мм', cylinder: 'Вал', base: ['Основа сырья', 'Основа'],
             minFormat: 'Минимальный формат, мм', optFormat: 'Оптимальный формат, мм', usedFormat: 'Исп. формат, мм',
             sleeveWidth: 'Ширина втулки, мм', angle: 'Угол заточки'
@@ -68,8 +68,8 @@
             labelWidth: 'Ширина этикетки, мм', labelLength: 'Длина этикетки, мм', labelsPerRoll: 'Этикеток в рулоне',
             knifeType: 'Тип ножей', core: 'Диаметр втулки', winding: 'Тип намотки', unit: 'Ед.изм.',
             status: ['Статус позиции', 'Статус'], note: 'Примечание',
-            material: 'Сырьё этикетки', due: 'Срок изготовления'
-        }, optionalReqs: ['material', 'due'] },
+            material: 'Сырьё этикетки', due: 'Срок изготовления', mrCalc: 'Мастер-рулонов расчётное'
+        }, optionalReqs: ['material', 'due', 'mrCalc'] },
         material: { name: 'Сырьё этикетки', optional: true, reqs: { base: ['Основа сырья', 'Основа'], glue: 'Клей' }, optionalReqs: ['base', 'glue'] },
         setting: { name: 'Настройка', optional: true, reqs: { type: 'Тип', value: 'Значение' }, optionalReqs: ['type', 'value'] },
         client: { name: 'Клиент', reqs: {} },
@@ -270,7 +270,7 @@
     var TYPE_MATCH_KEYS = ['labelWidth', 'labelLength', 'angle', 'streamGap', 'labelGap', 'streams', 'cylinder'];
 
     var NUM_LABEL = {
-        labelWidth: 'ширина этикетки', labelLength: 'длина этикетки', streams: 'ручьёв', labelsPerRepeat: 'этикеток на раппорте',
+        labelWidth: 'ширина этикетки', labelLength: 'длина этикетки', streams: 'ручьёв', labelsPerRepeat: 'ручьев / (этикеток) на раппорте',
         labelGap: 'м/э расстояние', streamGap: 'между ручьями', edge: 'ширина кромки', minFormat: 'минимальный формат',
         optFormat: 'оптимальный формат', usedFormat: 'исп. формат', sleeveWidth: 'ширина втулки', height: 'высота ножа'
     };
@@ -436,7 +436,7 @@
         var material = mat && !/^(намотка|вт\.?|каучук|акрил)/i.test(mat[1]) ? mat[1] : '';
         var gl = /(каучук|акрил\S*|hot\s*melt)/i.exec(s);
         return { width: width, length: length, perRoll: perRoll, core: core ? core[1] : '', winding: winding,
-            material: material, glue: gl ? gl[1] : '', perRollRaw: perRollRaw, qtyIn: qtyIn };
+            material: material, glue: gl ? gl[1] : '', matte: /матов/i.test(s), perRollRaw: perRollRaw, qtyIn: qtyIn };
     }
 
     // Марка мастер-рулона из комментария 1С: «MONOCHROME 0043 SG/HM/YG 0,300 х 2000 (П) - 41 шт» →
@@ -862,7 +862,9 @@
         { key: 'knifeType', kind: 'text' }, { key: 'core', kind: 'ref' }, { key: 'winding', kind: 'text' },
         { key: 'unit', kind: 'ref' }, { key: 'status', kind: 'ref', createOnly: true }, { key: 'note', kind: 'text', createOnly: true },
         // Сырьё и срок подбирает импорт, но выбор менеджера не затирает: у существующей позиции они пишутся, только если пусты.
-        { key: 'material', kind: 'ref', fillOnly: true }, { key: 'due', kind: 'text', fillOnly: true }
+        { key: 'material', kind: 'ref', fillOnly: true }, { key: 'due', kind: 'text', fillOnly: true },
+        // Расчётное МР по типу ножа (#5551): ножной подбор в «Заказах этикетки» его перепишет по выбранному ножу.
+        { key: 'mrCalc', kind: 'num', fillOnly: true }
     ];
 
     // Настройка «срок = поступление + N дней»: допущение тест-цикла (14), владелец подтвердит.
@@ -901,6 +903,22 @@
         return '';
     }
 
+    // Номер марки сырья по правилу планировщика («Сырье» в «Плане на производство»: 43, 44, 45, 47, 52, 53, 55, 56):
+    // П/Гл — 43, ЭКО — 44, ТОП — 45, Vellum — 56; П/П — по клею и «матовый»: каучук 47 / матовый 55, акрил 52 / матовый 53.
+    // Совпадает с «Планом» в 98 % строк; исключения («ТОП» → 46) задаёт марка в комментарии 1С. → число или 0.
+    function materialNumber(label) {
+        var t = label && label.material ? norm(label.material).replace(/\s+/g, '') : '';
+        if (/^п\/гл|^пгл/.test(t)) return 43;
+        if (t === 'эко') return 44;
+        if (t === 'топ') return 45;
+        if (/^vellum/.test(t)) return 56;
+        if (t === 'п/п' || t === 'пп') {
+            var acryl = /^акрил/.test(norm(label.glue));
+            return acryl ? (label.matte ? 53 : 52) : (label.matte ? 55 : 47);
+        }
+        return 0;
+    }
+
     // Сырьё позиции по обозначению и клею из номенклатуры. materials — [{ id, name, base, glue }].
     // code — марка мастер-рулона из комментария 1С («0043 SG/HM/YG»): если есть, сырьё ищется только
     // по ней (название записи = марка), обозначение «П/Гл» уже не угадывается.
@@ -920,6 +938,12 @@
         if (!list.length) return { ok: false, reason: 'справочник «Сырьё этикетки» пуст' };
         var exact = list.filter(function(m) { return norm(m.name) === norm(token) || (glue && norm(m.name) === norm(token + ' ' + glue)); });
         if (exact.length === 1) return { ok: true, id: exact[0].id, name: exact[0].name, base: exact[0].base };
+        var no = materialNumber(label);
+        if (no) {
+            var prefix = '00' + no + ' ';
+            var byNo = list.filter(function(m) { return norm(m.name).indexOf(prefix) === 0; });
+            if (byNo.length === 1) return { ok: true, id: byNo[0].id, name: byNo[0].name, base: byNo[0].base };
+        }
         var hint = baseHint(token);
         if (!hint) return { ok: false, reason: 'материал «' + token + '» из 1С не опознан' };
         var cand = list.filter(function(m) { return norm(m.base) === hint; });
@@ -989,7 +1013,7 @@
             if (n != null && !isNaN(n) && n >= 0) dueDays = Math.round(n);
         }
         return {
-            tables: tables, orders: orders, dupInBase: dupInBase, positions: positions, materials: materials, dueDays: dueDays,
+            mr: mrContext(tables, d), tables: tables, orders: orders, dupInBase: dupInBase, positions: positions, materials: materials, dueDays: dueDays,
             dict: {
                 client: dictByLabel(d.clients), article: dictByLabel(d.articles), productKind: dictByLabel(d.productKinds),
                 core: coreDict(d.cores), unit: dictByLabel(d.units)
@@ -1097,6 +1121,9 @@
                 var due = t.position.reqs.due ? addDays(item.received, ctx.dueDays) : '';
                 put('due', due);
                 if (matchRes && matchRes.ok) put('material', matchRes.id, matchRes.name);
+                var mrRes = checkMasterRolls(item, ctx.mr);
+                if (mrRes.warning) row.warnings.push(mrRes.warning);
+                if (mrRes.calc != null) put('mrCalc', fmtNum(mrRes.calc));
                 // Количество позиции — рулоны: пересчитанное из этикеток пишется с единицей «шт» (рулонов).
                 var unit = item.inLabels ? 'шт' : item.unit;
                 if (unit) {
@@ -1232,6 +1259,69 @@
         });
     }
 
+    // ── Число мастер-рулонов из комментария 1С и сверка с расчётом (#5551) ────────────────
+
+    // «MONOCHROME 0043 SG/HM/YG 0,300 х 2000 (П) - 41 шт» → [41]: количество МР по каждой марке
+    // комментария. Опора — толщина «0,300» перед «х длина МР»: «58 х 40 1500 шт.» не подходит.
+    var MR_COUNT_RE = /\d[,.]\d+\s*[хХxX]\s*\d{3,5}\s*(?:\([^)]*\))?\s*[-–—]?\s*(\d+(?:[.,]\d+)?)\s*шт/gi;
+    function mrCountFromComment(comment) {
+        var out = [], m;
+        MR_COUNT_RE.lastIndex = 0;
+        while ((m = MR_COUNT_RE.exec(String(comment == null ? '' : comment)))) out.push(Number(m[1].replace(',', '.')));
+        return out;
+    }
+
+    // Допуск количества МР от 1С к расчёту (владелец, #5551).
+    var MR_TOLERANCE = 0.1;
+
+    // Данные для сверки МР: типы ножей по названию (= «Тип ножей» из 1С), раппорты валов, длина МР.
+    function mrContext(tables, d) {
+        var out = { types: {}, mrLength: 2000 };
+        if (!tables.dieType) return out;
+        var cyl = {};
+        (d.cylinders || []).forEach(function(r) {
+            var col = tables.cylinder && tables.cylinder.reqs.repeat;
+            var rep = col ? cellNum(reqText(r, col)) : NaN;
+            var n = cellNum(r.val);
+            cyl[r.id] = rep > 0 ? rep : (n > 0 ? Math.round(n * 3.175 * 1000) / 1000 : 0);
+        });
+        (d.dieTypes || []).forEach(function(r) {
+            var v = valuesOf(r, tables.dieType, TYPE_FIELDS);
+            var key = norm(r.val);
+            if (key && !out.types[key]) out.types[key] = { streams: cellNum(v.streams), perRepeat: cellNum(v.labelsPerRepeat), repeatMm: cyl[v.cylinder] || 0 };
+        });
+        var len = cellNum(settingValue(((tables.setting && tables.setting.reqs.value) ? (d.settings || []) : []).map(function(r) {
+            return { key: r.val, type: tables.setting.reqs.type ? reqText(r, tables.setting.reqs.type) : '', value: reqText(r, tables.setting.reqs.value) };
+        }), 'LABEL_MASTER_ROLL_M', d.db));
+        if (len > 0) out.mrLength = len;
+        return out;
+    }
+
+    // Расчётное число МР позиции по типу ножа: раппорты = ceil(этикетки / (на раппорте × ручьёв)),
+    // метраж = раппорты × раппорт, МР = метраж / длина МР (те же шаги, что «Потребность позиции»
+    // в «Заказах этикетки», labelPositionDemand). Рулоны × этикеток в рулоне — из строки файла.
+    // → { calc (дробное, 2 знака) | null, file (МР из комментария 1С) | null, warning | '' }.
+    function checkMasterRolls(item, mr) {
+        var res = { calc: null, file: null, warning: '' };
+        if (!mr || !item || !item.label || !(item.rolls > 0)) return res;
+        var type = mr.types[norm(item.knifeType)];
+        if (!type || !(type.streams > 0) || !(type.perRepeat > 0) || !(type.repeatMm > 0)) return res;
+        var labels = item.rolls * item.label.perRoll;
+        var meters = Math.round(Math.ceil(labels / (type.perRepeat * type.streams) - 1e-9) * type.repeatMm) / 1000;
+        res.calc = Math.round(meters / mr.mrLength * 100) / 100;
+        var counts = mrCountFromComment(item.comment);
+        if (!counts.length) return res;
+        res.file = counts.reduce(function(a, b) { return a + b; }, 0);
+        var lo = res.calc * (1 - MR_TOLERANCE), hi = res.calc * (1 + MR_TOLERANCE);
+        // Целое «вверх» — штатный запас: 21 при расчёте 20,64 — не ошибка.
+        var inTol = res.file >= lo - 1e-9 && res.file <= hi + 1e-9;
+        if (!inTol && res.file !== Math.ceil(res.calc - 1e-9)) {
+            res.warning = 'расчёт МР сделан неверно: в комментарии 1С ' + fmtNum(res.file) + ' МР, по ножу «' + item.knifeType + '» расчётное ' +
+                fmtNum(res.calc) + ' (допуск ±10%: ' + fmtNum(Math.round(lo * 100) / 100) + '–' + fmtNum(Math.round(hi * 100) / 100) + ')';
+        }
+        return res;
+    }
+
     return {
         IMPORT_TABLES: IMPORT_TABLES,
         resolveImportTables: resolveImportTables,
@@ -1243,6 +1333,7 @@
         findHeader: findHeader,
         parseNomenclature: parseNomenclature,
         matchMaterial: matchMaterial,
+        materialNumber: materialNumber,
         addDays: addDays,
         settingValue: settingValue,
         groupWarnings: groupWarnings,
@@ -1258,6 +1349,10 @@
         planOrders: planOrders,
         touchedOrders: touchedOrders,
         planVerdict: planVerdict,
-        runBatches: runBatches
+        runBatches: runBatches,
+        mrCountFromComment: mrCountFromComment,
+        checkMasterRolls: checkMasterRolls,
+        mrContext: mrContext,
+        MR_TOLERANCE: MR_TOLERANCE
     };
 });
