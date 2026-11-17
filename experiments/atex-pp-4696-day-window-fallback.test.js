@@ -18,6 +18,8 @@
 //   B. потолок дня: 975 (TOTAL_INTERVALS+нахлёст прочитаны) против 960 (взят CLEANUP_SHIFT 30).
 //
 // Run with: node experiments/atex-pp-4696-day-fill-probe.test.js
+//
+// rules: CFG-cut-ceiling
 
 process.env.TZ = 'Europe/Moscow';
 global.window = { db: 'ateh', xsrf: 'x' };

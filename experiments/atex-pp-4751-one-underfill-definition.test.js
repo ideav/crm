@@ -24,6 +24,8 @@
 //       подменив вердикт, число объектива не двигаем.
 //
 // Run with: node experiments/atex-pp-4751-one-underfill-definition.test.js
+//
+// rules: DAY_FILL
 
 process.env.TZ = 'UTC';
 global.window = { db: 'ateh1', xsrf: 'x' };

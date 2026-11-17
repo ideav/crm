@@ -18,6 +18,8 @@
 //   3) applySplitPlan — ссылка уходит в БД реквизитом, а обычное продолжение по дням её НЕ несёт.
 //
 // Run with: node experiments/atex-pp-4651-settle-origin.test.js
+//
+// rules: none (defect #4651)
 
 process.env.TZ = 'Europe/Moscow';
 global.window = { db: 'testdb', xsrf: 'x' };

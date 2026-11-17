@@ -12,6 +12,8 @@
 // стаба, а вопрос ровно в том, какой механизм зовётся.
 //
 // Run with: node experiments/atex-pp-4726-settle-no-resequence.test.js
+//
+// rules: none (defect #4726)
 
 var fs = require('fs');
 var path = require('path');

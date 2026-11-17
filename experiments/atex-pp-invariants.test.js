@@ -9,6 +9,8 @@
 // за четыре дня, каждый раз через другую кнопку.
 //
 // Run with: node experiments/atex-pp-invariants.test.js
+//
+// rules: CUT_BATCH, FIXED_CUT_DAY, FIXED_NO_OVERTAKE, FIXED_NO_PUSH, FIXED_ORDER_KEPT, FROZEN_DAY
 
 process.env.TZ = 'UTC';
 global.window = { db: 'testdb', xsrf: 'x' };

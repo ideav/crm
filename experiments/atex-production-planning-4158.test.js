@@ -14,6 +14,8 @@
 // пере-разбиения == Σ до него (== спросу позиции заказа).
 //
 // Run with: node experiments/atex-production-planning-4158.test.js
+//
+// rules: SUPPLY_CONSERVED
 
 process.env.TZ = 'UTC';
 global.window = { db: 'testdb', xsrf: 'x' };

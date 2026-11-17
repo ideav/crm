@@ -14,6 +14,8 @@
 //   • runDeleteCutTask: обеспечения пулом → затем ровно одна резка → autoSequenceQueue.
 //
 // Run with: node experiments/atex-production-planning-4005.test.js
+//
+// rules: none (defect #4005)
 
 process.env.TZ = 'UTC';
 

@@ -11,6 +11,8 @@
 // резки одно и то же — иначе правило снова разъедется по обработчикам (как было с #3606).
 //
 // Run with: node experiments/atex-pp-4501-narrow-winding.test.js
+//
+// rules: DUR-narrow-strip
 
 process.env.TZ = 'UTC';
 var api = require('../download/atex/js/production-planning.js');

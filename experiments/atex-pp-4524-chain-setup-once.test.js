@@ -26,6 +26,8 @@
 //       записи (шлюз guardPlanOps), режим — audit.
 //
 // Run with: node experiments/atex-pp-4524-chain-setup-once.test.js
+//
+// rules: CHAIN_SETUP_ONCE
 
 process.env.TZ = 'Europe/Moscow';
 global.window = { db: 'ateh1', xsrf: 'x' };

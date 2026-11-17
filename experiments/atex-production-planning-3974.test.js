@@ -10,6 +10,8 @@
 //   • Фольга — по-прежнему в конец КАЖДОГО дня (#3717).
 //
 // Run with: node experiments/atex-production-planning-3974.test.js
+//
+// rules: none (defect #3974)
 
 process.env.TZ = 'Europe/Moscow';
 

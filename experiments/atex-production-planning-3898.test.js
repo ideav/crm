@@ -15,6 +15,8 @@
 // отсутствие записи — firstCutSetup (одни ножи).
 //
 // Run with: node experiments/atex-production-planning-3898.test.js
+//
+// rules: none (defect #3898)
 
 process.env.TZ = 'UTC';
 global.window = { db: 'testdb', xsrf: 'x' };

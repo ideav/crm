@@ -10,6 +10,8 @@
 //   • замороженный день (#4436) не трогает никакой пересчёт.
 //
 // Run with: node experiments/atex-pp-4555-recalc-from-cut.test.js
+//
+// rules: none (defect #4555)
 
 process.env.TZ = 'UTC';
 var mod = require('../download/atex/js/production-planning.js');

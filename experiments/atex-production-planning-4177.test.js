@@ -8,6 +8,8 @@
 // на каждый POST: старт (поля видны, _xsrf скрыт), успех (id из ответа), отказ (код+текст).
 //
 // Run with: node experiments/atex-production-planning-4177.test.js
+//
+// rules: none (defect #4177)
 
 process.env.TZ = 'UTC';
 global.window = { xsrf: 'xsrf-token' };

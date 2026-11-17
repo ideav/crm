@@ -32,6 +32,8 @@
 //   G — ширины заказа не подменяются складским добором: `preferred` добирает только ОСТАТОК.
 //
 // Run with: node experiments/atex-cut-layout-4757-order-config.test.js
+//
+// rules: CUT-order-widths, CUT-split-only-if-needed
 
 var layout = require('../download/atex/js/cut-layout.js').layout;
 

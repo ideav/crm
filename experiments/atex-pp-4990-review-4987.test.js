@@ -12,6 +12,8 @@
 //       которая упала по-настоящему, и несёт поимённый перечень (`failures`).
 //
 // Run with: node experiments/atex-pp-4990-review-4987.test.js
+//
+// rules: none (defect #4990)
 
 process.env.TZ = 'UTC';
 global.window = { db: 'testdb', xsrf: 'x' };

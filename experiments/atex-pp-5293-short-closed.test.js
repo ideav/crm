@@ -9,6 +9,8 @@
 // [С; По] ≤ сегодня) и подписывается на карточке. Факт неизвестен (колонки нет) — молчим.
 //
 // Run with: node experiments/atex-pp-5293-short-closed.test.js
+//
+// rules: none (defect #5293)
 
 process.env.TZ = 'UTC';
 

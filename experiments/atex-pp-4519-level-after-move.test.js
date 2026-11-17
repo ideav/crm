@@ -14,6 +14,8 @@
 // на время его работы стои́т флаг.
 //
 // Run with: node experiments/atex-pp-4519-level-after-move.test.js
+//
+// rules: DAY_CAPACITY
 
 process.env.TZ = 'Europe/Moscow';
 

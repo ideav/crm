@@ -15,6 +15,8 @@
 // — и оператор видел «Вт, 28.07.2026 (484 мин)» при потолке 460.
 //
 // Run with: node experiments/atex-pp-4473-day-level-after-move.test.js
+//
+// rules: DAY_CAPACITY
 
 process.env.TZ = 'Europe/Moscow';
 

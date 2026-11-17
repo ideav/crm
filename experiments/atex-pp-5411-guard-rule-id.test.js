@@ -22,6 +22,8 @@
 //   F — боевой реестр: FROZEN_DAY называет себя.
 //
 // Run with: node experiments/atex-pp-5411-guard-rule-id.test.js
+//
+// rules: none (defect #5411)
 
 process.env.TZ = 'UTC';
 global.window = { db: 'ateh', xsrf: 'x' };

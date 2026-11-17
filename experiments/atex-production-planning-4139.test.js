@@ -16,6 +16,8 @@
 // #3635 п.5), остаётся последней; ни одна резка не уезжает на более поздний день.
 //
 // Run with: node experiments/atex-production-planning-4139.test.js
+//
+// rules: none (defect #4139)
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

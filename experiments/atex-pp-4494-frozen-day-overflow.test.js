@@ -21,6 +21,8 @@
 //   4) нарушение по-прежнему видно в отчёте стража (violations), даже когда операция пропущена.
 //
 // Run with: node experiments/atex-pp-4494-frozen-day-overflow.test.js
+//
+// rules: FROZEN_DAY, DAY_CAPACITY
 
 process.env.TZ = 'Europe/Moscow';
 

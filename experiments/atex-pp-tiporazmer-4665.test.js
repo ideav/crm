@@ -7,6 +7,8 @@
 // здесь — стык: реквизит в полях записи, доп. втулка позиции из отчёта и подпись строки.
 //
 // Run with: node experiments/atex-pp-tiporazmer-4665.test.js
+//
+// rules: none (defect #4665)
 
 var mod = require('../download/atex/js/production-planning.js');
 var planning = mod.planning;

@@ -5,6 +5,8 @@
 // Проверяем чистое ядро: (1) computeQueueBreakMarkers.extendByCut; (2) formatScheduleLine(...,extendMin).
 //
 // Run with: node experiments/atex-production-planning-4094.test.js
+//
+// rules: SHIFT-breaks-transparent
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

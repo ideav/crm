@@ -13,6 +13,8 @@
 // без простоя. Саму проводку (что move/delete теперь зовут autoSequenceQueue) проверяет E2E.
 //
 // Run with: node experiments/atex-production-planning-3840.test.js
+//
+// rules: DUR-back-to-back
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

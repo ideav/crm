@@ -11,6 +11,8 @@
 // LUNCH_START неизвестен → прежняя привязка к зазору (деградация без поломки).
 //
 // Run with: node experiments/atex-production-planning-3909.test.js
+//
+// rules: SHIFT-breaks-transparent
 
 process.env.TZ = 'Europe/Moscow';
 var planning = require('../download/atex/js/production-planning.js').planning;

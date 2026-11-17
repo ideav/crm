@@ -8,6 +8,8 @@
 // намотки (windPointsForCut) и «фольга в конец дня» (#3717).
 //
 // Run with: node experiments/atex-pp-5044-foil-by-material-type.test.js
+//
+// rules: none (defect #5044)
 
 var M = require('../download/atex/js/production-planning.js');
 var planning = M.planning;

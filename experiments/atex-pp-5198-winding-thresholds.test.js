@@ -9,6 +9,8 @@
 // калькулятора резки с эталоном «порог вверх».
 //
 // Run with: node experiments/atex-pp-5198-winding-thresholds.test.js
+//
+// rules: DUR-wind-threshold
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

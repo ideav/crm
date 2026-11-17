@@ -14,6 +14,8 @@
 // (сток/сирота) → сохранённая «Длина, м» резки как есть.
 //
 // Run with: node experiments/atex-production-planning-4301.test.js
+//
+// rules: none (defect #4301)
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

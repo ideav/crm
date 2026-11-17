@@ -9,6 +9,8 @@
 // obvious a day carries more work than fits.
 //
 // Run with: node experiments/atex-production-planning-3885.test.js
+//
+// rules: none (defect #3885)
 
 process.env.TZ = 'UTC';
 

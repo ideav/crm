@@ -9,6 +9,8 @@
 // #4434 п.1) — день на 690 мин при потолке 455, а трасса лишь предупреждала.
 //
 // Run with: node experiments/atex-pp-4467-day-ceiling.test.js
+//
+// rules: DAY_CAPACITY
 
 process.env.TZ = 'UTC';
 global.window = { db: 'ateh1', xsrf: 'x' };

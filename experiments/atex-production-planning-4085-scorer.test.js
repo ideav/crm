@@ -6,7 +6,7 @@
 //
 // Run with: node experiments/atex-production-planning-4085-scorer.test.js
 //
-// rules: FOIL-penalty, PEN-knives-decrease, PEN-knives-increase, PEN-material, PEN-leader, PEN-late, PEN-exact-due, PEN-max-distance
+// rules: FOIL-penalty, PEN-knives-decrease, PEN-knives-increase, PEN-material, PEN-leader, PEN-late, PEN-exact-due, PEN-max-distance, PLACE-tail-continuation
 
 var planning = require('../download/atex/js/production-planning.js').planning;
 var tc = planning.transitionCost, ic = planning.insertionCost, dkfo = planning.dayKeyFromOffset;

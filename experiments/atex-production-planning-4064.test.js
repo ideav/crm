@@ -10,6 +10,8 @@
 // опозданий может увеличить переналадку, но НЕ наоборот.
 //
 // Run with: node experiments/atex-production-planning-4064.test.js
+//
+// rules: PRIO-ladder
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

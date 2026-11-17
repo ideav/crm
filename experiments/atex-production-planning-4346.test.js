@@ -10,6 +10,8 @@
 //       нет следующего → ближайший рабочий незамороженный день (колбэк freeDayMsFor).
 //
 // Run with: node experiments/atex-production-planning-4346.test.js
+//
+// rules: none (defect #4346)
 
 process.env.TZ = 'UTC';
 

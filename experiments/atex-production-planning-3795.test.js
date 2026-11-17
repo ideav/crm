@@ -12,6 +12,8 @@
 //     (лечит реюзнутые продолжения, созданные до фикса с пустым «Вид сырья»).
 //
 // Run with: node experiments/atex-production-planning-3795.test.js
+//
+// rules: none (defect #3795)
 
 process.env.TZ = 'UTC';
 

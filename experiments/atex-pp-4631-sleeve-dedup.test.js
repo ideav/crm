@@ -28,6 +28,8 @@
 // втулок при живом спросе. Правило обязано молчать там, где не уверено.
 //
 // Run with: node experiments/atex-pp-4631-sleeve-dedup.test.js
+//
+// rules: none (defect #4631)
 
 process.env.TZ = 'UTC';
 global.window = { db: 'ateh', xsrf: 'x' };

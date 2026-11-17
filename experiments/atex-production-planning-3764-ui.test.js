@@ -9,6 +9,8 @@
 //   • удаление строки шлёт _m_del.
 //
 // Run with: node experiments/atex-production-planning-3764-ui.test.js
+//
+// rules: none (defect #3764)
 
 process.env.TZ = 'UTC';
 

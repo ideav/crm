@@ -15,6 +15,8 @@
 //   F — задания, которых операции не касались, в отчёт не попадают (иначе тонет главное).
 //
 // Run with: node experiments/atex-pp-4618-journal-balance.test.js
+//
+// rules: none (defect #4618)
 
 process.env.TZ = 'UTC';
 global.window = { db: 'ateh', xsrf: 'x' };

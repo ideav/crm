@@ -8,6 +8,8 @@
 // сдвигает резки за окно простоя (#3764).
 //
 // Run with: node experiments/atex-production-planning-3883.test.js
+//
+// rules: AVAIL-outage-fixed
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

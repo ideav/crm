@@ -15,6 +15,8 @@
 // Тогда острова MWR200 через задания с другим джамбо оказываются в одном блоке и сливаются.
 //
 // Run with: node experiments/atex-production-planning-4214.test.js
+//
+// rules: ISLAND-knife-block, ISLAND-merge
 
 var mod = require('../download/atex/js/production-planning.js');
 var P = mod.planning;

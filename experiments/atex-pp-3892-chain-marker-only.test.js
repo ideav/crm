@@ -16,6 +16,8 @@
 //   D — значки смежности «←/→» на карточках тоже по маркеру, а не по конфигурации.
 //
 // Run with: node experiments/atex-pp-3892-chain-marker-only.test.js
+//
+// rules: SPLIT-first-part-id
 
 process.env.TZ = 'UTC';
 global.window = { db: 'ateh', xsrf: 'x' };

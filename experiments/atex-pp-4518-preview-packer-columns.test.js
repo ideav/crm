@@ -20,6 +20,8 @@
 // у всех, кто стои́т следом.
 //
 // Run with: node experiments/atex-pp-4518-preview-packer-columns.test.js
+//
+// rules: none (defect #4518)
 
 process.env.TZ = 'Europe/Moscow';
 

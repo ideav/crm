@@ -16,6 +16,8 @@
 //      fix=TRUE, свой станок, withinSlitter); выходной/отпуск → не создаём ничего.
 //
 // Run with: node experiments/atex-production-planning-4396.test.js
+//
+// rules: none (defect #4396)
 
 process.env.TZ = 'UTC';
 

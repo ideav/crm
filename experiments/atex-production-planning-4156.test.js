@@ -12,6 +12,8 @@
 // а не пересчитывает по весам. Веса штрафов остаются объективу «Упорядочить» (planQuality/planChangeoverMin).
 //
 // Run with: node experiments/atex-production-planning-4156.test.js
+//
+// rules: SCORE-fact-stored, SCORE-first-job
 
 process.env.TZ = 'UTC';
 var api = require('../download/atex/js/production-planning.js');

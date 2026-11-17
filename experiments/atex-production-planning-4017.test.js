@@ -13,6 +13,8 @@
 // то есть мимо loadDaySettings, где и терялся ключ. Этот тест гоняет ИМЕННО loadDaySettings.
 //
 // Run with: node experiments/atex-production-planning-4017.test.js
+//
+// rules: SHIFT-overrun-cuts, SHIFT-overrun-tune
 
 process.env.TZ = 'UTC';
 global.window = global.window || { db: 'ateh' };

@@ -6,6 +6,8 @@
 // is the width-agnostic gate that lets callers skip the report in exactly that case.
 //
 // Run with: node experiments/atex-production-planning-3954.test.js
+//
+// rules: none (defect #3954)
 
 process.env.TZ = 'UTC';
 

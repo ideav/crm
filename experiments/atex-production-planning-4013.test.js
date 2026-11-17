@@ -15,6 +15,8 @@
 // (не кредитуются, инвариант combos ≤ ножи×сырьё цел).
 //
 // Run with: node experiments/atex-production-planning-4013.test.js
+//
+// rules: SCORE-ideal-window, SCORE-excess
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

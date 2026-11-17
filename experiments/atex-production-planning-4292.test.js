@@ -8,6 +8,8 @@
 // записей цепочки (голова + продолжения), который delete-путь сносит целиком.
 //
 // Run with: node experiments/atex-production-planning-4292.test.js
+//
+// rules: none (defect #4292)
 
 var planning = require('../download/atex/js/production-planning.js').planning;
 var chain = planning.chainRecordIdsForCut;

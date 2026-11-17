@@ -6,6 +6,8 @@
 // контроллерные, проверяются в браузере.
 //
 // Run with: node experiments/atex-production-planning-4306.test.js
+//
+// rules: none (defect #4306)
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

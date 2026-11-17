@@ -13,6 +13,8 @@
 // на лишнюю смену ножей. Реальные минуты «Наладки»/«Смены сырья» и модель стоимости НЕ трогаем.
 //
 // Run with: node experiments/atex-production-planning-4151.test.js
+//
+// rules: none (defect #4151)
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

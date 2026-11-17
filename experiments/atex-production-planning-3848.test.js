@@ -7,6 +7,8 @@
 // стоп при отсутствии прогресса, защита от циклов (Set посещённых комбинаций).
 //
 // Run with: node experiments/atex-production-planning-3848.test.js
+//
+// rules: none (defect #3848)
 
 process.env.TZ = 'UTC';
 var api = require('../download/atex/js/production-planning.js');

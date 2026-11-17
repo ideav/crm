@@ -17,6 +17,8 @@
 // по-прежнему кричит: разработчику нужна каждая такая ситуация).
 //
 // Run with: node experiments/atex-pp-4525-fixed-day-lost-from-probe.test.js
+//
+// rules: none (defect #4525)
 
 process.env.TZ = 'Europe/Moscow';
 var P = require('../download/atex/js/production-planning.js').planning;

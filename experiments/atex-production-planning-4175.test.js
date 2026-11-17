@@ -11,6 +11,8 @@
 // заказа), а ВОССТАНАВЛИВАЕМ Обеспечение на позицию заказа (orderId+ширина Партии ГП из genPositions).
 //
 // Run with: node experiments/atex-production-planning-4175.test.js
+//
+// rules: none (defect #4175)
 
 process.env.TZ = 'UTC';
 global.window = { db: 'testdb', xsrf: 'x' };

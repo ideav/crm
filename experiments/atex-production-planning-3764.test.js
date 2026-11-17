@@ -5,6 +5,8 @@
 // splitMachineQueue (blockedRanges), плюс конверсию DATETIME ↔ input[datetime-local].
 //
 // Run with: node experiments/atex-production-planning-3764.test.js
+//
+// rules: AVAIL-outage-fixed
 
 process.env.TZ = 'UTC';
 

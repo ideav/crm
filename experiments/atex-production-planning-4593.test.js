@@ -12,6 +12,8 @@
 // (плановый день ещё не прошёл), чтобы форма не превращалась в архив.
 //
 // Run with: node experiments/atex-production-planning-4593.test.js
+//
+// rules: none (defect #4593)
 
 process.env.TZ = 'UTC';
 

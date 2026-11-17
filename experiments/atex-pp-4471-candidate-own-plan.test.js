@@ -22,6 +22,8 @@
 // `ops.creates[].occMin`), станок берётся из ops; хранимые колонки остаются меркой ХРАНИМОГО плана.
 //
 // Run with: node experiments/atex-pp-4471-candidate-own-plan.test.js
+//
+// rules: none (defect #4471)
 
 process.env.TZ = 'UTC';
 global.window = { db: 'ateh1', xsrf: 'x' };

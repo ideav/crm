@@ -23,6 +23,8 @@
 //   D — вход в выравнивание берёт недобор оттуда же (чиним ровно то, о чём говорим).
 //
 // Run with: node experiments/atex-pp-4745-one-underfill-measure.test.js
+//
+// rules: DAY_FILL
 
 process.env.TZ = 'UTC';
 global.window = { db: 'ateh1', xsrf: 'x' };

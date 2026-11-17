@@ -18,6 +18,8 @@
 // разные конфиги (сценарий #3965) по-прежнему дают полную настройку у каждой (станок тяжёлый).
 //
 // Run with: node experiments/atex-production-planning-3968.test.js
+//
+// rules: none (defect #3968)
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

@@ -25,6 +25,8 @@
 //   F — нет `reconcileSleeveTasks` (стаб-self старых тестов) — удаление всё равно доходит до конца.
 //
 // Run with: node experiments/atex-pp-4753-delete-cut-sleeve-ids.test.js
+//
+// rules: none (defect #4753)
 
 process.env.TZ = 'UTC';
 global.window = { db: 'ateh1', xsrf: 'x' };

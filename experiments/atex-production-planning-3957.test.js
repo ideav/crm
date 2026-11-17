@@ -12,6 +12,8 @@
 // Модель span/endPos пропускает те же дни, что и расписание → хвост за отпуском стекает.
 //
 // Run with: node experiments/atex-production-planning-3957.test.js
+//
+// rules: none (defect #3957)
 
 process.env.TZ = 'UTC';
 var api = require('../download/atex/js/production-planning.js');

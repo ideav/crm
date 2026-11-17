@@ -28,6 +28,8 @@
 //   H — правило реестра ORDER_PARTS_ADJACENT (ТЗ §15): actor 'any', mode 'audit'.
 //
 // Run with: node experiments/atex-pp-4735-adjacent-order-merge.test.js
+//
+// rules: ORDER_PARTS_ADJACENT, SPLIT-merge-same-day
 
 process.env.TZ = 'Europe/Moscow';
 

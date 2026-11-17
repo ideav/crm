@@ -30,6 +30,8 @@
 //   H — фраза оператору разворачивает число в объекты (ТЗ §14): день, сколько ещё успеваем, донор.
 //
 // Run with: node experiments/atex-pp-4749-underfill-vs-stored.test.js
+//
+// rules: DAY_FILL
 
 process.env.TZ = 'UTC';
 global.window = { db: 'ateh1', xsrf: 'x' };

@@ -17,6 +17,8 @@
 //   E — переполнения нет → молчим (не шумим на ровном месте, регресс-контроль #4497).
 //
 // Run with: node experiments/atex-pp-4531-overfilled-message.test.js
+//
+// rules: none (defect #4531)
 
 process.env.TZ = 'UTC';
 global.window = { db: 'ateh', xsrf: 'x' };

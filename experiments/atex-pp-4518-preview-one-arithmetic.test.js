@@ -26,6 +26,8 @@
 //   D — `movedCount` разбора = числу строк списка (панель и «Детали» не спорят).
 //
 // Run with: node experiments/atex-pp-4518-preview-one-arithmetic.test.js
+//
+// rules: none (defect #4518)
 
 process.env.TZ = 'Europe/Moscow';
 global.window = { db: 'ateh1', xsrf: 'x' };

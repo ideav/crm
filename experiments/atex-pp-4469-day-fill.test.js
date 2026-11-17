@@ -15,6 +15,8 @@
 // DAY_CAPACITY #4467) и член объектива «Упорядочить» ниже срока, но выше переналадки.
 //
 // Run with: node experiments/atex-pp-4469-day-fill.test.js
+//
+// rules: DAY_FILL
 
 process.env.TZ = 'UTC';
 global.window = { db: 'ateh1', xsrf: 'x' };

@@ -17,6 +17,8 @@
 //       клиент уже не стучится. Идёт ПОСЛЕДНИМ: флаг «ручки нет» живёт до перезагрузки страницы.
 //
 // Run with: node experiments/atex-pp-4984-batch-writes.test.js
+//
+// rules: none (defect #4984)
 
 process.env.TZ = 'Europe/Moscow';
 global.window = { xsrf: 'xsrf-token' };

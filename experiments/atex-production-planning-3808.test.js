@@ -11,6 +11,8 @@
 // (несколько сырьёв) не трогаем.
 //
 // Run with: node experiments/atex-production-planning-3808.test.js
+//
+// rules: none (defect #3808)
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

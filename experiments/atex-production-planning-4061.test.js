@@ -12,6 +12,8 @@
 // простой/выходной) между резками сохраняются. Упаковку/дни/колонки не трогаем.
 //
 // Run with: node experiments/atex-production-planning-4061.test.js
+//
+// rules: DUR-back-to-back
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

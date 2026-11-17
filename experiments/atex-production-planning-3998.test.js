@@ -10,6 +10,8 @@
 //     запущенные до лимита — дорабатывают), как обрывалась прежняя последовательная цепочка.
 //
 // Run with: node experiments/atex-production-planning-3998.test.js
+//
+// rules: none (defect #3998)
 
 process.env.TZ = 'UTC';
 

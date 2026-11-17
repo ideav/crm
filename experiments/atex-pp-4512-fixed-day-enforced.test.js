@@ -23,6 +23,8 @@
 //     видны ему с #4475).
 //
 // Run with: node experiments/atex-pp-4512-fixed-day-enforced.test.js
+//
+// rules: FIXED_CUT_DAY
 
 process.env.TZ = 'UTC';
 global.window = { db: 'testdb', xsrf: 'x' };

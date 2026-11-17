@@ -15,6 +15,8 @@
 //       заданий, её же зовёт `overfilledDaysOf` (#4408/#4497).
 //
 // Run with: node experiments/atex-pp-4531-day-over-badge.test.js
+//
+// rules: none (defect #4531)
 
 process.env.TZ = 'UTC';
 

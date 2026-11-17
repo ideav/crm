@@ -9,6 +9,8 @@
 // поэтому результат балансировки сохраняется, а проход ускоряется в сотни раз.
 //
 // Run with: node experiments/atex-production-planning-3871.test.js
+//
+// rules: none (defect #3871)
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

@@ -12,6 +12,8 @@
 // станка или на ближайший свободный день. Целого переезда задания быть не должно.
 //
 // Run with: node experiments/atex-pp-4885-settle-setup-nextday.test.js
+//
+// rules: SETUP-early-settle
 
 process.env.TZ = 'UTC';
 global.window = { db: 'ateh', xsrf: 'x' };

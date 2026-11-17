@@ -16,6 +16,8 @@
 //   E — intraDayImprovementOps({slitterId}) трогает только свой станок.
 //
 // Run with: node experiments/atex-pp-4642-order-scope.test.js
+//
+// rules: none (defect #4642)
 
 process.env.TZ = 'UTC';
 global.window = { db: 'ateh', xsrf: 'x' };

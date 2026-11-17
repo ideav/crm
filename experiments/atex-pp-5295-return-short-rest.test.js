@@ -13,6 +13,8 @@
 // Закрыто с нуля проходов — то же: выполненная часть остаётся с 0 проходов, остаток = весь план.
 //
 // Run with: node experiments/atex-pp-5295-return-short-rest.test.js
+//
+// rules: none (defect #5295)
 
 process.env.TZ = 'UTC';
 

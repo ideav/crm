@@ -6,6 +6,8 @@
 // вместо имени из справочника «Вид сырья» и вместо отчётного; альта нет — как раньше.
 //
 // Run with: node experiments/atex-pp-4996-alt-material.test.js
+//
+// rules: none (defect #4996)
 
 var M = require('../download/atex/js/production-planning.js');
 var planning = M.planning;

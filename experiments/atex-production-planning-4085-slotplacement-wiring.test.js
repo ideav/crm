@@ -5,6 +5,8 @@
 // Дефолт (без флага) — путь не тронут (контракт ops прежний; существующие тесты зелёные).
 //
 // Run with: node experiments/atex-production-planning-4085-slotplacement-wiring.test.js
+//
+// rules: PLACE-global-search
 
 var planning = require('../download/atex/js/production-planning.js').planning;
 

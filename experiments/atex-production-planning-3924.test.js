@@ -16,6 +16,8 @@
 // РЕАЛЬНЫХ чужих дат (их не двигаем/не удаляем), а не право копить мусор.
 //
 // Run with: node experiments/atex-production-planning-3924.test.js
+//
+// rules: none (defect #3924)
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

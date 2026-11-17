@@ -12,6 +12,8 @@
 // переналадки это не ухудшает.
 //
 // Run with: node experiments/atex-production-planning-3999.test.js
+//
+// rules: PEN-knives-increase, PEN-knives-decrease
 
 process.env.TZ = 'UTC';
 var api = require('../download/atex/js/production-planning.js');

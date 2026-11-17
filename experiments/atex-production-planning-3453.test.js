@@ -4,6 +4,8 @@
 // резку с пустой «Партией сырья»).
 //
 // Run with: node experiments/atex-production-planning-3453.test.js
+//
+// rules: CUT_BATCH
 
 process.env.TZ = 'UTC';
 

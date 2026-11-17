@@ -8,6 +8,8 @@
 // на самом деле — по каждому из трёх названных заказчиком признаков.
 //
 // Run with: node experiments/atex-pp-4598-settle-anchor.test.js
+//
+// rules: none (defect #4598)
 
 process.env.TZ = 'Europe/Moscow';
 global.window = { db: 'ateh', xsrf: 'x' };

@@ -21,6 +21,8 @@
 //      по дням (хвост первым в следующем дне) — норма.
 //
 // Run with: node experiments/atex-pp-4488-move-merges-chain.test.js
+//
+// rules: CHAIN_CONTIGUOUS
 
 process.env.TZ = 'Europe/Moscow';
 
