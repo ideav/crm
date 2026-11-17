@@ -56,6 +56,14 @@
     });
   };
 
+  // Вход из ЛК ideav.ru/my (python2node#1288, crm /my/coresso): кабинет выпускает JWT и POST-ит его в
+  // /api/v1/<база>/login/crm, ядро ставит cookie-сессию и возвращает на back (только путь).
+  // Нет сессии my — кабинет сначала просит войти и сам возвращается сюда же.
+  S.CABINET = 'https://ideav.ru';
+  S.cabinetUrl = function (db, back) {
+    return S.CABINET + '/my/coresso?db=' + encodeURIComponent(db) + '&back=' + encodeURIComponent(back || '/');
+  };
+
   // форма входа поверх портала; A — LMSApp (для A.el)
   S.showLogin = function (A, db) {
     var E = A.el, old = document.getElementById('lms-login');
@@ -69,7 +77,10 @@
       S.login(fetch.bind(window), db, user.value.trim(), pwd.value).then(function () { location.reload(); }, function (err) {
         btn.disabled = false; msg.textContent = String(err.message || err);
       });
-    } }, [E('h2', { text: 'Вход' }), user, pwd, msg, E('div', { class: 'row' }, [btn,
+    } }, [E('h2', { text: 'Вход' }),
+      E('a', { class: 'btn btn-primary', href: S.cabinetUrl(db, location.pathname + location.search), text: 'Войти через личный кабинет ideav.ru' }),
+      E('p', { class: 'muted', text: 'или логином и паролем базы:' }),
+      user, pwd, msg, E('div', { class: 'row' }, [btn,
       E('button', { class: 'btn', type: 'button', text: 'Отмена', onclick: function () { box.remove(); } })])])]);
     (document.getElementById('lms-shell') || document.body).appendChild(box);
     user.focus();
