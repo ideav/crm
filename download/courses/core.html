@@ -1,0 +1,45 @@
+<!doctype html>
+<!-- Портал курсов на новом ядре (python2node, ideav/courses#145). Статическая страница: открывается на том же
+     домене, что и ядро (данные — /nav-api/<база>/, вход — /api/v1/<база>/login). База — ?db=, по умолчанию courses.
+     Скрипты портала грузит core.js после того, как узнает пользователя; список и версии — в data-scripts.
+     Версии ?v=N держать равными шаблону templates/courses/info.html. -->
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Курсы Интеграм</title>
+<link rel="stylesheet" href="/download/courses/css/lms.css?v=7">
+<script>
+var LMS = window.LMS = Object.create(null);
+LMS.core = true;
+LMS.z = (/[?&]db=([a-z0-9_]+)/i.exec(location.search) || [0, 'courses'])[1];
+document.documentElement.classList.add('lms-on');
+</script>
+</head>
+<body>
+<div id="lms-shell"><div id="lms-app"><p style="padding:24px;font-family:sans-serif">Загрузка…</p></div></div>
+<script src="/download/courses/js/core.js?v=1" data-scripts="
+  /download/courses/js/util.js?v=6
+  /download/courses/js/vendor/marked-18.0.5.umd.js
+  /download/courses/js/vendor/purify-3.4.11.min.js
+  /download/courses/js/authors.js?v=2
+  /download/courses/js/mock.js?v=7
+  /download/courses/js/api.js?v=8
+  /download/courses/js/data.js?v=7
+  /download/courses/js/tasks.js?v=5
+  /download/courses/js/quiz.js?v=5
+  /download/courses/js/practicum.js?v=5
+  /download/courses/js/lesson.js?v=7
+  /download/courses/js/map.js?v=7
+  /download/courses/js/me.js?v=5
+  /download/courses/js/curator.js?v=5
+  /download/courses/js/admin.js?v=6
+  /download/courses/js/moder.js?v=2
+  /download/courses/js/checks.js?v=5
+  /download/courses/js/landing.js?v=6
+  /download/courses/js/catalog.js?v=1
+  /download/courses/js/studio.js?v=1
+  /download/courses/js/lms.js?v=6"></script>
+</body>
+</html>

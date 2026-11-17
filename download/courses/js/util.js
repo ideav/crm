@@ -8,6 +8,14 @@
   A.root = A.mock ? '/download/courses/dev/' : '/download/courses/';
   A.contentRoot = A.root + 'content/';
   A.z = L.z || 'courses';
+  // новое ядро (python2node, courses#145): страница core.html, данные под /nav-api/<база>/, xsrf — кука idx_<база>
+  A.core = !!L.core;
+  A.base = (A.core ? '/nav-api/' : '/') + A.z + '/';
+  A.xsrf = function () {
+    if (!A.core) return L.xsrf || '';
+    var m = new RegExp('(?:^|; )idx_' + A.z + '=([^;]*)').exec(document.cookie || '');
+    return m ? decodeURIComponent(m[1]) : '';
+  };
 
   A.esc = function (s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -134,6 +142,11 @@
     return [A.el('button', { class: 'btn btn-primary', type: 'button', text: 'Войти через Яндекс', onclick: A.loginYandex }),
       A.el('button', { class: 'btn', type: 'button', text: 'Войти по почте', onclick: A.loginMail })];
   };
+  // на новом ядре Яндекса и входа через ЛК нет (python2node#1287/#1288): логин и пароль базы
+  if (A.core && window.LMSCore) {
+    A.loginYandex = A.loginMail = function () { window.LMSCore.showLogin(A, A.z); };
+    A.loginButtons = function () { return [A.el('button', { class: 'btn btn-primary', type: 'button', text: 'Войти', onclick: A.loginYandex })]; };
+  }
   A.isCurator = function () { return /куратор|curator/i.test(L.role || '') || A.isAdmin(); };
   A.isGuest = function () { return L.user === 'guest'; };
   A.isAdmin = function () { return /^(admin|админ)/i.test(L.role || ''); };
