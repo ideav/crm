@@ -105,7 +105,8 @@
             var lost = ['dieJob', 'die', 'cylinder', 'machine', 'material', 'dieState'].filter(function(k) { return !t[k]; });
             if (lost.length) throw new Error('в базе нет таблиц: ' + lost.join(', '));
             var settingsTable = meta.filter(function(x) { return String(x.val).trim() === 'Настройка'; })[0] || null;
-            var sreq = function(tb, name) { var r = ((tb && tb.reqs) || []).filter(function(x) { return String(x.val).trim() === name; })[0]; return r ? String(r.id) : ''; };
+            // реквизит-ссылка носит имя типа («Основа сырья»), а своё имя — в псевдониме («Стоп-лист основы»): ищем и по нему (#5553)
+            var sreq = function(tb, name) { var r = ((tb && tb.reqs) || []).filter(function(x) { return String(x.val).trim() === name || String((x.field_attrs && x.field_attrs.alias) || '').trim() === name; })[0]; return r ? String(r.id) : ''; };
             var cutterTable = meta.filter(function(x) { return String(x.val).trim() === 'Втулкорез'; })[0] || null;
             var kv = function(tid) { return tid ? c.getJson('object/' + tid + '/?JSON_KV&LIMIT=0,100000').then(LO.kvRecords) : Promise.resolve([]); };
             return Promise.all([

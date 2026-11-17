@@ -189,7 +189,8 @@ if (C) (function() {
     assert(C.jobFlags(J(1, { dieId: 'k1' }), dieCtx).blocks.length === 0, 'исправный нож, МР есть — блокировок нет');
     assert(C.jobFlags(J(1, { dieId: '' }), dieCtx).blocks[0] === 'нет ножа', 'нет ножа');
     assert(C.jobFlags(J(1, { dieId: 'k2' }), dieCtx).blocks.indexOf('нож списан') >= 0, 'нож списан');
-    assert(C.jobFlags(J(5, { dieId: 'k1' }), dieCtx).blocks.indexOf('нет МР нужного формата') >= 0, 'нет МР нужного формата');
+    var f5 = C.jobFlags(J(5, { dieId: 'k1' }), dieCtx);
+    assert(f5.blocks.length === 0 && f5.warnings.indexOf('нет МР нужного формата') >= 0, 'нет МР нужного формата — предупреждение, не блокировка (#5553)', JSON.stringify(f5));
     var w3 = C.jobFlags(J(1, { dieId: 'k3' }), dieCtx);
     assert(w3.blocks.length === 0 && w3.warnings.some(function(x) { return /ресурс ножа/.test(x); }), '250 000 + 30 000 из 300 000 = 93 % — предупреждение «ресурс ножа»', JSON.stringify(w3));
     assert(!C.jobFlags(J(1, { dieId: 'k1' }), dieCtx).warnings.length, '105 000 из 300 000 — предупреждения нет');
