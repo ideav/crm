@@ -1,6 +1,6 @@
 // Стенд портала на новом ядре (ideav/courses#145): портал с ядром на одном адресе.
 //   /download/courses/*  — файлы этого каталога (download/courses), content/ — из CONTENT_DIR, если задан
-//   /api/*, /nav-api/*   — прокси на ядро CORE_URL (Set-Cookie без Secure, чтобы вход работал по http)
+//   /api/*               — прокси на ядро CORE_URL (Set-Cookie без Secure, чтобы вход работал по http)
 // Запуск: CORE_URL=http://127.0.0.1:8099 PORT=8145 node download/courses/dev/core-dev.cjs
 // Открыть: http://localhost:8145/download/courses/core.html
 const http = require('http');
@@ -38,7 +38,7 @@ function proxy(req, res) {
 
 http.createServer((req, res) => {
     const u = req.url.split('?')[0];
-    if (/^\/(api|nav-api)\//.test(u)) return proxy(req, res);
+    if (u.startsWith('/api/')) return proxy(req, res);
     if (u.startsWith('/download/courses/content/')) return file(res, CONTENT, decodeURIComponent(u.slice('/download/courses/content/'.length)));
     if (u.startsWith('/download/courses/')) return file(res, ROOT, decodeURIComponent(u.slice('/download/courses/'.length)));
     if (u === '/') { res.writeHead(302, { Location: '/download/courses/core.html' }); return res.end(); }

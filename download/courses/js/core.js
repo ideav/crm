@@ -2,7 +2,7 @@
    Страница core.html задаёт LMS.core = true и LMS.z (база), этот файл узнаёт пользователя и только потом
    подгружает остальные скрипты: data.js читает LMS.userId при загрузке.
    /api/v1/<база>/session отдаёт имя; id и роль — из своей строки таблицы «Пользователь» (18), найденной
-   по логину (нужен грант READ на «Пользователь» с маской [USER]). Если /session сам вернёт user_id и role,
+   по логину через /api/v1/<база>/objects/18?format=kv (нужен грант READ на «Пользователь» с маской [USER]). Если /session сам вернёт user_id и role,
    берутся они. Нет доступа к строке — вход остаётся, id и роль пустые (портал ученика без записи). */
 (function () {
   'use strict';
@@ -40,15 +40,11 @@
       if (!s || !s.user) return { user: 'guest', userId: '', role: '' };
       if (s.admin) return { user: s.user, userId: '', role: 'admin' };
       if (s.user_id != null && s.role != null) return { user: s.user, userId: String(s.user_id), role: String(s.role) };
-      return Promise.all([
-        f('/nav-api/' + db + '/metadata/' + USER, same).then(body),
-        f('/nav-api/' + db + '/object/' + USER + '/?F_' + USER + '=' + encodeURIComponent(s.user) + '&LIMIT=0,20', same).then(body)
-      ]).then(function (r) {
-        var reqs = (r[0] && r[0].reqs) || [], ri = -1;
-        reqs.forEach(function (q, i) { if (q.val === 'Роль') ri = i; });
-        var row = (Array.isArray(r[1]) ? r[1] : []).filter(function (x) { return x.r && x.r[0] === s.user; })[0];
-        var role = row && ri >= 0 ? String(row.r[ri + 1] || '').replace(/^[\d,]+:/, '') : '';
-        return { user: s.user, userId: row ? String(row.i) : '', role: role };
+      // kv: {id, val, <реквизит>: значение}; «Роль» — ссылка «id:имя», закрытой ролью колонки в строке нет
+      return f('/api/v1/' + db + '/objects/' + USER + '?format=kv&limit=20&f' + USER + '=' + encodeURIComponent(s.user), same).then(body).then(function (rows) {
+        var row = (Array.isArray(rows) ? rows : []).filter(function (x) { return x.val === s.user; })[0];
+        var role = row ? String(row['Роль'] || '').replace(/^[\d,]+:/, '') : '';
+        return { user: s.user, userId: row ? String(row.id) : '', role: role };
       }, function (e) {
         if (window.console) console.warn('LMS: строка «Пользователь» недоступна —', e.message || e);
         return { user: s.user, userId: '', role: '' };

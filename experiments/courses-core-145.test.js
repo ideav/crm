@@ -1,10 +1,13 @@
 // ideav/courses#145: портал курсов на новом ядре (python2node) — режим LMS.core в api.js/util.js и
 // загрузчик core.js. Проверяется поведение с поддельным fetch, без сети:
-// - чтение и запись идут в /nav-api/<база>/..., xsrf берётся из куки idx_<база> (поле _xsrf и заголовок);
-// - ошибки ядра обоих видов ({error:{message}} у чтения, [{error}] у записи) доходят до вызывающего;
+// - всё идёт в родной API ядра /api/v1/<база>/... (фасада /nav-api в ядре нет, python2node#1332), xsrf —
+//   из куки idx_<база> в заголовке X-XSRF-Token;
+//   строки — objects/<таблица>?format=kv (поля по именам), создание — POST objects, правка — PATCH object/<id>,
+//   удаление — DELETE object/<id>, отчёт — queries/<id> → строки вида JSON_KV;
+// - ошибки ядра ({error:{message}}, [{error}] у создания, {id,error} у правки) доходят до вызывающего;
 // - DATETIME приходит unix-секундами, в том числе с дробной частью;
-// - загрузка файлов на новом ядре — multipart в /nav-api/<база>/_m_new|_m_set с X-XSRF-Token (python2node#1286),
-//   значение FILE «<id>/<имя>» — ссылка на защищённый /api/v1/<база>/object/<строка>/file/<реквизит>;
+// - файл — multipart (часть file) в POST /api/v1/<база>/object/<строка>/file/<реквизит> (python2node#1286),
+//   значение FILE «<id>/<имя>» — ссылка туда же (GET);
 // - без LMS.core адреса прежние (/<база>/...);
 // - core.js по /api/v1/<база>/session и своей строке таблицы «Пользователь» узнаёт id и роль.
 //
@@ -62,30 +65,53 @@ async function t(name, fn) {
 }
 
 (async () => {
-    await t('core: list читает /nav-api/courses/object/<id>/, ссылка id:текст, DATETIME с дробью', async () => {
-        const p = portal({ core: true, z: 'courses' }, () => json(200, [{ i: 7, u: 1, o: 1, r: ['k', '600:lmstest', 'mini', '00-start', '1794898907.25'] }]));
+    await t('core: list читает /api/v1/courses/objects/<id>?format=kv по именам, ссылка id:текст, DATETIME с дробью', async () => {
+        // ядро отдаёт колонки в своём порядке, не в порядке schema.json, — портал берёт их по именам
+        const p = portal({ core: true, z: 'courses' }, () => json(200, [
+            { id: 7, val: 'k', 'Дата и время': '1794898907.25', 'Урок': '00-start', 'Пользователь': '600:lmstest', 'Курс': 'mini' },
+            { id: 8, val: 'k2', 'Пользователь': '604:lmstest2', 'Курс': 'mini' }]));
         await p.A.loadSchema();
         const rows = await p.A.list('Прогресс', { 'Пользователь': '600' });
-        assert.strictEqual(p.api[0].url, '/nav-api/courses/object/301/?JSON_OBJ&LIMIT=0,5000');
+        assert.strictEqual(p.api[0].url, '/api/v1/courses/objects/301?format=kv&limit=5000');
+        assert.strictEqual(rows[0]._main, 'k');
+        assert.strictEqual(rows[0]['Урок'], '00-start');
+        assert.strictEqual(rows[0]['Курс'], 'mini');
         assert.strictEqual(rows.length, 1);
         assert.strictEqual(rows[0]._id, '7');
         assert.strictEqual(p.A.refId(rows[0]['Пользователь']), '600');
         assert.strictEqual(rows[0]['Дата и время'], p.A.fmtUnix('1794898907'));
     });
 
-    await t('core: create шлёт _m_new в /nav-api с xsrf из куки idx_courses (поле и заголовок)', async () => {
-        const p = portal({ core: true, z: 'courses' }, () => json(200, { id: 900, obj: 900 }));
+    await t('core: create — POST /api/v1/courses/objects [{id,up:1,t<id>:…}] с X-XSRF-Token из куки idx_courses', async () => {
+        const p = portal({ core: true, z: 'courses' }, () => json(200, [{ id: 900, up: 1, t: 301, val: 'k' }]));
         await p.A.loadSchema();
-        const id = await p.A.create('Прогресс', 'k', { 'Курс': 'mini' });
+        const id = await p.A.create('Прогресс', 'k', { 'Курс': 'mini', 'Пользователь': '600' });
         assert.strictEqual(id, '900');
         const c = p.api[0];
-        assert.strictEqual(c.url, '/nav-api/courses/_m_new/301?JSON&up=1');
+        assert.strictEqual(c.url, '/api/v1/courses/objects');
         assert.strictEqual(c.init.method, 'POST');
-        const body = new URLSearchParams(c.init.body);
-        assert.strictEqual(body.get('_xsrf'), 'XS-145');
-        assert.strictEqual(body.get('t301'), 'k');
-        assert.strictEqual(body.get('t325'), 'mini');
+        assert.deepStrictEqual(JSON.parse(c.init.body), [{ t325: 'mini', t324: '600', t301: 'k', id: 301, up: 1 }]);
         assert.strictEqual(c.init.headers['X-XSRF-Token'], 'XS-145');
+        assert.strictEqual(c.init.headers['Content-Type'], 'application/json');
+    });
+
+    await t('core: update — PATCH /api/v1/courses/object/<id>, главное значение t<id таблицы>; remove — DELETE', async () => {
+        const p = portal({ core: true, z: 'courses' }, () => json(200, { id: 7 }));
+        await p.A.loadSchema();
+        await p.A.update('Прогресс', 7, { 'Урок': 'x' }, 'k-new');
+        await p.A.remove('Прогресс', 7);
+        assert.deepStrictEqual(p.api.map(c => [c.init.method, c.url]), [['PATCH', '/api/v1/courses/object/7'], ['DELETE', '/api/v1/courses/object/7']]);
+        assert.deepStrictEqual(JSON.parse(p.api[0].init.body), { t327: 'x', t301: 'k-new' });
+        assert.strictEqual(p.api[1].init.headers['X-XSRF-Token'], 'XS-145');
+    });
+
+    await t('core: ошибка создания [{error}] и правки {id,error} при HTTP 200 доходят текстом ядра', async () => {
+        const c = portal({ core: true, z: 'courses' }, () => json(200, [{ up: 1, t: 301, error: 'No create access', code: 'err_access_denied' }]));
+        await c.A.loadSchema();
+        await assert.rejects(c.A.create('Прогресс', 'k', {}), /No create access/);
+        const u = portal({ core: true, z: 'courses' }, () => json(200, { id: 7, error: 'Invalid DATETIME' }));
+        await u.A.loadSchema();
+        await assert.rejects(u.A.update('Прогресс', 7, { 'Дата и время': 'x' }), /Invalid DATETIME/);
     });
 
     await t('core: ошибка записи [{error}] и чтения {error:{message}} доходят текстом ядра', async () => {
@@ -97,33 +123,42 @@ async function t(name, fn) {
         await assert.rejects(r.A.list('Прогресс'), /Authentication token required/);
     });
 
-    await t('core: загрузка — multipart в /nav-api/<база>/_m_new с заголовком X-XSRF-Token, файл в t<id реквизита>', async () => {
-        const p = portal({ core: true, z: 'courses' }, () => json(200, {}), () => ({ status: 200, body: { id: '', obj: 77 } }));
+    await t('core: загрузка — строка через POST objects, затем файл multipart (часть file) в object/<строка>/file/<реквизит>', async () => {
+        const p = portal({ core: true, z: 'courses' }, () => json(200, [{ id: 77, up: 1, t: 308 }]),
+            () => ({ status: 200, body: { id: 77, req_id: 384, name: 'отчёт.pdf', size: 3, value: '0123456789abcdef0123456789abcdef/отчёт.pdf' } }));
         await p.A.loadSchema();
         const file = { name: 'отчёт.pdf' };
         const id = await p.A.upload('Файл ответа', 'k1', { 'Пользователь': '600' }, 'Файл', file);
         assert.strictEqual(id, '77');
+        assert.deepStrictEqual(JSON.parse(p.api[0].init.body), [{ t380: '600', t308: 'k1', id: 308, up: 1 }]);
         const x = p.xhr[0];
-        assert.strictEqual(x.url, '/nav-api/courses/_m_new/308?JSON&up=1');
+        assert.strictEqual(x.method, 'POST');
+        assert.strictEqual(x.url, '/api/v1/courses/object/77/file/384');
         assert.strictEqual(x.headers['X-XSRF-Token'], 'XS-145');
         assert.strictEqual(x.withCredentials, true);
-        assert.deepStrictEqual(x.fd.find(e => e[0] === 't384'), ['t384', file, 'отчёт.pdf']);
-        assert.strictEqual(x.fd.find(e => e[0] === 't308')[1], 'k1');
-        assert.strictEqual(x.fd.find(e => e[0] === 't380')[1], '600');
+        assert.deepStrictEqual(x.fd, [['file', file, 'отчёт.pdf']]);
     });
 
-    await t('core: загрузка в строку — multipart в /nav-api/<база>/_m_set/<id>; ошибка ядра {error:{message}} доходит', async () => {
+    await t('core: файл не принят ядром — ошибка доходит, созданная строка удаляется', async () => {
+        const p = portal({ core: true, z: 'courses' }, (url, init) => json(200, init.method === 'DELETE' ? { id: 78 } : [{ id: 78 }]),
+            () => ({ status: 415, body: { error: { code: 'err_bad_request', message: 'File type is not allowed' } } }));
+        await p.A.loadSchema();
+        await assert.rejects(p.A.upload('Файл ответа', 'k1', {}, 'Файл', { name: 'a.html' }), /File type is not allowed/);
+        assert.deepStrictEqual(p.api.map(c => [c.init.method, c.url]), [['POST', '/api/v1/courses/objects'], ['DELETE', '/api/v1/courses/object/78']]);
+    });
+
+    await t('core: загрузка в строку — POST object/<id>/file/<реквизит>; ошибка ядра {error:{message}} доходит', async () => {
         const p = portal({ core: true, z: 'courses' }, () => json(200, {}), () => ({ status: 415, body: { error: { code: 'err_bad_request', message: 'File type is not allowed' } } }));
         await p.A.loadSchema();
         await assert.rejects(p.A.uploadTo('Файл ответа', 5, 'Файл', { name: 'a.html' }), /File type is not allowed/);
-        assert.strictEqual(p.xhr[0].url, '/nav-api/courses/_m_set/5?JSON');
+        assert.strictEqual(p.xhr[0].url, '/api/v1/courses/object/5/file/384');
         assert.strictEqual(p.xhr[0].headers['X-XSRF-Token'], 'XS-145');
     });
 
     await t('core: значение FILE «<id>/<имя>» — ссылка на /api/v1/<база>/object/<строка>/file/<реквизит>', async () => {
         const p = portal({ core: true, z: 'courses' }, () => json(200, [
-            { i: 9, u: 1, o: 1, r: ['k', '600:lmstest', '0123456789abcdef0123456789abcdef/отчёт <1>&.pdf'] },
-            { i: 10, u: 1, o: 1, r: ['k2', '600:lmstest', ''] }]));
+            { id: 9, val: 'k', 'Пользователь': '600:lmstest', 'Файл': '0123456789abcdef0123456789abcdef/отчёт <1>&.pdf' },
+            { id: 10, val: 'k2', 'Пользователь': '600:lmstest', 'Файл': '' }]));
         await p.A.loadSchema();
         const rows = await p.A.list('Файл ответа');
         assert.deepStrictEqual(Object.assign({}, p.A.fileInfo(rows[0]['Файл'])), { url: '/api/v1/courses/object/9/file/384', name: 'отчёт <1>&.pdf' });
@@ -141,19 +176,26 @@ async function t(name, fn) {
         assert.strictEqual(p.xhr[0].headers['X-XSRF-Token'], undefined);
     });
 
-    await t('core: удаление строки с файлом — один _m_del', async () => {
-        const p = portal({ core: true, z: 'courses' }, () => json(200, { id: '', obj: 5 }));
+    await t('core: удаление строки с файлом — один DELETE object/<id> (файл стирает сборщик ядра)', async () => {
+        const p = portal({ core: true, z: 'courses' }, () => json(200, { id: 5 }));
         await p.A.loadSchema();
         await p.A.removeFile('Файл ответа', 5, 'Файл');
-        assert.deepStrictEqual(p.api.map(c => c.url), ['/nav-api/courses/_m_del/5?JSON']);
+        assert.deepStrictEqual(p.api.map(c => [c.init.method, c.url]), [['DELETE', '/api/v1/courses/object/5']]);
     });
 
-    await t('core: отчёт и схема — из /nav-api и core/schema.json', async () => {
-        const p = portal({ core: true, z: 'courses' }, () => json(200, [{ a: 1 }]));
+    await t('core: отчёт — queries/<id>, ключи по «Имя в отчёте» (без него — имя поля), пустое значение — пустая строка', async () => {
+        const p = portal({ core: true, z: 'courses' }, () => json(200, {
+            master: 301,
+            composition: [{ ord: 1, reportName: 'Прогресс', name: 'Прогресс' }, { ord: 2, reportName: 'Ученик', name: null },
+                { ord: 3, reportName: null, name: 'Курс' }, { ord: 4, reportName: 'Когда', name: 'Дата и время' }],
+            columns: [{ alias: 'col1', name: null, ord: 2 }, { alias: 'col2', name: 'Курс', ord: 3 }, { alias: 'col3', name: 'Дата и время', ord: 4 }],
+            rows: [{ col1: 'lmstest', col2: 'mini', col3: null }],
+        }));
         await p.A.loadSchema();
-        await p.A.reportRows('Лента ответов');
+        const rows = await p.A.reportRows('Лента ответов');
         assert.strictEqual(p.calls[0].url, '/download/courses/core/schema.json');
-        assert.strictEqual(p.api[0].url, '/nav-api/courses/report/509?JSON_KV');
+        assert.strictEqual(p.api[0].url, '/api/v1/courses/queries/509?limit=5000');
+        assert.deepStrictEqual(JSON.parse(JSON.stringify(rows)), [{ 'Ученик': 'lmstest', 'Курс': 'mini', 'Когда': '' }]);
     });
 
     await t('без LMS.core адреса прежние: /courses/object, /courses/_m_new, schema.json', async () => {
@@ -177,17 +219,22 @@ async function t(name, fn) {
         const f = (url, init) => { calls.push(url); return Promise.resolve(route(url, init)); };
         return { S: ctx.LMSCore, f, calls, ctx };
     }
-    const meta = { id: '18', val: 'Пользователь', reqs: [{ id: 115, val: 'Роль' }, { id: 33, val: 'Имя' }] };
 
     await t('core.js: вошедший — id и роль из своей строки «Пользователь»', async () => {
         const c = core(url => {
             if (url === '/api/v1/courses/session') return json(200, { user: 'kurator', admin: false, issuer: null });
-            if (url === '/nav-api/courses/metadata/18') return json(200, meta);
-            if (url === '/nav-api/courses/object/18/?F_18=kurator&LIMIT=0,20') return json(200, [{ i: 608, r: ['kurator', '493:Куратор', 'К'] }]);
+            if (url === '/api/v1/courses/objects/18?format=kv&limit=20&f18=kurator') return json(200, [{ id: 608, val: 'kurator', 'Имя': 'К', 'Роль': '493:Куратор' }]);
             return json(404, {});
         });
         const s = await c.S.session(c.f, 'courses');
         assert.deepStrictEqual(JSON.parse(JSON.stringify(s)), { user: 'kurator', userId: '608', role: 'Куратор' });
+    });
+
+    await t('core.js: роль закрыта грантом BARRED (колонки «Роль» в строке нет) — id есть, роль пустая', async () => {
+        const c = core(url => url === '/api/v1/courses/session' ? json(200, { user: 'lmstest', admin: false })
+            : json(200, [{ id: 600, val: 'lmstest', 'Имя': 'Тест' }]));
+        const s = await c.S.session(c.f, 'courses');
+        assert.deepStrictEqual(JSON.parse(JSON.stringify(s)), { user: 'lmstest', userId: '600', role: '' });
     });
 
     await t('core.js: нет доступа к «Пользователь» — вход остаётся, id и роль пустые', async () => {

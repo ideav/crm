@@ -8,9 +8,9 @@
   A.root = A.mock ? '/download/courses/dev/' : '/download/courses/';
   A.contentRoot = A.root + 'content/';
   A.z = L.z || 'courses';
-  // новое ядро (python2node, courses#145): страница core.html, данные под /nav-api/<база>/, xsrf — кука idx_<база>
+  // новое ядро (python2node, courses#145): страница core.html, данные под /api/v1/<база>/, xsrf — кука idx_<база>
   A.core = !!L.core;
-  A.base = (A.core ? '/nav-api/' : '/') + A.z + '/';
+  A.base = (A.core ? '/api/v1/' : '/') + A.z + '/';
   A.xsrf = function () {
     if (!A.core) return L.xsrf || '';
     var m = new RegExp('(?:^|; )idx_' + A.z + '=([^;]*)').exec(document.cookie || '');
