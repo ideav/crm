@@ -58,7 +58,8 @@
 
   // Вход из ЛК ideav.ru/my (python2node#1288, crm /my/coresso): кабинет выпускает JWT и POST-ит его в
   // /api/v1/<база>/login/crm, ядро ставит cookie-сессию и возвращает на back (только путь).
-  // Нет сессии my — кабинет сначала просит войти и сам возвращается сюда же.
+  // Нет сессии my — кабинет сначала просит войти и сам возвращается сюда же. target=_self: иначе util.js
+  // откроет чужой домен в новой вкладке, и сессия встанет там, а этот портал останется гостем.
   S.CABINET = 'https://ideav.ru';
   S.cabinetUrl = function (db, back) {
     return S.CABINET + '/my/coresso?db=' + encodeURIComponent(db) + '&back=' + encodeURIComponent(back || '/');
@@ -78,7 +79,7 @@
         btn.disabled = false; msg.textContent = String(err.message || err);
       });
     } }, [E('h2', { text: 'Вход' }),
-      E('a', { class: 'btn btn-primary', href: S.cabinetUrl(db, location.pathname + location.search), text: 'Войти через личный кабинет ideav.ru' }),
+      E('a', { class: 'btn btn-primary', href: S.cabinetUrl(db, location.pathname + location.search), target: '_self', text: 'Войти через личный кабинет ideav.ru' }),
       E('p', { class: 'muted', text: 'или логином и паролем базы:' }),
       user, pwd, msg, E('div', { class: 'row' }, [btn,
       E('button', { class: 'btn', type: 'button', text: 'Отмена', onclick: function () { box.remove(); } })])])]);
