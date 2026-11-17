@@ -40,15 +40,11 @@
       if (!s || !s.user) return { user: 'guest', userId: '', role: '' };
       if (s.admin) return { user: s.user, userId: '', role: 'admin' };
       if (s.user_id != null && s.role != null) return { user: s.user, userId: String(s.user_id), role: String(s.role) };
-      return Promise.all([
-        f('/nav-api/' + db + '/metadata/' + USER, same).then(body),
-        f('/nav-api/' + db + '/object/' + USER + '/?F_' + USER + '=' + encodeURIComponent(s.user) + '&LIMIT=0,20', same).then(body)
-      ]).then(function (r) {
-        var reqs = (r[0] && r[0].reqs) || [], ri = -1;
-        reqs.forEach(function (q, i) { if (q.val === 'Роль') ri = i; });
-        var row = (Array.isArray(r[1]) ? r[1] : []).filter(function (x) { return x.r && x.r[0] === s.user; })[0];
-        var role = row && ri >= 0 ? String(row.r[ri + 1] || '').replace(/^[\d,]+:/, '') : '';
-        return { user: s.user, userId: row ? String(row.i) : '', role: role };
+      // format=kv — строка {id, val, <реквизит>: значение}; «Роль», закрытой роли грантом, в ней нет
+      return f('/api/v1/' + db + '/objects/' + USER + '?format=kv&f' + USER + '=' + encodeURIComponent(s.user) + '&limit=20', same).then(body).then(function (rows) {
+        var row = (Array.isArray(rows) ? rows : []).filter(function (x) { return x.val === s.user; })[0];
+        var role = row ? String(row['Роль'] || '').replace(/^[\d,]+:/, '') : '';
+        return { user: s.user, userId: row ? String(row.id) : '', role: role };
       }, function (e) {
         if (window.console) console.warn('LMS: строка «Пользователь» недоступна —', e.message || e);
         return { user: s.user, userId: '', role: '' };

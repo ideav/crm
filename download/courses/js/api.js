@@ -1,5 +1,6 @@
 /* LMS: доступ к данным базы courses по id из schema.json (или к localStorage-моку при ?mock=1).
-   На новом ядре (A.core, courses#145) — те же вызовы под /nav-api/<база>/, схема из core/schema.json. */
+   На новом ядре (A.core, courses#145) — родной REST /api/v1/<база>/ (objects, object/<id>, queries/<id>,
+   object/<id>/file/<реквизит>), схема из core/schema.json. */
 (function () {
   'use strict';
   var A = window.LMSApp, L = window.LMS || {};
@@ -37,7 +38,6 @@
     order(t).forEach(function (name, i) {
       var v = rec.r ? rec.r[i + 1] : '';
       v = v == null ? '' : v;
-      if (A.core) v = coreFile(t, rec.i, name, v);
       if (/^[0-9]{9,11}(.[0-9]+)?$/.test(v) && /^(Дата|Доступно)/.test(name)) v = A.fmtUnix(v);
       row[name] = v;
     });
@@ -83,19 +83,55 @@
     return fetch(A.base + path, { method: 'POST', credentials: 'same-origin', headers: h, body: f.toString() }).then(answer);
   }
 
+  // Новое ядро: запись — JSON с X-XSRF-Token; ответ записи [{id}] или [{error}] разбирает answer.
+  function send(method, path, data) {
+    var h = { 'X-XSRF-Token': A.xsrf() };
+    if (data) h['Content-Type'] = 'application/json';
+    return fetch(A.base + path, { method: method, credentials: 'same-origin', headers: h, body: data ? JSON.stringify(data) : undefined }).then(answer);
+  }
+  // Колонки строки compact — в порядке заголовка таблицы (header). Колонки, закрытые роли, ядро в нём
+  // не отдаёт; колонки, которых нет в schema.json, отдаёт — поэтому имя берётся по reqId, не по позиции.
+  var heads = {};
+  function header(t) {
+    if (!heads[t.id]) {
+      heads[t.id] = fetch(A.base + 'objects/' + t.id + '?limit=1', { credentials: 'same-origin' }).then(answerJson).then(function (d) {
+        var byId = {};
+        Object.keys(t.req).forEach(function (n) { byId[t.req[n]] = n; });
+        return ((d && d.header) || []).map(function (h) { return byId[h.reqId] || null; });
+      });
+      heads[t.id].catch(function () { delete heads[t.id]; });
+    }
+    return heads[t.id];
+  }
+  function parseCoreRow(t, rec, names) {
+    var row = { _id: String(rec.i), _main: rec.r && rec.r[0] };
+    names.forEach(function (name, i) {
+      if (!name) return;
+      var v = rec.r ? rec.r[i + 1] : '';
+      v = coreFile(t, rec.i, name, v == null ? '' : v);
+      if (/^[0-9]{9,11}(.[0-9]+)?$/.test(v) && /^(Дата|Доступно)/.test(name)) v = A.fmtUnix(v);
+      row[name] = v;
+    });
+    return row;
+  }
+  function firstId(d) { var o = Array.isArray(d) ? d[0] : d; return String((o && (o.id || o.obj)) || ''); }
+
   // list('Прогресс', {Пользователь: 5}) -> [{_id,_main,Курс,...}]
   A.list = function (name, filter) {
     if (A.mock) return A.mockApi.list(name, filter);
-    var t = tbl(name), q = ['JSON_OBJ', 'LIMIT=0,5000'];
+    var t = tbl(name);
     // ссылки сервер фильтрует по тексту, не по id; чужие строки и так режет маска роли — отбор на клиенте
     var client = filter || {};
-    return fetch(A.base + 'object/' + t.id + '/?' + q.join('&'), { credentials: 'same-origin' })
-      .then(answerJson)
-      .then(function (arr) {
-        return (Array.isArray(arr) ? arr : []).map(function (rec) { return parseRow(t, rec); }).filter(function (row) {
-          return Object.keys(client).every(function (k) { return A.refId(row[k]) === String(client[k]) || row[k] === String(client[k]); });
-        });
+    var rows = A.core
+      ? Promise.all([header(t), fetch(A.base + 'objects/' + t.id + '?format=compact&limit=5000', { credentials: 'same-origin' }).then(answerJson)])
+        .then(function (r) { return (Array.isArray(r[1]) ? r[1] : []).map(function (rec) { return parseCoreRow(t, rec, r[0]); }); })
+      : fetch(A.base + 'object/' + t.id + '/?JSON_OBJ&LIMIT=0,5000', { credentials: 'same-origin' }).then(answerJson)
+        .then(function (arr) { return (Array.isArray(arr) ? arr : []).map(function (rec) { return parseRow(t, rec); }); });
+    return rows.then(function (list) {
+      return list.filter(function (row) {
+        return Object.keys(client).every(function (k) { return A.refId(row[k]) === String(client[k]) || row[k] === String(client[k]); });
       });
+    });
   };
 
   function toParams(t, fields) {
@@ -110,20 +146,21 @@
     if (A.mock) return A.mockApi.create(name, main, fields);
     var t = tbl(name), p = toParams(t, fields);
     p['t' + t.id] = main;
-    return post('_m_new/' + t.id + '?JSON&up=1', p).then(function (d) {
-      return String((d && (d.id || d.obj)) || '');
-    });
+    if (A.core) return send('POST', 'objects', Object.assign({ id: t.id, up: 1 }, p)).then(firstId);
+    return post('_m_new/' + t.id + '?JSON&up=1', p).then(firstId);
   };
-  // main (необязательно) — новое главное значение строки (t<id таблицы> в _m_set).
+  // main (необязательно) — новое главное значение строки (t<id таблицы>).
   A.update = function (name, id, fields, main) {
     if (A.mock) return A.mockApi.update(name, id, fields, main);
     var t = tbl(name), p = toParams(t, fields);
     if (main != null) p['t' + t.id] = main;
+    if (A.core) return send('PATCH', 'object/' + id, p);
     return post('_m_set/' + id + '?JSON', p);
   };
   A.remove = function (name, id) {
     if (A.mock) return A.mockApi.remove(name, id);
     tbl(name);
+    if (A.core) return send('DELETE', 'object/' + id);
     return post('_m_del/' + id + '?JSON', {});
   };
   A.hasField = function (name, field) { var t = schema && schema.tables && schema.tables[name]; return !!(t && t.req && t.req[field]); };
@@ -144,42 +181,71 @@
       x.send(fd);
     });
   }
-  // multipart: на новом ядре — /nav-api/<база>/ (A.base), на старом — /<база>/
-  function formBase() { return A.core ? A.base : '/' + A.z + '/'; }
+  // Новое ядро: файл — multipart (часть file) в POST /api/v1/<база>/object/<строка>/file/<реквизит>.
+  function coreUpload(t, id, fileField, file, onProgress) {
+    var fd = new FormData();
+    fd.append('file', file, file.name);
+    return sendForm(A.base + 'object/' + id + '/file/' + t.req[fileField], fd, onProgress, false).then(function () { return String(id); });
+  }
   // Загрузка файла: multipart в _m_new (поле t<id реквизита FILE>), XHR ради индикатора прогресса.
+  // На новом ядре — строка без файла, затем файл в неё; файл не принят — строка удаляется.
   // fields — реквизиты таблицы по именам (кроме FILE); file — File; onProgress(0..1).
   A.upload = function (name, main, fields, fileField, file, onProgress) {
     if (A.mock) return A.mockApi.upload(name, main, fields, fileField, file);
     var t = tbl(name), p = toParams(t, fields);
     if (!t.req[fileField]) return Promise.reject(new Error('Нет реквизита «' + fileField + '»'));
-    p['t' + t.id] = main; p._xsrf = A.xsrf();
+    p['t' + t.id] = main;
+    if (A.core) {
+      return send('POST', 'objects', Object.assign({ id: t.id, up: 1 }, p)).then(firstId).then(function (id) {
+        if (!id) throw new Error('ядро не вернуло id строки');
+        return coreUpload(t, id, fileField, file, onProgress).catch(function (e) {
+          return send('DELETE', 'object/' + id).then(function () { throw e; }, function () { throw e; });
+        });
+      });
+    }
+    p._xsrf = A.xsrf();
     var fd = new FormData();
     Object.keys(p).forEach(function (k) { fd.append(k, p[k]); });
     fd.append('t' + t.req[fileField], file, file.name);
-    return sendForm(formBase() + '_m_new/' + t.id + '?JSON&up=1', fd, onProgress, true);
+    return sendForm('/' + A.z + '/_m_new/' + t.id + '?JSON&up=1', fd, onProgress, true);
   };
-  // Загрузка файла в существующую строку (_m_set, multipart): ядро пишет в тот же реквизит FILE,
-  // поэтому адрес файла (хэш от id реквизита) остаётся прежним.
+  // Загрузка файла в существующую строку: ядро пишет в тот же реквизит FILE,
+  // поэтому адрес файла (строка и реквизит) остаётся прежним.
   A.uploadTo = function (name, id, fileField, file, onProgress) {
     if (A.mock) return A.mockApi.uploadTo(name, id, fileField, file);
     var t = tbl(name);
     if (!t.req[fileField]) return Promise.reject(new Error('Нет реквизита «' + fileField + '»'));
+    if (A.core) return coreUpload(t, id, fileField, file, onProgress);
     var fd = new FormData();
     fd.append('_xsrf', A.xsrf());
     fd.append('t' + t.req[fileField], file, file.name);
-    return sendForm(formBase() + '_m_set/' + id + '?JSON', fd, onProgress, false).then(function () { return String(id); });
+    return sendForm('/' + A.z + '/_m_set/' + id + '?JSON', fd, onProgress, false).then(function () { return String(id); });
   };
   // Удаление строки с файлом: сначала очищаем реквизит FILE (так сервер стирает сам файл), потом строку.
+  // Новое ядро файлы без ссылок стирает само (сборщик python2node#1342) — достаточно удалить строку.
   A.removeFile = function (name, id, fileField) {
     if (A.mock) return A.mockApi.remove(name, id);
-    if (A.core) return post('_m_del/' + id + '?JSON', {}); // байты удалённой строки ядро с диска пока не убирает (сборщика нет)
+    if (A.core) return send('DELETE', 'object/' + id);
     var f = {}; f[fileField] = '';
     return post('_m_set/' + id + '?JSON', toParams(tbl(name), f)).then(function () { return post('_m_del/' + id + '?JSON', {}); });
   };
+  // Строки отчёта нового ядра {columns:[{alias,name,ord}], composition:[{ord,reportName}], rows:[{alias:…}]}
+  // в виде JSON_KV: ключ — «Имя в отчете» колонки, без него — имя колонки, без него — col<порядок>.
+  function kvRows(d) {
+    var names = {};
+    ((d && d.composition) || []).forEach(function (c) { if (c.reportName) names[c.ord] = c.reportName; });
+    var cols = ((d && d.columns) || []).map(function (c) { return { alias: c.alias, name: names[c.ord] || c.name || ('col' + c.ord) }; });
+    return ((d && d.rows) || []).map(function (row) {
+      var o = {};
+      cols.forEach(function (c) { var v = row[c.alias]; o[c.name] = v == null ? '' : v; });
+      return o;
+    });
+  }
   A.reportRows = function (name) {
     if (A.mock) return A.mockApi.report(name);
     var id = schema.reports && schema.reports[name];
     if (!id) return Promise.reject(new Error('Нет отчёта «' + name + '»'));
+    if (A.core) return fetch(A.base + 'queries/' + (id.id || id) + '?limit=5000', { credentials: 'same-origin' }).then(answerJson).then(kvRows);
     return fetch(A.base + 'report/' + (id.id || id) + '?JSON_KV', { credentials: 'same-origin' })
       .then(answerJson);
   };

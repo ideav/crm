@@ -1,6 +1,6 @@
 <!doctype html>
 <!-- Портал курсов на новом ядре (python2node, ideav/courses#145). Статическая страница: открывается на том же
-     домене, что и ядро (данные — /nav-api/<база>/, вход — /api/v1/<база>/login). База — ?db=, по умолчанию courses.
+     домене, что и ядро (данные и вход — REST /api/v1/<база>/). База — ?db=, по умолчанию courses.
      Скрипты портала грузит core.js после того, как узнает пользователя; список и версии — в data-scripts.
      Версии ?v=N держать равными шаблону templates/courses/info.html. -->
 <html lang="ru">
@@ -19,13 +19,13 @@ document.documentElement.classList.add('lms-on');
 </head>
 <body>
 <div id="lms-shell"><div id="lms-app"><p style="padding:24px;font-family:sans-serif">Загрузка…</p></div></div>
-<script src="/download/courses/js/core.js?v=3" data-scripts="
-  /download/courses/js/util.js?v=6
+<script src="/download/courses/js/core.js?v=4" data-scripts="
+  /download/courses/js/util.js?v=7
   /download/courses/js/vendor/marked-18.0.5.umd.js
   /download/courses/js/vendor/purify-3.4.11.min.js
   /download/courses/js/authors.js?v=2
   /download/courses/js/mock.js?v=7
-  /download/courses/js/api.js?v=9
+  /download/courses/js/api.js?v=10
   /download/courses/js/data.js?v=7
   /download/courses/js/tasks.js?v=5
   /download/courses/js/quiz.js?v=5
