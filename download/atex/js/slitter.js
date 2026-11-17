@@ -2623,22 +2623,61 @@
     // #3674: события смены из защищённого отчёта report/slitter_shift_events (91520)
     // вместо сырого object/. Разобранные события раскладываем общим хвостом
     // applyLoadedEvents. Тихий фолбэк на прямое чтение (loadShiftEventsFromTable).
-    // #5545: пульту нужны только СВЕЖИЕ события смены — последние SHIFT_EVENTS_LIMIT, новые
-    // сверху. Без сортировки отчёт и object/ отдают строки старыми вперёд, и лимит запроса
-    // отрезает как раз сегодняшние («Конец смены» не доходит — смена для пульта не закрывается).
-    // 1000 событий — около 13 рабочих дней (≈75 событий в день на ateh, ноябрь 2026). Станок,
-    // простоявший дольше, в выборку не попадает и считается с закрытой сменой — это верно.
-    // Сортировка отчёта: ORDER=-{id колонки} (по имени колонки ядро её не принимает);
-    // 91524 — колонка event_when отчёта slitter_shift_events (одинакова в ateh и ateh1).
-    // Таблица событий: ORDER=-{id таблицы} — по главному значению, времени события.
-    var SHIFT_EVENTS_LIMIT = 1000;
-    var SHIFT_EVENTS_REPORT_WHEN_COL = '91524';
+    // #5545: пульт читает журнал С КОНЦА — порциями по SHIFT_EVENTS_PAGE, новые сверху, — и
+    // останавливается, как только в прочитанном есть событие «Начало/Конец смены» выбранного
+    // станка (или журнал кончился). Порция ≈ 13 рабочих дней (≈75 событий в день на ateh).
+    // Порядок «новые сверху» задан в САМОМ отчёте: сортировка колонок event_when (-1) и
+    // event_id (-2). Таблица событий сортируется параметром ORDER=-{id таблицы} — по главному
+    // значению, времени события.
+    var SHIFT_EVENTS_PAGE = 1000;
+
+    function hasShiftEventOfSlitter(events, slitterId, slitterLabel) {
+        return (events || []).some(function(ev) {
+            return (isShiftStartType(ev.type) || isShiftEndType(ev.type))
+                && shiftEventMatchesSlitter(ev, slitterId, slitterLabel);
+        });
+    }
+
+    // Читает порции, пока не найдётся смена станка или не придёт неполная порция.
+    // readPage(offset) → Promise<разобранные события порции>.
+    AtexSlitter.prototype.readShiftEventsFromEnd = function(readPage) {
+        var self = this;
+        var all = [];
+        function step(offset) {
+            return readPage(offset).then(function(list) {
+                all = all.concat(list);
+                if (list.length < SHIFT_EVENTS_PAGE) return all;
+                if (!self.selectedSlitterId) return all;
+                if (hasShiftEventOfSlitter(all, self.selectedSlitterId, self.selectedSlitterLabel())) return all;
+                return step(offset + SHIFT_EVENTS_PAGE);
+            });
+        }
+        return step(0).then(function(list) {
+            return list.sort(function(a, b) { return String(b.when).localeCompare(String(a.when)); });
+        });
+    };
+
+    // Порция пришла старыми вперёд — у отчёта потеряна сортировка: тогда в первую порцию попадает
+    // начало журнала, а не свежие события, и смена станка определяется неверно.
+    function warnIfOldestFirst(rows, source) {
+        if (!rows || rows.length < 2) return;
+        var first = Number(rows[0].event_when), last = Number(rows[rows.length - 1].event_when);
+        if (isFinite(first) && isFinite(last) && first < last) {
+            console.error('atex-slitter: ' + source + ' отдаёт события старыми вперёд — в определении '
+                + 'отчёта нет сортировки event_when по убыванию (#5545)');
+        }
+    }
 
     AtexSlitter.prototype.loadShiftEvents = function() {
         var self = this;
-        return this.getJson('report/slitter_shift_events?JSON_KV&ORDER=-' + SHIFT_EVENTS_REPORT_WHEN_COL
-            + '&LIMIT=0,' + SHIFT_EVENTS_LIMIT).then(function(rows) {
-            var list = core.rowsToShiftEvents(Array.isArray(rows) ? rows : (rows && rows.rows) || []);
+        return this.readShiftEventsFromEnd(function(offset) {
+            return self.getJson('report/slitter_shift_events?JSON_KV&LIMIT=' + offset + ',' + SHIFT_EVENTS_PAGE)
+                .then(function(rows) {
+                    var list = Array.isArray(rows) ? rows : (rows && rows.rows) || [];
+                    if (!offset) warnIfOldestFirst(list, 'report/slitter_shift_events');
+                    return core.rowsToShiftEvents(list);
+                });
+        }).then(function(list) {
             if (list.length) { self.applyLoadedEvents(list); return; }
             // #4359: пустой отчёт — НЕ доказательство, что событий нет: сломанный или
             // недогранченный report/ отдаёт [] со статусом 200, и пульт молча считает смену
@@ -2669,9 +2708,13 @@
         var self = this;
         var meta = this.meta.event;
         if (!meta) { this.shiftEvents = []; this.events = []; this.allEvents = []; return Promise.resolve(); }
-        return this.getJson('object/' + meta.id + '/?JSON_OBJ&ORDER=-' + meta.id
-            + '&LIMIT=0,' + SHIFT_EVENTS_LIMIT).then(function(rows) {
-            self.applyLoadedEvents(self.parseEventRows(rows));
+        return this.readShiftEventsFromEnd(function(offset) {
+            return self.getJson('object/' + meta.id + '/?JSON_OBJ&ORDER=-' + meta.id
+                + '&LIMIT=' + offset + ',' + SHIFT_EVENTS_PAGE).then(function(rows) {
+                return self.parseEventRows(rows);
+            });
+        }).then(function(list) {
+            self.applyLoadedEvents(list);
         });
     };
 
