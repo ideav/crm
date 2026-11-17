@@ -1,13 +1,13 @@
-// #5545 — пульт слиттера: после «Закрыть смену» снова появляется «Открыть смену», даже когда
-// журнал событий длиннее одной страницы запроса.
+// #5545 — пульт слиттера: после «Закрыть смену» снова появляется «Открыть смену», сколько бы
+// событий ни накопилось в журнале.
 //
-// Отчёт report/slitter_shift_events отдаёт строки СТАРЫМИ ВПЕРЁД. Пульт читал его одним запросом
-// LIMIT=0,5000; на боевой ateh 17.11.2026 в журнале 5076 событий — всё, что записано после 5000-го
-// (в том числе сегодняшние «Конец смены»), до пульта не доходило, и последним событием станка
-// оставалось утреннее «Начало смены»: смена для пульта не закрывалась никогда.
+// Отчёт report/slitter_shift_events без сортировки отдаёт строки СТАРЫМИ ВПЕРЁД. Пульт читал его
+// одним запросом LIMIT=0,5000; на боевой ateh 17.11.2026 в журнале 5076 событий — всё после
+// 5000-го (в том числе сегодняшние «Конец смены») до пульта не доходило, и последним событием
+// станка оставалось утреннее «Начало смены»: смена для пульта не закрывалась.
 //
-// Правило: пульт читает журнал целиком — страницами, пока страница не придёт неполной; то же
-// у запасного прямого чтения таблицы событий.
+// Правило: пульт берёт последние 1000 событий, НОВЫЕ СВЕРХУ — отчёт с ORDER=-{колонка
+// event_when}, запасное прямое чтение таблицы с ORDER=-{id таблицы}. Длина журнала не важна.
 //
 // rules: none (defect #5545)
 // Run with: node experiments/atex-slitter-5545.test.js
@@ -23,34 +23,47 @@ function assert(cond, name) {
     if (cond) passed++; else process.exitCode = 1;
 }
 
-// Журнал станка 1277, старыми вперёд: n-1 событие резки и последним — заданное событие смены.
+// Журнал станка 1277 в порядке записи: «Начало смены», n-2 события резки, последним — lastType.
+var T0 = 1785605362;
 function journal(n, lastType) {
-    var rows = [];
-    var t0 = 1785605362;
-    rows.push({ event_id: '1', event_when: String(t0), event_type: 'Начало смены', event_user_id: '1640',
-        event_notes: 'Станок 1 · 2026-08-01', event_cut_id: '', slitter_id: '1277' });
-    for (var i = 2; i < n; i++) {
-        rows.push({ event_id: String(i), event_when: String(t0 + i), event_type: 'Резка', event_user_id: '1640',
-            event_notes: '', event_cut_id: '900', slitter_id: '1277' });
-    }
-    rows.push({ event_id: String(n), event_when: String(t0 + n), event_type: lastType, event_user_id: '1640',
-        event_notes: 'Станок 1 · 2026-11-17', event_cut_id: '', slitter_id: '1277' });
-    return rows;
+    var list = [{ id: 1, when: T0, type: 'Начало смены' }];
+    for (var i = 2; i < n; i++) list.push({ id: i, when: T0 + i * 60, type: 'Резка', cut: '900' });
+    list.push({ id: n, when: T0 + n * 60, type: lastType });
+    return list;
+}
+function toReportRow(ev) {
+    return { event_id: String(ev.id), event_when: String(ev.when), event_type: ev.type, event_user_id: '1640',
+        event_notes: ev.cut ? '' : 'Станок 1', event_cut_id: ev.cut || '', slitter_id: '1277' };
+}
+// JSON_OBJ таблицы 1082 (реальная схема ateh): r[0] — время, далее реквизиты в порядке meta.reqs.
+var EVENT_META = { id: '1082', reqs: [
+    { id: '1196', val: 'Пользователь' }, { id: '1198', val: 'Значение' }, { id: '1199', val: 'Примечания' },
+    { id: '16415', val: 'Задание в производство' }, { id: '16417', val: 'Задача на втулки' },
+    { id: '16419', val: 'Тип события' }, { id: '642887', val: 'Слиттер' }
+] };
+function toObjRow(ev) {
+    return { i: ev.id, u: 1, o: 1, r: [String(ev.when), '1640:operator', '', ev.cut ? '' : 'Станок 1',
+        ev.cut ? ev.cut + ':1785474000' : '', '', '1:' + ev.type, '1277:Станок 1'] };
 }
 
-// Сервер, который честно соблюдает LIMIT=offset,count (как боевой Интеграм).
-function serve(rows) {
+// Сервер как боевой Интеграм: без ORDER — старыми вперёд, ORDER=-… — новыми вперёд; LIMIT=offset,count.
+function serve(events, opts) {
+    opts = opts || {};
     return function(path) {
         this.requests.push(path);
+        var isReport = path.indexOf('report/') === 0;
+        if (isReport && opts.reportEmpty) return Promise.resolve([]);
+        var list = events.slice();
+        if (/[?&]ORDER=-/.test(path)) list.reverse();
         var m = /LIMIT=(\d+),(\d+)/.exec(path);
-        var from = m ? +m[1] : 0, count = m ? +m[2] : rows.length;
-        return Promise.resolve(rows.slice(from, from + count));
+        list = list.slice(m ? +m[1] : 0, m ? +m[1] + +m[2] : list.length);
+        return Promise.resolve(list.map(isReport ? toReportRow : toObjRow));
     };
 }
 
-function makePult(rows) {
+function makePult(events, opts) {
     var inst = Object.create(Controller.prototype);
-    inst.meta = {};
+    inst.meta = { event: EVENT_META };
     inst.userId = '1640';
     inst.selectedSlitterId = '1277';
     inst.selectedSlitterLabel = function() { return 'Станок 1'; };
@@ -59,37 +72,35 @@ function makePult(rows) {
     inst.currentCutId = null;
     inst.requests = [];
     inst.notify = function() {};
-    inst.getJson = serve(rows);
+    inst.getJson = serve(events, opts);
     return inst;
 }
 
 var cases = [
-    { n: 5076, last: 'Конец смены', open: false, name: 'журнал 5076 > 5000, последним «Конец смены» → смена закрыта' },
+    { n: 5076, last: 'Конец смены', open: false, name: 'журнал 5076, последним «Конец смены» → смена закрыта' },
     { n: 5076, last: 'Начало смены', open: true, name: 'журнал 5076, последним «Начало смены» → смена открыта' },
-    { n: 10000, last: 'Конец смены', open: false, name: 'журнал ровно на две страницы → хвост дочитан' },
-    { n: 12, last: 'Конец смены', open: false, name: 'короткий журнал → одна страница, смена закрыта' }
+    { n: 50000, last: 'Конец смены', open: false, name: 'журнал 50000 → смена закрыта' },
+    { n: 12, last: 'Конец смены', open: false, name: 'журнал 12 → смена закрыта' },
+    { n: 5076, last: 'Конец смены', open: false, reportEmpty: true,
+        name: 'отчёт пуст, запасное чтение таблицы, журнал 5076 → смена закрыта' }
 ];
 
 var chain = Promise.resolve();
 cases.forEach(function(c) {
     chain = chain.then(function() {
-        var pult = makePult(journal(c.n, c.last));
+        var pult = makePult(journal(c.n, c.last), { reportEmpty: c.reportEmpty });
         return pult.loadShiftEvents().then(function() {
-            assert(pult.allEvents.length === c.n, c.name + ': прочитаны все ' + c.n + ' событий (получено '
-                + pult.allEvents.length + ')');
             assert(pult.isShiftOpen() === c.open, c.name);
+            assert(pult.allEvents.length === Math.min(c.n, 1000), c.name + ': прочитано min(журнал, 1000) событий (получено '
+                + pult.allEvents.length + ')');
+            var newest = String(c.n);
+            assert(pult.allEvents.some(function(ev) { return String(ev.id) === newest; }),
+                c.name + ': самое свежее событие в выборке');
         });
     });
 });
 
 chain.then(function() {
-    // Короткий журнал — один запрос, лишних обращений нет.
-    var pult = makePult(journal(12, 'Конец смены'));
-    return pult.loadShiftEvents().then(function() {
-        assert(pult.requests.length === 1, 'короткий журнал читается одним запросом (было '
-            + pult.requests.length + ')');
-    });
-}).then(function() {
     console.log('\n' + passed + '/' + total + ' passed');
 }).catch(function(err) {
     console.error(err);

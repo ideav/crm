@@ -2623,35 +2623,22 @@
     // #3674: события смены из защищённого отчёта report/slitter_shift_events (91520)
     // вместо сырого object/. Разобранные события раскладываем общим хвостом
     // applyLoadedEvents. Тихий фолбэк на прямое чтение (loadShiftEventsFromTable).
-    // #5545: журнал событий смены читается ЦЕЛИКОМ — страницами по SHIFT_EVENTS_PAGE, пока
-    // страница не придёт неполной. Отчёт и object/ отдают строки старыми вперёд, поэтому
-    // одиночный запрос с лимитом отрезает самые свежие события (сегодняшние «Конец смены»), и
-    // смена для пульта не закрывается. `basePath` — путь без LIMIT.
-    var SHIFT_EVENTS_PAGE = 5000;
-    var SHIFT_EVENTS_MAX_PAGES = 100;
-    AtexSlitter.prototype.getJsonAllPages = function(basePath) {
-        var self = this;
-        var all = [];
-        function page(n) {
-            return self.getJson(basePath + '&LIMIT=' + (n * SHIFT_EVENTS_PAGE) + ',' + SHIFT_EVENTS_PAGE).then(function(rows) {
-                var list = Array.isArray(rows) ? rows : (rows && rows.rows) || [];
-                all = all.concat(list);
-                if (list.length < SHIFT_EVENTS_PAGE) return all;
-                if (n + 1 >= SHIFT_EVENTS_MAX_PAGES) {
-                    console.error('atex-slitter: ' + basePath + ' — прочитано ' + all.length
-                        + ' строк, дальше не читаю; журнал событий не дочитан');
-                    return all;
-                }
-                return page(n + 1);
-            });
-        }
-        return page(0);
-    };
+    // #5545: пульту нужны только СВЕЖИЕ события смены — последние SHIFT_EVENTS_LIMIT, новые
+    // сверху. Без сортировки отчёт и object/ отдают строки старыми вперёд, и лимит запроса
+    // отрезает как раз сегодняшние («Конец смены» не доходит — смена для пульта не закрывается).
+    // 1000 событий — около 13 рабочих дней (≈75 событий в день на ateh, ноябрь 2026). Станок,
+    // простоявший дольше, в выборку не попадает и считается с закрытой сменой — это верно.
+    // Сортировка отчёта: ORDER=-{id колонки} (по имени колонки ядро её не принимает);
+    // 91524 — колонка event_when отчёта slitter_shift_events (одинакова в ateh и ateh1).
+    // Таблица событий: ORDER=-{id таблицы} — по главному значению, времени события.
+    var SHIFT_EVENTS_LIMIT = 1000;
+    var SHIFT_EVENTS_REPORT_WHEN_COL = '91524';
 
     AtexSlitter.prototype.loadShiftEvents = function() {
         var self = this;
-        return this.getJsonAllPages('report/slitter_shift_events?JSON_KV').then(function(rows) {
-            var list = core.rowsToShiftEvents(rows);
+        return this.getJson('report/slitter_shift_events?JSON_KV&ORDER=-' + SHIFT_EVENTS_REPORT_WHEN_COL
+            + '&LIMIT=0,' + SHIFT_EVENTS_LIMIT).then(function(rows) {
+            var list = core.rowsToShiftEvents(Array.isArray(rows) ? rows : (rows && rows.rows) || []);
             if (list.length) { self.applyLoadedEvents(list); return; }
             // #4359: пустой отчёт — НЕ доказательство, что событий нет: сломанный или
             // недогранченный report/ отдаёт [] со статусом 200, и пульт молча считает смену
@@ -2682,7 +2669,8 @@
         var self = this;
         var meta = this.meta.event;
         if (!meta) { this.shiftEvents = []; this.events = []; this.allEvents = []; return Promise.resolve(); }
-        return this.getJsonAllPages('object/' + meta.id + '/?JSON_OBJ').then(function(rows) {
+        return this.getJson('object/' + meta.id + '/?JSON_OBJ&ORDER=-' + meta.id
+            + '&LIMIT=0,' + SHIFT_EVENTS_LIMIT).then(function(rows) {
             self.applyLoadedEvents(self.parseEventRows(rows));
         });
     };
