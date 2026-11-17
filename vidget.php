@@ -284,11 +284,24 @@ function jobStatus(string $id): array
     if (preg_match('/^\[ExtractAudio\]/', $last)) {
         return ['state' => 'running', 'stage' => 'Конвертируем в MP3…'];
     }
-    if (preg_match_all('/^\[download\]\s+([\d.]+)%/m', $log, $m)) {
-        $stage = $parts > 1 ? 'Качаем звук' : 'Качаем';
-        return ['state' => 'running', 'percent' => (float) end($m[1]), 'stage' => $stage];
+    $res = ['state' => 'running'];
+    // обрыв связи: yt-dlp ждёт до --socket-timeout и повторяет — без этой строки страница «висит»
+    if (preg_match('/Retrying \((\d+)\/(\d+)\)/', $last, $r)) {
+        $res['note'] = 'связь с сайтом оборвалась, повтор ' . $r[1] . ' из ' . $r[2];
     }
-    return ['state' => 'running', 'stage' => 'Получаем сведения о видео…'];
+    if (preg_match_all('/^\[download\]\s+([\d.]+)% of\s+~?\s*([\d.]+)(\w+)(?:.*ETA\s+([\d:]+))?/m', $log, $m, PREG_SET_ORDER)) {
+        $p = end($m);
+        $res['percent'] = (float) $p[1];
+        $res['size']    = $p[2] . ' ' . strtr($p[3], ['GiB' => 'ГБ', 'MiB' => 'МБ', 'KiB' => 'КБ']);
+        if (!empty($p[4]) && !isset($res['note'])) {
+            $res['eta'] = $p[4];
+        }
+        $res['stage'] = $parts > 1 ? 'Качаем звук' : 'Качаем';
+        return $res;
+    }
+    $res['stage'] = preg_grep('/Solving JS challenges/', $lines)
+        ? 'Проходим проверку сайта…' : 'Получаем сведения о видео…';
+    return $res;
 }
 
 function sendFile(string $path): void
@@ -427,7 +440,10 @@ header('Content-Type: text/html; charset=utf-8');
             if (s.state === 'error') return finish(s.error);
             if (s.state === 'done') { finish(''); location.href = '?file=' + id; return; }
             var pct = typeof s.percent === 'number' ? s.percent : null;
-            stage.textContent = (s.stage || 'Качаем') + (pct !== null ? ' — ' + pct.toFixed(1) + '%' : '');
+            stage.textContent = (s.stage || 'Качаем')
+                + (pct !== null ? ' — ' + pct.toFixed(1) + '%' + (s.size ? ' из ' + s.size : '') : '')
+                + (s.eta ? ', осталось ' + s.eta : '')
+                + (s.note ? ' (' + s.note + '…)' : '');
             bar.hidden = pct === null;
             if (pct !== null) fill.style.width = pct + '%';
             setTimeout(function () { poll(id, started); }, 1000);

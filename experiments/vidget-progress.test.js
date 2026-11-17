@@ -34,6 +34,7 @@ fs.writeFileSync(fake, [
     'echo "[youtube] x: Downloading webpage"',
     'echo "[download] Destination: $f"',
     'echo "[download]  42.0% of 1.00MiB at 1.00MiB/s ETA 00:01"',
+    'echo "[download] Got error: _ssl.c:983: The handshake operation timed out. Retrying (3/30)..."',
     'i=0; while [ ! -f "' + gate + '" ] && [ $i -lt 100 ]; do sleep 0.1; i=$((i+1)); done',
     'echo "[download] 100% of 1.00MiB"',
     'printf "VIDEO" > "$f"',
@@ -108,6 +109,11 @@ async function pollUntil(port, id, pred) {
         check('в процессе — проценты из вывода yt-dlp', () => {
             assert.strictEqual(mid.state, 'running');
             assert.strictEqual(mid.percent, 42);
+            assert.strictEqual(mid.size, '1.00 МБ');
+        });
+        // #5535: на обрыве связи yt-dlp ждёт до --socket-timeout — страница должна сказать, что идёт повтор
+        check('обрыв связи виден в статусе как повтор', () => {
+            assert.match(String(mid.note), /повтор 3 из 30/, JSON.stringify(mid));
         });
         const early = await request(port, 'GET', '/vidget.php?file=' + r.id);
         check('?file до готовности — 404', () => assert.strictEqual(early.status, 404));
