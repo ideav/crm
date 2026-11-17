@@ -350,6 +350,8 @@ if(strlen($rawInput)){
 # Строка запроса пишется при завершении PHP — с пользователем, кодом ответа и временем (#5104).
 # Секреты в параметрах маскирует logParams(): `c`/`s` — код и секрет входа по QR (#4677).
 register_shutdown_function("logRequest");
+if(($z === "my") && ((isset($com[2]) ? $com[2] : "") === "coresso")) # ideav/python2node#1288: вход в базу на новом ядре
+    Core_sso_enter();
 if(($z === "my") && ((isset($com[2]) ? $com[2] : "") === "register")){ # Register the user
     # Check if this is a confirmation request
     if(isset($_GET["c"]) && isset($_GET["u"])){
@@ -3507,6 +3509,68 @@ function Sso_enter(){
 		setcookie("_aff", $_GET["aff"], Auth_cookie_opts(time() + 180 * 86400, FALSE));
 	setcookie("sso_back", $z, Auth_cookie_opts(time() + 86400, FALSE));
 	header("Location: /start.html?".http_build_query(array("db" => "my", "r" => "InvalidToken", "uri" => $_SERVER["REQUEST_URI"])));
+	die();
+}
+# ideav/python2node#1288: вход вошедшего в my в базу на новом ядре (python2node) без второго пароля.
+# Константа в include/connection.php: define("CORE_SSO_DBS", array("<база>" => "https://<хост ядра>")); нет константы —
+# маршрут /my/coresso отвечает отказом. Ключ подписи тот же, что у core_token ИИ-агента (#5131): CORE_JWT_PRIVATE_KEY.
+# Токен — RS256-JWT {iss, aud = база, sub = id в my, email, jti, iat, exp}; живёт CORE_JWT_TTL, но не дольше 300 с.
+# Ядро принимает его ОДИН раз (jti) POST-формой на /api/v1/<база>/login/crm и ставит свою cookie сессии.
+# Токен уходит только в теле POST: в адресе он попал бы в журналы и Referer.
+function Core_sso_back($raw){
+	if(!is_string($raw) || $raw === "" || strlen($raw) > 1024 || $raw[0] !== "/" || (strpos($raw, "//") === 0)
+			|| (strpos($raw, "\\") !== FALSE) || preg_match('/[\x00-\x1f\x7f]/', $raw))
+		return "/";
+	return $raw;
+}
+function Core_sso_url($base){
+	return (is_string($base) && preg_match('#^https://[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?$#i', $base)) ? $base : "";
+}
+function Core_sso_token($db, $email, $sub, $now = NULL){
+	$key = aiConfigValue(array("CORE_JWT_PRIVATE_KEY"));
+	if($key === "" || $email === "" || !($key = openssl_pkey_get_private(str_replace("\\n", "\n", $key))))
+		return "";
+	$ttl = (int)aiConfigValue(array("CORE_JWT_TTL"));
+	if($ttl <= 0 || $ttl > 300)
+		$ttl = 300;
+	$iss = aiConfigValue(array("CORE_JWT_ISS"));
+	$now = $now === NULL ? time() : (int)$now;
+	$b64 = function($s){ return rtrim(strtr(base64_encode($s), "+/", "-_"), "="); };
+	$jwt = $b64(json_encode(array("alg" => "RS256", "typ" => "JWT")))
+		.".".$b64(json_encode(array("iss" => $iss !== "" ? $iss : "crm", "aud" => $db, "sub" => (string)$sub, "email" => $email,
+			"jti" => bin2hex(random_bytes(16)), "iat" => $now, "exp" => $now + $ttl), JSON_UNESCAPED_UNICODE));
+	return openssl_sign($jwt, $signature, $key, OPENSSL_ALGO_SHA256) ? $jwt.".".$b64($signature) : "";
+}
+# Страница с автоотправляемой формой: браузер сам делает POST на ядро. Форма — не ссылка: токена нет в URL.
+function Core_sso_page($base, $db, $token, $back){
+	$h = function($s){ return htmlspecialchars((string)$s, ENT_QUOTES, "UTF-8"); };
+	return "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name=\"referrer\" content=\"no-referrer\"><title>...</title></head><body>"
+		."<form method=\"post\" action=\"".$h($base."/api/v1/".$db."/login/crm")."\">"
+		."<input type=\"hidden\" name=\"token\" value=\"".$h($token)."\"><input type=\"hidden\" name=\"redirect\" value=\"".$h($back)."\">"
+		."<noscript><button type=\"submit\">Continue</button></noscript></form>"
+		."<script>document.forms[0].submit();</script></body></html>";
+}
+# GET /my/coresso?db=<база>&back=<путь на ядре>. Нет сессии my — на вход в кабинет с возвратом сюда.
+function Core_sso_enter(){
+	$map = defined("CORE_SSO_DBS") && is_array(CORE_SSO_DBS) ? CORE_SSO_DBS : array();
+	$db = isset($_GET["db"]) && is_string($_GET["db"]) ? $_GET["db"] : "";
+	$base = (preg_match(DB_MASK, $db) && ($db !== "my") && isset($map[$db])) ? Core_sso_url($map[$db]) : "";
+	if($base === "")
+		my_die("Sign-in to this database is not configured");
+	if(!isset($_COOKIE["idb_my"]) || !is_string($_COOKIE["idb_my"])
+			|| !($my = mysqli_fetch_array(Exec_sql("SELECT u.id, email.val email FROM my tok, my u LEFT JOIN my email ON email.up=u.id AND email.t=".EMAIL
+				." WHERE u.t=".USER." AND tok.up=u.id AND ".Token_match_sql("tok", $_COOKIE["idb_my"])." AND tok.t=".TOKEN." LIMIT 1"
+				, "Core SSO: cabinet user")))){
+		header("Location: /start.html?".http_build_query(array("db" => "my", "r" => "InvalidToken", "uri" => $_SERVER["REQUEST_URI"])));
+		die();
+	}
+	$token = Core_sso_token($db, trim((string)$my["email"]), (int)$my["id"]);
+	if($token === "")
+		my_die("The cabinet account has no email or core sign-in is not configured");
+	header("Content-Type: text/html; charset=utf-8");
+	header("Cache-Control: no-store");
+	header("Referrer-Policy: no-referrer");
+	print(Core_sso_page($base, $db, $token, Core_sso_back(isset($_GET["back"]) ? $_GET["back"] : "/")));
 	die();
 }
 # Вход гостем (#5221, #5231): посетитель без токена работает пользователем guest, если тот
