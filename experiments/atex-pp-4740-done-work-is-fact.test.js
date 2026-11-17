@@ -24,6 +24,8 @@
 //   C — «выполнено» читаем по «Закончено», а не по колонке статуса (#4572: отчёт её не отдаёт).
 //
 // Run with: node experiments/atex-pp-4740-done-work-is-fact.test.js
+//
+// rules: none (defect #4740)
 
 process.env.TZ = 'UTC';
 global.window = { db: 'ateh1', xsrf: 'x' };

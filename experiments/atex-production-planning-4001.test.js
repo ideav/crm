@@ -10,6 +10,8 @@
 // (Персистентность/мутацию self.cuts и applySplitPlan changed-only проверяют 3781/3795.)
 //
 // Run with: node experiments/atex-production-planning-4001.test.js
+//
+// rules: AVAIL-jumbo-width, AVAIL-material-stoplist
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

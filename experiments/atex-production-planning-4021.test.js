@@ -11,6 +11,8 @@
 // (хранимое «Резка и Лидер»), и в buildSchedule (leaderMin сегмента, гейт по setupTaskIds).
 //
 // Run with: node experiments/atex-production-planning-4021.test.js
+//
+// rules: none (defect #4021)
 
 process.env.TZ = 'UTC';
 global.window = { db: 'ateh' };

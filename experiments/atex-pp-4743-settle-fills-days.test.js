@@ -22,6 +22,8 @@
 //   F — мерка недобора у выравнивания и у предупреждения ОДНА (чиним то, о чём говорим).
 //
 // Run with: node experiments/atex-pp-4743-settle-fills-days.test.js
+//
+// rules: DAY_FILL
 
 process.env.TZ = 'UTC';
 global.window = { db: 'ateh1', xsrf: 'x' };

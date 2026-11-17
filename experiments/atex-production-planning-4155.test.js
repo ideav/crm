@@ -13,6 +13,8 @@
 //   cut.batchId, applySplitPlan берёт партию ГОЛОВЫ цепочки (batchForCutId) для продолжений.
 //
 // Run with: node experiments/atex-production-planning-4155.test.js
+//
+// rules: none (defect #4155)
 
 process.env.TZ = 'UTC';
 global.window = { db: 'testdb', xsrf: 'x' };

@@ -7,6 +7,8 @@
 // и подпись диапазона formatPlanDayRangeLabel.
 //
 // Run with: node experiments/atex-production-planning-3622.test.js
+//
+// rules: none (defect #3622)
 
 process.env.TZ = 'UTC';
 

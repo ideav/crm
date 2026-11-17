@@ -7,6 +7,8 @@
 // Числа — из разбора #3684 (сырьё MWR116L: «Ширина, мм» = 891, допуск 20).
 //
 // Run with: node experiments/atex-production-planning-3706.test.js
+//
+// rules: none (defect #3706)
 
 var api = require('../download/atex/js/production-planning.js');
 var planning = api.planning;

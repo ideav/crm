@@ -3,6 +3,8 @@
 // группировка dayCutsBySched по schedDay). Здесь покрываем чистый форматтер даты дня.
 //
 // Run with: node experiments/atex-production-planning-3616.test.js
+//
+// rules: none (defect #3616)
 
 process.env.TZ = 'UTC';
 

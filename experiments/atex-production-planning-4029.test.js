@@ -12,6 +12,8 @@
 // остаются СЫРЫМ разнообразием (инвариант combos ≤ ножи×сырьё цел, #4008).
 //
 // Run with: node experiments/atex-production-planning-4029.test.js
+//
+// rules: SCORE-ideal-window, SCORE-excess
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

@@ -25,6 +25,8 @@
 //   D — СТОРОЖ ИСХОДНИКОВ: формулы потолка на месте больше нет ни в одном модуле.
 //
 // Run with: node experiments/atex-pp-4563-one-day-ceiling.test.js
+//
+// rules: SHIFT-overrun-none
 
 process.env.TZ = 'UTC';
 

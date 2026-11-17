@@ -21,6 +21,8 @@
 //   I — упаковщик отдаёт `unplaced`, и оно доезжает до операций (причина, а не только симптом).
 //
 // Run with: node experiments/atex-pp-4645-work-conserved.test.js
+//
+// rules: SUPPLY_CONSERVED
 
 process.env.TZ = 'UTC';
 global.window = { db: 'ateh', xsrf: 'x' };

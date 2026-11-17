@@ -3,6 +3,8 @@
 //   • buildFields      — сборка полей t{reqId}, пропуск пустых значений.
 //
 // Run with: node experiments/atex-production-planning.test.js
+//
+// rules: SHIFT-cleanup
 
 process.env.TZ = 'UTC';
 

@@ -10,6 +10,8 @@
 // на 05.08 — за видимый диапазон; оператор увидел «не хватает 25 резок».
 //
 // Run with: node experiments/atex-pp-4598-rest-pushes-all.test.js
+//
+// rules: none (defect #4598)
 
 process.env.TZ = 'Europe/Moscow';
 global.window = { db: 'ateh', xsrf: 'x' };

@@ -10,6 +10,8 @@
 //   5) deviationSettlePlan (#4346) — «Урегулировать» начатые не двигает и не встаёт перед ними.
 //
 // Run with: node experiments/atex-production-planning-4381.test.js
+//
+// rules: none (defect #4381)
 
 process.env.TZ = 'UTC';
 

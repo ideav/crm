@@ -15,6 +15,8 @@
 // работы, основа бейджа дня) не меняется; меняется только конец дня и положение обеда.
 //
 // Run with: node experiments/atex-production-planning-3816.test.js
+//
+// rules: SHIFT-breaks-transparent
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

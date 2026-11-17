@@ -11,6 +11,8 @@
 // Live-расписание (buildSchedule, leaderMin задан числом) не трогаем: лидер ПОСЛЕ окна.
 //
 // Run with: node experiments/atex-production-planning-3862.test.js
+//
+// rules: none (defect #3862)
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

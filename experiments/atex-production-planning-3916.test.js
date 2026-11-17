@@ -16,6 +16,8 @@
 // экспортированные чистые функции и сверяет её с сегментами splitMachineQueue.
 //
 // Run with: node experiments/atex-production-planning-3916.test.js
+//
+// rules: DUR-discrete-cuts
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

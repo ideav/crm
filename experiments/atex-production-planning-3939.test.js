@@ -11,6 +11,8 @@
 // карточкой. День больше не вылезает за ёмкость, и нет отдельной «настройки в начале дня».
 //
 // Run with: node experiments/atex-production-planning-3939.test.js
+//
+// rules: SPLIT-boundaries
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

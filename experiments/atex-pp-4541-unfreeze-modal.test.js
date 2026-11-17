@@ -14,6 +14,8 @@
 // действий над замком дня теперь выглядит одинаково.
 //
 // Run with: node experiments/atex-pp-4541-unfreeze-modal.test.js
+//
+// rules: none (defect #4541)
 
 process.env.TZ = 'Europe/Moscow';
 

@@ -10,6 +10,8 @@
 //   5) свободные (без флага) — как прежде: пересобираются и перетекают между днями.
 //
 // Run with: node experiments/atex-production-planning-3792.test.js
+//
+// rules: FIXED_CUT_DAY
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

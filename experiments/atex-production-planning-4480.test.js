@@ -22,6 +22,8 @@
 //       остался от предыдущей операции и вводил в заблуждение при разборе.
 //
 // Run with: node experiments/atex-production-planning-4480.test.js
+//
+// rules: none (defect #4480)
 
 process.env.TZ = 'UTC';
 global.window = { db: 'testdb', xsrf: 'x' };

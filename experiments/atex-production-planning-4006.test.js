@@ -7,6 +7,8 @@
 //     ≥ 1000 (MWR500L=1000) не ставится на станок 1/4, только на 2/3.
 //
 // Run with: node experiments/atex-production-planning-4006.test.js
+//
+// rules: SHIFT-overrun-cuts, AVAIL-jumbo-width
 
 process.env.TZ = 'UTC';
 

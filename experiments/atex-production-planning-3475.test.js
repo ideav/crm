@@ -7,6 +7,8 @@
 //   • пустая дата → пустой набор (удалять нечего).
 //
 // Run with: node experiments/atex-production-planning-3475.test.js
+//
+// rules: none (defect #3475)
 
 process.env.TZ = 'UTC';
 

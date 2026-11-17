@@ -8,6 +8,8 @@
 // локальным штрафом; соблюдение срока проверяет #4050. Здесь — только что кастомные веса доходят.
 //
 // Run with: node experiments/atex-production-planning-4059.test.js
+//
+// rules: CFG-defaults
 
 var planning = require('../download/atex/js/production-planning.js').planning;
 

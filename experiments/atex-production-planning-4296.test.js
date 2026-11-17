@@ -8,6 +8,8 @@
 // резки > 0 → панель «смены сырья: N», а факт сходится с идеалом (избыток ≥ 0).
 //
 // Run with: node experiments/atex-production-planning-4296.test.js
+//
+// rules: SCORE-first-job, SCORE-excess
 
 var planning = require('../download/atex/js/production-planning.js').planning;
 

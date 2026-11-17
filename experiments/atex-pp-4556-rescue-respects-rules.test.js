@@ -30,6 +30,8 @@
 //       на том же станке спасается на своё же место (правило его не выталкивает).
 //
 // Run with: node experiments/atex-pp-4556-rescue-respects-rules.test.js
+//
+// rules: FIXED_NO_PUSH, CHAIN_CONTIGUOUS
 
 process.env.TZ = 'UTC';
 var P = require('../download/atex/js/production-planning.js').planning;

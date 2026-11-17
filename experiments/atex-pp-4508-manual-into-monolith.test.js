@@ -22,6 +22,8 @@
 //   E — порядок остальных звеньев монолита не меняется.
 //
 // Run with: node experiments/atex-pp-4508-manual-into-monolith.test.js
+//
+// rules: FIXED_BLOCK
 
 process.env.TZ = 'UTC';
 global.window = { db: 'ateh1', xsrf: 'x' };

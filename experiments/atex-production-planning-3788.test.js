@@ -5,6 +5,8 @@
 // ближайший рабочий день. Берём реальные данные ateh (январские праздники + рабочая суббота 10.01).
 //
 // Run with: node experiments/atex-production-planning-3788.test.js
+//
+// rules: none (defect #3788)
 
 process.env.TZ = 'UTC';
 

@@ -10,6 +10,8 @@
 //   • «втулки готовы» = у ВСЕХ «Задач на втулки» позиции проставлено «Закончено».
 //
 // Run with: node experiments/atex-pp-4774-dashboard.test.js
+//
+// rules: none (defect #4774)
 
 process.env.TZ = 'UTC';
 

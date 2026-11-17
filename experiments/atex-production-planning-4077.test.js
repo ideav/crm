@@ -13,6 +13,8 @@
 // перенос, реально сокращающий дату окончания (перегруз/срок), — берётся.
 //
 // Run with: node experiments/atex-production-planning-4077.test.js
+//
+// rules: none (defect #4077)
 
 process.env.TZ = 'UTC';
 var api = require('../download/atex/js/production-planning.js');

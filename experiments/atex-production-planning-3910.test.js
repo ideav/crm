@@ -9,6 +9,8 @@
 // невозможно. Обед в эту сумму не входит (резерв в бюджете, но не в подписи минут).
 //
 // Run with: node experiments/atex-production-planning-3910.test.js
+//
+// rules: SHIFT-overrun-cuts, SHIFT-overrun-tune
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

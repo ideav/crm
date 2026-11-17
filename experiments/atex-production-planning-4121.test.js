@@ -13,6 +13,8 @@
 // (в дне нет зазора ≈ его длительности перед карточкой, стартующей не раньше LUNCH_START).
 //
 // Run with: node experiments/atex-production-planning-4121.test.js
+//
+// rules: SHIFT-breaks-transparent
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

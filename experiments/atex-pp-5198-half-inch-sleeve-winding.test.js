@@ -8,6 +8,8 @@
 // Шлюз один — `windPointsForCut`; признак берётся из `sleeveInches` резки/плана/раскладки.
 //
 // Run with: node experiments/atex-pp-5198-half-inch-sleeve-winding.test.js
+//
+// rules: DUR-core-05
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

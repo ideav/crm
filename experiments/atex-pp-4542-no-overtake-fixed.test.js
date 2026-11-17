@@ -22,6 +22,8 @@
 //   F — правило есть в реестре инвариантов (§15) и ловит нарушение на шлюзе записи.
 //
 // Run with: node experiments/atex-pp-4542-no-overtake-fixed.test.js
+//
+// rules: FIXED_NO_OVERTAKE
 
 process.env.TZ = 'UTC';
 global.window = { db: 'ateh1', xsrf: 'x' };

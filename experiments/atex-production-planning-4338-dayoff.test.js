@@ -4,6 +4,8 @@
 // проход застревает в локальном минимуме), см. docs/atex_planning_actual_behavior.md §7.
 //
 // Run with: node experiments/atex-production-planning-4338-dayoff.test.js
+//
+// rules: none (defect #4338)
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

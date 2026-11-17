@@ -14,6 +14,8 @@
 //
 // Здесь проверяем клиентскую часть (серверная — PHP, юнит-тестом не покрывается).
 // Run with: node experiments/atex-production-planning-4234.test.js
+//
+// rules: none (defect #4234)
 
 process.env.TZ = 'UTC';
 var api = require('../download/atex/js/production-planning.js');

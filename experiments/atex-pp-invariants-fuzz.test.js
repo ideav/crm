@@ -32,6 +32,8 @@
 // Run with: node experiments/atex-pp-invariants-fuzz.test.js
 //   FUZZ_CASES=500 node experiments/... — больше случаев (по умолчанию 120)
 //   FUZZ_SEED=12345 node experiments/... — другой seed
+//
+// rules: CHAIN_CONTIGUOUS, CHAIN_SETUP_ONCE, DAY_CAPACITY, DAY_FILL, FIXED_CUT_DAY, FROZEN_DAY, ORDER_PARTS_ADJACENT, SUPPLY_CONSERVED
 
 process.env.TZ = 'UTC';
 global.window = { db: 'ateh1', xsrf: 'x' };

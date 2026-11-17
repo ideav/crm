@@ -31,6 +31,8 @@
 //       Станок 1, Чт 30.07.2026 — шесть заданий встали перед 649432/653120, те уехали в конец дня).
 //
 // Run with: node experiments/atex-pp-4497-fixed-insert-after.test.js
+//
+// rules: FIXED_NO_PUSH
 
 process.env.TZ = 'UTC';
 global.window = { db: 'ateh1', xsrf: 'x' };

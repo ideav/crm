@@ -15,6 +15,8 @@
 // а нетронутая запись остаётся со своим хранимым числом.
 //
 // Run with: node experiments/atex-pp-4598-runs-conserved.test.js
+//
+// rules: SUPPLY_CONSERVED
 
 process.env.TZ = 'UTC';
 global.window = { db: 'ateh', xsrf: 'x' };

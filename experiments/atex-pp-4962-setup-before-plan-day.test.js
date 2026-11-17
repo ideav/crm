@@ -23,6 +23,8 @@
 // времени и идут дальше как продолжение «ножи на станке».
 //
 // Run with: node experiments/atex-pp-4962-setup-before-plan-day.test.js
+//
+// rules: SETUP-early-deviation, SETUP-early-settle
 
 process.env.TZ = 'UTC';
 global.window = { db: 'ateh', xsrf: 'x' };

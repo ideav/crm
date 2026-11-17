@@ -19,6 +19,8 @@
 // (balanceFastChangeover, #3871) — там нужна скорость, а финальный порядок всё равно собирает orderCuts.
 //
 // Run with: node experiments/atex-production-planning-3996.test.js
+//
+// rules: PEN-knives-increase, PEN-knives-decrease
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

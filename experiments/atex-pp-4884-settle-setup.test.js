@@ -9,6 +9,8 @@
 // записи связываются «ID выполненной части» (#4651).
 //
 // Run with: node experiments/atex-pp-4884-settle-setup.test.js
+//
+// rules: SETUP-early-settle
 
 process.env.TZ = 'UTC';
 global.window = { db: 'ateh', xsrf: 'x' };

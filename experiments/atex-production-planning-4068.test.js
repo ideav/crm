@@ -7,6 +7,8 @@
 // что механизм #4068 действительно снят (иначе дрейф вернулся бы незаметно).
 //
 // Run with: node experiments/atex-production-planning-4068.test.js
+//
+// rules: none (defect #4068)
 
 var planning = require('../download/atex/js/production-planning.js').planning;
 

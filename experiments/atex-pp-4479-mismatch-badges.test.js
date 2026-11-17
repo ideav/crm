@@ -11,6 +11,8 @@
 //   4) расхождений нет → ни кнопки, ни бейджей (пустая очередь ничем не помечена).
 //
 // Run with: node experiments/atex-pp-4479-mismatch-badges.test.js
+//
+// rules: none (defect #4479)
 
 process.env.TZ = 'UTC';
 

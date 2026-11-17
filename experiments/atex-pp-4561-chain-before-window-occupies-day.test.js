@@ -33,6 +33,8 @@
 //       из входа не зависит.
 //
 // Run with: node experiments/atex-pp-4561-chain-before-window-occupies-day.test.js
+//
+// rules: DAY_CAPACITY
 
 process.env.TZ = 'UTC';
 

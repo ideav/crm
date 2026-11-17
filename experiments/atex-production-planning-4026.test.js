@@ -17,6 +17,8 @@
 // День N с хвостом у cutEnd: 447 + 15 = 462 (462 vs 460 — округление «Длительности» вверх, #3635 п.4).
 //
 // Run with: node experiments/atex-production-planning-4026.test.js
+//
+// rules: SPLIT-boundaries
 
 process.env.TZ = 'UTC';
 global.window = { db: 'ateh' };

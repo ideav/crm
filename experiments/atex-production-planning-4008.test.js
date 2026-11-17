@@ -6,6 +6,8 @@
 // DOM-панель (renderQueue) не тестируется — проверяем источник её чисел (planQualityView).
 //
 // Run with: node experiments/atex-production-planning-4008.test.js
+//
+// rules: SCORE-fact-stored, SCORE-combos
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

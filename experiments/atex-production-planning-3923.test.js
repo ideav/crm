@@ -14,6 +14,8 @@
 //   • planMoveSequences — желаемый порядок по planStart, возвращает { ordered }.
 //
 // Run with: node experiments/atex-production-planning-3923.test.js
+//
+// rules: none (defect #3923)
 
 process.env.TZ = 'UTC';
 

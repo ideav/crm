@@ -17,6 +17,8 @@
 //   E — и на путях ПЛАНА (Сгенерировать / пересчёт / ручной перенос) фолбэк не срабатывает НИ РАЗУ.
 //
 // Run with: node experiments/atex-pp-4547-exact-day.test.js
+//
+// rules: PLACE-day-by-layout
 
 process.env.TZ = 'UTC';
 global.window = { db: 'ateh1', xsrf: 'x' };

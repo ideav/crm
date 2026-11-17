@@ -11,6 +11,8 @@
 // В СРОК (≤ день-1), даже когда на дне-1 стоит приколотое (замороженное) задание.
 //
 // Run with: node experiments/atex-production-planning-4326.test.js
+//
+// rules: FROZEN_DAY
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

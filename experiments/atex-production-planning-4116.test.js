@@ -17,6 +17,8 @@
 // {0,0} возвращаем только когда даже минимальный компонент вылезает за потолок.
 //
 // Run with: node experiments/atex-production-planning-4116.test.js
+//
+// rules: SHIFT-overrun-tune
 
 process.env.TZ = 'UTC';
 var api = require('../download/atex/js/production-planning.js');

@@ -36,6 +36,8 @@
 //       же правами действия (`manualShift`, #4749) — иначе чиним не то, о чём говорим.
 //
 // Run with: node experiments/atex-pp-4751-level-converges.test.js
+//
+// rules: DAY_FILL, DAY_CAPACITY
 
 process.env.TZ = 'UTC';
 global.window = { db: 'ateh1', xsrf: 'x' };

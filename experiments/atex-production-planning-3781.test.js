@@ -9,6 +9,8 @@
 //   • обновляемая запись (голова/реюзнутое продолжение) тоже получает «Метраж, м» (лечит старые).
 //
 // Run with: node experiments/atex-production-planning-3781.test.js
+//
+// rules: none (defect #3781)
 
 process.env.TZ = 'UTC';
 

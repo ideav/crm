@@ -10,6 +10,8 @@
 // вызывается уже с исправленным значением.
 //
 // Run with: node experiments/atex-production-planning-4388.test.js
+//
+// rules: none (defect #4388)
 
 var Controller = require('../download/atex/js/production-planning.js').Controller;
 

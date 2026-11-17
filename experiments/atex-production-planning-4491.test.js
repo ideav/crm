@@ -18,6 +18,8 @@
 //   D — без приезжих 🔒 поведение прежнее (монолит дня цел, регресс-контроль #4464).
 //
 // Run with: node experiments/atex-production-planning-4491.test.js
+//
+// rules: FIXED_BLOCK
 
 process.env.TZ = 'UTC';
 global.window = { db: 'ateh1', xsrf: 'x' };

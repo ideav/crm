@@ -23,6 +23,8 @@
 // заданиям) не меньше заказанного количества — `SUPPLY_CONSERVED` в реестре инвариантов.
 //
 // Run with: node experiments/atex-pp-4536-supply-conservation.test.js
+//
+// rules: SUPPLY_CONSERVED
 
 process.env.TZ = 'UTC';
 global.window = { db: 'testdb', xsrf: 'x' };

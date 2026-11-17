@@ -5,6 +5,8 @@
 // позиция/день внутри своего станка по-прежнему выбираются по весу.
 //
 // Run with: node experiments/atex-production-planning-4225.test.js
+//
+// rules: MOVE-manual-single-slitter
 
 var P = require('../download/atex/js/production-planning.js').planning;
 

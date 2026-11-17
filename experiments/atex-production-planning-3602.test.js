@@ -12,6 +12,8 @@
 //   • зафиксированные задания цели тоже переупорядочиваются (перенос — наивысший приоритет).
 //
 // Run with: node experiments/atex-production-planning-3602.test.js
+//
+// rules: none (defect #3602)
 
 process.env.TZ = 'UTC';
 

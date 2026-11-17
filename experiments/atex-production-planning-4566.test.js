@@ -16,6 +16,8 @@
 // нет следующего задания) замороженные дни по-прежнему пропускает.
 //
 // Run with: node experiments/atex-production-planning-4566.test.js
+//
+// rules: none (defect #4566)
 
 process.env.TZ = 'Europe/Moscow';
 

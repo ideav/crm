@@ -6,7 +6,7 @@
 //
 // Run with: node experiments/atex-production-planning-3989.test.js
 //
-// rules: PEN-knives-decrease, PEN-knives-increase, PEN-material, PEN-late, PEN-max-distance
+// rules: PEN-knives-decrease, PEN-knives-increase, PEN-material, PEN-late, PEN-max-distance, PLACE-tail-continuation
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

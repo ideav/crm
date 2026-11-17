@@ -8,6 +8,8 @@
 //   • перерыв без несущей (простой/после последней резки) — не рисуется и не сдвигает.
 //
 // Run with: node experiments/atex-production-planning-4075.test.js
+//
+// rules: SHIFT-breaks-transparent
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

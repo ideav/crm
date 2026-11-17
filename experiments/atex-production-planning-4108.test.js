@@ -19,6 +19,8 @@
 // станок так же, как applySplitPlan (u.slitterId != null && String(u.slitterId) !== хранимый).
 //
 // Run with: node experiments/atex-production-planning-4108.test.js
+//
+// rules: none (defect #4108)
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

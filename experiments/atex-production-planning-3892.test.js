@@ -16,6 +16,8 @@
 //      (450), игнорируя делёную долю обеспечения сегмента (348.496) — корень defect C.
 //
 // Run with: node experiments/atex-production-planning-3892.test.js
+//
+// rules: SPLIT-first-part-id
 
 process.env.TZ = 'UTC';
 

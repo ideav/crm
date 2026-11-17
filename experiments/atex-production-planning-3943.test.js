@@ -14,6 +14,8 @@
 // это мусор без обеспечений/ручной раскладки; #3660 бережёт раскладку РЕАЛЬНЫХ чужих дат, не мусор.
 //
 // Run with: node experiments/atex-production-planning-3943.test.js
+//
+// rules: none (defect #3943)
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

@@ -26,6 +26,8 @@
 //   F — врезки на месте: генерация, ручная правка, перенос — все три пути пишут в журнал.
 //
 // Run with: node experiments/atex-pp-4636-journal-blindspots.test.js
+//
+// rules: none (defect #4636)
 
 process.env.TZ = 'Europe/Moscow';
 global.window = { db: 'ateh', xsrf: 'x' };

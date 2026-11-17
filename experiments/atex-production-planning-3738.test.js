@@ -6,6 +6,8 @@
 // у части названий встречается ведущий таб.
 //
 // Run with: node experiments/atex-production-planning-3738.test.js
+//
+// rules: none (defect #3738)
 
 process.env.TZ = 'UTC';
 

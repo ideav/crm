@@ -29,6 +29,8 @@
 //       правило сужено до DAY_CAPACITY, прочие жёсткие правила §15 не ослаблены (#4471/#4464).
 //
 // Run with: node experiments/atex-pp-4622-manual-never-refused.test.js
+//
+// rules: none (defect #4622)
 
 process.env.TZ = 'UTC';
 global.window = { db: 'ateh', xsrf: 'x' };

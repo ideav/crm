@@ -23,6 +23,8 @@
 //     («тут сдвинули, а там не смогли») недопустим.
 //
 // Run with: node experiments/atex-pp-4569-settle-starts-scope.test.js
+//
+// rules: none (defect #4569)
 
 process.env.TZ = 'Europe/Moscow';
 

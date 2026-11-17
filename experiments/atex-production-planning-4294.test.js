@@ -11,6 +11,8 @@
 // которые НЕ подаём в планировщик (остаются на своих днях).
 //
 // Run with: node experiments/atex-production-planning-4294.test.js
+//
+// rules: none (defect #4294)
 
 var planning = require('../download/atex/js/production-planning.js').planning;
 var keep = planning.cutsBeforeWindowToKeep;

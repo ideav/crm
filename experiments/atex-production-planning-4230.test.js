@@ -9,6 +9,8 @@
 // через stockStripPurpose. Здесь проверяются обе чистые части: cutOrderedWidthKeys и классификация.
 //
 // Run with: node experiments/atex-production-planning-4230.test.js
+//
+// rules: none (defect #4230)
 
 process.env.TZ = 'UTC';
 

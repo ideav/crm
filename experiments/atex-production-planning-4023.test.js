@@ -17,6 +17,8 @@
 //     зовётся РОВНО раз (тихо не глотаем, но и очередь старта/порядка не валим, #3778).
 //
 // Run with: node experiments/atex-production-planning-4023.test.js
+//
+// rules: none (defect #4023)
 
 process.env.TZ = 'UTC';
 global.window = { db: 'testdb', xsrf: 'x' };

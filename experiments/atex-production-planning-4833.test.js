@@ -7,6 +7,8 @@
 // У станка с ИДУЩЕЙ сменой работа может идти — неприкосновенность #4381 остаётся.
 //
 // Run with: node experiments/atex-production-planning-4833.test.js
+//
+// rules: none (defect #4833)
 
 process.env.TZ = 'UTC';
 

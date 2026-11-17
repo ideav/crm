@@ -16,6 +16,8 @@
 // уменьшает объектив, а строго убывающая величина циклов не даёт.
 //
 // Run with: node experiments/atex-pp-4652-optimize-converges.test.js
+//
+// rules: none (defect #4652)
 
 process.env.TZ = 'Europe/Moscow';
 

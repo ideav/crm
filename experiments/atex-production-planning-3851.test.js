@@ -15,6 +15,8 @@
 // «Длительность, минут»/«Тайминг» безвредны.
 //
 // Run with: node experiments/atex-production-planning-3851.test.js
+//
+// rules: none (defect #3851)
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

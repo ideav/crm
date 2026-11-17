@@ -18,6 +18,8 @@
 //   7 — трасса пакета называет записи (#4177: по логу должно быть видно, ЧТО ушло).
 //
 // Run with: node experiments/atex-pp-4986-split-plan-batch.test.js
+//
+// rules: none (defect #4986)
 
 process.env.TZ = 'UTC';
 global.window = { db: 'testdb', xsrf: 'x' };
