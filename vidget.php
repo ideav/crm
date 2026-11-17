@@ -13,7 +13,7 @@
  *
  * Использование:
  *   Браузер: открыть /vidget.php, вставить ссылку
- *   CLI:     php vidget.php "https://www.youtube.com/watch?v=XXXX" [mp4|mp3]
+ *   CLI:     php vidget.php "https://www.youtube.com/watch?v=XXXX" [mp4|mp3] [best|1080|720|480]
  */
 
 // ---------- Настройки ----------
@@ -95,6 +95,21 @@ function proxyUrl(): string
     return preg_match('~^(socks5h?|socks4a?|https?)://([^\s@/]+@)?[A-Za-z0-9.-]+:\d{1,5}/?$~', $raw) ? $raw : '';
 }
 
+/** Качество видео из формы: высота кадра (не выше) или best. Чужое значение — best. */
+function quality(string $q): string
+{
+    return in_array($q, ['1080', '720', '480'], true) ? $q : 'best';
+}
+
+/** Выбор формата yt-dlp: mp4 c m4a, иначе что есть; с ограничением высоты кадра, если задано. */
+function videoFormat(string $quality): string
+{
+    $h = $quality === 'best' ? '' : '[height<=' . $quality . ']';
+    $f = 'bv*' . $h . '[ext=mp4]+ba[ext=m4a]/b' . $h . '[ext=mp4]/bv*' . $h . '+ba/b' . $h;
+    // сайт не сообщил высоту ни одного формата — берём лучшее, а не падаем
+    return $h === '' ? $f : $f . '/b';
+}
+
 function cleanupStale(): void
 {
     foreach (glob(DOWNLOAD_DIR . '/*') ?: [] as $f) {
@@ -110,7 +125,7 @@ function cleanupStale(): void
  *
  * @return array{ok:bool, cmd?:string, error?:string}
  */
-function prepareJob(string $url, string $format, string $id, bool $progress): array
+function prepareJob(string $url, string $format, string $id, bool $progress, string $quality = 'best'): array
 {
     $bad = checkUrl($url);
     if ($bad !== '') {
@@ -143,7 +158,7 @@ function prepareJob(string $url, string $format, string $id, bool $progress): ar
         // TLS-рукопожатие через прокси иногда рвётся: повторять и докачивать, а не бросать
         '--retries', '30',
         '--fragment-retries', '30',
-        '--socket-timeout', '30',
+        '--socket-timeout', '15',
         '-o', $template
     );
     $youtube = isYoutubeHost(urlHost($url));
@@ -163,7 +178,7 @@ function prepareJob(string $url, string $format, string $id, bool $progress): ar
     if ($format === 'mp3') {
         array_push($args, '-x', '--audio-format', 'mp3');
     } else {
-        array_push($args, '-f', 'bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/bv*+ba/b', '--merge-output-format', 'mp4');
+        array_push($args, '-f', videoFormat($quality), '--merge-output-format', 'mp4');
     }
     // "--" — дальше только URL, даже если он начинается с дефиса
     array_push($args, '--', $url);
@@ -206,10 +221,10 @@ function jobResult(string $id, int $code, array $output): array
  *
  * @return array{ok:bool, file?:string, error?:string}
  */
-function downloadVideo(string $url, string $format = 'mp4'): array
+function downloadVideo(string $url, string $format = 'mp4', string $quality = 'best'): array
 {
     $id  = bin2hex(random_bytes(6));
-    $job = prepareJob($url, $format, $id, false);
+    $job = prepareJob($url, $format, $id, false, $quality);
     if (!$job['ok']) {
         return $job;
     }
@@ -231,10 +246,10 @@ function validJobId(string $id): bool
 /**
  * @return array{ok:bool, id?:string, error?:string}
  */
-function startJob(string $url, string $format): array
+function startJob(string $url, string $format, string $quality = 'best'): array
 {
     $id  = bin2hex(random_bytes(6));
-    $job = prepareJob($url, $format, $id, true);
+    $job = prepareJob($url, $format, $id, true, $quality);
     if (!$job['ok']) {
         return $job;
     }
@@ -324,7 +339,7 @@ function sendFile(string $path): void
 if (PHP_SAPI === 'cli') {
     $url    = $argv[1] ?? '';
     $format = ($argv[2] ?? 'mp4') === 'mp3' ? 'mp3' : 'mp4';
-    $res    = downloadVideo($url, $format);
+    $res    = downloadVideo($url, $format, quality($argv[3] ?? 'best'));
     if ($res['ok']) {
         echo "Готово: {$res['file']}\n";
         exit(0);
@@ -369,11 +384,12 @@ $error = '';
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
     $url    = trim($_POST['url'] ?? '');
     $format = ($_POST['format'] ?? 'mp4') === 'mp3' ? 'mp3' : 'mp4';
+    $quality = quality($_POST['quality'] ?? 'best');
     if (!empty($_POST['async'])) {
-        sendJson(startJob($url, $format));
+        sendJson(startJob($url, $format, $quality));
     }
     // без JavaScript: закачка в этом же запросе, файл — ответом
-    $res    = downloadVideo($url, $format);
+    $res    = downloadVideo($url, $format, $quality);
     if ($res['ok']) {
         sendFile($res['file']);
     }
@@ -415,6 +431,16 @@ header('Content-Type: text/html; charset=utf-8');
         <p>
             <label><input type="radio" name="format" value="mp4" checked> Видео (MP4)</label>
             <label><input type="radio" name="format" value="mp3"> Только аудио (MP3)</label>
+        </p>
+        <p>
+            <label>Качество видео:
+                <select name="quality">
+                    <option value="best">Лучшее</option>
+                    <option value="1080">До 1080p</option>
+                    <option value="720" selected>До 720p — быстрее</option>
+                    <option value="480">До 480p</option>
+                </select>
+            </label>
         </p>
         <button type="submit" id="go">Скачать</button>
     </form>
