@@ -51,7 +51,13 @@ def table(meta, name):
 
 
 def reqs_of(t):
-    return {str(r.get('val', '')).strip(): str(r['id']) for r in t.get('reqs') or []}
+    out = {}
+    for r in t.get('reqs') or []:
+        out[str(r.get('val', '')).strip()] = str(r['id'])
+        alias = str((r.get('field_attrs') or {}).get('alias') or '').strip()   # ссылка: имя типа + псевдоним (#5553)
+        if alias:
+            out.setdefault(alias, str(r['id']))
+    return out
 
 
 def listing(tid):

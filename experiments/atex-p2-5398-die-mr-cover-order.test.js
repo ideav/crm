@@ -53,10 +53,14 @@ var jobs = dues.map(function(d, i) { return J(101 + i, { start: NOW + i, due: ts
 var rolls = ['a', 'b', 'c', 'd', 'e'].map(function(x) { return roll(x); });
 function order(js) {
     var cov = C.coverJobs(js.filter(C.isMovable), rolls, [], 15);
-    var blocked = {};
-    js.forEach(function(j) { var f = C.jobFlags(j, { dies: {}, openRevs: {}, cover: cov }); if (f.blocks.length) blocked[j.id] = f.blocks; });
+    var blocked = {}, noMr = [];
+    js.forEach(function(j) {
+        var f = C.jobFlags(j, { dies: {}, openRevs: {}, cover: cov });
+        if (f.blocks.length) blocked[j.id] = f.blocks;
+        if (f.warnings.indexOf('нет МР нужного формата') >= 0) noMr.push(j.id);   // #5553: нехватка МР — предупреждение, не блокировка
+    });
     var plan = C.orderQueue({ jobs: js, machines: [M1], from: NOW, settings: S, blocked: blocked });
-    return { blocked: Object.keys(blocked).sort(), plan: plan };
+    return { blocked: Object.keys(blocked).sort(), noMr: noMr.sort(), plan: plan };
 }
 function placed(plan) {
     var out = {};
@@ -73,8 +77,8 @@ var applied = jobs.map(function(j) {
 });
 var p2 = order(applied);
 var pl2 = placed(p2.plan);
-assert(Object.keys(pl1).length === 6 && p1.blocked.length === 6, 'R3: первое «Упорядочить» — 6 размещено (склад в метрах), 6 без МР', 'размещено ' + Object.keys(pl1).length + ', блок ' + p1.blocked.length);
-assert(JSON.stringify(p1.blocked) === JSON.stringify(p2.blocked), 'R3: после «Применить» те же блокировки «нет МР»', p1.blocked.join(',') + ' → ' + p2.blocked.join(','));
+assert(Object.keys(pl1).length === 12 && p1.blocked.length === 0 && p1.noMr.length === 6, 'R3: первое «Упорядочить» — все 12 размещены (нет МР не блокирует), 6 с предупреждением «нет МР» (склад в метрах)', 'размещено ' + Object.keys(pl1).length + ', блок ' + p1.blocked.length + ', без МР ' + p1.noMr.length);
+assert(JSON.stringify(p1.noMr) === JSON.stringify(p2.noMr), 'R3: после «Применить» те же задания без МР', p1.noMr.join(',') + ' → ' + p2.noMr.join(','));
 assert(JSON.stringify(pl1) === JSON.stringify(pl2), 'R3: после «Применить» тот же план', JSON.stringify(pl1) + ' → ' + JSON.stringify(pl2));
 
 // R4: «Зарезервировать МР» отдаёт рулон тому же заданию, что и покрытие (порядок плана, а не старт)
