@@ -82,6 +82,39 @@ async function waitUp(port) {
         console.log('ok   CLI отклоняет не-http ссылку');
     }
 
+    // Прокси из файла вне docroot доходит до yt-dlp аргументом --proxy; мусор в файле — нет.
+    // yt-dlp подменён скриптом, который пишет полученные аргументы в файл.
+    // PHP на Windows не считает .bat исполняемым (is_executable) — там блок пропускается, в CI (ubuntu) идёт.
+    if (process.platform === 'win32') {
+        console.log('SKIP прокси: подмена yt-dlp только на POSIX, проверка идёт в CI');
+    } else {
+    const fs = require('fs');
+    const os = require('os');
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vidget-'));
+    const argsOut = path.join(tmp, 'args.txt');
+    const fake = path.join(tmp, 'yt-dlp');
+    fs.writeFileSync(fake, '#!/bin/sh\necho "$@" > "' + argsOut + '"\nexit 1\n');
+    fs.chmodSync(fake, 0o755);
+    const proxyFile = path.join(tmp, 'vidget.proxy');
+    const runWithProxy = (content) => {
+        fs.writeFileSync(proxyFile, content);
+        try { fs.unlinkSync(argsOut); } catch (e) { /* нет — и ладно */ }
+        spawnSync('php', [page, 'https://www.youtube.com/watch?v=jNQXAC9IVRw'], {
+            encoding: 'utf8', env: Object.assign({}, process.env, { VIDGET_YTDLP: fake, VIDGET_PROXY_FILE: proxyFile }),
+        });
+        return fs.existsSync(argsOut) ? fs.readFileSync(argsOut, 'utf8') : '';
+    };
+    const withProxy = runWithProxy('socks5h://127.0.0.1:1080\n');
+    check('прокси из файла передан yt-dlp', () => assert.match(withProxy, /--proxy\W+socks5h:\/\/127\.0\.0\.1:1080/));
+    check('ссылка идёт после "--"', () => assert.match(withProxy, /--\W+https:\/\/www\.youtube\.com\/watch\?v=jNQXAC9IVRw/));
+    const garbage = runWithProxy('rm -rf / ; echo\n');
+    check('мусор в файле прокси не передаётся', () => {
+        assert.ok(garbage.length > 0, 'yt-dlp не был вызван');
+        assert.doesNotMatch(garbage, /--proxy/);
+    });
+    fs.rmSync(tmp, { recursive: true, force: true });
+    }
+
     if (failed) {
         console.log('FAIL — vidget-5523: ' + failed);
         process.exitCode = 1;
