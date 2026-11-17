@@ -78,13 +78,16 @@
         };
     }
 
+    // Порог выплаты партнёру по оферте: меньшая сумма переносится на следующий месяц.
+    var PAYOUT_MIN = 1000;
+
     function signals(partners, clients, now) {
         var out = [];
         partners.forEach(function (p) {
             if (p.exam !== 'passed' && byPartner(clients, p.id).length)
                 out.push({ kind: 'wait', pid: p.id, text: p.name + ': есть клиенты, но экзамен не сдан' });
-            if (p.payable >= 1000)
-                out.push({ kind: 'ok', pid: p.id, text: p.name + ': к выплате ' + rub(p.payable) + ' (порог 1 000 ₽)' });
+            if (p.payable >= PAYOUT_MIN)
+                out.push({ kind: 'ok', pid: p.id, text: p.name + ': к выплате ' + rub(p.payable) + ' (порог ' + rub(PAYOUT_MIN) + ')' });
         });
         clients.forEach(function (c) {
             var p = partnerOf(partners, c.pid), who = c.name + ' (' + (p ? p.name : c.pid) + ')', t = trial(c, now);
@@ -322,6 +325,7 @@
     }
 
     root.PartnerAdmin = {
+        PAYOUT_MIN: PAYOUT_MIN,
         readPartners: readPartners, readClients: readClients, readEvents: readEvents, funnel: funnel, totals: totals,
         signals: signals, filterPartners: filterPartners, render: render, load: load, loadEvents: loadEvents, init: init
     };
