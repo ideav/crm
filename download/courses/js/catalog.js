@@ -90,9 +90,9 @@
       msg.textContent = 'Войдите, чтобы купить курс и сохранять прогресс.';
       A.loginButtons().forEach(function (b) { cta.appendChild(b); });
     } else {
-      var req = D.requests.filter(function (r) { return r['Курс'] === c.code && r['Статус'] !== 'reject'; })[0];
+      var req = D.requests.filter(function (r) { return r['Курс'] === c.code && r['Статус'] !== 'reject' && A.refId(r['Пользователь']) === D.uid; })[0];
       if (c.payUrl) cta.appendChild(E('a', { class: 'btn btn-primary', href: c.payUrl, target: '_blank', rel: 'noopener', text: 'Оплатить · ' + A.priceText(c) }));
-      if (req) msg.textContent = req['Статус'] === 'done' ? 'Заявка обработана — обновите страницу.' : 'Заявка отправлена: доступ откроется, когда мы сверим оплату.';
+      if (req) msg.textContent = req['Статус'] === 'done' ? 'Заявка обработана — обновите страницу.' : D.requestNote;
       else {
         var paid = E('button', { class: 'btn', type: 'button', text: 'Я оплатил', onclick: function () {
           paid.disabled = true;

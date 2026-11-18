@@ -171,6 +171,26 @@
     if (A.core) return core('DELETE', 'object/' + id);
     return post('_m_del/' + id + '?JSON', {});
   };
+  // Промокод (courses#172): проверка и списание — на сервере. ideav.ru: /courses-promo.php (include/courses_promo.php),
+  // ядро: POST /api/v1/<база>/promo/redeem. Ответ {ok:true,status:'granted'|'already'} или {ok:false,error:код};
+  // нет обработчика на сервере (404/405) → reject с .unsupported, портал откатывается на заявку.
+  A.redeemPromo = function (course, code) {
+    if (A.mock) { var u = new Error('нет сервера'); u.unsupported = true; return Promise.reject(u); }
+    var req = A.core
+      ? fetch(A.base + 'promo/redeem', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-XSRF-Token': A.xsrf() },
+        body: JSON.stringify({ course: course, code: code }) })
+      : fetch('/courses-promo.php', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'courses' },
+        body: JSON.stringify({ course: course, code: code }) });
+    return req.then(function (r) {
+      return r.json().catch(function () { return null; }).then(function (d) {
+        if (r.status === 404 || r.status === 405) { var e = new Error('нет обработчика'); e.unsupported = true; throw e; }
+        if (d && typeof d.ok === 'boolean') return d;
+        // ядро отдаёт ошибки как {error:{code,message}} — приводим к тому же виду
+        var c = d && d.error && (d.error.code || d.error);
+        return { ok: false, error: r.status === 401 || r.status === 403 ? 'login' : r.status === 429 ? 'too_many' : (typeof c === 'string' ? c : 'server') };
+      });
+    });
+  };
   A.hasField = function (name, field) { var t = schema && schema.tables && schema.tables[name]; return !!(t && t.req && t.req[field]); };
   function sendForm(url, fd, onProgress, needId) {
     return new Promise(function (resolve, reject) {

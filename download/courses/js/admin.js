@@ -1,4 +1,4 @@
-/* LMS: админ-вкладки куратора: выдача доступа, заявки, оплата. */
+/* LMS: админ-вкладки куратора: выдача доступа, заявки, оплата, промокоды. */
 (function () {
   'use strict';
   var A = window.LMSApp, E = A.el, D = A.data;
@@ -69,6 +69,35 @@
     pane.appendChild(E('div', { class: 'card' }, [E('h3', { text: 'Ввод оплаты' }), u.w, E('label', { class: 'fld' }, [E('span', { class: 'lbl', text: 'Курс' }), c]), s.w, n.w, E('div', { class: 'row' }, [go, msg])]));
   }
 
+  // Промокоды (courses#172): список кодов и создание. Проверяет и списывает сервер; ученик таблицу не читает.
+  function promos(pane) {
+    var code = field('Код (регистр не важен)'), lim = field('Лимит активаций (пусто — без лимита)', { inputmode: 'numeric' }), due = field('Срок действия, ДД.ММ.ГГГГ (пусто — бессрочно)');
+    var key = field('Ключ курса (пусто — сервер возьмёт из каталога контента)');
+    var c = courseSel(), msg = E('span', { class: 'muted' }), list = E('div');
+    function show() {
+      list.innerHTML = '';
+      A.list('Промокод', {}).then(function (rows) {
+        if (!rows.length) list.appendChild(E('p', { class: 'lms-empty', text: 'Промокодов нет.' }));
+        rows.forEach(function (r) {
+          list.appendChild(E('div', { class: 'card req' }, [E('b', { text: r._main }),
+            E('div', { class: 'muted', text: (r['Курс'] || 'любой курс') + ' · использовано ' + (r['Использовано'] || 0) + (r['Лимит'] ? ' из ' + r['Лимит'] : ' (без лимита)') + (r['Срок'] ? ' · до ' + r['Срок'] : '') })]));
+        });
+      }, function (e) { list.appendChild(E('p', { class: 'warn', text: e.message })); });
+    }
+    var go = E('button', { class: 'btn btn-primary', type: 'button', text: 'Создать промокод', onclick: function () {
+      var v = code.i.value.trim();
+      if (!v) { msg.textContent = 'Введите код'; return; }
+      var f = { 'Курс': c.value, 'Лимит': lim.i.value.trim(), 'Использовано': '0', 'Срок': due.i.value.trim() };
+      if (A.hasField('Промокод', 'Ключ')) f['Ключ'] = key.i.value.trim();
+      go.disabled = true;
+      A.create('Промокод', v, f).then(function () { msg.textContent = 'Создан'; code.i.value = ''; go.disabled = false; show(); },
+        function (e) { msg.textContent = 'Ошибка: ' + e.message; go.disabled = false; });
+    } });
+    pane.appendChild(E('div', { class: 'card' }, [E('h3', { text: 'Новый промокод' }), code.w, E('label', { class: 'fld' }, [E('span', { class: 'lbl', text: 'Курс' }), c]), lim.w, due.w, key.w, E('div', { class: 'row' }, [go, msg])]));
+    pane.appendChild(list);
+    show();
+  }
+
   A.views = A.views || {};
-  A.views.admin = [['grant', 'Выдать доступ', function (p) { grant(p); }], ['req', 'Заявки', requests], ['pay', 'Оплата', payment]];
+  A.views.admin = [['grant', 'Выдать доступ', function (p) { grant(p); }], ['req', 'Заявки', requests], ['pay', 'Оплата', payment], ['promo', 'Промокоды', promos]];
 })();
