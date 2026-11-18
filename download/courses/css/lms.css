@@ -52,7 +52,7 @@ html.lms-on,html.lms-on body{overflow:hidden}
 #lms-shell .question.ok{border-color:var(--ok);background:#f0fdf4}#lms-shell .question.bad{border-color:var(--bad);background:#fef2f2}
 #lms-shell .q-text{font-weight:600}
 #lms-shell .explain{margin-top:8px;font-size:16px;color:var(--tx)}
-#lms-shell .quiz-result{margin-top:8px;font-weight:600}#lms-shell .quiz-result.good{color:var(--ok)}#lms-shell .quiz-result.warn{color:var(--warn)}
+#lms-shell .quiz-result{margin-top:8px;font-weight:600}#lms-shell .quiz-result.good{color:var(--ok)}#lms-shell .quiz-result.warn{color:var(--warn)}#lms-shell .quiz-result{font-size:1.15em}#lms-shell .quiz-review{margin-top:10px}#lms-shell .quiz-err{margin:8px 0;padding:8px 10px;border-left:3px solid var(--warn)}#lms-shell .qe-bad{color:var(--warn)}#lms-shell .qe-good{color:var(--ok)}#lms-shell .qe-expl{opacity:.85}
 #lms-shell .chk{display:flex;gap:8px;padding:6px 0}#lms-shell .chk.ok .mark{color:var(--ok)}#lms-shell .chk.bad .mark{color:var(--bad)}#lms-shell .mark{font-weight:700;width:18px}
 #lms-shell .lesson-foot{margin:28px 0;display:flex;flex-direction:column;gap:10px;align-items:flex-start}
 #lms-shell .btn-next{min-width:200px}
