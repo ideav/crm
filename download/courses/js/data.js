@@ -152,6 +152,26 @@
     });
   };
 
+  // Промокод (courses#172): сервер проверяет код, списывает активацию и открывает курс сразу.
+  // Результат {ok,status:'granted'|'already'|'requested'} или {ok:false,error}. Сервера нет — прежняя заявка на модерацию.
+  D.PROMO_MSG = {
+    invalid: 'Такого промокода нет. Проверьте написание.', wrong_course: 'Этот промокод не подходит к выбранному курсу.',
+    expired: 'Срок действия промокода истёк.', exhausted: 'Промокод уже использован максимальное число раз.',
+    login: 'Войдите, чтобы ввести промокод.', too_many: 'Слишком много неверных попыток. Попробуйте через 10 минут.',
+    bad_code: 'Введите промокод.', course: 'Курс не найден или недоступен по промокоду.', server: 'Не удалось проверить промокод, попробуйте ещё раз.'
+  };
+  D.redeemPromo = function (course, code) {
+    return A.redeemPromo(course, code).then(function (r) {
+      if (r.ok && r.status !== 'already') return D.init().then(function () { return r; });
+      return r;
+    }, function (e) {
+      if (!e.unsupported) throw e;
+      return D.requestPromo(course, code).then(function () { return { ok: true, status: 'requested' }; });
+    });
+  };
+  // срок обработки заявки, часы (в уведомлении ученику)
+  D.REQUEST_HOURS = 24;
+  D.requestNote = 'Заявку получили, откроем доступ в течение ' + D.REQUEST_HOURS + ' часов.';
   // «Я оплатил»: заявка без промокода, админ сверяет оплату и выдаёт доступ
   D.requestPaid = function (course) { return D.requestPromo(course, ''); };
   // первый невыполненный урок курса (или null)

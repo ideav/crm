@@ -44,12 +44,12 @@
           E('span', { class: 'badge', text: access ? doneN + ' из ' + ls.length : (c.price ? 'Закрыт · ' + c.price + ' ₽' : 'Закрыт') })])]);
       if (!access) {
         if (A.isGuest()) { card.appendChild(E('p', { class: 'muted', text: 'Войдите, чтобы получить доступ к курсу.' })); card.appendChild(E('div', { class: 'row' }, A.loginButtons())); }
-        var req = A.isGuest() ? null : D.requests.filter(function (r) { return r['Курс'] === c.code; })[0];
+        var req = A.isGuest() ? null : D.requests.filter(function (r) { return r['Курс'] === c.code && A.refId(r['Пользователь']) === D.uid; })[0];
         if (!A.isGuest() && c.price) card.appendChild(E('div', { class: 'row' }, [E('a', { class: 'btn btn-primary', href: '/courses-pay.php?course=' + encodeURIComponent(c.code),
           text: 'Оплатить ' + Number(c.price).toLocaleString('ru-RU') + ' ₽' })]));
-        if (!A.isGuest()) card.appendChild(E('p', { class: 'muted', text: 'Курс откроется сразу после оплаты картой или СБП. Если у вас есть промокод — введите его, и мы откроем курс.' }));
+        if (!A.isGuest()) card.appendChild(E('p', { class: 'muted', text: 'Курс откроется сразу после оплаты картой или СБП. Если у вас есть промокод — введите его, и курс откроется сразу.' }));
         if (req && req['Статус'] !== 'reject') {
-          card.appendChild(E('p', { class: 'good', text: 'Заявка отправлена' + (req['Статус'] === 'done' ? ' и обработана — обновите страницу.' : ', ждите открытия доступа.') }));
+          card.appendChild(E('p', { class: 'good', text: req['Статус'] === 'done' ? 'Заявка обработана — обновите страницу.' : D.requestNote }));
         } else if (!A.isGuest()) card.appendChild(promoForm(c));
       }
       var list = E('ol', { class: 'lessons' }, ls.map(function (l) {
@@ -69,8 +69,11 @@
     btn.addEventListener('click', function () {
       if (!inp.value.trim()) { msg.textContent = 'Введите промокод'; return; }
       btn.disabled = true;
-      D.requestPromo(c.code, inp.value.trim()).then(function () { A.route(); },
-        function () { msg.textContent = 'Не удалось отправить, попробуйте ещё раз'; btn.disabled = false; });
+      msg.textContent = '';
+      D.redeemPromo(c.code, inp.value.trim()).then(function (r) {
+        if (r.ok) { A.route(); return; } // открыто (granted/already) или заявка (requested)
+        msg.textContent = D.PROMO_MSG[r.error] || D.PROMO_MSG.server; btn.disabled = false;
+      }, function () { msg.textContent = D.PROMO_MSG.server; btn.disabled = false; });
     });
     return E('div', { class: 'row promo' }, [inp, btn, msg]);
   }
