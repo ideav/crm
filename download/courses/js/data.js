@@ -85,6 +85,16 @@
     return k ? A.contentRoot + course.code + '-' + k + '/' : null;
   };
   D.hasAccess = function (course) { return !!D.contentPath(course); };
+  // Гейт «сначала выполните предыдущий урок» (courses#171). Закрытый урок — тот, что помечен gate (в курсе gated: true
+  // или в уроке gate: true) и перед которым есть невыполненный урок. Возвращает урок-блокер или null.
+  // failed: загрузка урока упала со статусом «нет доступа» (401/403/404/423) — тогда гейт считается по порядку уроков.
+  D.gateFor = function (course, id, failed) {
+    var ls = course.lessons || [], i = ls.map(function (l) { return l.id; }).indexOf(id);
+    if (i <= 0) return null;
+    if (!failed && !(course.gated || ls[i].gate)) return null;
+    for (var j = 0; j < i; j++) if (!D.isDone(course.code, ls[j].id)) return ls[j];
+    return null;
+  };
   D.loadLesson = function (course, id) {
     var p = D.contentPath(course);
     if (!p) return Promise.reject(new Error('locked'));

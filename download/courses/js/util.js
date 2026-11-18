@@ -43,7 +43,7 @@
 
   A.getJSON = function (url) {
     return fetch(url, { credentials: 'same-origin', cache: 'no-cache' }).then(function (r) {
-      if (!r.ok) throw new Error(url + ' -> ' + r.status);
+      if (!r.ok) { var er = new Error(url + ' -> ' + r.status); er.status = r.status; throw er; }
       return r.json();
     });
   };

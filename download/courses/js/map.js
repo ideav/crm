@@ -41,7 +41,7 @@
       var doneN = ls.filter(function (l) { return D.isDone(c.code, l.id); }).length;
       var card = E('section', { class: 'card course' + (access ? '' : ' locked') }, [
         E('div', { class: 'course-head' }, [E('h2', {}, [E('a', { href: '#/course/' + encodeURIComponent(c.code), class: 'course-link', text: c.title })]),
-          E('span', { class: 'badge', text: access ? doneN + ' из ' + ls.length : (c.price ? 'Закрыт · ' + c.price + ' ₽' : 'Закрыт') })])]);
+          E('span', { class: 'badge', text: access ? 'Пройдено: ' + doneN + ' из ' + ls.length : (c.price ? 'Закрыт · ' + c.price + ' ₽' : 'Закрыт') })])]);
       if (!access) {
         if (A.isGuest()) { card.appendChild(E('p', { class: 'muted', text: 'Войдите, чтобы получить доступ к курсу.' })); card.appendChild(E('div', { class: 'row' }, A.loginButtons())); }
         var req = A.isGuest() ? null : D.requests.filter(function (r) { return r['Курс'] === c.code && A.refId(r['Пользователь']) === D.uid; })[0];
@@ -55,6 +55,9 @@
       var list = E('ol', { class: 'lessons' }, ls.map(function (l) {
         var s = status(c, l);
         var inner = [E('span', { class: 'ln', text: /^(Урок|Модуль|Кейс|Практикум)\s*[0-9П]/i.test(l.title || '') ? '' : String(l.n || '') }), E('span', { class: 'lt', text: l.title }), E('span', { class: 'ls', text: LABEL[s] })];
+        var gate = access && D.gateFor(c, l.id, false);
+        if (gate) return E('li', { class: 'l-' + s + ' l-gated', title: 'Сначала выполните задание в уроке «' + gate.title + '»' }, [E('span', { class: 'l-lock', 'aria-disabled': 'true' },
+          inner.slice(0, 2).concat([E('span', { class: 'ls', text: '🔒 Сначала: ' + gate.title })]))]);
         return E('li', { class: 'l-' + s }, [access ? E('a', { href: '#/c/' + c.code + '/' + l.id }, inner) : E('span', { class: 'l-lock' }, inner)]);
       }));
       card.appendChild(list);
