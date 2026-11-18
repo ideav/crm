@@ -10,12 +10,18 @@
 // в 179 ложных срабатываниях. Спрашиваем только с тех файлов, которые ИЗМЕНИЛИСЬ в этой ветке.
 //
 // Сравнение идёт с базовой веткой (`BASE_REF`, по умолчанию `origin/main`). Нет git или базы —
-// сторож молча пропускает: он для CI и для локальной ветки, а не для распакованного архива.
+// локально сторож пропускает (распакованный архив), а в CI (задана `CI`) это падение: клон без
+// истории выключает сторож, поэтому job `regression` делает checkout с `fetch-depth: 0` (issue #5541).
+//
+// Пути шаблонов для `git show база:путь` — всегда через `/`: путь с `\` git не находит, и сторож
+// принимает шаблон за новый (issue #5541). Самопроверка ниже гоняет сторож на временном
+// репозитории с шаблоном во вложенной папке.
 //
 // Run with: node experiments/asset-version-bump.test.js
 
 var cp = require('child_process');
 var fs = require('fs');
+var os = require('os');
 var path = require('path');
 
 var passed = 0, total = 0;
@@ -26,10 +32,11 @@ function assert(cond, name, extra) {
 }
 
 var ROOT = path.resolve(__dirname, '..');
-function git(args) {
-    return cp.execFileSync('git', args, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+function gitQuiet(root, args) {
+    try {
+        return cp.execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    } catch (e) { return null; }
 }
-function gitQuiet(args) { try { return git(args); } catch (e) { return null; } }
 
 // ── Чистое ядро: какие версии подключены в шаблоне для данного файла ─────────────────────
 // → массив строк-версий («{_global_.version}.2», «0{_global_.version}», «120»), по одной на
@@ -43,8 +50,8 @@ function assetVersions(templateText, assetPath) {
     return out;
 }
 
-// Шаблоны, подключающие файл.
-function templatesUsing(assetPath) {
+// Шаблоны, подключающие файл: пути от корня репозитория, разделитель `/` на любой ОС.
+function templatesUsing(root, assetPath) {
     var found = [];
     (function walk(dir) {
         fs.readdirSync(dir, { withFileTypes: true }).forEach(function (e) {
@@ -52,9 +59,9 @@ function templatesUsing(assetPath) {
             if (e.isDirectory()) return walk(p);
             if (!/\.html$/.test(e.name)) return;
             var text = fs.readFileSync(p, 'utf8');
-            if (assetVersions(text, assetPath).length) found.push(path.relative(ROOT, p));
+            if (assetVersions(text, assetPath).length) found.push(path.relative(root, p).split(path.sep).join('/'));
         });
-    })(path.join(ROOT, 'templates'));
+    })(path.join(root, 'templates'));
     return found;
 }
 
@@ -68,24 +75,20 @@ assert(assetVersions(sample, '/js/main.js').join('|') === '',
     'подключение без версии видно как пустая версия — на него правило и ругается');
 assert(assetVersions(sample, '/js/нет-такого.js').length === 0, 'чужой файл в шаблоне не находится');
 
-// ── Сторож: изменённый файл обязан поднять версию ────────────────────────────────────────
-var base = process.env.BASE_REF || 'origin/main';
-if (!gitQuiet(['rev-parse', '--verify', base])) base = gitQuiet(['rev-parse', '--verify', 'main']) ? 'main' : null;
-// Пустой дифф — это ПУСТО, а не «git недоступен»: null отдаёт только сбой команды.
-var changed = base ? gitQuiet(['diff', '--name-only', base + '...HEAD']) : null;
-
-if (changed === null) {
-    console.log('\n  git или базовая ветка недоступны — сторож пропущен (это не ошибка).');
-} else {
+// Сторож целиком. → null, если git или база недоступны; иначе { assets, problems }.
+function runGuard(root, base) {
+    // Пустой дифф — это ПУСТО, а не «git недоступен»: null отдаёт только сбой команды.
+    var changed = base ? gitQuiet(root, ['diff', '--name-only', base + '...HEAD']) : null;
+    if (changed === null) return null;
     var assets = changed.split('\n').filter(function (f) { return /^(js|css)\/.+\.(js|css)$/.test(f); });
     var problems = [];
     assets.forEach(function (asset) {
         var ref = '/' + asset;
-        var users = templatesUsing(ref);
+        var users = templatesUsing(root, ref);
         if (!users.length) return;                       // файл не подключён из шаблонов — нечего версионировать
         users.forEach(function (tpl) {
-            var nowText = fs.readFileSync(path.join(ROOT, tpl), 'utf8');
-            var baseText = gitQuiet(['show', base + ':' + tpl]);
+            var nowText = fs.readFileSync(path.join(root, tpl), 'utf8');
+            var baseText = gitQuiet(root, ['show', base + ':' + tpl]);
             var now = assetVersions(nowText, ref);
             if (now.indexOf('') !== -1) {
                 problems.push(asset + ' в ' + tpl + ': подключение БЕЗ версии — правка не доедет до браузера');
@@ -98,11 +101,66 @@ if (changed === null) {
             }
         });
     });
+    return { assets: assets, problems: problems };
+}
+
+// ── Самопроверка сторожа на временном репозитории (#5541) ────────────────────────────────
+// Сценарий #5532: шаблон во вложенной папке, js изменён, версия в шаблоне не поднята.
+(function selfTest() {
+    if (gitQuiet(ROOT, ['--version']) === null) { console.log('\n  git недоступен — самопроверка пропущена.'); return; }
+    var tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'asset-guard-'));
+    function g(args) {
+        cp.execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'core.autocrlf=false',
+            '-c', 'commit.gpgsign=false'].concat(args), { cwd: tmp, stdio: 'ignore' });
+    }
+    function put(rel, text) {
+        fs.mkdirSync(path.dirname(path.join(tmp, rel)), { recursive: true });
+        fs.writeFileSync(path.join(tmp, rel), text);
+    }
+    function commit(msg) { g(['add', '-A']); g(['commit', '-q', '-m', msg]); }
+    try {
+        g(['init', '-q']);
+        put('templates/my/partners.html', '<script src="/js/partner-admin.js?{_global_.version}.2"></script>\n');
+        put('js/partner-admin.js', 'var v = 1;\n');
+        commit('base');
+        g(['branch', 'guard-base']);
+        put('js/partner-admin.js', 'var v = 2;\n');
+        commit('js changed');
+
+        var r = runGuard(tmp, 'guard-base');
+        assert(r !== null && r.problems.length === 1 && r.problems[0].indexOf('templates/my/partners.html') !== -1,
+            'самопроверка: js изменён, версия в templates/my/ не поднята → сторож краснеет (#5541)',
+            r === null ? 'сторож пропущен' : 'замечаний: ' + r.problems.length + ' ' + r.problems.join('; '));
+
+        put('templates/my/partners.html', '<script src="/js/partner-admin.js?{_global_.version}.3"></script>\n');
+        commit('version bumped');
+        r = runGuard(tmp, 'guard-base');
+        assert(r !== null && r.problems.length === 0, 'самопроверка: версия поднята → сторож молчит',
+            r === null ? 'сторож пропущен' : r.problems.join('; '));
+    } finally {
+        try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}
+    }
+})();
+
+// ── Сторож: изменённый файл обязан поднять версию ────────────────────────────────────────
+var base = process.env.BASE_REF || 'origin/main';
+if (!gitQuiet(ROOT, ['rev-parse', '--verify', base])) base = gitQuiet(ROOT, ['rev-parse', '--verify', 'main']) ? 'main' : null;
+var res = runGuard(ROOT, base);
+
+if (res === null) {
+    if (process.env.CI) {
+        assert(false, 'в CI сторож версий работает (#5541)',
+            'git или базовая ветка недоступны — checkout работы с гейтом нужен с `fetch-depth: 0`.');
+    } else {
+        console.log('\n  git или базовая ветка недоступны — сторож пропущен (локально это не ошибка).');
+    }
+} else {
+    var problems = res.problems;
     assert(problems.length === 0,
         'каждый изменённый js/css поднял версию во всех шаблонах, где подключён (#4722)',
         problems.length ? problems.join('\n  ') +
             '\n  Поднимите суффикс `?{_global_.version}.N` — иначе браузер отдаст старый файл из кэша.' : '');
-    console.log('  (сверка с ' + base + ': изменённых ассетов — ' + assets.length + ')');
+    console.log('  (сверка с ' + base + ': изменённых ассетов — ' + res.assets.length + ')');
 }
 
 console.log('\n' + passed + ' проверок прошли из ' + total);

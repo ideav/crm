@@ -20,6 +20,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # нужна история: сторож версий ассетов сверяется с origin/main (#4722, #5541)
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
