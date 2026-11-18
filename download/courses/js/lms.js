@@ -40,13 +40,19 @@
   function start() {
     var app = document.getElementById('lms-app');
     if (A.isGuest()) A.rememberAff();
+    // вернулись из Яндекса, кука кабинета есть, а страница гостевая: один раз повторяем запрос (courses#176)
+    if (A.isGuest() && A.cabinetSessionAlive()) {
+      var k = 'lms-sso-retry', tried = A.store.get(k);
+      if (!tried || Date.now() - Number(tried) > 60000) { A.store.set(k, String(Date.now())); location.reload(); return; }
+    }
     nav = A.isGuest() ? E('nav', { class: 'lms-nav' }, [E('a', { class: 'brand', href: '#/' }, [E('span', { class: 'dot' }), 'Курсы Интеграм']),
       E('div', { class: 'links' }, [E('a', { href: '#/catalog', text: 'Каталог' })]),
       E('button', { class: 'btn btn-primary nav-login', type: 'button', text: 'Войти', onclick: A.loginYandex })]) : E('nav', { class: 'lms-nav' }, [E('a', { class: 'brand', href: '#/' }, [E('span', { class: 'dot' }), 'Курсы Интеграм']),
       E('div', { class: 'links' }, [E('a', { href: '#/map', text: 'Карта' }), E('a', { href: '#/catalog', text: 'Каталог' }), E('a', { href: '#/author', text: 'Автор' }), E('a', { href: '#/me', text: 'Кабинет' }),
         A.isCurator() ? E('a', { href: '#/curator', text: 'Куратор' }) : null,
         A.isAdmin() ? E('a', { href: '/' + L.z + '/dict', target: '_self', text: 'Интерфейс базы' }) : null]),
-      E('span', { class: 'who', text: L.user || '' })]);
+      E('span', { class: 'who', text: A.whoLabel() }),
+      E('button', { class: 'btn nav-logout', type: 'button', text: 'Выйти', onclick: A.logout })]);
     root = E('main', { class: 'lms-main' });
     app.innerHTML = '';
     app.appendChild(nav); app.appendChild(root);
