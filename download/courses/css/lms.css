@@ -124,6 +124,7 @@ html.lms-on,html.lms-on body{overflow:hidden}
 #lms-shell .guest-plate{background:var(--card);border:1px solid var(--ac2);border-radius:14px;padding:18px;margin:24px 0}
 #lms-shell .guest-tasks{opacity:.85}
 #lms-shell .nav-login{margin-left:auto;min-height:36px;padding:6px 16px}
+#lms-shell .nav-logout{min-height:36px;padding:6px 14px}
 @media (min-width:700px){#lms-shell .ld-hero h1{font-size:40px}#lms-shell .ld-hero{padding:72px 0 64px}}
 @media (max-width:520px){#lms-shell .lms-nav{flex-wrap:nowrap;gap:6px;padding:8px 12px}#lms-shell .lms-nav .links a{padding:6px 8px}#lms-shell .nav-login{padding:6px 14px}}
 /* #93: каталог, страница курса, студия автора, модерация */

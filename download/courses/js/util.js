@@ -147,6 +147,17 @@
     A.loginYandex = A.loginMail = function () { window.LMSCore.showLogin(A, A.z); };
     A.loginButtons = function () { return [A.el('button', { class: 'btn btn-primary', type: 'button', text: 'Войти', onclick: A.loginYandex })]; };
   }
+  // --- «Вы вошли как …» и выход (courses#176) ---
+  A.whoLabel = function () { var u = L.email || L.user || ''; return u && u !== 'guest' ? 'Вы вошли как ' + u : ''; };
+  // выход: сессия базы и, на SSO-базе, сессия кабинета my — иначе ядро тут же снова войдёт по куке idb_my
+  A.logout = function () {
+    function out(url) { return fetch(url, { credentials: 'same-origin' }).catch(function () { /* нет сессии — не беда */ }); }
+    function done() { location.href = location.pathname; }
+    if (A.core && window.LMSCore) return window.LMSCore.logout(fetch.bind(window), A.z).then(done, done);
+    return out('/' + A.z + '/exit?next_act=nul').then(function () { return out('/my/exit?next_act=nul'); }).then(done);
+  };
+  // idbs_my=1 (не HttpOnly) ставится при входе в кабинет: гость при живой idbs_my = вход в базу не прошёл (гонка/потерянная кука)
+  A.cabinetSessionAlive = function () { return !A.core && A.hasCookie('idbs_my'); };
   A.isCurator = function () { return /куратор|curator/i.test(L.role || '') || A.isAdmin(); };
   A.isGuest = function () { return L.user === 'guest'; };
   A.isAdmin = function () { return /^(admin|админ)/i.test(L.role || ''); };
