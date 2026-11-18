@@ -24,8 +24,42 @@
         E('p', { class: 'muted', text: 'Поделитесь ею — и вы получите вознаграждение за тех, кто начнёт учиться.' }),
         E('div', { class: 'row' }, [inp, E('button', { class: 'btn btn-primary', type: 'button', text: 'Копировать', onclick: function () { A.copy(link); } })])]));
     }
+    progressCard(root);
     accruals(root, link);
   };
+
+  // Сводка прогресса: [{code,title,total,done,pct,next,state,href}], next — первый непройденный урок (или null).
+  // courses — D.myCourses(); isDone(code, lessonId) — D.isDone; started(code) — есть ли строки прогресса.
+  A.cabinetSummary = function (courses, isDone, started) {
+    return (courses || []).map(function (c) {
+      var ls = c.lessons || [], done = 0, next = null;
+      ls.forEach(function (l) { if (isDone(c.code, l.id)) done++; else if (!next) next = l; });
+      var st = !ls.length ? 'empty' : !next ? 'finished' : (done || (started && started(c.code))) ? 'going' : 'new';
+      return { code: c.code, title: c.title, total: ls.length, done: done, pct: ls.length ? Math.round(done / ls.length * 100) : 0,
+        next: next, state: st, href: next ? '#/c/' + c.code + '/' + next.id : '#/course/' + encodeURIComponent(c.code) };
+    });
+  };
+
+  function progressCard(root) {
+    var card = E('section', { class: 'card cabinet-progress' }, [E('h2', { text: 'Мои курсы' })]);
+    root.appendChild(card);
+    var sums = A.cabinetSummary(D.myCourses().filter(function (c) { return D.hasAccess(c); }), D.isDone, function (code) {
+      return Object.keys(D.progress).some(function (k) { return k.indexOf(code + '/') === 0; });
+    });
+    if (!sums.length) {
+      card.appendChild(E('p', { class: 'muted' }, ['Пока нет курсов. Выберите в ', E('a', { href: '#/catalog', text: 'каталоге' }), '.']));
+      return;
+    }
+    sums.forEach(function (s) {
+      var step = s.state === 'finished' ? E('span', { class: 'good', text: 'Курс пройден' })
+        : s.next ? E('a', { class: 'btn btn-primary', href: s.href, text: (s.state === 'new' ? 'Начать: ' : 'Продолжить: ') + (s.next.title || 'следующий урок') }) : null;
+      card.appendChild(E('div', { class: 'cp-row' }, [
+        E('div', { class: 'course-head' }, [E('a', { class: 'course-link', href: '#/course/' + encodeURIComponent(s.code), text: s.title }),
+          E('span', { class: 'badge', text: s.done + ' из ' + s.total })]),
+        E('div', { class: 'progress', role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': 100, 'aria-valuenow': s.pct }, [E('i', { style: 'width:' + s.pct + '%' })]),
+        step ? E('div', { class: 'row' }, [step]) : null]));
+    });
+  }
 
   var LEVEL = { 40: 'с первой оплаты, 40%', 15: 'с повторной оплаты, 15%', 5: 'от приглашённого агента, 5%' };
   function accruals(root, link) {
