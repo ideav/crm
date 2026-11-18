@@ -65,6 +65,16 @@ function templatesUsing(root, assetPath) {
     return found;
 }
 
+// ── Проверки чистой части (работают всегда) ──────────────────────────────────────────────
+var sample = '<link href="/css/dash-import.css?{_global_.version}.1">\n' +
+             '<script src="/js/dash-import.js?{_global_.version}.2"></script>\n' +
+             '<script src="/js/main.js"></script>';
+assert(assetVersions(sample, '/js/dash-import.js').join('|') === '{_global_.version}.2',
+    'версия подключения читается из шаблона', assetVersions(sample, '/js/dash-import.js').join('|'));
+assert(assetVersions(sample, '/js/main.js').join('|') === '',
+    'подключение без версии видно как пустая версия — на него правило и ругается');
+assert(assetVersions(sample, '/js/нет-такого.js').length === 0, 'чужой файл в шаблоне не находится');
+
 // Сторож целиком. → null, если git или база недоступны; иначе { assets, problems }.
 function runGuard(root, base) {
     // Пустой дифф — это ПУСТО, а не «git недоступен»: null отдаёт только сбой команды.
@@ -93,16 +103,6 @@ function runGuard(root, base) {
     });
     return { assets: assets, problems: problems };
 }
-
-// ── Проверки чистой части (работают всегда) ──────────────────────────────────────────────
-var sample = '<link href="/css/dash-import.css?{_global_.version}.1">\n' +
-             '<script src="/js/dash-import.js?{_global_.version}.2"></script>\n' +
-             '<script src="/js/main.js"></script>';
-assert(assetVersions(sample, '/js/dash-import.js').join('|') === '{_global_.version}.2',
-    'версия подключения читается из шаблона', assetVersions(sample, '/js/dash-import.js').join('|'));
-assert(assetVersions(sample, '/js/main.js').join('|') === '',
-    'подключение без версии видно как пустая версия — на него правило и ругается');
-assert(assetVersions(sample, '/js/нет-такого.js').length === 0, 'чужой файл в шаблоне не находится');
 
 // ── Самопроверка сторожа на временном репозитории (#5541) ────────────────────────────────
 // Сценарий #5532: шаблон во вложенной папке, js изменён, версия в шаблоне не поднята.
@@ -155,9 +155,10 @@ if (res === null) {
         console.log('\n  git или базовая ветка недоступны — сторож пропущен (локально это не ошибка).');
     }
 } else {
-    assert(res.problems.length === 0,
+    var problems = res.problems;
+    assert(problems.length === 0,
         'каждый изменённый js/css поднял версию во всех шаблонах, где подключён (#4722)',
-        res.problems.length ? res.problems.join('\n  ') +
+        problems.length ? problems.join('\n  ') +
             '\n  Поднимите суффикс `?{_global_.version}.N` — иначе браузер отдаст старый файл из кэша.' : '');
     console.log('  (сверка с ' + base + ': изменённых ассетов — ' + res.assets.length + ')');
 }
