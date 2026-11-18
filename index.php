@@ -3040,19 +3040,23 @@ function Rec_masks_denial($id, $fields = NULL, $typ = 0)
 	}
 	if(isset($GLOBALS["GRANTS"]["mask"][$typ]))
 		$masked[$typ] = "val";	# Маска на таблицу — по главному значению записи
-	$vals = array();
+	$vals = $ids = array();	# $ids — id записи, которой принадлежит значение: по нему сравнивают маски @N
 	if(count($masked) && $id){
-		if(isset($masked[$typ]))
+		if(isset($masked[$typ])){
 			$vals[$typ][] = $val;
-		$data_set = Exec_sql("SELECT t, val FROM $z WHERE up=$id", "Get record values for masks");
+			$ids[$typ][] = $id;
+		}
+		$data_set = Exec_sql("SELECT id, t, val FROM $z WHERE up=$id", "Get record values for masks");
 		while($row = mysqli_fetch_array($data_set))
-			if(isset($masked[(int)$row["t"]]) && ($masked[(int)$row["t"]] === "val"))
+			if(isset($masked[(int)$row["t"]]) && ($masked[(int)$row["t"]] === "val")){
 				$vals[(int)$row["t"]][] = $row["val"];
+				$ids[(int)$row["t"]][] = (int)$row["id"];
+			}
 			elseif(!isset($reqs[(int)$row["t"]]) && is_numeric($row["val"])
 					&& isset($masked[(int)$row["val"]]) && ($masked[(int)$row["val"]] === "ref"))
 				$vals[(int)$row["val"]][] = $row["t"];	# Ссылка: up=запись, t=цель, val=колонка
 	}
-	$new = array();
+	$new = $newIds = array();
 	if(is_array($fields))
 		foreach($fields as $key => $v){
 			$req = (int)substr($key, 1);
@@ -3060,20 +3064,25 @@ function Rec_masks_denial($id, $fields = NULL, $typ = 0)
 				continue;
 			if($masked[$req] === "ref")
 				$new[$req] = is_array($v) ? $v : explode(",", (string)$v);
-			else
+			else{
 				$new[$req] = array(is_array($v) ? "" : BuiltIn((string)$v));
+				$newIds[$req] = array($req === $typ ? $id : 0);	# Новое значение главного поля — у этой записи
+			}
 		}
-	foreach(array($vals, $new) as $set)
+	foreach(array(array($vals, $ids), array($new, $newIds)) as list($set, $setIds))
 		foreach($set as $req => $list)
-			if(($msg = Mask_denial($req, $list, $masked[$req])) !== "")
+			if(($msg = Mask_denial($req, $list, $masked[$req], isset($setIds[$req]) ? $setIds[$req] : array())) !== "")
 				return $msg;
 	if($up > 1)	# Подчинённая запись наследует маски родителя
 		return Rec_masks_denial($up);
 	return "";
 }
-function Mask_denial($req, $list, $kind)
+# Маска @N / !@N / @IN(…) задаёт id записи, а не значение: значение колонки на неё не подставляется
+# (MySQL приводит '~код' к 0, и маска @0 пропускала любую запись). Сравнивается id из $ids;
+# у записи, которой ещё нет (создание), id не известен — такая маска её не задерживает.
+function Mask_denial($req, $list, $kind, $ids = array())
 {
-	foreach($list as $v){
+	foreach($list as $i => $v){
 		$v = trim((string)$v);
 		if($v === "")
 			continue;
@@ -3081,7 +3090,15 @@ function Mask_denial($req, $list, $kind)
 			continue;	# Нечисловую ссылку отобьёт RequireRefId/checkNewRef
 		$ok = FALSE;
 		foreach($GLOBALS["GRANTS"]["mask"][$req] as $mask => $level){
-			$cond = Fetch_WHERE_for_mask($req, $v, $mask);
+			$on = $v;
+			if(($kind === "val") && preg_match('/^\s*!?@/', (string)$mask)){
+				$on = isset($ids[$i]) ? (int)$ids[$i] : 0;
+				if(!$on){
+					$ok = TRUE;
+					break;
+				}
+			}
+			$cond = Fetch_WHERE_for_mask($req, $on, $mask);
 			if($cond === ""){
 				$ok = TRUE;
 				break;
@@ -7128,6 +7145,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 										, "Get Object & type name");
 					if($row = mysqli_fetch_array($data_set))
 					{
+						Check_Rec_masks($id);	# #5462: запись вне масок роли не читается и по id
 						$blocks[$block]["title"][] = $row[0]." ".Format_Val_View($row[1], $row[2], $id);
 						$GLOBALS["REV_BT"][$row["id"]] = $GLOBALS["REV_BT"][$row["t"]];
 					}
