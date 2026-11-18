@@ -65,6 +65,7 @@
     {"name": "Тип ножа", "unique": true, "fields": [
       {"name": "Ширина этикетки, мм", "type": "SIGNED"},
       {"name": "Длина этикетки, мм", "type": "SIGNED"},
+      {"name": "Длина этикетки факт, мм", "type": "SIGNED"},
       {"name": "Ручьёв", "type": "NUMBER"},
       {"name": "Ручьев / (этикеток) на раппорте", "type": "NUMBER"},
       {"name": "М/э расстояние, мм", "type": "SIGNED"},

@@ -64,6 +64,7 @@ REPORTS = {
         ('material', ('req', POS, 'Сырьё этикетки'), None),
         ('thickness', ('req', MAT, 'Толщина подложки, мкм'), None),
         ('die_gap', ('req', DIE_TYPE, 'М/э расстояние, мм'), None),
+        ('die_actual_length', ('req', DIE_TYPE, 'Длина этикетки факт, мм'), None),
     ],
 }
 

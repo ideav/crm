@@ -52,8 +52,8 @@
             streams: 'Ручьёв', labelsPerRepeat: ['Ручьев / (этикеток) на раппорте', 'Этикеток на раппорте'], labelGap: 'М/э расстояние, мм',
             streamGap: 'Между ручьями, мм', edge: 'Ширина кромки, мм', cylinder: 'Вал', base: ['Основа сырья', 'Основа'],
             minFormat: 'Минимальный формат, мм', optFormat: 'Оптимальный формат, мм', usedFormat: 'Исп. формат, мм',
-            sleeveWidth: 'Ширина втулки, мм', angle: 'Угол заточки'
-        } },
+            sleeveWidth: 'Ширина втулки, мм', angle: 'Угол заточки', actualLength: 'Длина этикетки факт, мм'
+        }, optionalReqs: ['actualLength'] },
         dieRun: { name: 'Движение пробега', reqs: { revs: 'Обороты пробега', kind: 'Вид движения пробега' } },
         cylinder: { name: 'Вал', reqs: { repeat: 'Раппорт, мм' } },
         base: { name: 'Основа сырья', reqs: {} },
@@ -241,7 +241,7 @@
 
     var KNIFE_COLS = {
         no: ['Номер ножа'], delivered: ['Дата поставки'], labelWidth: ['Ширина этикетки'],
-        labelLength: ['Длинна этикетки', 'Длина этикетки'], streams: ['кол-во ручев', 'кол-во ручьев', 'Ручьев'],
+        labelLength: ['Длинна этикетки', 'Длина этикетки'], actualLength: ['Длинна этикетки _1', 'Длина этикетки факт*'], streams: ['кол-во ручев', 'кол-во ручьев', 'Ручьев'],
         labelsPerRepeat: ['этикеток на раппорте'], labelGap: ['м/э расстояние, мм'], streamGap: ['между ручьями, мм'],
         edge: ['ширина кромки, мм'], cylinder: ['Вал'], repeat: ['раппорт'], height: ['высота ножа, мкм'],
         angle: ['угол заточки'], base: ['сырье', 'Основа'], brand: ['Доп', 'Марка ножа'], state: ['Состояние ножа*'],
@@ -255,6 +255,7 @@
     // «Типа ножа», а не самого ножа.
     var KNIFE_FIELDS = [
         { key: 'delivered', kind: 'date' }, { key: 'labelWidth', kind: 'num', type: true }, { key: 'labelLength', kind: 'num', type: true },
+        { key: 'actualLength', kind: 'num', type: true, fill: true },
         { key: 'streams', kind: 'int', type: true }, { key: 'labelsPerRepeat', kind: 'int', type: true }, { key: 'labelGap', kind: 'num', type: true },
         { key: 'streamGap', kind: 'num', type: true }, { key: 'edge', kind: 'num', type: true }, { key: 'cylinder', kind: 'ref', type: true },
         { key: 'base', kind: 'ref', type: true }, { key: 'minFormat', kind: 'int', type: true }, { key: 'optFormat', kind: 'int', type: true },
@@ -270,7 +271,7 @@
     var TYPE_MATCH_KEYS = ['labelWidth', 'labelLength', 'angle', 'streamGap', 'labelGap', 'streams', 'cylinder'];
 
     var NUM_LABEL = {
-        labelWidth: 'ширина этикетки', labelLength: 'длина этикетки', streams: 'ручьёв', labelsPerRepeat: 'ручьев / (этикеток) на раппорте',
+        labelWidth: 'ширина этикетки', labelLength: 'длина этикетки', actualLength: 'фактическая длина этикетки', streams: 'ручьёв', labelsPerRepeat: 'ручьев / (этикеток) на раппорте',
         labelGap: 'м/э расстояние', streamGap: 'между ручьями', edge: 'ширина кромки', minFormat: 'минимальный формат',
         optFormat: 'оптимальный формат', usedFormat: 'исп. формат', sleeveWidth: 'ширина втулки', height: 'высота ножа'
     };
@@ -344,7 +345,7 @@
             else v.labelWidth = w;
         }
 
-        ['streams', 'labelsPerRepeat', 'labelGap', 'streamGap', 'edge', 'minFormat', 'optFormat', 'usedFormat', 'sleeveWidth', 'height'].forEach(function(k) {
+        ['actualLength', 'streams', 'labelsPerRepeat', 'labelGap', 'streamGap', 'edge', 'minFormat', 'optFormat', 'usedFormat', 'sleeveWidth', 'height'].forEach(function(k) {
             var n = cellNum(get(k));
             if (n == null) return;
             if (isNaN(n)) { warnings.push(NUM_LABEL[k] + ' «' + cellText(get(k)) + '» — не число, поле не заполняется'); return; }
@@ -368,6 +369,8 @@
                 var chk = lp.checkDieRepeat(fmtNum(rep), teeth);   // ячейка Excel: 419.00300000000004
                 if (!chk.ok) warnings.push(chk.error + ' — раппорт 1С не берётся, вал — по номеру');
             }
+            var fit = repeatFit(v, teeth);
+            if (fit) warnings.push(fit);
         }
 
         var base = cellText(get('base'));
@@ -394,6 +397,21 @@
         if (mileage != null && mileage < 0) { warnings.push('пробег ' + mileage + ' об меньше нуля — не импортирован'); mileage = null; source = ''; }
 
         return { row: rowNo, key: key, values: v, mileage: mileage, mileageSource: source, warnings: warnings, errors: errors };
+    }
+
+    // Этикетки раппорта ножа помещаются на окружность вала: «на раппорте» × (длина + м/э) ≤ раппорт
+    // вала. Длина — фактическая («Длинна этикетки _1»: 39,3 у ножа «58 х 40»), без неё — номинальная.
+    // Допуск 0,5 мм — округление м/э в листе (1,98 вместо 1,975). → текст предупреждения или ''.
+    function repeatFit(v, teeth) {
+        var len = v.actualLength > 0 ? v.actualLength : v.labelLength;
+        if (!(len > 0) || !(v.labelsPerRepeat > 0) || !(teeth > 0)) return '';
+        var need = v.labelsPerRepeat * (len + (v.labelGap > 0 ? v.labelGap : 0));
+        var have = lp ? lp.cylinderRepeatMm(teeth) : teeth * 3.175;
+        if (need <= have + 0.5) return '';
+        return v.labelsPerRepeat + ' этикеток × (' + fmtNum(len).replace('.', ',') + ' + ' + fmtNum(v.labelGap || 0).replace('.', ',') + ') = ' +
+            fmtNum(Math.round(need * 10) / 10).replace('.', ',') + ' мм не помещаются на раппорт вала ' + teeth + ' (' +
+            fmtNum(Math.round(have * 10) / 10).replace('.', ',') + ' мм)' + (v.actualLength > 0 ? '' : ' — фактической длины этикетки в файле нет, взята номинальная') +
+            ' — проверьте вал, длину или «на раппорте»';
     }
 
     // ── Лист заказов ─────────────────────────────────────────────────────────────────────
@@ -437,25 +455,6 @@
         var gl = /(каучук|акрил\S*|hot\s*melt)/i.exec(s);
         return { width: width, length: length, perRoll: perRoll, core: core ? core[1] : '', winding: winding,
             material: material, glue: gl ? gl[1] : '', matte: /матов/i.test(s), perRollRaw: perRollRaw, qtyIn: qtyIn };
-    }
-
-    // Марка мастер-рулона из комментария 1С: «MONOCHROME 0043 SG/HM/YG 0,300 х 2000 (П) - 41 шт» →
-    // «0043 SG/HM/YG». → { code, codes: [все разные марки] }; code — '' при нуле или нескольких марках.
-    var MR_CODE_RE = /MONOCHROME\s+(\d{3,5}\s+[^\s,;]+)/gi;
-    function commentMaterial(comment) {
-        var codes = [], seen = {}, m;
-        MR_CODE_RE.lastIndex = 0;
-        while ((m = MR_CODE_RE.exec(String(comment == null ? '' : comment)))) {
-            var k = codeKey(m[1]);
-            if (!seen[k]) { seen[k] = true; codes.push(m[1]); }
-        }
-        return { code: codes.length === 1 ? codes[0] : '', codes: codes };
-    }
-
-    // Ключ сравнения марки: кириллица, похожая на латиницу (1С пишет «PP/А/G» с русской «А»), — в латиницу.
-    var LOOKALIKE = { 'а': 'a', 'в': 'b', 'е': 'e', 'к': 'k', 'м': 'm', 'н': 'h', 'о': 'o', 'р': 'p', 'с': 'c', 'т': 't', 'у': 'y', 'х': 'x' };
-    function codeKey(s) {
-        return norm(s).replace(/[авекмнорстух]/g, function(ch) { return LOOKALIKE[ch]; });
     }
 
     // Количество строки в рулонах. «Заказано количество» в 1С — рулоны, кроме двух случаев:
@@ -523,15 +522,13 @@
                     warnings.push('в номенклатуре пометка «тыс. шт», а единица хранения «' + get('unit') + '» — количество взято в штуках этикеток');
                 }
             }
-            var mat = commentMaterial(get('comment'));
-            if (mat.codes.length > 1) warnings.push('в комментарии несколько марок мастер-рулона (' + mat.codes.join(', ') + ') — сырьё по комментарию не выбрано');
             var received = excelDate(cell(row, h.cols, 'received'));
             if (!received && get('received')) warnings.push('дата поступления «' + get('received') + '» не разобрана');
             items.push({
                 row: r + 1, key: key, order: order, article: article, partner: get('partner'),
                 clientOrder: clientOrder, nomenclature: nom, comment: get('comment'), received: received,
                 knifeType: get('knifeType'), box: get('box'), unit: get('unit'), rolls: q ? q.rolls : null,
-                qtySource: q ? q.source : '', inLabels: !!(q && q.labels != null), materialCode: mat.code,
+                qtySource: q ? q.source : '', inLabels: !!(q && q.labels != null),
                 label: p, warnings: warnings, errors: errors
             });
         }
@@ -631,12 +628,13 @@
 
     // Параметры файла, которые расходятся с типом: [«Ручьёв» 4, у типа 3]. Новый вал (его ещё нет
     // в справочнике) у типа быть не может — тоже расхождение.
-    function typeDiff(tp, target, labels, ctx) {
+    function typeDiff(tp, target, labels, ctx, values) {
         var names = (ctx.tables.dieType && ctx.tables.dieType.reqNames) || {};
+        var vals = values || tp.values;
         var out = [];
         TYPE_FIELDS.forEach(function(f) {
             if (!(f.key in target)) return;
-            var want = target[f.key], have = tp.values[f.key];
+            var want = target[f.key], have = vals[f.key];
             if (typeof want !== 'object' && sameValue(f.kind, have, want)) return;
             var haveLabel = f.kind === 'ref' ? ((ctx.labels[f.key] || {})[have] || have) : have;
             out.push('«' + (names[f.key] || f.key) + '» ' + labels[f.key] + ', у типа ' + (haveLabel || 'пусто'));
@@ -662,6 +660,29 @@
         });
     }
 
+    // Поля типа с fill (фактическая длина этикетки) заполняются из файла, если у типа они пусты;
+    // заполненное не меняется — расхождение остаётся предупреждением typeDiff. Несколько ножей
+    // одного типа заполняют поле один раз: следующие сравниваются с уже записанным (ctx.fill —
+    // заполненное этим импортом, { idТипа: { ключ: значение } }). Операция — в ctx.fillOps.
+    // → значения типа с учётом заполненного.
+    function fillType(tp, target, labels, ctx, row) {
+        var t = ctx.tables;
+        var done = ctx.fill[tp.id] = ctx.fill[tp.id] || {};
+        var vals = {};
+        Object.keys(tp.values).forEach(function(k) { vals[k] = tp.values[k]; });
+        Object.keys(done).forEach(function(k) { vals[k] = done[k]; });
+        TYPE_FIELDS.forEach(function(f) {
+            if (!f.fill || !(f.key in target) || !t.dieType.reqs[f.key]) return;
+            if (String(vals[f.key] == null ? '' : vals[f.key]).trim() !== '') return;
+            var op = { op: 'set', id: tp.id, group: 'type:' + tp.id, fields: {} };
+            op.fields['t' + t.dieType.reqs[f.key]] = target[f.key];
+            ctx.fillOps.push(op);
+            done[f.key] = vals[f.key] = target[f.key];
+            row.changes.push({ field: t.dieType.reqNames[f.key] + ' (тип «' + tp.name + '»)', from: '—', to: labels[f.key] });
+        });
+        return vals;
+    }
+
     // Тип для ножа без типа: подходящий из справочника (из нескольких — тот, у которого больше
     // ножей, затем меньший id), затем — заведённый этим же импортом, иначе — новый тип с
     // параметрами файла. Новый тип называется как типы, заведённые по ножам без каталога:
@@ -676,7 +697,7 @@
         if (cands.length) {
             var tp = cands[0];
             if (cands.length > 1) row.warnings.push('подходит типов: ' + cands.length + ', выбран «' + tp.name + '» — у него больше ножей');
-            var diff = typeDiff(tp, target, labels, ctx);
+            var diff = typeDiff(tp, target, labels, ctx, fillType(tp, target, labels, ctx, row));
             if (diff.length) row.warnings.push('параметры в файле расходятся с типом «' + tp.name + '»: ' + diff.join('; ') + ' — актуален тип');
             return { value: tp.id, name: tp.name };
         }
@@ -708,6 +729,9 @@
         var t = ctx.tables;
         var rows = [], ops = [], counts = counts0();
         var newCyl = {}, newTypes = [];
+        // ctx не меняется: заполнение типов этого прогона — в своей копии.
+        var fillCtx = Object.create(ctx);
+        fillCtx.fill = {}; fillCtx.fillOps = [];
 
         (parsed.items || []).forEach(function(item) {
             var row = { row: item.row, key: item.key, status: '', summary: knifeSummary(item.values), changes: [],
@@ -756,10 +780,10 @@
             var group = dieRef;
             var typeLink = null;
             if (curType) {
-                var diff = typeDiff(curType, target, labels, ctx);
+                var diff = typeDiff(curType, target, labels, ctx, fillType(curType, target, labels, fillCtx, row));
                 if (diff.length) row.warnings.push('параметры в файле расходятся с типом «' + curType.name + '»: ' + diff.join('; ') + ' — актуален тип, он не меняется');
             } else {
-                typeLink = knifeType(item, target, labels, ctx, newTypes, ops, row);
+                typeLink = knifeType(item, target, labels, fillCtx, newTypes, ops, row);
             }
             if (!existing) {
                 var op = { op: 'new', table: t.die.id, up: 1, ref: dieRef, group: group, fields: {} };
@@ -784,6 +808,7 @@
                 }
                 if (Object.keys(set.fields).length) ops.push(set);
             }
+            Array.prototype.push.apply(ops, fillCtx.fillOps.splice(0));
             if (runPlan && runPlan.op === 'new') {
                 var run = { op: 'new', table: t.dieRun.id, up: existing ? existing.id : { ref: dieRef }, group: group, fields: {} };
                 run.fields['t' + t.dieRun.id] = now;
@@ -905,7 +930,7 @@
 
     // Номер марки сырья по правилу планировщика («Сырье» в «Плане на производство»: 43, 44, 45, 47, 52, 53, 55, 56):
     // П/Гл — 43, ЭКО — 44, ТОП — 45, Vellum — 56; П/П — по клею и «матовый»: каучук 47 / матовый 55, акрил 52 / матовый 53.
-    // Совпадает с «Планом» в 98 % строк; исключения («ТОП» → 46) задаёт марка в комментарии 1С. → число или 0.
+    // Совпадает с «Планом» в 98 % строк. → число или 0.
     function materialNumber(label) {
         var t = label && label.material ? norm(label.material).replace(/\s+/g, '') : '';
         if (/^п\/гл|^пгл/.test(t)) return 43;
@@ -920,20 +945,12 @@
     }
 
     // Сырьё позиции по обозначению и клею из номенклатуры. materials — [{ id, name, base, glue }].
-    // code — марка мастер-рулона из комментария 1С («0043 SG/HM/YG»): если есть, сырьё ищется только
-    // по ней (название записи = марка), обозначение «П/Гл» уже не угадывается.
+    // Комментарий 1С на сырьё не влияет: в нём ручной подбор мастер-рулонов (владелец, #5552).
     // → { ok, id, name, base } | { ok:false, reason }
-    function matchMaterial(label, materials, code) {
+    function matchMaterial(label, materials) {
         var token = label && label.material ? String(label.material).trim() : '';
         var glue = label && label.glue ? norm(label.glue) : '';
         var list = materials || [];
-        if (code) {
-            var byCode = list.filter(function(m) { return codeKey(m.name) === codeKey(code); });
-            if (byCode.length === 1) return { ok: true, id: byCode[0].id, name: byCode[0].name, base: byCode[0].base };
-            return { ok: false, reason: byCode.length
-                ? 'марке «' + code + '» из комментария 1С подходит несколько записей сырья'
-                : 'марки «' + code + '» из комментария 1С нет в справочнике «Сырьё этикетки»' };
-        }
         if (!token) return { ok: false, reason: 'в номенклатуре 1С нет обозначения материала' };
         if (!list.length) return { ok: false, reason: 'справочник «Сырьё этикетки» пуст' };
         var exact = list.filter(function(m) { return norm(m.name) === norm(token) || (glue && norm(m.name) === norm(token + ' ' + glue)); });
@@ -1104,7 +1121,7 @@
                 if (i === 0) row.changes = row.changes.concat(orderChanges);
                 var lab = item.label;
                 var pt = {}, plabels = {};
-                var matchRes = t.position.reqs.material ? matchMaterial(lab, ctx.materials, item.materialCode) : null;
+                var matchRes = t.position.reqs.material ? matchMaterial(lab, ctx.materials) : null;
                 var put = function(k, v, label) { if (v == null || v === '' || !t.position.reqs[k]) return; pt[k] = v; plabels[k] = label != null ? label : v; };
                 put('productKind', kindId, lp ? lp.PRODUCT_KIND.LABEL : 'этикетка');
                 put('article', ensure('article', item.article), item.article);
