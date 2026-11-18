@@ -201,6 +201,11 @@ function Cp_webhook($cfg, $payload){
     $op = isset($payload['operationId']) ? $payload['operationId'] : null;
     $path = Cp_order_path($cfg, $op);
     if (!$path || !is_file($path)) return null;
+    # доступ открывает только подтверждённая оплата; прочие статусы (создан, истёк, отказ) — не действие
+    if (isset($payload['status']) && strtoupper((string)$payload['status']) !== 'APPROVED') {
+        Cp_log($cfg, 'ignored_status', array('op' => $op, 'status' => (string)$payload['status']));
+        return true;
+    }
     $fh = fopen($path, 'c+');
     flock($fh, LOCK_EX); # Точка может прислать повтор параллельно
     try {
@@ -238,4 +243,51 @@ function Cp_webhook($cfg, $payload){
     } finally {
         flock($fh, LOCK_UN); fclose($fh);
     }
+}
+
+# ---- подпись вебхука Точки (ideav/courses#173) ----
+# Точка шлёт в теле вебхука JWT-строку (RS256), подписанную своим ключом. Открытый ключ
+# (JWK со страницы документации Точки или PEM) кладётся в конфиг: 'webhook_public_key'.
+function Cp_b64u($s){ return base64_decode(strtr($s, '-_', '+/') . str_repeat('=', (4 - strlen($s) % 4) % 4), true); }
+
+function Cp_der($tag, $body){
+    $l = strlen($body);
+    $len = $l < 128 ? chr($l) : (($l < 256) ? "\x81" . chr($l) : "\x82" . chr($l >> 8) . chr($l & 255));
+    return chr($tag) . $len . $body;
+}
+function Cp_der_int($bin){ $bin = ltrim($bin, "\x00"); if ($bin === '' || ord($bin[0]) > 127) $bin = "\x00" . $bin; return Cp_der(0x02, $bin); }
+
+# Ключ в виде PEM: из PEM-строки, JWK-массива или JWK-JSON
+function Cp_public_pem($key){
+    if (is_string($key) && strpos($key, '-----BEGIN') !== false) return $key;
+    if (is_string($key)) $key = json_decode($key, true);
+    if (!is_array($key) || empty($key['n']) || empty($key['e'])) return null;
+    $n = Cp_b64u($key['n']); $e = Cp_b64u($key['e']);
+    if ($n === false || $e === false) return null;
+    $rsa = Cp_der(0x30, Cp_der_int($n) . Cp_der_int($e));
+    $spki = Cp_der(0x30, Cp_der(0x30, "\x06\x09\x2a\x86\x48\x86\xf7\x0d\x01\x01\x01\x05\x00") . Cp_der(0x03, "\x00" . $rsa));
+    return "-----BEGIN PUBLIC KEY-----\n" . chunk_split(base64_encode($spki), 64, "\n") . "-----END PUBLIC KEY-----\n";
+}
+
+# JWT → массив payload или null, если подпись/алгоритм не те
+function Cp_verify_jwt($cfg, $jwt){
+    $parts = explode('.', trim((string)$jwt));
+    if (count($parts) !== 3) return null;
+    $h = json_decode((string)Cp_b64u($parts[0]), true);
+    if (!is_array($h) || !isset($h['alg']) || $h['alg'] !== 'RS256') return null; # alg=none и HS256 не принимаем
+    $pem = Cp_public_pem(isset($cfg['webhook_public_key']) ? $cfg['webhook_public_key'] : null);
+    $sig = Cp_b64u($parts[2]);
+    if (!$pem || $sig === false || !function_exists('openssl_verify')) return null;
+    if (openssl_verify($parts[0] . '.' . $parts[1], $sig, $pem, OPENSSL_ALGO_SHA256) !== 1) return null;
+    $p = json_decode((string)Cp_b64u($parts[1]), true);
+    return is_array($p) ? $p : null;
+}
+
+# Тело вебхука целиком: [HTTP-код, null|true]. 403 — подпись не сошлась; 200+null — платёж не наш
+# (вызывающий twh.php продолжает путь my); 200+true — обработан или не требует действий; 500 — повтор.
+function Cp_handle_webhook($cfg, $raw){
+    $p = Cp_verify_jwt($cfg, $raw);
+    if ($p === null) { Cp_log($cfg, 'webhook_bad_signature'); return array(403, null); }
+    $r = Cp_webhook($cfg, $p);
+    return $r === false ? array(500, null) : array(200, $r);
 }
