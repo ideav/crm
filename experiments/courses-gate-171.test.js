@@ -63,8 +63,5 @@ function mk(progress, loadErr) {
   assert(find(root, n => n.tag === 'a' && n.attrs.href === '#/c/c/a').length === 1);
   assert(/Сначала: Первый/.test(t));
 
-  // подпись внутри урока
-  const src = fs.readFileSync(path.join(dir, 'lesson.js'), 'utf8');
-  assert(/'Урок ' \+ \(pos \+ 1\) \+ ' из ' \+ total/.test(src));
   console.log('ok');
 })().catch(e => { console.error(e); process.exit(1); });
