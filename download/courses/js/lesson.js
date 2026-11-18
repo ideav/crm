@@ -19,10 +19,25 @@
         course.authored ? E('a', { class: 'btn btn-primary', href: '#/course/' + encodeURIComponent(course.code), text: 'К странице курса' }) : E('a', { class: 'btn btn-primary', href: '#/map', text: 'К карте курсов' })]));
       return;
     }
+    var blocker = D.gateFor(course, id, false);
+    if (blocker) { gatePage(root, course, blocker); return; }
     root.appendChild(E('p', { class: 'lms-empty', text: 'Загружаем урок…' }));
     D.loadLesson(course, id).then(function (lesson) { root.innerHTML = ''; build(root, course, lesson); },
-      function () { root.innerHTML = ''; root.appendChild(E('div', { class: 'card' }, [E('p', { text: 'Не удалось загрузить урок.' }), E('a', { class: 'btn', href: '#/map', text: 'К карте' })])); });
+      function (err) {
+        root.innerHTML = '';
+        var denied = err && [401, 403, 404, 423].indexOf(err.status) >= 0, b = denied && D.gateFor(course, id, true);
+        if (b) { gatePage(root, course, b); return; }
+        root.appendChild(E('div', { class: 'card' }, [E('p', { text: 'Не удалось загрузить урок.' }), E('a', { class: 'btn', href: '#/map', text: 'К карте' })]));
+      });
   };
+
+  // «Нет доступа» вместо ошибки загрузки: ведём к уроку, который нужно пройти первым (courses#171)
+  function gatePage(root, course, blocker) {
+    root.appendChild(E('div', { class: 'card gate' }, [E('h1', { text: 'Нет доступа' }),
+      E('p', { text: 'Сначала выполните задание в уроке «' + blocker.title + '» — после этого этот урок откроется.' }),
+      E('div', { class: 'row' }, [E('a', { class: 'btn btn-primary', href: '#/c/' + course.code + '/' + blocker.id, text: 'Перейти к уроку «' + blocker.title + '»' }),
+        E('a', { class: 'btn', href: '#/map', text: 'К карте' })])]));
+  }
 
   function build(root, course, lesson) {
     var st = D.state(course.code, lesson.id), ans = st.ans;
@@ -38,7 +53,7 @@
     };
     var bar = E('header', { class: 'lesson-bar' }, [
       E('div', { class: 'lesson-bar-row' }, [E('span', { class: 'lb-course', text: course.title }),
-        E('span', { class: 'lb-pos', text: (pos + 1) + ' / ' + total }),
+        E('span', { class: 'lb-pos', text: 'Урок ' + (pos + 1) + ' из ' + total }),
         E('a', { class: 'lb-map', href: '#/map', text: 'Карта' })]),
       E('div', { class: 'progress', role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': total, 'aria-valuenow': pos + 1 }, [E('i', { style: 'width:' + Math.round((pos + 1) / total * 100) + '%' })])]);
     var title = E('h1', { class: 'lesson-title', text: lesson.title });
