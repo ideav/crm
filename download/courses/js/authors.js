@@ -132,7 +132,42 @@
     });
   };
   function mk() { var M = window.marked; if (!M || !M.parse) throw new Error('marked не загружен'); return M; }
-  AU.md = function (src) { return AU.externalLinks(AU.sanitize(mk().parse(String(src || ''), { gfm: true, breaks: false, async: false }))); };
+  // ---- видео: внешний видеохостинг с защитой (Kinescope) ----
+  // Ссылка на видео отдельной строкой → метка <div data-video="kinescope:<id>">. В HTML урока iframe не хранится
+  // (санитайзер их не пропускает): плеер ставит страница при показе, с водяным знаком зрителя.
+  var VIDEO_ID = '[A-Za-z0-9]{4,64}';
+  var VIDEO_P = new RegExp('<p>\\s*<a\\s(?:[^>]*?\\s)?href="https://kinescope\\.io/(?:embed/)?(' + VIDEO_ID + ')"[^>]*>(?:(?!</a>)[\\s\\S])*</a>\\s*</p>', 'g');
+  AU.videoMarks = function (html) {
+    return String(html).replace(VIDEO_P, function (all, id) { return '<div class="lesson-video" data-video="kinescope:' + id + '"></div>'; });
+  };
+  // Адрес плеера по метке или '' для чужой/испорченной метки. viewer — подпись зрителя для водяного знака.
+  AU.videoSrc = function (spec, viewer) {
+    var m = new RegExp('^kinescope:(' + VIDEO_ID + ')$').exec(String(spec == null ? '' : spec));
+    if (!m) return '';
+    var w = String(viewer == null ? '' : viewer).trim();
+    return 'https://kinescope.io/embed/' + m[1] + (w ? '?watermark=' + encodeURIComponent(w) : '');
+  };
+  // Поставить плееры во все метки внутри root; возвращает число поставленных.
+  AU.mountVideos = function (root, viewer) {
+    var n = 0;
+    [].forEach.call(root.querySelectorAll('[data-video]'), function (el) {
+      if (el.getAttribute('data-video-on')) return;
+      var src = AU.videoSrc(el.getAttribute('data-video'), viewer);
+      if (!src) return;
+      var f = document.createElement('iframe');
+      f.setAttribute('src', src);
+      f.setAttribute('title', 'Видео урока');
+      f.setAttribute('allow', 'autoplay; fullscreen; picture-in-picture; encrypted-media');
+      f.setAttribute('allowfullscreen', '');
+      f.setAttribute('loading', 'lazy');
+      f.setAttribute('frameborder', '0');
+      el.appendChild(f);
+      el.setAttribute('data-video-on', '1');
+      n++;
+    });
+    return n;
+  };
+  AU.md = function (src) { return AU.videoMarks(AU.externalLinks(AU.sanitize(mk().parse(String(src || ''), { gfm: true, breaks: false, async: false })))); };
   AU.inline = function (src) { return AU.externalLinks(AU.sanitize(mk().parseInline(String(src || ''), { gfm: true, async: false }))); };
 
   // ---- черновик урока → lesson.json (#84) ----

@@ -160,5 +160,7 @@
   A.cabinetSessionAlive = function () { return !A.core && A.hasCookie('idbs_my'); };
   A.isCurator = function () { return /куратор|curator/i.test(L.role || '') || A.isAdmin(); };
   A.isGuest = function () { return L.user === 'guest'; };
+  // Подпись зрителя для водяного знака на видео: логин и номер пользователя; у гостя пусто.
+  A.viewerLabel = function () { return A.isGuest() ? '' : [L.user, L.userId].filter(Boolean).join(' · '); };
   A.isAdmin = function () { return /^(admin|админ)/i.test(L.role || ''); };
 })();
