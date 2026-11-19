@@ -99,9 +99,13 @@ function Cp_admin_create($cfg, &$xsrf, $table, $main, $fields){
     return isset($d['id']) ? $d['id'] : (isset($d['obj']) ? $d['obj'] : null);
 }
 
-# Строки таблицы как массивы значений по порядку реквизитов (первое — значение записи)
-function Cp_rows($cfg, $table){
-    $rows = Cp_admin_get($cfg, 'object/' . $table['id'] . '/?JSON_OBJ&LIMIT=0,100000');
+# Строки таблицы как массивы значений по порядку реквизитов (первое — значение записи).
+# $filter: имя реквизита (или '_main' — значение записи) => текст. Ссылку сервер отбирает по тексту
+# (логину, названию), не по id — id сверяет вызывающий.
+function Cp_rows($cfg, $table, $filter = array()){
+    $q = '';
+    foreach ($filter as $k => $v) $q .= '&F_' . ($k === '_main' ? $table['id'] : $table['req'][$k]) . '=' . rawurlencode($v);
+    $rows = Cp_admin_get($cfg, 'object/' . $table['id'] . '/?JSON_OBJ&LIMIT=0,100000' . $q);
     $names = array_merge(array('_main'), array_keys($table['req']));
     $out = array();
     foreach ($rows as $r) {

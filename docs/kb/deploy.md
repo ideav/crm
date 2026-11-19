@@ -46,7 +46,7 @@ curl -s -w ' %{http_code}\n' 'https://ideav.ru/courses-content.php?course=adept&
 
 После мержа клиента — «Обновить» в базе `courses` и проверка под учеником с «Доступом»: платный урок открывается, в сети браузера запрос `courses-content.php` с ответом 200.
 
-Версии `?v=N` у js и css портала стоят в двух файлах: `templates/courses/info.html` и `download/courses/core.html`. Кэш immutable — номер поднимается в обоих при каждой правке файла и повторно не используется.
+Версии `?v=N` у js и css портала стоят в двух файлах: `templates/courses/info.html` и `download/courses/core.html`. Кэш immutable — номер поднимается в обоих при каждой правке файла и повторно не используется. Одинаковость номеров на двух страницах держит `experiments/courses-asset-versions.test.js`.
 
 ### PR-флоу (через форк unidel2035)
 Изменения вносятся pull request'ом. Push в основной репозиторий идёт через форк

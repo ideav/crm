@@ -2,9 +2,11 @@
 # Защита платного курса портала ideav.ru/courses: урок отдаёт сервер и только ученику с «Доступом».
 #
 # courses-content.php?course=<код>&lesson=<урок> → Cc_get(): ученик определяется ядром по его cookie
-# (/courses/xsrf), строка «Доступ» ищется от имени админа базы. Ключ курса и адреса файлов ученику
-# не уходят: встроенный курс читается с диска из <content_dir>/<код>-<ключ>/<урок>.json, авторский —
-# по адресу манифеста из «Доступа» (без lesson отдаётся манифест без адресов файлов).
+# (/courses/xsrf), строка «Доступ» ищется от имени админа базы с отбором по логину ученика. Доступ —
+# сама строка; где лежит курс, решает сервер, а не «Ключ» в строке: встроенный курс читается с диска из
+# <content_dir>/<код>-<ключ каталога>/<урок>.json, авторский — по манифесту из «Каталога» (курс снят с
+# «Каталога» — по адресу из «Ключа» строки). Без lesson у авторского курса отдаётся манифест без адресов
+# файлов. Ключ курса и адреса файлов ученику не уходят.
 # Бесплатные курсы открыты и так, через эту дверь не идут.
 #
 # Конфиг и хелперы Cp_* — из courses_pay.php (COURSES_PAY_CONFIG: site, admin_token, content_dir, schema_file).
@@ -13,11 +15,22 @@ require_once __DIR__ . '/courses_pay.php';
 
 function Cc_fail($code, $error){ return array($code, json_encode(array('error' => $error), JSON_UNESCAPED_UNICODE)); }
 
-# Ключ из строки «Доступ» ученика к курсу или null
-function Cc_access_key($cfg, $tables, $uid, $code){
-    foreach (Cp_rows($cfg, $tables['Доступ']) as $r)
-        if (Cp_ref_id($r['Пользователь']) === (string)$uid && $r['Курс'] === $code && $r['Ключ'] !== '') return $r['Ключ'];
+# Строка «Доступ» ученика к курсу или null. Сначала отбор по логину (одна-две строки вместо таблицы);
+# не нашлось — вся таблица: текст ссылки может не совпасть с логином из xsrf, а доступ терять нельзя.
+function Cc_access_row($cfg, $tables, $uid, $login, $code){
+    $filters = $login !== '' ? array(array('Пользователь' => $login), array()) : array(array());
+    foreach ($filters as $filter)
+        foreach (Cp_rows($cfg, $tables['Доступ'], $filter) as $r)
+            if (Cp_ref_id($r['Пользователь']) === (string)$uid && $r['Курс'] === $code) return $r;
     return null;
+}
+
+# Адрес манифеста авторского курса: из «Каталога», если курс там есть, иначе из «Ключа» строки «Доступ»
+function Cc_manifest_url($cfg, $tables, $code, $access){
+    if (isset($tables['Каталог']['req']['Манифест']))
+        foreach (Cp_rows($cfg, $tables['Каталог'], array('_main' => $code)) as $r)
+            if ($r['_main'] === $code && $r['Манифест'] !== '') return $r['Манифест'];
+    return $access['Ключ'];
 }
 
 # Адрес файла публикации на своём сайте (абсолютный) или null: чужие хосты и схемы не запрашиваем
@@ -47,14 +60,17 @@ function Cc_get($cfg, $cookie, $code, $lesson){
         return Cc_fail(401, 'login');
     }
     $uid = isset($me['id']) ? (string)$me['id'] : '';
+    $login = isset($me['user']) && is_string($me['user']) ? $me['user'] : '';
     if (!preg_match('/^\d+$/', $uid) || $uid === '0' || (isset($me['role']) && $me['role'] === 'guest')) return Cc_fail(401, 'login');
     try {
-        $key = Cc_access_key($cfg, Cp_schema($cfg), $uid, $code);
+        $tables = Cp_schema($cfg);
+        $access = Cc_access_row($cfg, $tables, $uid, $login, $code);
+        $murl = ($access && $authored) ? Cc_own_url($cfg, Cc_manifest_url($cfg, $tables, $code, $access)) : null;
     } catch (Exception $e) {
         Cp_log($cfg, 'content_failed', array('user' => $uid, 'course' => $code, 'error' => $e->getMessage()));
         return Cc_fail(502, 'base');
     }
-    if ($key === null) return Cc_fail(403, 'access');
+    if ($access === null) return Cc_fail(403, 'access');
 
     if (!$authored) {
         $dir = Cp_content_key($cfg, $code);
@@ -63,7 +79,6 @@ function Cc_get($cfg, $cookie, $code, $lesson){
         return array(200, file_get_contents($file));
     }
 
-    $murl = Cc_own_url($cfg, $key);
     $man = $murl ? Cc_fetch_json($cfg, $murl) : null;
     if (!$man) return Cc_fail(404, 'manifest');
     $m = $man[1];
