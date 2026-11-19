@@ -3595,6 +3595,25 @@
             input.addEventListener('blur', function() { self.saveJumboIfChanged(); });
         }
 
+        // #5575: кнопка «Ввод» — запись по-прежнему уходит автосохранением по выходу из
+        // ячейки, кнопка только снимает фокус (оператор промахивался мимо поля). Погашена,
+        // пока поле не правили; правка зажигает её, выход из поля — гасит.
+        var enterBtn = el('button', { class: 'atex-sl-btn atex-sl-btn-primary atex-sl-enter', type: 'button', text: 'Ввод' });
+        function setEnterLit(on) {
+            enterBtn.disabled = !on;
+            if (on) enterBtn.classList.add('is-dirty'); else enterBtn.classList.remove('is-dirty');
+        }
+        setEnterLit(false);
+        enterBtn.addEventListener('click', function() {
+            var active = document.activeElement;
+            if (active && active !== enterBtn && typeof active.blur === 'function') active.blur();
+            setEnterLit(false);
+        });
+        function trackEnter(input) {
+            input.addEventListener('input', function() { setEnterLit(true); });
+            input.addEventListener('blur', function() { setEnterLit(false); });
+        }
+
         // ── Строка корешков «Номера джамбо» НАД панелью показаний (#4916) ──
         // Корешок на каждую запись; активный — редактируемый номер (записи ещё нет —
         // черновик pendingJumbo, заводится автосохранением номера). Остальные записи
@@ -3609,6 +3628,7 @@
         });
         numberInput.addEventListener('input', function() { jumboDraft().jumboNo = numberInput.value; });
         autosaveJumbo(numberInput);
+        trackEnter(numberInput);
         var tabs = el('div', { class: 'atex-sl-jumbo-tabs' });
         (cut.jumbos || []).forEach(function(rec, i) {
             if (i === activeIndex) { tabs.appendChild(numberInput); return; }
@@ -3663,6 +3683,7 @@
         } else {
             autosave(cStart);
         }
+        trackEnter(cStart);
         // #4785 п.3: подсказки «(остаток партии: N м)» под полем нет — остаток партии
         // виден строкой партии внизу; значение поля по-прежнему подставляется из неё.
         grid.appendChild(field('Счётчик нач.', cStart));
@@ -3721,6 +3742,7 @@
                 self.saveJumboRecord(storedRec, { quiet: true, full: true });
             });
         }
+        trackEnter(runsInput);
         grid.appendChild(field('Проходов', runsInput));
 
         // ── Поля АКТИВНОЙ записи джамбо (#4914) ──
@@ -3746,18 +3768,22 @@
 
         var jumboWork = numInput(rec ? rec.spent : '', '0');
         jumboWork.addEventListener('input', function() { jumboDraft().spentDraft = jumboWork.value; });
+        trackEnter(jumboWork);
         grid.appendChild(field('Рабочий расход, м', jumboWork));
 
         var jumboOff = numInput(rec ? rec.writeoff : '', '0');
         jumboOff.addEventListener('input', function() { jumboDraft().writeoffDraft = jumboOff.value; });
+        trackEnter(jumboOff);
         grid.appendChild(field('К списанию, м', jumboOff));
 
         var defectM = numInput(rec ? rec.defectM : '', '0');
         defectM.addEventListener('input', function() { jumboDraft().defectMDraft = defectM.value; });
+        trackEnter(defectM);
         grid.appendChild(field('Брак, м', defectM));
 
         var defectQty = numInput(rec ? rec.defectQty : '', '0');
         defectQty.addEventListener('input', function() { jumboDraft().defectQtyDraft = defectQty.value; });
+        trackEnter(defectQty);
         grid.appendChild(field('Брак, шт', defectQty));
 
         // Фото брака — файловый реквизит записи джамбо (791712)
@@ -3780,9 +3806,11 @@
         notes.value = cut.notes || '';
         notes.addEventListener('input', function() { cut.notes = notes.value; });
         autosave(notes);
+        trackEnter(notes);
         grid.appendChild(field('Примечания', notes, 'atex-sl-field-notes'));
 
         section.appendChild(grid);
+        section.appendChild(el('div', { class: 'atex-sl-enter-row' }, [enterBtn]));
 
         refreshMeterage();
         return wrap;
