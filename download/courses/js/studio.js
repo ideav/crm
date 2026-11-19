@@ -227,7 +227,8 @@
     render();
     root.appendChild(E('section', { class: 'card' }, [fld('Заголовок', title),
       E('div', { class: 'au-split' }, [E('div', {}, [E('span', { class: 'lbl', text: 'Текст (markdown)' }), text,
-        E('span', { class: 'muted small', text: 'Видео: вставьте ссылку на ролик в Kinescope, YouTube или RuTube отдельной строкой — в уроке на её месте будет плеер. Водяной знак ученика есть только у Kinescope.' })]),
+        E('span', { class: 'muted small' }, ['Видео: вставьте ссылку на ролик в Kinescope, YouTube или RuTube отдельной строкой — в уроке на её месте будет плеер. Водяной знак ученика есть только у Kinescope. ',
+          E('a', { href: '#/author/help', target: '_blank', rel: 'noopener', text: 'Как вставить видео' })])]),
         E('div', {}, [E('span', { class: 'lbl', text: 'Как увидит ученик' }), prev])]), sv.el]));
 
     var tbox = E('div', { class: 'au-tasks' });
