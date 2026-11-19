@@ -115,6 +115,7 @@
 | после переноса со старого Интеграма в длинных текстах склеились слова | хвосты `t=0` склеены без добивки кусков пробелами до 127 — склеивать `migrate.js sql` | [tools/old-integram-migration](../../tools/old-integram-migration/README.md) |
 | повторный перенос со старого Интеграма в уже переведённую базу: ссылки запросов и меню на id ломаются | переносить строками с прежними id: `migrate.js transfer` (совпадающие типы и пароли остаются) | [tools/old-integram-migration](../../tools/old-integram-migration/README.md) |
 | удалённый файл всё ещё на сервере | `update.php` только копирует, не удаляет | [deploy.md](deploy.md) |
+| правка портала курсов смержена, `update.php` дал `Copied: 0`, на `ideav.ru/courses` старый код | курсы раскладывает «Обновление из репозитория» в базе `courses`, PHP-файлы курсов кладутся отдельно и раньше клиента | [deploy.md](deploy.md) |
 | `Uncaught SyntaxError: Unexpected token '<'` на своём `.js` | файл под `assets/` — каталога нет в `update.conf`, сервер отдаёт HTML; вендорное класть в `js/` | [deploy.md](deploy.md) |
 | пред-авторизационная ручка отвечает `401 No authorization token provided` | ветки на сервере нет — `index.php` старее фичи (он не в `update.conf`), выкладывать отдельно | [deploy.md](deploy.md) |
 | `Authorization: Bearer`/Basic → `401 No authorization token provided`, `X-Authorization` с тем же токеном работает | PHP как CGI, веб-сервер не передаёт `Authorization` — нужен `CGIPassAuth On` (на ideav.ru включён) | [00-start.md](00-start.md) |
