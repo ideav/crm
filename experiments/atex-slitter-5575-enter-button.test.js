@@ -5,6 +5,8 @@
 //      фокус с поля: запись уходит тем же автосохранением по выходу из ячейки (#4783 п.10).
 //      Пока ничего не правили — кнопка погашена; правка любого поля панели её зажигает;
 //      выход из поля (кнопкой или иначе) — снова гасит.
+//   3) Кнопка не занимает отдельную строку: она ячейка сетки полей сразу после «Брак, шт»
+//      (уточнение владельца в #5575).
 //
 // Run with: node experiments/atex-slitter-5575-enter-button.test.js
 
@@ -110,6 +112,15 @@ function lit(btn) { return !!btn && !btn.disabled && btn.classList.contains('is-
     assert(!!btn, '#5575: в секции показаний есть кнопка «Ввод»');
     if (!btn) return;
     assert(!lit(btn), '#5575: ничего не правили — кнопка погашена');
+
+    var grid = section.querySelectorAll('.atex-sl-grid')[0];
+    var cells = grid.childNodes;
+    var idx = -1;
+    cells.forEach(function(c, i) { if (c._all([]).indexOf(btn) !== -1) idx = i; });
+    var prevLabel = idx > 0 ? (cells[idx - 1].querySelector('.atex-sl-label') || {}).textContent : null;
+    assert(idx !== -1, '#5575: «Ввод» — ячейка сетки полей, а не отдельная строка');
+    assert(prevLabel === 'Брак, шт', '#5575: «Ввод» стоит сразу после «Брак, шт» (перед ним: ' + prevLabel + ')');
+    assert(section.querySelectorAll('.atex-sl-enter-row').length === 0, '#5575: отдельной строки под кнопку нет');
 
     var inputs = section.querySelectorAll('.atex-sl-grid')[0].querySelectorAll('.atex-sl-input');
     var cstart = inputs[0];
