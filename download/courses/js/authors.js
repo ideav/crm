@@ -259,7 +259,11 @@
   // Повторная очистка HTML авторского урока перед показом (данные пришли из файла, а не из нашей сборки).
   AU.cleanLesson = function (l) {
     var s = AU.sanitize;
-    var out = Object.assign({}, l, { html: s(l.html), attachments: [] });
+    // Вложения остаются, если адрес свой или https (правила AU.safeUrl); чужие схемы — выкидываются
+    var att = (l.attachments || []).filter(function (a) {
+      return a && AU.safeUrl(a.url) && String(a.title || '').trim();
+    }).map(function (a) { return { url: AU.safeUrl(a.url), title: String(a.title) }; });
+    var out = Object.assign({}, l, { html: s(l.html), attachments: att });
     out.tasks = (l.tasks || []).map(function (t) {
       var c = Object.assign({}, t);
       if (c.prompt != null) c.prompt = s(c.prompt);

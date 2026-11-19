@@ -142,6 +142,23 @@ async function t(name, fn) {
         assert.strictEqual(l.attachments.length, 0);
     });
 
+    await t('безопасные вложения авторского урока переживают cleanLesson, опасные — нет', () => {
+        const l = AU.cleanLesson({
+            id: 'l2', html: '<p>конспект</p>', tasks: [],
+            attachments: [
+                { url: '/download/courses/content/a1/files/01-plan.pdf', title: 'План занятия' },
+                { url: 'https://cdn.example.com/scheme.jpg', title: 'Схема' },
+                { url: 'javascript:1', title: 'злой' },
+                { url: '//evil.example/x.pdf', title: 'протокол-относительный' },
+            ],
+        });
+        // объекты из vm-контекста: сравниваем по содержимому, не по прототипу
+        assert.strictEqual(JSON.stringify(l.attachments), JSON.stringify([
+            { url: '/download/courses/content/a1/files/01-plan.pdf', title: 'План занятия' },
+            { url: 'https://cdn.example.com/scheme.jpg', title: 'Схема' },
+        ]));
+    });
+
     console.log(failed ? `\n${failed} FAILED` : '\nall passed');
     process.exit(failed ? 1 : 0);
 })();
