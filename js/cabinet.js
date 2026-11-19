@@ -844,6 +844,10 @@ class CabinetController {
                             <span class="database-save-status"></span>
                             <button type="button" class="btn-secondary btn-small database-restore-admin-btn" title="Если вы смогли удалить администратора или сменили ему роль, восстановите её здесь">Восстановить админа</button>
                         </div>
+                        <div class="database-domain">
+                            <button type="button" class="btn-secondary btn-small database-domain-toggle" title="Открывать базу по своему адресу, например crm.company.ru">Свой домен</button>
+                            <div class="database-domain-body" hidden></div>
+                        </div>
                     </div>
                 </div>
             `;
@@ -885,6 +889,16 @@ class CabinetController {
             const restoreAdminBtn = card.querySelector('.database-restore-admin-btn');
             if (restoreAdminBtn) {
                 restoreAdminBtn.addEventListener('click', () => this.restoreAdmin(db.DB, restoreAdminBtn));
+            }
+
+            // #5573: свой домен базы
+            const domainToggle = card.querySelector('.database-domain-toggle');
+            const domainBody = card.querySelector('.database-domain-body');
+            if (domainToggle && domainBody) {
+                domainToggle.addEventListener('click', () => {
+                    domainBody.hidden = !domainBody.hidden;
+                    if (!domainBody.hidden) this.domainCall(db.DB, '_domain_status', domainBody);
+                });
             }
 
             container.appendChild(card);
@@ -968,6 +982,94 @@ class CabinetController {
         } finally {
             if (saveBtn) saveBtn.disabled = false;
         }
+    }
+
+    // #5573: свой домен базы. action — _domain_status | _domain_set | _domain_check | _domain_del | _domain_pay
+    async domainCall(dbName, action, body, extra) {
+        body.querySelectorAll('button').forEach(b => { b.disabled = true; });
+        try {
+            const url = 'https://' + this.apiConfig.host + '/my/' + action + '?JSON&db=' + encodeURIComponent(dbName);
+            const fd = new FormData();
+            fd.append('_xsrf', xsrf);
+            Object.keys(extra || {}).forEach(k => fd.append(k, extra[k]));
+            const resp = await fetch(url, { method: 'POST', credentials: 'include', body: fd });
+            const data = await resp.json().catch(() => null);
+            const err = Array.isArray(data) && data[0] && data[0].error ? data[0].error : (!resp.ok ? 'HTTP ' + resp.status : '');
+            if (err || !data || !data.state) {
+                showToast(err || 'Ошибка запроса', 'error');
+                if (action === '_domain_status') body.innerHTML = '<p class="database-domain-note">' + this.escapeHtml(err || 'Ошибка запроса') + '</p>';
+                return;
+            }
+            if (action === '_domain_check' && !data.dns_ok) showToast('DNS ещё не указывает на базу — проверьте запись или подождите', 'error');
+            if (action === '_domain_pay') showToast('Домен оплачен', 'success');
+            this.renderDomain(dbName, body, data);
+        } catch (e) {
+            console.error('[cabinet] domain error:', e);
+            showToast('Ошибка запроса', 'error');
+        } finally {
+            body.querySelectorAll('button').forEach(b => { b.disabled = false; });
+        }
+    }
+
+    renderDomain(dbName, body, st) {
+        const esc = s => this.escapeHtml(String(s == null ? '' : s));
+        const included = st.state === 'active' && st.until >= 4102444800;
+        const until = st.until && !included ? new Date(st.until * 1000).toLocaleDateString('ru-RU') : '';
+        const states = {
+            dns_pending: 'ждём DNS: добавьте запись ниже и нажмите «Проверить». Обновление DNS занимает до нескольких часов.',
+            not_paid: 'DNS настроен. Оплатите подключение — и база откроется по адресу домена.',
+            active: included ? 'подключено, входит в тариф.' : 'подключено, оплачено до ' + until + '.',
+            grace: 'оплата закончилась ' + until + ' — домен работает ещё 7 дней. Продлите оплату.',
+            expired: 'оплата закончилась — по домену открывается страница «Домен не оплачен». Продлите оплату.'
+        };
+        const dnsTable = rows => '<table class="database-domain-dns"><tr><th>Имя</th><th>Тип</th><th>Значение</th></tr>'
+            + rows.map(r => '<tr><td>' + esc(r[0]) + '</td><td>' + r[1] + '</td><td><code>' + esc(r[2]) + '</code></td></tr>').join('') + '</table>';
+        let html = '';
+        if (st.state === 'none') {
+            html = '<p class="database-domain-note">Укажите свой домен — база будет открываться по нему, с адресами без «/' + esc(dbName) + '». '
+                + 'Стоимость ' + esc(st.price_month) + ' ₽ в месяц или ' + esc(st.price_year) + ' ₽ в год; на тарифе «Масштабируемый» один домен входит в тариф.</p>'
+                + '<div class="database-domain-row"><input type="text" class="database-field-input database-domain-input" placeholder="crm.company.ru" autocomplete="off">'
+                + '<button type="button" class="btn-primary btn-small" data-act="set">Подключить</button></div>';
+        } else {
+            const live = st.state === 'active' || st.state === 'grace';
+            const name = live ? '<a href="https://' + esc(st.domain) + '/" target="_blank" rel="noopener">' + esc(st.domain) + '</a>' : '<strong>' + esc(st.domain) + '</strong>';
+            html = '<p class="database-domain-note">' + name + ' — ' + esc(states[st.state] || st.state) + '</p>';
+            if (st.state === 'dns_pending') {
+                html += st.apex && st.edge_ip
+                    ? dnsTable([[st.domain, 'A', st.edge_ip], [st.txt_name, 'TXT', st.txt]])
+                    : dnsTable([[st.domain, 'CNAME', st.cname]]);
+                html += '<p class="database-domain-note">В Cloudflare включите для записи режим «DNS only» (серое облако). Если у домена есть записи CAA — разрешите letsencrypt.org.</p>';
+            }
+            const canPay = st.state !== 'dns_pending' && !included;
+            html += '<div class="database-domain-row">';
+            if (st.state === 'dns_pending') html += '<button type="button" class="btn-primary btn-small" data-act="check">Проверить</button>';
+            if (canPay) html += '<button type="button" class="btn-primary btn-small" data-act="pay" data-period="month">Оплатить месяц — ' + esc(st.price_month) + ' ₽</button>'
+                + '<button type="button" class="btn-secondary btn-small" data-act="pay" data-period="year">Год — ' + esc(st.price_year) + ' ₽</button>';
+            html += '<button type="button" class="btn-secondary btn-small" data-act="del">Отвязать домен</button></div>';
+            if (canPay) html += '<p class="database-domain-note">Оплата списывается с баланса личного кабинета.</p>';
+        }
+        body.innerHTML = html;
+        body.querySelectorAll('button[data-act]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const act = btn.dataset.act;
+                if (act === 'set') {
+                    const input = body.querySelector('.database-domain-input');
+                    const v = input ? input.value.trim() : '';
+                    if (v) this.domainCall(dbName, '_domain_set', body, { domain: v });
+                } else if (act === 'check') {
+                    this.domainCall(dbName, '_domain_check', body);
+                } else if (act === 'pay') {
+                    this.domainCall(dbName, '_domain_pay', body, { period: btn.dataset.period });
+                } else if (act === 'del') {
+                    if (btn.dataset.confirm !== '1') {
+                        btn.dataset.confirm = '1';
+                        btn.textContent = 'Точно отвязать? Нажмите ещё раз';
+                        return;
+                    }
+                    this.domainCall(dbName, '_domain_del', body);
+                }
+            });
+        });
     }
 
     async restoreAdmin(dbName, btn) {

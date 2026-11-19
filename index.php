@@ -222,6 +222,11 @@ define("QR_CODE_MASK", "/^[a-f0-9]{32,64}$/");  # Вход по QR: формат
 define("VERSION", 120);  # cache-bust версия ассетов (?0{_global_.version}); НЕ бить при правках js/css — версию поднимать посуффиксно в шаблоне (?{_global_.version}.N), см. docs/WORKSPACE_DEVELOPMENT_GUIDE.md §2
 define("VAL_LIM", 127);  # Maximum length of the value (val) field on UI
 
+# Свой домен базы (#5573): проверка Caddy перед выпуском сертификата и перевод чистого адреса
+# своего домена в /<база>/… — до разбора REQUEST_URI.
+require_once __DIR__."/include/custom_domain.php";
+Cd_route();
+
 $com = explode("?", strtolower($_SERVER["REQUEST_URI"]));
 $com = explode("/", $com[0]);
 if(isset($com[1]))
@@ -16886,6 +16891,30 @@ if(Validate_Token())
             Insert($id, 1, 283, $template, "Insert new DB template");
             Insert($id, 1, 276, $_POST["descr"], "Insert new DB notes");
 			api_dump(json_encode(array("status"=>"Ok","id"=>$id)), "_new_db.json");
+			break;
+
+		# #5573: свой домен базы — состояние, привязка, проверка DNS, отвязка, оплата с баланса
+		case "_domain_status":
+		case "_domain_set":
+		case "_domain_check":
+		case "_domain_del":
+		case "_domain_pay":
+			if($z !== "my")
+				my_die(t9n("[RU]Домен подключается в Личном кабинете[EN]Domains are managed in your private space"));
+			$cdDb = isset($_REQUEST["db"]) ? (string)$_REQUEST["db"] : "";
+			if($a !== "_domain_status")
+				check();
+			if($a === "_domain_set")
+				$cdRes = Cd_action_set($cdDb, isset($_POST["domain"]) ? $_POST["domain"] : "");
+			elseif($a === "_domain_check")
+				$cdRes = Cd_check($cdDb);
+			elseif($a === "_domain_del")
+				$cdRes = Cd_action_del($cdDb);
+			elseif($a === "_domain_pay")
+				$cdRes = Cd_action_pay($cdDb, isset($_POST["period"]) ? $_POST["period"] : "month");
+			else
+				$cdRes = Cd_status($cdDb);
+			api_dump(json_encode($cdRes, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "_domain.json");
 			break;
 
 		# #5364: шаблоны баз — список (в my — для выбора при создании базы и модерации; в своей базе — её шаблон)
