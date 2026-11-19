@@ -1,0 +1,74 @@
+# Caddy перед Apache на ideav.ru (#5573, docs/custom-domain.md).
+#
+# Caddy держит публичные 80/443. Apache слушает только 127.0.0.1: 8080 (HTTP) и 8443 (HTTPS) —
+# Caddy ходит в него по HTTPS с исходным именем сайта (SNI + Host), поэтому для Apache, .htaccess
+# и PHP соединение остаётся «HTTPS на свой сертификат»: редиректы http→https и HSTS работают как
+# раньше. Адрес клиента Apache берёт из X-Forwarded-For (mod_remoteip, docs/custom-domain.md).
+#
+# Сайты сервера (вхосты ispmanager) — /etc/caddy/sites.caddy, собирает deploy/caddy/sites.sh:
+# сертификаты ispmanager из файлов, продление — ispmanager через HTTP-01 (запрос /.well-known
+# Caddy переводит на HTTPS и отдаёт Apache), после продления sites.sh + reload по таймеру.
+#
+# Чужие домены клиентов — блок https:// в конце: сертификат Let's Encrypt выпускается при первом
+# заходе, если ядро ответит 200 на /my/_domain_ok?domain=<хост>.
+
+{
+	email care@ideav.ru
+	on_demand_tls {
+		ask http://127.0.0.1:9180/my/_domain_ok
+	}
+}
+
+# В Apache по HTTPS с именем сайта; заголовки своего домена с клиента не принимаются.
+(apache) {
+	reverse_proxy https://127.0.0.1:8443 {
+		header_up -X-Integram-Domain
+		header_up -X-Integram-Edge
+		transport http {
+			tls_server_name {http.request.host}
+			tls_insecure_skip_verify
+		}
+	}
+}
+(apache_http) {
+	reverse_proxy 127.0.0.1:8080 {
+		header_up -X-Integram-Domain
+		header_up -X-Integram-Edge
+	}
+}
+
+# Проверка on-demand TLS: Caddy спрашивает сам себя, отсюда — в ядро ideav.ru.
+http://127.0.0.1:9180 {
+	bind 127.0.0.1
+	reverse_proxy https://127.0.0.1:8443 {
+		header_up Host ideav.ru
+		transport http {
+			tls_server_name ideav.ru
+			tls_insecure_skip_verify
+		}
+	}
+}
+
+import /etc/caddy/sites.caddy
+
+# Свои домены клиентов.
+https:// {
+	tls {
+		on_demand
+	}
+	rewrite / /_root
+	reverse_proxy https://127.0.0.1:8443 {
+		header_up Host ideav.ru
+		header_up X-Integram-Domain {host}
+		header_up X-Integram-Edge {$INTEGRAM_EDGE_SECRET}
+		transport http {
+			tls_server_name ideav.ru
+			tls_insecure_skip_verify
+		}
+	}
+}
+
+# HTTP чужих доменов — на HTTPS (у сайтов сервера редирект свой, от автоматического HTTPS Caddy).
+http:// {
+	redir https://{host}{uri} 308
+}

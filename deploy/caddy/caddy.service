@@ -1,0 +1,21 @@
+# /etc/systemd/system/caddy.service (#5573). Переменные — /etc/caddy/env (INTEGRAM_EDGE_SECRET).
+[Unit]
+Description=Caddy (TLS front for Apache, #5573)
+After=network-online.target apache2.service
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=caddy
+Group=caddy
+EnvironmentFile=-/etc/caddy/env
+ExecStart=/usr/local/bin/caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+ExecReload=/usr/local/bin/caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile --force
+TimeoutStopSec=5s
+LimitNOFILE=1048576
+PrivateTmp=true
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
