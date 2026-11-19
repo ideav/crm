@@ -1,10 +1,11 @@
-// Видео в уроках LMS ideav.ru/courses: плеер внешнего видеохостинга с защитой (Kinescope).
+// Видео в уроках LMS ideav.ru/courses: плеер Kinescope (с защитой), YouTube или RuTube — на усмотрение автора.
 // Автор ставит ссылку на видео отдельной строкой — в уроке на её месте плеер.
 // - в собранном HTML урока лежит не iframe, а метка <div data-video="kinescope:<id>">: санитайзер
 //   по-прежнему не пропускает ни одного iframe из текста автора;
-// - iframe строит сама страница, адрес — только https://kinescope.io/embed/<id>, чужой хост и
-//   дописанные к id параметры не проходят;
-// - на видео — водяной знак зрителя (параметр watermark), чтобы утечку можно было отследить.
+// - iframe строит сама страница, адрес — только плеер одного из трёх хостингов; чужой хост и
+//   дописанные параметры не проходят;
+// - на видео Kinescope — водяной знак зрителя (параметр watermark), чтобы утечку можно было отследить;
+//   у YouTube и RuTube водяного знака нет.
 //
 // Run with: node experiments/courses-video-embed.test.js
 
@@ -70,10 +71,49 @@ async function t(name, fn) {
     });
 
     await t('чужой хост и похожий домен плеером не становятся', () => {
-        ['https://youtube.com/watch?v=abc123DEF', 'https://kinescope.io.evil.example/abc123DEF', 'https://evil.example/kinescope.io/abc123DEF',
+        ['https://vimeo.com/123456789', 'https://youtube.com/watch?v=short', 'https://www.youtube.com/playlist?list=PLabcdefghijk', 'https://youtube.com.evil.example/watch?v=dQw4w9WgXcQ',
+            'https://rutube.ru/channel/123456/', 'https://rutube.ru.evil.example/video/0123456789abcdef0123456789abcdef/', 'https://rutube.ru/video/XYZ/', 'https://kinescope.io.evil.example/abc123DEF', 'https://evil.example/kinescope.io/abc123DEF',
             'http://kinescope.io/abc123DEF', 'https://kinescope.io/abc123DEF?watermark=x', 'https://kinescope.io/a/b/c'].forEach(u => {
             assert.ok(!AU.md(u).includes('data-video'), u + ' → ' + AU.md(u));
         });
+    });
+
+    await t('YouTube: ссылка на ролик в любом обычном виде становится меткой плеера', () => {
+        const mark = '<div class="lesson-video" data-video="youtube:dQw4w9WgXcQ"></div>';
+        ['https://www.youtube.com/watch?v=dQw4w9WgXcQ', 'https://youtube.com/watch?v=dQw4w9WgXcQ', 'https://m.youtube.com/watch?v=dQw4w9WgXcQ',
+            'https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=42s', 'https://www.youtube.com/watch?app=desktop&v=dQw4w9WgXcQ', 'https://youtu.be/dQw4w9WgXcQ',
+            'https://youtu.be/dQw4w9WgXcQ?si=AbCdEf123', 'https://www.youtube.com/embed/dQw4w9WgXcQ', 'https://www.youtube.com/shorts/dQw4w9WgXcQ',
+            '[Смотреть](https://youtu.be/dQw4w9WgXcQ)'].forEach(u => {
+            const html = AU.md('До.\n\n' + u + '\n\nПосле.');
+            assert.ok(html.includes(mark), u + ' → ' + html);
+            assert.ok(!/<a\b/.test(html), u + ': ссылки на месте видео не осталось');
+        });
+    });
+
+    await t('RuTube: открытый ролик и ролик «по ссылке» (с ключом p) становятся меткой плеера', () => {
+        const id = '0123456789abcdef0123456789abcdef';
+        ['https://rutube.ru/video/' + id + '/', 'https://rutube.ru/video/' + id, 'https://rutube.ru/play/embed/' + id, 'https://rutube.ru/video/' + id + '/?r=wd'].forEach(u => {
+            assert.ok(AU.md(u).includes('<div class="lesson-video" data-video="rutube:' + id + '"></div>'), u + ' → ' + AU.md(u));
+        });
+        ['https://rutube.ru/video/private/' + id + '/?p=AbC_dEf-123', 'https://rutube.ru/play/embed/' + id + '/?p=AbC_dEf-123', 'https://rutube.ru/video/private/' + id + '/?r=wd&p=AbC_dEf-123'].forEach(u => {
+            assert.ok(AU.md(u).includes('<div class="lesson-video" data-video="rutube:' + id + ':AbC_dEf-123"></div>'), u + ' → ' + AU.md(u));
+        });
+    });
+
+    await t('адреса плееров YouTube и RuTube: без водяного знака и без чужих параметров', () => {
+        const id = '0123456789abcdef0123456789abcdef';
+        assert.strictEqual(AU.videoSrc('youtube:dQw4w9WgXcQ', 'ivan · 15'), 'https://www.youtube.com/embed/dQw4w9WgXcQ');
+        assert.strictEqual(AU.videoSrc('rutube:' + id, 'ivan · 15'), 'https://rutube.ru/play/embed/' + id);
+        assert.strictEqual(AU.videoSrc('rutube:' + id + ':AbC_dEf-123', ''), 'https://rutube.ru/play/embed/' + id + '?p=AbC_dEf-123');
+        ['youtube:', 'youtube:short', 'youtube:dQw4w9WgXcQ?autoplay=1', 'youtube:dQw4w9WgXcQ/../x', 'rutube:XYZ', 'rutube:' + id + ':', 'rutube:' + id + ':a&b=1', 'rutube:' + id + ':a:b', 'vimeo:123456789']
+            .forEach(spec => assert.strictEqual(AU.videoSrc(spec, 'v'), '', spec));
+    });
+
+    await t('страница ставит плееры всех трёх хостингов', () => {
+        const id = '0123456789abcdef0123456789abcdef';
+        const ms = ['kinescope:abc123DEF', 'youtube:dQw4w9WgXcQ', 'rutube:' + id].map(v => node('div', { 'data-video': v }));
+        assert.strictEqual(AU.mountVideos(rootWith(ms), 'v'), 3);
+        assert.deepStrictEqual(ms.map(m => new URL(m.children[0].attrs.src).host), ['kinescope.io', 'www.youtube.com', 'rutube.ru']);
     });
 
     await t('iframe из текста автора в урок не попадает', () => {
@@ -91,7 +131,7 @@ async function t(name, fn) {
     });
 
     await t('испорченная метка адреса не даёт', () => {
-        ['', 'kinescope:', 'kinescope:../x', 'kinescope:abc?x=1', 'kinescope:abc/def', 'youtube:abc123DEF', 'https://evil.example/', 'kinescope:abc"onload="x', null, undefined]
+        ['', 'kinescope:', 'kinescope:../x', 'kinescope:abc?x=1', 'kinescope:abc/def', 'tiktok:abc123DEF', 'https://evil.example/', 'kinescope:abc"onload="x', null, undefined]
             .forEach(spec => assert.strictEqual(AU.videoSrc(spec, 'v'), '', String(spec)));
     });
 
