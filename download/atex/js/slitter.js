@@ -3785,6 +3785,9 @@
         defectQty.addEventListener('input', function() { jumboDraft().defectQtyDraft = defectQty.value; });
         trackEnter(defectQty);
         grid.appendChild(field('Брак, шт', defectQty));
+        // #5575: «Ввод» — ячейка сетки сразу после «Брак, шт», без своей строки; подпись
+        // пустая, чтобы кнопка стояла вровень с полями.
+        grid.appendChild(field(' ', enterBtn, 'atex-sl-field-enter'));
 
         // Фото брака — файловый реквизит записи джамбо (791712)
         var photoInput = el('input', { type: 'file', accept: 'image/*', capture: 'environment', style: 'display:none' });
@@ -3810,7 +3813,6 @@
         grid.appendChild(field('Примечания', notes, 'atex-sl-field-notes'));
 
         section.appendChild(grid);
-        section.appendChild(el('div', { class: 'atex-sl-enter-row' }, [enterBtn]));
 
         refreshMeterage();
         return wrap;
