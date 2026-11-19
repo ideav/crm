@@ -36,6 +36,7 @@ file_put_contents("$root/content/mini/00-start.json", '{"id":"00-start"}');
 file_put_contents("$root/schema.json", json_encode(array('tables' => array(
     'Доступ' => array('id' => 535, 'req' => array('Пользователь' => 536, 'Курс' => 537, 'Ключ' => 538, 'Основание' => 539, 'Дата и время' => 540)),
     'Каталог' => array('id' => 1411, 'req' => array('Название' => 1447, 'Манифест' => 1458)),
+    'Курс автора' => array('id' => 1409, 'req' => array('Владелец' => 1413, 'Код' => 1430, 'Манифест' => 1431)),
     'Оплата' => array('id' => 474, 'req' => array('Пользователь' => 526, 'Курс' => 527, 'Сумма' => 529, 'Дата' => 530, 'Возврат' => 532, 'Номер' => 534)),
 )), JSON_UNESCAPED_UNICODE));
 
@@ -47,7 +48,7 @@ $files = array(
     )), JSON_UNESCAPED_UNICODE),
     'https://ideav.ru/download/courses/bbb222/l7.json' => '{"id":"l7","html":"<p>АВТОРСКИЙ ТЕКСТ</p>"}',
 );
-$net = array('whoami' => array('id' => '1102', 'user' => 'my236968', 'role' => 'Ученик'), 'access' => array(), 'catalog' => array(), 'gets' => array(), 'queries' => array());
+$net = array('whoami' => array('id' => '1102', 'user' => 'my236968', 'role' => 'Ученик'), 'access' => array(), 'catalog' => array(), 'authored' => array(), 'gets' => array(), 'queries' => array());
 $LOGINS = array('1102' => 'my236968', '2000' => 'other');
 # Сервер отбирает ссылку F_<реквизит>=<текст> по тексту ссылки (логину), а значение записи — F_<таблица>=<значение>
 function fake_filter($rows, $query, $param, $pos){
@@ -67,6 +68,7 @@ function fake_http($method, $url, $headers, $body){
     }
     $query = parse_url($url, PHP_URL_QUERY);
     if($path === '/courses/object/535/'){ $net['queries'][] = $query; return array(200, json_encode(fake_filter($net['access'], $query, 'F_536', 1))); }
+    if($path === '/courses/object/1409/') return array(200, json_encode(fake_filter($net['authored'], $query, 'F_1430', 2)));
     if($path === '/courses/object/1411/') return array(200, json_encode(fake_filter($net['catalog'], $query, 'F_1411', 0)));
     $net['gets'][] = $url;
     if(isset($files[$url])) return array(200, $files[$url]);
@@ -77,6 +79,7 @@ function access_row($uid, $course, $key, $login = null){
     if($login === null) $login = isset($LOGINS[$uid]) ? $LOGINS[$uid] : 'u' . $uid;
     return array('i' => 9000 + crc32($uid . $course) % 1000, 'r' => array("$uid:$course", "$uid:$login", $course, $key, 'оплата', '01.11.2026 10:00:00'));
 }
+function author_row($code, $manifest){ return array('i' => 1990, 'r' => array('Курс автора', '7:author', $code, $manifest)); }
 function catalog_row($code, $manifest){ return array('i' => 1999, 'r' => array($code, 'Курс автора', $manifest)); }
 
 $cfg = array('site' => 'https://ideav.ru', 'admin_token' => 'ADMIN', 'store_dir' => "$root/orders", 'content_dir' => "$root/content",
@@ -177,6 +180,17 @@ $net['catalog'] = array();
 $net['access'] = array(access_row('1102', 'a12', $MAN));
 list($c, $b) = Cc_get($cfg, 'idb_courses=U', 'a12', 'l7');
 expect($c === 200 && strpos($b, 'АВТОРСКИЙ ТЕКСТ') !== false, 'курс снят с «Каталога»: манифест по адресу из «Доступа»');
+
+# 6) платный авторский курс: в «Каталоге» манифеста нет (его там не публикуют), адрес — в «Курсе автора»
+$net['catalog'] = array(catalog_row('a12', ''));
+$net['authored'] = array(author_row('a120', $MAN), author_row('a12', $NEWMAN));
+$net['access'] = array(access_row('1102', 'a12', '/download/courses/old000/manifest.json'));
+list($c, $b) = Cc_get($cfg, 'idb_courses=U', 'a12', 'l7');
+expect($c === 200 && strpos($b, 'НОВЫЙ ТЕКСТ') !== false, 'платный авторский курс: урок по манифесту из «Курса автора», старый адрес в «Доступе» не мешает');
+$net['access'] = array(access_row('1102', 'a12', ''));
+list($c, $b) = Cc_get($cfg, 'idb_courses=U', 'a12', '');
+expect($c === 200 && strpos($b, 'Курс автора v2') !== false, 'платный авторский курс: «Доступ» без ключа открывает манифест из «Курса автора»');
+$net['authored'] = array();
 
 rrmdir($root);
 echo $failures ? "\n$failures FAILED\n" : "\nOK\n";
