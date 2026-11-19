@@ -115,8 +115,8 @@
     var who = E('section', { class: 'card', hidden: !full.forWhom }, [E('h2', { text: 'Для кого' }), E('p', { class: 'pre', text: full.forWhom || '' })]);
     root.appendChild(who);
     // «Для кого» нет в «Каталоге» — берём из манифеста, если он открыт этому посетителю
-    if (!full.forWhom && c.authored && D.contentPath(c)) {
-      D.manifest(D.contentPath(c)).then(function (m) { if (m && m.forWhom) { who.lastChild.textContent = m.forWhom; who.hidden = false; } }, function () { /* нет манифеста */ });
+    if (!full.forWhom && c.authored && D.hasAccess(c)) {
+      D.courseManifest(c).then(function (m) { if (m && m.forWhom) { who.lastChild.textContent = m.forWhom; who.hidden = false; } }, function () { /* нет манифеста */ });
     }
     root.appendChild(E('section', { class: 'card' }, [E('h2', { text: 'Программа' }), E('ol', { class: 'lessons' }, ls.map(function (l, i) {
       var done = D.isDone(c.code, l.id);

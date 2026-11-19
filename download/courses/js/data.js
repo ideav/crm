@@ -43,9 +43,9 @@
   }
   // Курс снят с каталога, а у ученика есть платный доступ: собираем курс из его манифеста.
   function orphans() {
-    var miss = D.access.filter(function (a) { return AU.isAuthored(a['Курс']) && a['Ключ'] && !D.course(a['Курс']); });
+    var miss = D.access.filter(function (a) { return AU.isAuthored(a['Курс']) && (served() || a['Ключ']) && !D.course(a['Курс']); });
     return Promise.all(miss.map(function (a) {
-      return D.manifest(a['Ключ']).then(function (m) {
+      return (served() ? A.getJSON(D.gateUrl(a['Курс'])) : D.manifest(a['Ключ'])).then(function (m) {
         D.catalog.push({ code: a['Курс'], title: m.title || a['Курс'], author: m.author || '', free: false, price: 0, tags: [], desc: '', authored: true, visibility: 'ссылка',
           lessons: (m.lessons || []).map(function (l) { return { id: l.id, n: l.n, title: l.title, task: l.task }; }) });
       }, function () { /* манифест недоступен — курса нет */ });
@@ -64,7 +64,7 @@
   // курсы ученика для карты: встроенные + авторские, к которым есть доступ или прогресс
   D.myCourses = function () {
     return D.courses.concat(D.catalog.filter(function (c) {
-      return D.accessKey(c.code) || Object.keys(D.progress).some(function (k) { return k.indexOf(c.code + '/') === 0; });
+      return D.paid(c.code) || Object.keys(D.progress).some(function (k) { return k.indexOf(c.code + '/') === 0; });
     }));
   };
   D.manifest = function (url) {
@@ -84,7 +84,31 @@
     var k = D.accessKey(course.code);
     return k ? A.contentRoot + course.code + '-' + k + '/' : null;
   };
-  D.hasAccess = function (course) { return !!D.contentPath(course); };
+  // Платный курс отдаёт сервер (courses-content.php) по строке «Доступ»: ключ курса и адреса файлов ученику
+  // не нужны, и в «Доступе» ключ может быть скрыт ролью. Без сервера (мок-стенд, портал на новом ядре) —
+  // прежний путь по ключу.
+  function served() { return !A.mock && !L.core; }
+  D.gateUrl = function (code, lesson) {
+    return '/courses-content.php?course=' + encodeURIComponent(code) + (lesson ? '&lesson=' + encodeURIComponent(lesson) : '');
+  };
+  // есть ли у ученика платный доступ к курсу
+  D.paid = function (code) {
+    return served() ? D.access.some(function (x) { return x['Курс'] === code; }) : !!D.accessKey(code);
+  };
+  D.hasAccess = function (course) {
+    if (course.free) return !!D.contentPath(course);
+    return D.paid(course.code);
+  };
+  // манифест авторского курса, к которому есть доступ
+  D.courseManifest = function (course) {
+    if (!course.free && served()) {
+      if (!D.paid(course.code)) return Promise.reject(new Error('locked'));
+      var u = D.gateUrl(course.code);
+      if (!manifests[u]) manifests[u] = A.getJSON(u).catch(function (e) { delete manifests[u]; throw e; });
+      return manifests[u];
+    }
+    return D.manifest(D.contentPath(course));
+  };
   // Гейт «сначала выполните предыдущий урок» (courses#171). Закрытый урок — тот, что помечен gate (в курсе gated: true
   // или в уроке gate: true) и перед которым есть невыполненный урок. Возвращает урок-блокер или null.
   // failed: загрузка урока упала со статусом «нет доступа» (401/403/404/423) — тогда гейт считается по порядку уроков.
@@ -96,6 +120,10 @@
     return null;
   };
   D.loadLesson = function (course, id) {
+    if (!D.hasAccess(course)) return Promise.reject(new Error('locked'));
+    if (!course.free && served()) {
+      return A.getJSON(D.gateUrl(course.code, id)).then(function (l) { return course.authored ? AU.cleanLesson(l) : l; });
+    }
     var p = D.contentPath(course);
     if (!p) return Promise.reject(new Error('locked'));
     if (course.authored) {
