@@ -275,7 +275,9 @@ function makeInst(opts) {
     var inst = makeInst();
     var section = inst.renderReadings();
     var labels = section.querySelectorAll('.atex-sl-btn').map(function(b) { return b.textContent; });
-    assertEqual(labels, ['Фото брака'], '#4783 п.10: кнопки «Сохранить показания» в секции нет');
+    // #5575 (решение владельца): в секции есть «Ввод» — он только снимает фокус, запись
+    // по-прежнему уходит выходом из ячейки; своей записи у кнопки нет.
+    assertEqual(labels, ['Фото брака', 'Ввод'], '#4783 п.10: кнопки «Сохранить показания» в секции нет (есть «Ввод» #5575)');
 
     var inputs = section.querySelectorAll('.atex-sl-grid')[0].querySelectorAll('.atex-sl-input');
     // (#4902: «Счётчик кон.» стал вычисляемым (readonly) — правим вводимый «Счётчик нач.»)

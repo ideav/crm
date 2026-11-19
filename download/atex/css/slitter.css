@@ -248,7 +248,8 @@
    читается издалека), без подписи «Заказ». */
 .atex-sl-head-order-no { font-size: 28px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
 /* #4783 п.7: спецификация задания одной строкой — «Вид сырья / Метраж / Намотка / Лидер». */
-.atex-sl-spec { display: inline-flex; flex-direction: column; font-size: 15px; font-weight: 600; color: var(--sl-accent-d); }
+/* #5575: кегль 20px — 15px у станка читался плохо («мелко»). */
+.atex-sl-spec { display: inline-flex; flex-direction: column; font-size: 20px; font-weight: 600; color: var(--sl-accent-d); }
 /* #5060: вторая строчка сводки — втулка задания «1", Пластик черная». */
 .atex-sl-spec-sleeve { font-weight: 500; }
 /* #4783 п.9: все кнопки управления заданием — одним рядом; #4933 п.1 — в строке шапки. */
@@ -493,6 +494,12 @@
 .atex-sl-btn-primary:hover { background: var(--sl-accent-d); }
 .atex-sl-btn-secondary { background: var(--sl-surface); }
 .atex-sl-photo { display: flex; align-items: center; gap: 8px; }
+/* #5575: кнопка «Ввод» под полями показаний — крупная (по ней попадают пальцем), правым
+   краем. Только снимает фокус с поля; погашена, пока ничего не правили, горит при правке. */
+.atex-sl-enter-row { display: flex; justify-content: flex-end; margin-top: 8px; }
+.atex-sl-enter { min-width: 160px; min-height: 48px; font-size: 18px; font-weight: 700; }
+.atex-sl-enter:disabled { background: var(--sl-surface); border-color: var(--sl-border); color: var(--sl-muted); cursor: default; }
+.atex-sl-enter.is-dirty { box-shadow: 0 0 0 3px var(--sl-warning-bg); }
 
 /* Тосты-уведомления (без alert/confirm/prompt) */
 .atex-sl-toast {
