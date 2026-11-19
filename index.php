@@ -319,6 +319,9 @@ if(!$billing && ($z !== "auth.asp")){
 	}
 	my_die(t9n("[RU]Не удалось открыть базу «{$z}»[EN]Failed to open the «{$z}» database"), "500 Internal Server Error");
 }
+# Служебный вызов биллинга (#5206): POST /{db}/billing/add, без сессии, по X-Billing-Token.
+if((isset($com[2]) ? $com[2] : "") === "billing" && (isset($com[3]) ? $com[3] : "") === "add")
+    handleBillingAdd($z);
 																									
 # The trace cookie to be deleted upon the session close
 if(isset($_GET["TRACE_IT"]) || isset($_COOKIE["TRACE_IT"])){
@@ -14203,6 +14206,82 @@ function updateBilling(){
 	if(!$connection)
 		return;
 	mysqli_query($connection, "UPDATE my SET ord=ord+".min(50, max(1, floor(substr(microtime(TRUE) - $time_start, 0, 6)*50)))." WHERE t=".DATABASE." AND val='$z'");
+}
+# Счётчики биллинга базы (#5206): расход ИИ-токенов и запуски агента в единицах ресурса тарифа.
+# Счётчик — строка-реквизит записи базы в my (t=DATABASE, val=<база>) с типом BILLING_*_TYPE,
+# значение — её ord; прибавка — один UPDATE, строка создаётся один раз. ord записи базы
+# (активность, updateBilling) не меняется. Пересчёт в единицы:
+#   ai_tokens  = ceil(tokens / BILLING_AI_TOKENS_PER_UNIT)  (по умолчанию 1000 токенов = 1 ед.)
+#   agent_runs = runs * BILLING_AGENT_RUN_UNITS             (по умолчанию 1 запуск = 1 ед.)
+function billingUnits($tokens, $runs){
+    $perUnit = (int)aiConfigValue(array("BILLING_AI_TOKENS_PER_UNIT"));
+    if($perUnit <= 0)
+        $perUnit = 1000;
+    $runUnits = (int)aiConfigValue(array("BILLING_AGENT_RUN_UNITS"));
+    if($runUnits <= 0)
+        $runUnits = 1;
+    return array("ai_tokens" => $tokens > 0 ? (int)ceil($tokens / $perUnit) : 0,
+        "agent_runs" => $runs > 0 ? $runs * $runUnits : 0);
+}
+# Прибавляет $units к счётчику $type базы $db. TRUE — прибавлено, FALSE — записи базы в my нет.
+# Строку счётчика создаёт первый вызов под GET_LOCK, чтобы параллельные вызовы не завели две.
+function billingCounterAdd($connection, $db, $type, $code, $units){
+    $db = mysqli_real_escape_string($connection, (string)$db);
+    $type = (int)$type;
+    $units = (int)$units;
+    $upd = "UPDATE my c JOIN my db ON c.up=db.id SET c.ord=c.ord+$units"
+        ." WHERE db.t=".DATABASE." AND db.val='$db' AND c.t=$type";
+    mysqli_query($connection, $upd);
+    if(mysqli_affected_rows($connection) > 0)
+        return TRUE;
+    $lock = "billing_".$db."_".$type;
+    mysqli_query($connection, "SELECT GET_LOCK('$lock', 5)");
+    mysqli_query($connection, $upd);
+    $done = mysqli_affected_rows($connection) > 0;
+    if(!$done){
+        mysqli_query($connection, "INSERT INTO my (up, ord, t, val) SELECT db.id, $units, $type, '$code'"
+            ." FROM my db WHERE db.t=".DATABASE." AND db.val='$db' LIMIT 1");
+        $done = mysqli_affected_rows($connection) > 0;
+    }
+    mysqli_query($connection, "SELECT RELEASE_LOCK('$lock')");
+    return $done;
+}
+# POST /{db}/billing/add — служебный вызов: {"tokens": N, "runs": M}, заголовок X-Billing-Token.
+# Выключен, пока не задан BILLING_SERVICE_TOKEN (404); без типов счётчиков — 503.
+# Возвращает array("code" => HTTP-код, "body" => ответ); $headers — с ключами в нижнем регистре.
+function billingAddRequest($connection, $db, $method, $headers, $body){
+    $secret = aiConfigValue(array("BILLING_SERVICE_TOKEN"));
+    if($secret === "")
+        return array("code" => 404, "body" => array("error" => t9n("[RU]Биллинг не включён[EN]Billing is not enabled")));
+    if($method !== "POST")
+        return array("code" => 405, "body" => array("error" => t9n("[RU]Только POST[EN]POST only")));
+    $given = isset($headers["x-billing-token"]) ? (string)$headers["x-billing-token"] : "";
+    if($given === "" || !hash_equals($secret, $given))
+        return array("code" => 403, "body" => array("error" => t9n("[RU]Неверный токен биллинга[EN]Invalid billing token")));
+    $types = array("ai_tokens" => (int)aiConfigValue(array("BILLING_AI_TOKENS_TYPE")),
+        "agent_runs" => (int)aiConfigValue(array("BILLING_AGENT_RUNS_TYPE")));
+    if($types["ai_tokens"] <= 0 || $types["agent_runs"] <= 0)
+        return array("code" => 503, "body" => array("error" => t9n("[RU]Не заданы типы счётчиков биллинга[EN]Billing counter types are not set")));
+    $in = json_decode((string)$body, true);
+    $bad = !is_array($in);
+    foreach(array("tokens", "runs") as $k)
+        if(!$bad && isset($in[$k]) && (!is_int($in[$k]) || $in[$k] < 0))
+            $bad = TRUE;
+    $units = $bad ? array() : billingUnits(isset($in["tokens"]) ? $in["tokens"] : 0, isset($in["runs"]) ? $in["runs"] : 0);
+    if($bad || $units["ai_tokens"] + $units["agent_runs"] === 0)
+        return array("code" => 400, "body" => array("error" => t9n("[RU]Нужны целые tokens и/или runs больше нуля[EN]Positive integer tokens and/or runs required")));
+    foreach($units as $code => $n)
+        if($n > 0 && !billingCounterAdd($connection, $db, $types[$code], $code, $n))
+            return array("code" => 404, "body" => array("error" => t9n("[RU]Нет записи базы[EN]No database record")));
+    return array("code" => 200, "body" => array("ok" => TRUE, "db" => (string)$db, "added" => $units));
+}
+function handleBillingAdd($db){
+    global $connection;
+    $headers = array_change_key_case(function_exists("getallheaders") ? (array)getallheaders() : array(), CASE_LOWER);
+    $r = billingAddRequest($connection, $db, isset($_SERVER["REQUEST_METHOD"]) ? $_SERVER["REQUEST_METHOD"] : "", $headers, file_get_contents("php://input"));
+    if($r["code"] !== 200)
+        header("HTTP/1.0 ".$r["code"]." ".aiChatHttpStatusText($r["code"]));
+    api_dump(json_encode($r["body"], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "billing.json");
 }
 # <m-batch-4981> Пакетная запись: _m_save, _m_set, _m_new и _m_del одним запросом (issue #4981, #4988)
 # Ошибка одной операции пакета.
