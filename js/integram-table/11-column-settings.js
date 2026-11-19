@@ -114,6 +114,7 @@
                     }).join('') }
                 </div>
                 <div style="display: flex; justify-content: flex-end; align-items: center; margin-top: 15px; gap: 10px;">
+                    <button class="btn btn-outline-primary" id="ai-formula-btn-${instanceName}" title="Описать словами, что посчитать, — ИИ предложит формулу новой колонки">&#10024; Формула словами</button>
                     <button class="btn btn-primary" id="add-column-btn-${instanceName}">Добавить колонку</button>
                     <button class="btn btn-secondary" onclick="window.${ instanceName }.closeColumnSettings()">Закрыть</button>
                 </div>
@@ -130,6 +131,8 @@
                 if (helpBtnNoAccess) helpBtnNoAccess.style.display = 'none';
                 const addColBtnNoAccess = modal.querySelector(`#add-column-btn-${instanceName}`);
                 if (addColBtnNoAccess) addColBtnNoAccess.style.display = 'none';
+                const aiFormulaBtnNoAccess = modal.querySelector(`#ai-formula-btn-${instanceName}`);
+                if (aiFormulaBtnNoAccess) aiFormulaBtnNoAccess.style.display = 'none';
                 modal.querySelectorAll('.column-settings-item').forEach(item => { item.setAttribute('draggable', 'false'); });
             }
 
@@ -146,6 +149,11 @@
             const addColumnBtn = modal.querySelector(`#add-column-btn-${instanceName}`);
             if (addColumnBtn) {
                 addColumnBtn.addEventListener('click', () => this.showAddColumnForm(modal));
+            }
+            // AI helper: formula described in words (issue #5583)
+            const aiFormulaBtn = modal.querySelector(`#ai-formula-btn-${instanceName}`);
+            if (aiFormulaBtn) {
+                aiFormulaBtn.addEventListener('click', () => this.openAiFormulaHelper());
             }
 
             modal.querySelectorAll('input[type="checkbox"]').forEach(cb => {
