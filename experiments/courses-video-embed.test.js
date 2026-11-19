@@ -130,6 +130,15 @@ async function t(name, fn) {
         assert.strictEqual(new URL(AU.videoSrc('kinescope:abc123DEF', 'x&autoplay=1#y')).searchParams.get('watermark'), 'x&autoplay=1#y');
     });
 
+    await t('kinescope-ид из API (uuid с дефисами) тоже даёт плеер', () => {
+        const uuid = '1468190b-5320-4d4e-b5d4-c33002bd5d1c';
+        assert.ok(AU.md('https://kinescope.io/' + uuid).includes(MARK(uuid)), AU.md('https://kinescope.io/' + uuid));
+        assert.strictEqual(AU.videoSrc('kinescope:' + uuid, ''), 'https://kinescope.io/embed/' + uuid);
+        const m = node('div', { 'data-video': 'kinescope:' + uuid });
+        assert.strictEqual(AU.mountVideos(rootWith([m]), 'v'), 1);
+        assert.strictEqual(m.children[0].attrs.src, 'https://kinescope.io/embed/' + uuid + '?watermark=v');
+    });
+
     await t('испорченная метка адреса не даёт', () => {
         ['', 'kinescope:', 'kinescope:../x', 'kinescope:abc?x=1', 'kinescope:abc/def', 'tiktok:abc123DEF', 'https://evil.example/', 'kinescope:abc"onload="x', null, undefined]
             .forEach(spec => assert.strictEqual(AU.videoSrc(spec, 'v'), '', String(spec)));

@@ -140,7 +140,7 @@
   // Адрес ролика → метка «kinescope:<id>», «youtube:<id>», «rutube:<id>[:<ключ>]» или '' для всего остального.
   AU.videoSpec = function (url) {
     var u = String(url == null ? '' : url), m;
-    if ((m = /^https:\/\/kinescope\.io\/(?:embed\/)?([A-Za-z0-9]{4,64})$/.exec(u))) return 'kinescope:' + m[1];
+    if ((m = /^https:\/\/kinescope\.io\/(?:embed\/)?([A-Za-z0-9-]{4,64})$/.exec(u))) return 'kinescope:' + m[1];
     if ((m = new RegExp('^https://(?:www\\.|m\\.)?youtube\\.com/watch\\?(?:[^#]*&)?v=(' + YT + ')(?:[&#].*)?$').exec(u))) return 'youtube:' + m[1];
     if ((m = new RegExp('^https://(?:youtu\\.be|(?:www\\.|m\\.)?youtube\\.com/(?:embed|shorts|live))/(' + YT + ')(?:[?#].*)?$').exec(u))) return 'youtube:' + m[1];
     if ((m = new RegExp('^https://rutube\\.ru/(?:video|play/embed)/(?:private/)?(' + RT + ')/?(?:\\?([^#]*))?(?:#.*)?$').exec(u))) {
@@ -158,7 +158,7 @@
   // Адрес плеера по метке или '' для чужой/испорченной метки. viewer — подпись зрителя для водяного знака Kinescope.
   AU.videoSrc = function (spec, viewer) {
     var s = String(spec == null ? '' : spec), m;
-    if ((m = /^kinescope:([A-Za-z0-9]{4,64})$/.exec(s))) {
+    if ((m = /^kinescope:([A-Za-z0-9-]{4,64})$/.exec(s))) {
       var w = String(viewer == null ? '' : viewer).trim();
       return 'https://kinescope.io/embed/' + m[1] + (w ? '?watermark=' + encodeURIComponent(w) : '');
     }
