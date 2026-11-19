@@ -47,6 +47,8 @@
         dayCapacityMin: ['DIE_DAY_CAPACITY_MN', 455, false],
         horizonDays: ['DIE_HORIZON_DAYS', 14, false],
         mrLength: ['LABEL_MASTER_ROLL_M', 2000, false],
+        // Допуск размера ножа к этикетке, мм (#5569): тот же, что у «Заказов этикетки»; 0 — точный подбор.
+        dieSizeTolerance: ['LABEL_DIE_SIZE_TOLERANCE_MM', 0, true],
         tolerance: ['JUMBO_FORMAT_TOLERANCE_MM', 15, true],
         // Ресурс ножа без марки, об (один оборот = один раппорт вала): медиана пробега списанных ножей из 1С.
         dieResource: ['DIE_RESOURCE_DEFAULT_REV', 300000, false],
@@ -917,7 +919,7 @@
     function formJobs(inp) {
         var s = withDefaults(inp.settings), create = [], skipped = [];
         var mrLength = num(inp.mrLength) > 0 ? num(inp.mrLength) : s.mrLength;
-        var lim = { mrLength: mrLength };
+        var lim = { mrLength: mrLength, dieSizeTolerance: s.dieSizeTolerance };
         var has = {};
         (inp.jobs || []).forEach(function(j) { if (norm(j.status) !== 'отменено' && j.positionId) has[j.positionId] = j.id; });
         (inp.positions || []).forEach(function(pos) {

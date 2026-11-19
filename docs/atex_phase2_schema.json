@@ -28,7 +28,8 @@
       {"name": "Мин. партия, шт", "type": "NUMBER"},
       {"name": "Мастер-рулонов расчётное", "type": "SIGNED"},
       {"name": "Нужно подтверждение ИТС", "type": "BOOLEAN"},
-      {"name": "Подтверждено ИТС", "type": "BOOLEAN"}
+      {"name": "Подтверждено ИТС", "type": "BOOLEAN"},
+      {"name": "Нужно заказать нож", "type": "BOOLEAN"}
      ],
      "children": [
       {"name": "Обеспечение этикетки", "type": "NUMBER", "fields": [
