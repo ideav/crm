@@ -132,7 +132,61 @@
     });
   };
   function mk() { var M = window.marked; if (!M || !M.parse) throw new Error('marked не загружен'); return M; }
-  AU.md = function (src) { return AU.externalLinks(AU.sanitize(mk().parse(String(src || ''), { gfm: true, breaks: false, async: false }))); };
+  // ---- видео: Kinescope (с защитой), YouTube, RuTube — на усмотрение автора ----
+  // Ссылка на видео отдельной строкой → метка <div data-video="<хостинг>:<id>">. В HTML урока iframe не хранится
+  // (санитайзер их не пропускает): плеер ставит страница при показе. У Kinescope — с водяным знаком зрителя.
+  var VIDEO_P = /<p>\s*<a\s(?:[^>]*?\s)?href="(https:\/\/[^"]+)"[^>]*>(?:(?!<\/a>)[\s\S])*<\/a>\s*<\/p>/g;
+  var YT = '[A-Za-z0-9_-]{11}', RT = '[0-9a-f]{32}', RT_KEY = '[A-Za-z0-9_-]{1,64}';
+  // Адрес ролика → метка «kinescope:<id>», «youtube:<id>», «rutube:<id>[:<ключ>]» или '' для всего остального.
+  AU.videoSpec = function (url) {
+    var u = String(url == null ? '' : url), m;
+    if ((m = /^https:\/\/kinescope\.io\/(?:embed\/)?([A-Za-z0-9]{4,64})$/.exec(u))) return 'kinescope:' + m[1];
+    if ((m = new RegExp('^https://(?:www\\.|m\\.)?youtube\\.com/watch\\?(?:[^#]*&)?v=(' + YT + ')(?:[&#].*)?$').exec(u))) return 'youtube:' + m[1];
+    if ((m = new RegExp('^https://(?:youtu\\.be|(?:www\\.|m\\.)?youtube\\.com/(?:embed|shorts|live))/(' + YT + ')(?:[?#].*)?$').exec(u))) return 'youtube:' + m[1];
+    if ((m = new RegExp('^https://rutube\\.ru/(?:video|play/embed)/(?:private/)?(' + RT + ')/?(?:\\?([^#]*))?(?:#.*)?$').exec(u))) {
+      var k = new RegExp('(?:^|&)p=(' + RT_KEY + ')(?:&|$)').exec(m[2] || ''); // ролик «по ссылке»: без ключа p плеер его не покажет
+      return 'rutube:' + m[1] + (k ? ':' + k[1] : '');
+    }
+    return '';
+  };
+  AU.videoMarks = function (html) {
+    return String(html).replace(VIDEO_P, function (all, href) {
+      var spec = AU.videoSpec(href.replace(/&amp;/g, '&'));
+      return spec ? '<div class="lesson-video" data-video="' + spec + '"></div>' : all;
+    });
+  };
+  // Адрес плеера по метке или '' для чужой/испорченной метки. viewer — подпись зрителя для водяного знака Kinescope.
+  AU.videoSrc = function (spec, viewer) {
+    var s = String(spec == null ? '' : spec), m;
+    if ((m = /^kinescope:([A-Za-z0-9]{4,64})$/.exec(s))) {
+      var w = String(viewer == null ? '' : viewer).trim();
+      return 'https://kinescope.io/embed/' + m[1] + (w ? '?watermark=' + encodeURIComponent(w) : '');
+    }
+    if ((m = new RegExp('^youtube:(' + YT + ')$').exec(s))) return 'https://www.youtube.com/embed/' + m[1];
+    if ((m = new RegExp('^rutube:(' + RT + ')(?::(' + RT_KEY + '))?$').exec(s))) return 'https://rutube.ru/play/embed/' + m[1] + (m[2] ? '?p=' + m[2] : '');
+    return '';
+  };
+  // Поставить плееры во все метки внутри root; возвращает число поставленных.
+  AU.mountVideos = function (root, viewer) {
+    var n = 0;
+    [].forEach.call(root.querySelectorAll('[data-video]'), function (el) {
+      if (el.getAttribute('data-video-on')) return;
+      var src = AU.videoSrc(el.getAttribute('data-video'), viewer);
+      if (!src) return;
+      var f = document.createElement('iframe');
+      f.setAttribute('src', src);
+      f.setAttribute('title', 'Видео урока');
+      f.setAttribute('allow', 'autoplay; fullscreen; picture-in-picture; encrypted-media');
+      f.setAttribute('allowfullscreen', '');
+      f.setAttribute('loading', 'lazy');
+      f.setAttribute('frameborder', '0');
+      el.appendChild(f);
+      el.setAttribute('data-video-on', '1');
+      n++;
+    });
+    return n;
+  };
+  AU.md = function (src) { return AU.videoMarks(AU.externalLinks(AU.sanitize(mk().parse(String(src || ''), { gfm: true, breaks: false, async: false })))); };
   AU.inline = function (src) { return AU.externalLinks(AU.sanitize(mk().parseInline(String(src || ''), { gfm: true, async: false }))); };
 
   // ---- черновик урока → lesson.json (#84) ----

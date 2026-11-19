@@ -220,13 +220,15 @@
       return A.update('Урок автора', l._id, { 'Текст': text.value, 'Задания': json }, title.value.trim() || l._main)
         .then(function () { l._main = title.value.trim() || l._main; l['Текст'] = text.value; l['Задания'] = json; });
     });
-    function render() { try { prev.innerHTML = AU.md(text.value) || '<p class="muted">Здесь появится текст урока.</p>'; A.fixLinks(prev); } catch (e) { prev.textContent = e.message; } }
+    function render() { try { prev.innerHTML = AU.md(text.value) || '<p class="muted">Здесь появится текст урока.</p>'; A.fixLinks(prev); AU.mountVideos(prev, A.viewerLabel()); } catch (e) { prev.textContent = e.message; } }
     var later = A.debounce(render, 250);
     text.addEventListener('input', function () { later(); sv.touch(); });
     title.addEventListener('input', sv.touch);
     render();
     root.appendChild(E('section', { class: 'card' }, [fld('Заголовок', title),
-      E('div', { class: 'au-split' }, [E('div', {}, [E('span', { class: 'lbl', text: 'Текст (markdown)' }), text]),
+      E('div', { class: 'au-split' }, [E('div', {}, [E('span', { class: 'lbl', text: 'Текст (markdown)' }), text,
+        E('span', { class: 'muted small' }, ['Видео: вставьте ссылку на ролик в Kinescope, YouTube или RuTube отдельной строкой — в уроке на её месте будет плеер. Водяной знак ученика есть только у Kinescope. ',
+          E('a', { href: '#/author/help', target: '_blank', rel: 'noopener', text: 'Как вставить видео' })])]),
         E('div', {}, [E('span', { class: 'lbl', text: 'Как увидит ученик' }), prev])]), sv.el]));
 
     var tbox = E('div', { class: 'au-tasks' });
@@ -343,5 +345,6 @@
       E('div', { class: 'lesson-html', html: AU.sanitize(lesson.html) })].concat(parts.map(function (p) { return p.el; })));
     box.appendChild(art);
     A.fixLinks(box);
+    AU.mountVideos(box, A.viewerLabel());
   };
 })();

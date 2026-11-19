@@ -58,6 +58,7 @@
       E('div', { class: 'progress', role: 'progressbar', 'aria-valuemin': 0, 'aria-valuemax': total, 'aria-valuenow': pos + 1 }, [E('i', { style: 'width:' + Math.round((pos + 1) / total * 100) + '%' })])]);
     var title = E('h1', { class: 'lesson-title', text: lesson.title });
     var body = E('div', { class: 'lesson-html', html: lesson.html || '' });
+    A.au.mountVideos(body, A.viewerLabel());
     var att = (lesson.attachments || []).length ? E('div', { class: 'attach' }, lesson.attachments.map(function (a) {
       return E('a', { class: 'btn', href: a.url, download: '', text: 'Скачать: ' + a.title }); })) : null;
     var parts = (lesson.tasks || []).map(function (t, i) {
