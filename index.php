@@ -16478,11 +16478,15 @@ if(Validate_Token())
             # #5269: демон web-socket (ws-server/) проверяет подключение клиента его же куки или
             # токеном: кто это, и (с t=<тип>) может ли он подписаться на таблицу — читать её записи.
             $gv = $GLOBALS["GLOBAL_VARS"];
+            # fp — отпечаток прав (Ws_rights_fp): одинаковый у тех, кто видит одни и те же строки;
+            # masked — у таблицы есть маски этого пользователя (Ws_type_masked)
+            $wsCtx = Ws_core_ctx();
             $res = array("user" => (string)$gv["user"], "user_id" => isset($gv["user_id"]) ? (string)$gv["user_id"] : ""
-                        , "role" => isset($gv["role"]) ? (string)$gv["role"] : "");
+                        , "role" => isset($gv["role"]) ? (string)$gv["role"] : "", "fp" => Ws_rights_fp($wsCtx));
             if(isset($_REQUEST["t"])){
                 $res["t"] = $t;
-                $res["read"] = Ws_type_readable($t, Ws_core_ctx());
+                $res["read"] = Ws_type_readable($t, $wsCtx);
+                $res["masked"] = $res["read"] && Ws_type_masked($t, $wsCtx);
             }
             api_dump(json_encode($res, JSON_UNESCAPED_UNICODE), "ws_auth.json");
         case "_m_notify":

@@ -33,7 +33,7 @@
 | Импорт батчем `import=1` | [import.md](import.md) | bki_file, DATA, plain_data, формат строк, завершающий `;`, чанки 8МБ, upsert |
 | Архив таблицы: BKI и JSON | [json-archive.md](json-archive.md) | json_export, integram-archive v2, метаданные+данные, types, reqs, target, одна запись на строку, алиасы колонок, gzip, сведение колонок, перенос между базами |
 | Журнал базы (JSON Lines) | [logs.md](logs.md) | _log.jsonl, _sql.jsonl, rid, uid, ~ai, ai_job, old/new, op, import, маскировка секретов, LOG_ROTATE_MB, ротация, чтение journal, cursor, more |
-| Web-socket: живые таблицы, уведомления, события для внешних систем | [realtime.md](realtime.md) | ws-server, /ws, ws_auth, _m_notify, Ws_notify, IntegramWS, subscribe, onNotify, live, liveAttach, INTEGRAM_WS_PUSH_URL, INTEGRAM_WS_SECRET, INTEGRAM_WS_PUBLIC_URL, WS_CORE_URL, push, HMAC, 4401, nginx Upgrade |
+| Web-socket: живые таблицы, уведомления, события для внешних систем | [realtime.md](realtime.md) | ws-server, /ws, ws_auth, _m_notify, Ws_notify, IntegramWS, subscribe, onNotify, live, liveAttach, rows, shown, feed, fp, masked, плашка «Добавлено N», маски подписчика, INTEGRAM_WS_PUSH_URL, INTEGRAM_WS_SECRET, INTEGRAM_WS_PUBLIC_URL, WS_CORE_URL, push, HMAC, 4401, nginx Upgrade |
 | Почта приложения (SMTP клиента) | [mail.md](mail.md) | _mail, Почта для отправки, пароль приложения, AES-GCM шифрование, грант на таблицу, лимит в час, вложение, rec+req, STARTTLS |
 | Иерархический OLTP (разрезы) | [hierarchical-oltp.md](hierarchical-oltp.md) | разрез, частотность групп, накопитель меры, агрегаты, up-уровни |
 

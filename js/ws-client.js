@@ -4,11 +4,15 @@
  * Одно соединение на страницу с демоном ws-server/. Адрес — переменная шаблона
  * {_global_.ws} (INTEGRAM_WS_PUBLIC_URL ядра); пустой адрес — клиент выключен.
  *
- *   IntegramWS.subscribe(typeId, fn) → off()   fn({by, reload, events}) — события таблицы
+ *   IntegramWS.subscribe(typeId, fn) → off()   fn({by, rows, remove, added, stale}) — изменения таблицы
+ *     off.shown([id…])                         записи этой таблицы на экране — демон шлёт их правки
  *   IntegramWS.onNotify(fn) → off()            fn({from, data:{msg, link}}) — уведомления
  *
- * reload:true — данные надо перечитать целиком (массовое изменение или переподключение после
- * обрыва: события за время обрыва потеряны). Вход отозван (код 4401) — без переподключения.
+ * rows — новые значения записей на экране ({i,u,o,r}, как object/?JSON_OBJ), remove — записи,
+ * которые надо убрать с экрана (удалены или скрыты маской), added — родители (u) новых видимых
+ * записей (счётчик плашки), stale — "schema" | "bulk" | "lost": данные устарели, перечитать по
+ * кнопке. После обрыва — stale:"lost" (изменения за время обрыва потеряны). Вход отозван (код
+ * 4401) — без переподключения.
  */
 (function (root) {
     'use strict';
@@ -19,7 +23,7 @@
     class WsClient {
         constructor(opts) {
             this.opts = opts || {};
-            this.subs = new Map();          // typeId → Set<fn>
+            this.subs = new Map();          // typeId → Set<{fn, shown}>
             this.notifyFns = new Set();
             this.ws = null;
             this.opened = false;            // соединение уже открывалось — следующее открытие после обрыва
@@ -42,22 +46,39 @@
 
         subscribe(typeId, fn) {
             const t = Number(typeId);
-            if (!this.enabled() || !Number.isInteger(t) || t <= 0) return function () {};
+            if (!this.enabled() || !Number.isInteger(t) || t <= 0) {
+                const noop = function () {};
+                noop.shown = function () {};
+                return noop;
+            }
             let set = this.subs.get(t);
+            const entry = { fn: fn, shown: [] };
             if (!set) {
                 set = new Set();
                 this.subs.set(t, set);
-                this.sendIfOpen({ op: 'sub', t: t });
-            }
-            set.add(fn);
+                set.add(entry);
+                this.sendIfOpen({ op: 'sub', t: t, shown: [] });
+            } else set.add(entry);
             this.connect();
-            return () => {
-                set.delete(fn);
+            const off = () => {
+                set.delete(entry);
                 if (!set.size && this.subs.get(t) === set) {
                     this.subs.delete(t);
                     this.sendIfOpen({ op: 'unsub', t: t });
-                }
+                } else if (this.subs.get(t) === set) this.sendIfOpen({ op: 'shown', t: t, ids: this.shownOf(t) });
             };
+            off.shown = (ids) => {
+                entry.shown = Array.isArray(ids) ? ids.map(Number).filter((n) => Number.isInteger(n) && n > 0) : [];
+                if (this.subs.get(t) === set) this.sendIfOpen({ op: 'shown', t: t, ids: this.shownOf(t) });
+            };
+            return off;
+        }
+
+        // Записи на экране всех таблиц типа t на странице
+        shownOf(t) {
+            const out = new Set();
+            (this.subs.get(t) || []).forEach((e) => e.shown.forEach((id) => out.add(id)));
+            return Array.from(out);
         }
 
         onNotify(fn) {
@@ -77,14 +98,14 @@
             this.ws = ws;
             ws.onopen = () => {
                 this.retryMs = RETRY_MIN_MS;
-                this.subs.forEach((set, t) => ws.send(JSON.stringify({ op: 'sub', t: t })));
-                if (this.opened) this.dispatchAll({ by: '', reload: true, events: [] });
+                this.subs.forEach((set, t) => ws.send(JSON.stringify({ op: 'sub', t: t, shown: this.shownOf(t) })));
+                if (this.opened) this.dispatchAll({ by: '', rows: [], remove: [], added: [], stale: 'lost' });
                 this.opened = true;
             };
             ws.onmessage = (e) => {
                 let msg;
                 try { msg = JSON.parse(e.data); } catch (err) { return; }
-                if (msg && msg.op === 'events') this.dispatch(msg);
+                if (msg && msg.op === 'rows') this.dispatch(msg);
                 else if (msg && msg.op === 'notify') this.notifyFns.forEach((fn) => this.safe(fn, { from: msg.from, data: msg.data }));
             };
             ws.onclose = (e) => {
@@ -98,18 +119,16 @@
             ws.onerror = function () {};
         }
 
-        // Подписчику типа t — только события, в цепочке которых есть t (схема — сам тип t)
+        // Изменения таблицы t — её подписчикам
         dispatch(msg) {
-            this.subs.forEach((set, t) => {
-                const events = (msg.events || []).filter((e) => (e.k === 'schema' ? e.t === t : (e.types || []).indexOf(t) >= 0));
-                if (!events.length && !msg.reload) return;
-                const out = { by: msg.by || '', reload: !!msg.reload, events: events };
-                set.forEach((fn) => this.safe(fn, out));
-            });
+            const set = this.subs.get(Number(msg.t));
+            if (!set) return;
+            const out = { by: msg.by || '', rows: msg.rows || [], remove: msg.remove || [], added: msg.added || [], stale: msg.stale || '' };
+            set.forEach((e) => this.safe(e.fn, out));
         }
 
         dispatchAll(out) {
-            this.subs.forEach((set) => set.forEach((fn) => this.safe(fn, out)));
+            this.subs.forEach((set) => set.forEach((e) => this.safe(e.fn, out)));
         }
 
         safe(fn, arg) {

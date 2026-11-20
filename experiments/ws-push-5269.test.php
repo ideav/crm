@@ -138,6 +138,18 @@ eq($ev["change:22"]["types"], array(700, 800, 500), "перенос: типы н
 $ev = Ws_resolve(array($ch("update", 11, 10, 501), $ch("update", 11, 10, 501), $ch("delete", 11, 10, 501)), $lookup);
 eq(count($ev), 1, "правки одной строки за запрос сливаются");
 eq($ev[0]["op"], "delete", "итог — последняя операция");
+$ev = Ws_resolve(array($ch("insert", 10, 1, 500), $ch("update", 10, 1, 500)), $lookup);
+eq($ev[0]["op"], "insert", "создана и тут же поправлена — для подписчика это новая запись");
+
+# Цепочка записей [id, тип] — от строки до объекта первого уровня, без схлопывания одинаковых
+# типов: подписчик таблицы находит в ней свою запись (ближайшую своего типа)
+$ev = by_id(Ws_resolve(array($ch("update", 11, 10, 501), $ch("insert", 21, 20, 701), $ch("insert", 10, 1, 500)), $lookup));
+eq($ev["change:11"]["chain"], array(array(11, 501), array(10, 500)), "значение реквизита: строка и её объект");
+eq($ev["change:21"]["chain"], array(array(21, 701), array(20, 700), array(10, 500)), "подчинённый: до объекта первого уровня");
+eq($ev["change:10"]["chain"], array(array(10, 500)), "объект первого уровня — сам");
+$db[61] = array("up" => 60, "t" => 900); $db[60] = array("up" => 1, "t" => 900);
+$ev = by_id(Ws_resolve(array($ch("update", 62, 61, 901)), $lookup));
+eq($ev["change:62"]["chain"], array(array(62, 901), array(61, 900), array(60, 900)), "дерево одного типа: оба уровня в цепочке");
 
 # ── Транзакция запроса (InTransaction): откат и незафиксированное — не рассылаются ──
 reset_buf();
@@ -201,6 +213,28 @@ expect(Ws_type_readable(700, $ctx("ann", array(), $g1read)), "подчинённ
 expect(Ws_type_readable(700, $ctx("ann", array(650 => "READ"), $g1none)), "подчинённая таблица — по праву на свой реквизит-массив");
 expect(!Ws_type_readable(700, $ctx("ann", array(), $g1none)), "подчинённая без прав на родителя — нет");
 expect(!Ws_type_readable(0, $ctx("ann", array(), $g1read)) && !Ws_type_readable(-5, $ctx("ann", array(), $g1read)), "неположительный тип — нет");
+
+# ── Отпечаток прав: подписчики с одинаковым отпечатком видят одни и те же строки ──
+# Демон берёт строки для всей группы одним запросом к ядру — входом одного из её участников.
+$fp = function($user, $role, $grants){ return Ws_rights_fp(array("user" => $user, "role_id" => $role, "grants" => $grants)); };
+$gm = array(500 => "READ", "mask" => array(502 => array("ann" => "")));
+eq($fp("ann", 3, $gm), $fp("bob", 3, $gm), "одна роль и одни маски — один отпечаток, логин не важен");
+expect($fp("ann", 3, $gm) !== $fp("bob", 3, array(500 => "READ", "mask" => array(502 => array("bob" => "")))),
+    "маска с [USER] у каждого своя — отпечатки разные");
+expect($fp("ann", 3, $gm) !== $fp("ann", 4, $gm), "другая роль — другой отпечаток");
+expect($fp("ann", 3, array(500 => "READ")) !== $fp("ann", 3, array(500 => "WRITE")), "другой уровень доступа — другой отпечаток");
+expect($fp("admin", 0, array()) !== $fp("ann", 0, array()), "admin — отдельная группа");
+expect(preg_match('/^[0-9a-f]{40}$/', $fp("ann", 3, $gm)) === 1, "отпечаток — хеш, сами маски наружу не уходят");
+
+# ── Маски на таблице: на сам тип, его колонку или тип-родитель (подчинённая наследует) ──
+$reqs = function($t){ return $t == 500 ? array(501, 502) : ($t == 700 ? array(701) : array()); };
+$mctx = function($user, $grants) use ($arr, $reqs){ return array("user" => $user, "grants" => $grants, "arr" => $arr, "reqs" => $reqs); };
+expect(!Ws_type_masked(500, $mctx("ann", array(500 => "READ"))), "без масок — нет");
+expect(Ws_type_masked(500, $mctx("ann", array("mask" => array(502 => array("[USER]" => ""))))), "маска на колонку таблицы");
+expect(Ws_type_masked(500, $mctx("ann", array("mask" => array(500 => array("@IN(1,2)" => ""))))), "маска на саму таблицу");
+expect(Ws_type_masked(700, $mctx("ann", array("mask" => array(501 => array("x" => ""))))), "подчинённая — маска родительской таблицы");
+expect(!Ws_type_masked(500, $mctx("ann", array("mask" => array(701 => array("x" => ""))))), "маска подчинённой таблицы родителя не касается");
+expect(!Ws_type_masked(500, $mctx("admin", array("mask" => array(502 => array("x" => ""))))), "admin масками не ограничен");
 
 # ── Проводка в index.php: настоящий logChange отдаёт изменения в Ws_collect ──
 $src = file_get_contents(__DIR__."/../index.php");

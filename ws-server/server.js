@@ -8,10 +8,12 @@
 //        HMAC-SHA256(тело, WS_SECRET).
 //   GET  /health — число подключений.
 //
-// Сообщения клиента: {op:"sub",t}, {op:"unsub",t}, {op:"ping"}. Подписка на таблицу (тип) —
-// только с правом чтения, его проверяет ядро (ws_auth?JSON&t=<тип>).
+// Сообщения клиента: {op:"sub",t[,shown:[id…]][,feed:true]}, {op:"shown",t,ids:[…]} — записи
+// на экране, {op:"unsub",t}, {op:"ping"}. Подписка на таблицу (тип) — только с правом чтения, его
+// проверяет ядро (ws_auth?JSON&t=<тип>).
 // Сообщения демона: {op:"hello",db,user}, {op:"sub",t,ok}, {op:"unsub",t[,revoked]},
-// {op:"events",by,reload,events:[…]}, {op:"notify",from,data}, {op:"pong"}.
+// {op:"rows",t,by,rows?,remove?,added?,stale?} (lib/hub.js), {op:"notify",from,data}, {op:"pong"}.
+// Строки демон берёт у ядра листингом object/<t>/?JSON_OBJ&F_<t>=@IN(…) входом подписчика.
 
 const http = require('http');
 const crypto = require('crypto');
@@ -22,6 +24,13 @@ const DB_MASK = /^[A-Za-z0-9_]{1,64}$/;
 const MAX_PUSH_BYTES = 4 << 20;
 const MAX_MSG_BYTES = 64 << 10;
 const MAX_SUBS = 100;
+const MAX_SHOWN = 5000;
+
+function idList(v) {
+    const out = new Set();
+    if (Array.isArray(v)) for (const x of v) { const n = Number(x); if (Number.isInteger(n) && n > 0 && out.size < MAX_SHOWN) out.add(n); }
+    return out;
+}
 
 function pickCookie(header, name) {
     for (const part of String(header || '').split(';')) {
@@ -43,7 +52,7 @@ function createWsServer(options) {
         maxClients: 5000, fetch: globalThis.fetch, log: () => {},
     }, options);
     const coreBase = String(o.coreUrl).replace(/\/+$/, '');
-    const hub = new Hub();
+    const hub = new Hub({ fetchRows, maxFetch: o.maxFetch });
     const clients = new Set();
     const server = http.createServer(onRequest);
     server.on('upgrade', (req, socket, head) => {
@@ -55,10 +64,7 @@ function createWsServer(options) {
     // Ядро: {status:"ok",data} | {status:"denied"} | {status:"error"} (ядро недоступно)
     async function coreAuth(db, creds, t) {
         const url = `${coreBase}/${db}/ws_auth?JSON` + (t === undefined ? '' : `&t=${t}`);
-        const headers = {};
-        if (creds.cookie) headers.cookie = creds.cookie;
-        if (creds.xauth) headers['x-authorization'] = creds.xauth;
-        if (creds.auth) headers.authorization = creds.auth;
+        const headers = credHeaders(creds);
         try {
             const r = await o.fetch(url, { headers, redirect: 'manual', signal: AbortSignal.timeout(5000) });
             if (r.status === 401 || r.status === 403 || (r.status >= 300 && r.status < 400)) return { status: 'denied' };
@@ -67,6 +73,29 @@ function createWsServer(options) {
             return data && typeof data.user === 'string' && data.user ? { status: 'ok', data } : { status: 'denied' };
         } catch (e) {
             return { status: 'error' };
+        }
+    }
+
+    function credHeaders(creds) {
+        const headers = {};
+        if (creds.cookie) headers.cookie = creds.cookie;
+        if (creds.xauth) headers['x-authorization'] = creds.xauth;
+        if (creds.auth) headers.authorization = creds.auth;
+        return headers;
+    }
+
+    // Строки таблицы t по id — обычный листинг ядра входом подписчика: права и маски ядра.
+    // Не массив (вход отозван, ошибка, ядро недоступно) — null.
+    async function fetchRows(client, t, ids) {
+        const q = new URLSearchParams({ [`F_${t}`]: `@IN(${ids.join(',')})`, LIMIT: `0,${ids.length}` });
+        const url = `${coreBase}/${client.db}/object/${t}/?JSON_OBJ&${q}`;
+        try {
+            const r = await o.fetch(url, { headers: credHeaders(client.creds), redirect: 'manual', signal: AbortSignal.timeout(5000) });
+            if (r.status !== 200) return null;
+            const data = await r.json();
+            return Array.isArray(data) ? data : null;
+        } catch (e) {
+            return null;
         }
     }
 
@@ -113,7 +142,7 @@ function createWsServer(options) {
                 res.writeHead(400);
                 return res.end();
             }
-            hub.route(payload);
+            hub.route(payload).catch((e) => o.log('route: ' + e.message));
             res.writeHead(204);
             res.end();
         });
@@ -158,14 +187,15 @@ function createWsServer(options) {
         if (auth.status !== 'ok') return reject(socket, 503, 'Service Unavailable');
         socket.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n'
             + `Sec-WebSocket-Accept: ${frames.acceptKey(key)}\r\n\r\n`);
-        attach(socket, head, db, auth.data.user, creds);
+        attach(socket, head, db, auth.data, creds);
     }
 
-    function attach(socket, head, db, user, creds) {
+    function attach(socket, head, db, who, creds) {
+        const user = who.user;
         socket.setNoDelay(true);
         const reader = new frames.FrameReader({ requireMask: true, maxPayload: MAX_MSG_BYTES });
         const client = {
-            db, user, creds, socket, subs: new Set(), alive: true, timer: null,
+            db, user, fp: String(who.fp || ''), creds, socket, subs: new Map(), alive: true, timer: null,
             send(obj) {
                 if (!socket.destroyed) socket.write(frames.encodeFrame(frames.OP_TEXT, Buffer.from(JSON.stringify(obj))));
             },
@@ -218,18 +248,29 @@ function createWsServer(options) {
         const t = Number(msg.t);
         const typeOk = Number.isInteger(t) && t > 0;
         if (msg.op === 'ping') return client.send({ op: 'pong' });
+        if (msg.op === 'shown' && typeOk) {
+            const sub = client.subs.get(t);
+            if (sub) sub.shown = idList(msg.ids);
+            return;
+        }
         if (msg.op === 'unsub' && typeOk) {
             client.subs.delete(t);
             return client.send({ op: 'unsub', t });
         }
         if (msg.op !== 'sub' || !typeOk) return;
-        if (client.subs.has(t)) return client.send({ op: 'sub', t, ok: true });
+        if (client.subs.has(t)) {
+            const sub = client.subs.get(t);
+            if (msg.shown) sub.shown = idList(msg.shown);
+            return client.send({ op: 'sub', t, ok: true });
+        }
         let ok = false;
+        let masked = true;
         if (client.subs.size < MAX_SUBS) {
             const a = await coreAuth(client.db, client.creds, t);
             ok = a.status === 'ok' && a.data.read === true;
+            masked = !(a.status === 'ok' && a.data.masked === false);
         }
-        if (ok) client.subs.add(t);
+        if (ok) client.subs.set(t, { shown: idList(msg.shown), feed: msg.feed === true, masked });
         client.send({ op: 'sub', t, ok });
     }
 
@@ -239,12 +280,14 @@ function createWsServer(options) {
         const a = await coreAuth(client.db, client.creds);
         if (a.status === 'denied') return closeClient(client, 4401, 'unauthorized');
         if (a.status !== 'ok') return;
-        for (const t of [...client.subs]) {
+        client.fp = String(a.data.fp || '');     // права и маски могли смениться
+        for (const [t, sub] of [...client.subs]) {
             const r = await coreAuth(client.db, client.creds, t);
-            if (r.status === 'ok' && r.data.read !== true) {
+            if (r.status !== 'ok') continue;
+            if (r.data.read !== true) {
                 client.subs.delete(t);
                 client.send({ op: 'unsub', t, revoked: true });
-            }
+            } else sub.masked = r.data.masked !== false;
         }
     }
 

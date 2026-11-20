@@ -10,8 +10,8 @@
 #      POST на WS_PUSH_URL с подписью HMAC-SHA256 (WS_SECRET) в заголовке X-Ws-Signature;
 #   3. демон отдаёт событие тем, кто подписан на любой тип из цепочки (подписка проверена
 #      ядром: действие ws_auth и Ws_type_readable).
-# Клиент по событию перечитывает данные обычным API — со всеми проверками прав и масок,
-# поэтому значения в событие не попадают.
+# Значения в событие не попадают: демон берёт строки обычным листингом ядра (object/?JSON_OBJ)
+# входом подписчика — со всеми проверками прав и масок (группа подписчиков — по Ws_rights_fp).
 #
 # Без WS_PUSH_URL или WS_SECRET (include/connection.php, INTEGRAM_WS_*) модуль ничего не делает.
 
@@ -150,6 +150,7 @@ function Ws_resolve($changes, $lookup){
             continue;
         }
         $types = array($c["t"]);
+        $chain = array(array($c["id"], $c["t"]));
         $ok = TRUE;
         $meta = 0;
         foreach(array("up", "old_up") as $k){
@@ -166,6 +167,8 @@ function Ws_resolve($changes, $lookup){
                     break;
                 }
                 $types[] = (int)$n["t"];
+                if($k === "up")
+                    $chain[] = array($p, (int)$n["t"]);
                 $p = (int)$n["up"];
             }
             if($meta || !$ok)
@@ -173,9 +176,12 @@ function Ws_resolve($changes, $lookup){
         }
         if($meta)
             $schema[$meta] = TRUE;
-        elseif($ok)
-            $events[$c["id"]] = array("k" => "change", "op" => $c["op"], "id" => $c["id"], "up" => $c["up"]
-                                    , "t" => $c["t"], "types" => array_values(array_unique($types)));
+        elseif($ok){
+            # Создана и поправлена в том же запросе — для подписчика это новая запись
+            $op = (isset($events[$c["id"]]) && ($events[$c["id"]]["op"] === "insert") && ($c["op"] !== "delete")) ? "insert" : $c["op"];
+            $events[$c["id"]] = array("k" => "change", "op" => $op, "id" => $c["id"], "up" => $c["up"]
+                                    , "t" => $c["t"], "types" => array_values(array_unique($types)), "chain" => $chain);
+        }
     }
     $out = array_values($events);
     foreach(array_keys($schema) as $t)
@@ -268,10 +274,48 @@ function Ws_type_readable($t, $ctx){
     }
     return FALSE;
 }
+# Отпечаток прав: роль и права с уже подставленными масками (getGrants подставляет [USER],
+# [Запрос] … на входе). Одинаковый отпечаток — одинаково видимые строки: демон берёт строки для
+# всей группы одним запросом ядра входом одного её участника. Наружу уходит только хеш.
+function Ws_rights_fp($ctx){
+    if($ctx["user"] === "admin")
+        return sha1("admin");
+    return sha1(json_encode(array(isset($ctx["role_id"]) ? (string)$ctx["role_id"] : "", is_array($ctx["grants"]) ? $ctx["grants"] : array())));
+}
+# Есть ли у пользователя маски, сужающие записи таблицы: на сам тип, на его колонку или на
+# тип-родитель подчинённой таблицы (запись наследует маски родителя, как в Rec_masks_denial).
+# Без масок видимость записи следует из права на таблицу — тогда id удалённой записи подписчику
+# не открывает ничего нового.
+function Ws_type_masked($t, $ctx){
+    if($ctx["user"] === "admin")
+        return FALSE;
+    $masks = isset($ctx["grants"]["mask"]) && is_array($ctx["grants"]["mask"]) ? $ctx["grants"]["mask"] : array();
+    if(!count($masks))
+        return FALSE;
+    $t = (int)$t;
+    for($d = 0; ($t > 0) && ($d < 16); $d++){
+        if(isset($masks[$t]))
+            return TRUE;
+        foreach(call_user_func($ctx["reqs"], $t) as $req)
+            if(isset($masks[(int)$req]))
+                return TRUE;
+        $arr = call_user_func($ctx["arr"], $t);
+        $t = $arr ? (int)$arr["up"] : 0;
+    }
+    return FALSE;
+}
 # Контекст Ws_type_readable для текущего пользователя ядра (после Validate_Token)
 function Ws_core_ctx(){
     return array("user" => isset($GLOBALS["GLOBAL_VARS"]["user"]) ? $GLOBALS["GLOBAL_VARS"]["user"] : ""
+        , "role_id" => isset($GLOBALS["GLOBAL_VARS"]["role_id"]) ? $GLOBALS["GLOBAL_VARS"]["role_id"] : ""
         , "grants" => isset($GLOBALS["GRANTS"]) ? $GLOBALS["GRANTS"] : array()
+        , "reqs" => function($t){
+            $res = Exec_sql("SELECT id FROM ".$GLOBALS["z"]." WHERE up=".(int)$t." AND ".(int)$t."!=0", "WS: reqs of type", FALSE);
+            $out = array();
+            while($res && ($row = mysqli_fetch_assoc($res)))
+                $out[] = (int)$row["id"];
+            return $out;
+        }
         , "arr" => function($t){
             $res = Exec_sql("SELECT arr.id, arr.up FROM ".$GLOBALS["z"]." arr JOIN ".$GLOBALS["z"]." par ON par.id=arr.up AND par.up=0"
                             ." WHERE arr.t=".(int)$t." AND arr.id!=arr.t LIMIT 1", "WS: array of type", FALSE);
