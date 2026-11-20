@@ -57,9 +57,16 @@ function Cp_json($cfg, $method, $url, $headers = array(), $body = null){
     return $d;
 }
 
-# Каталог: платный курс с ценой или null
+function Cp_authored($code){ return is_string($code) && (bool)preg_match('/^a\d{1,30}$/', $code); }
+
+# Платный курс с ценой или null. Встроенный — из courses.json; авторский (a<N>) — из строки
+# Каталога базы courses (ideav/crm#5588). Цена — только отсюда, не из запроса.
 function Cp_course($cfg, $code){
     if (!is_string($code) || !preg_match('/^[a-z0-9_-]{1,32}$/', $code)) return null;
+    if (Cp_authored($code)) {
+        try { return Cp_authored_course($cfg, Cp_schema($cfg), $code); }
+        catch (Exception $e) { Cp_log($cfg, 'catalog_failed', array('course' => $code, 'error' => $e->getMessage())); return null; }
+    }
     $cat = json_decode(@file_get_contents($cfg['content_dir'] . '/courses.json'), true);
     foreach ((isset($cat['courses']) ? $cat['courses'] : array()) as $c)
         if (isset($c['code']) && $c['code'] === $code)
@@ -72,6 +79,42 @@ function Cp_content_key($cfg, $code){
     foreach (glob($cfg['content_dir'] . '/' . $code . '-*', GLOB_ONLYDIR) ?: array() as $d)
         if (preg_match('/^' . preg_quote($code, '/') . '-([0-9a-f]{16,64})$/', basename($d), $m)) return $m[1];
     return null;
+}
+
+# Авторский курс из Каталога: цена «16 900» / «16900.00» → число (как authors.js на портале)
+function Cp_authored_course($cfg, $tables, $code){
+    if (!isset($tables['Каталог']['req']['Цена'])) return null;
+    foreach (Cp_rows($cfg, $tables['Каталог'], array('_main' => $code)) as $r) {
+        if ($r['_main'] !== $code) continue;
+        $price = (float)preg_replace('/[^0-9.]/', '', str_replace(',', '.', $r['Цена']));
+        $title = isset($r['Название']) && $r['Название'] !== '' ? $r['Название'] : $code;
+        return $price > 0 ? array('code' => $code, 'title' => $title, 'price' => $price, 'authored' => true) : null;
+    }
+    return null;
+}
+
+# Ключ «Доступа». Встроенный курс — из имени каталога контента; авторский — адрес манифеста:
+# его читает Cc_manifest_url (include/courses_content.php) в том же порядке — «Курс автора»,
+# затем Каталог. Нет манифеста — null: курс не продаём и не открываем.
+function Cp_course_key($cfg, $tables, $code){
+    if (!Cp_authored($code)) return Cp_content_key($cfg, $code);
+    foreach (array('Курс автора' => 'Код', 'Каталог' => '_main') as $t => $f) {
+        if (!isset($tables[$t]['req']['Манифест']) || ($f !== '_main' && !isset($tables[$t]['req'][$f]))) continue;
+        foreach (Cp_rows($cfg, $tables[$t], array($f => $code)) as $r)
+            if ($r[$f] === $code && $r['Манифест'] !== '') return $r['Манифест'];
+    }
+    return null;
+}
+
+# Цифры в римские: twh.php берёт число из purpose как id пользователя my («Ступень 1» → «Ступень I»)
+function Cp_no_digits($s){
+    return preg_replace_callback('/\d+/', function ($m) {
+        $n = (int)$m[0]; if ($n < 1 || $n > 3999) return '';
+        $out = '';
+        foreach (array(1000 => 'M', 900 => 'CM', 500 => 'D', 400 => 'CD', 100 => 'C', 90 => 'XC', 50 => 'L', 40 => 'XL', 10 => 'X', 9 => 'IX', 5 => 'V', 4 => 'IV', 1 => 'I') as $v => $r)
+            while ($n >= $v) { $out .= $r; $n -= $v; }
+        return $out;
+    }, (string)$s);
 }
 
 function Cp_schema($cfg){
@@ -161,9 +204,13 @@ function Cp_start_payment($cfg, $cookie, $code){
     try {
         $tables = Cp_schema($cfg);
         if (Cp_has_access($cfg, $tables, $uid, $code)) return array('redirect' => $back);
+        if (!empty($course['authored']) && !Cp_course_key($cfg, $tables, $code)) {
+            Cp_log($cfg, 'no_manifest', array('user' => $uid, 'course' => $code));
+            return array('error' => 'course', 'redirect' => $back);
+        }
         $email = Cp_user_email($cfg, $uid);
         $amount = number_format((float)$course['price'], 2, '.', '');
-        $title = 'Доступ к курсу «' . $course['title'] . '» — ideav.ru/courses';
+        $title = 'Доступ к курсу «' . Cp_no_digits($course['title']) . '» — ideav.ru/courses';
         $data = array(
             'customerCode' => $cfg['customer_code'],
             'merchantId' => $cfg['merchant_id'],
@@ -228,7 +275,7 @@ function Cp_webhook($cfg, $payload){
         $granted = false;
         if ($amount + 0.001 >= (float)$o['amount']) {
             if (!Cp_has_access($cfg, $tables, $uid, $code)) {
-                $key = Cp_content_key($cfg, $code);
+                $key = Cp_course_key($cfg, $tables, $code);
                 if (!$key) throw new Exception('нет ключа курса ' . $code);
                 Cp_admin_create($cfg, $xsrf, $tables['Доступ'], $uid . ':' . $code, array(
                     'Пользователь' => $uid, 'Курс' => $code, 'Ключ' => $key, 'Основание' => 'оплата', 'Дата и время' => date('d.m.Y H:i:s')));

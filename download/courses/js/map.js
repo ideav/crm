@@ -80,4 +80,5 @@
     });
     return E('div', { class: 'row promo' }, [inp, btn, msg]);
   }
+  A.promoForm = promoForm; // и на странице курса (catalog.js)
 })();

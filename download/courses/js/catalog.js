@@ -83,6 +83,7 @@
     var started = ls.some(function (l) { return D.progress[c.code + '/' + l.id]; });
     var cta = E('div', { class: 'row course-cta' });
     var msg = E('p', { class: 'muted small' });
+    var promo = null;
     var startHref = first ? '#/c/' + encodeURIComponent(c.code) + '/' + encodeURIComponent(first.id) : '#/map';
     if (access) {
       cta.appendChild(E('a', { class: 'btn btn-primary', href: startHref, text: started ? 'Продолжить' : 'Начать курс' }));
@@ -91,15 +92,23 @@
       A.loginButtons().forEach(function (b) { cta.appendChild(b); });
     } else {
       var req = D.requests.filter(function (r) { return r['Курс'] === c.code && r['Статус'] !== 'reject' && A.refId(r['Пользователь']) === D.uid; })[0];
+      // своя ссылка оплаты автора — во вкладке, с «Я оплатил»; иначе — оплата картой/СБП через
+      // courses-pay.php, доступ открывает вебхук (ideav/crm#5588)
+      var ownPay = !c.payUrl && !c.free && Number(c.price) > 0;
       if (c.payUrl) cta.appendChild(E('a', { class: 'btn btn-primary', href: c.payUrl, target: '_blank', rel: 'noopener', text: 'Оплатить · ' + A.priceText(c) }));
+      if (ownPay) cta.appendChild(E('a', { class: 'btn btn-primary', href: '/courses-pay.php?course=' + encodeURIComponent(c.code), text: 'Оплатить · ' + A.priceText(c) }));
       if (req) msg.textContent = req['Статус'] === 'done' ? 'Заявка обработана — обновите страницу.' : D.requestNote;
-      else {
+      else if (ownPay) {
+        msg.textContent = 'Курс откроется сразу после оплаты картой или СБП. Если у вас есть промокод — введите его, и курс откроется сразу.';
+        if (A.promoForm) promo = A.promoForm(c);
+      } else {
         var paid = E('button', { class: 'btn', type: 'button', text: 'Я оплатил', onclick: function () {
           paid.disabled = true;
           D.requestPaid(c.code).then(function () { A.route(); }, function () { paid.disabled = false; msg.textContent = 'Не удалось отправить, попробуйте ещё раз.'; });
         } });
         cta.appendChild(paid);
-        msg.textContent = c.payUrl ? 'Оплата откроется в новой вкладке. Доступ откроется сам после оплаты; если за пару минут не открылся — нажмите «Я оплатил».' : 'Оплатили или есть промокод? Нажмите «Я оплатил» или введите промокод на карте курсов.';
+        msg.textContent = c.payUrl ? 'Оплата откроется в новой вкладке. Доступ откроется сам после оплаты; если за пару минут не открылся — нажмите «Я оплатил».' : 'Оплатили или есть промокод? Нажмите «Я оплатил» или введите промокод ниже.';
+        if (A.promoForm) promo = A.promoForm(c);
       }
     }
     var head = E('section', { class: 'course-hero card' }, [
@@ -109,7 +118,7 @@
         E('div', { class: 'muted', text: (full.author ? 'Автор: ' + full.author + ' · ' : '') + ls.length + ' ' + plural(ls.length, 'урок', 'урока', 'уроков') }),
         E('div', { class: 'course-price', text: A.priceText(c) }),
         (full.tags || []).length ? E('div', { class: 'cat-tags' }, full.tags.map(function (t) { return E('a', { class: 'tag', href: '#/catalog?tag=' + encodeURIComponent(t), text: '#' + t }); })) : null,
-        cta, msg])]);
+        cta, msg, promo])]);
     root.appendChild(head);
     if (full.desc) root.appendChild(E('section', { class: 'card' }, [E('h2', { text: 'О курсе' }), E('p', { class: 'pre', text: full.desc })]));
     var who = E('section', { class: 'card', hidden: !full.forWhom }, [E('h2', { text: 'Для кого' }), E('p', { class: 'pre', text: full.forWhom || '' })]);
