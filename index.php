@@ -214,6 +214,9 @@ define("MCP_TOKEN_TTL_DAYS", 90);    # наибольший срок MCP-ток�
 define("MCP_SCOPES", "read:r,write:w,delete:d,rights:g,schema:s");
 define("LOGIN_LOCK_S", 900);         # после RETRIES_LIMIT неудач подряд вход закрыт на столько секунд
 defined("AUTH_COOKIE_SAMESITE") || define("AUTH_COOKIE_SAMESITE", "Lax");
+# #5205: режим refresh/access для API-клиентов — AUTH_TOKENS ("session" | "refresh"), ACCESS_TTL (сек, 900),
+# REFRESH_TTL (простой refresh, сек, 30 дн.). Задаются define в include/connection.php или INTEGRAM_<имя>;
+# читаются функцией Auth_conf при запросе (connection.php подключается ниже этих строк).
 define("SECRET", 130);
 define("QR_LOGIN_TTL", 120);  # Вход по QR: время жизни кода, сек (#4667)
 define("QR_LOGIN_MAX", 200);  # Вход по QR: одновременных сессий на базу
@@ -1260,14 +1263,14 @@ function Token_stored_val($kind, $exp, $scope, $secret){
 function Token_db_val($tok, $now = NULL){
 	$p = Token_parse($tok);
 	if($p === NULL)
-		return (string)$tok;
+		return preg_match('/^(r|a)[.]/', (string)$tok) ? FALSE : (string)$tok;  # #5205: refresh/access — не ключ API
 	if(($p["kind"] === "mcp") || ($p["exp"] <= ($now === NULL ? time() : $now)))
 		return FALSE;
 	return Token_stored_val($p["kind"], $p["exp"], $p["scope"], $p["secret"]);
 }
 # Условие SQL на строку токена: прежний ключ пользователя, а не сессия/MCP-токен
 function Token_key_sql($alias){
-	return "$alias.val NOT REGEXP '^(s|m|mcp)[.][0-9]+[.]'";
+	return "$alias.val NOT REGEXP '^(s|m|mcp|r)[.][0-9]+[.]'";
 }
 # Условие SQL на простой сессии: последний запрос не раньше SESSION_IDLE назад (ord — минуты)
 function Token_idle_sql($alias, $parsed, $now = NULL){
@@ -1339,10 +1342,11 @@ function Session_prune_ids($rows, $now, $max = SESSION_MAX){
 	$drop = array();
 	$live = array();
 	foreach($rows as $id => $row)
-		if(preg_match('/^(s|m|mcp)\.([0-9]{1,12})\./', (string)$row["val"], $m)){
-			if(((int)$m[2] <= $now) || (($m[1] === "s") && ((int)$row["ord"] * 60 < $now - SESSION_IDLE)))
+		if(preg_match('/^(s|m|mcp|r)\.([0-9]{1,12})\./', (string)$row["val"], $m)){
+			if(((int)$m[2] <= $now) || (($m[1] === "s") && ((int)$row["ord"] * 60 < $now - SESSION_IDLE))
+					|| (($m[1] === "r") && Refresh_idle($row["ord"], $now)))
 				$drop[] = $id;
-			elseif($m[1] === "s")
+			elseif(($m[1] === "s") || ($m[1] === "r"))
 				$live[] = $id;
 		}
 	if(count($live) > $max)
@@ -1352,7 +1356,7 @@ function Session_prune_ids($rows, $now, $max = SESSION_MAX){
 function Session_prune($uid){
 	global $z;
 	$rows = array();
-	$data_set = Exec_sql("SELECT id, val, ord FROM $z WHERE up=".(int)$uid." AND t=".TOKEN." AND val REGEXP '^(s|m|mcp)[.]' ORDER BY id"
+	$data_set = Exec_sql("SELECT id, val, ord FROM $z WHERE up=".(int)$uid." AND t=".TOKEN." AND val REGEXP '^(s|m|mcp|r)[.]' ORDER BY id"
 				, "Sessions of the user");
 	while($row = mysqli_fetch_array($data_set))
 		$rows[$row["id"]] = array("val" => $row["val"], "ord" => $row["ord"]);
@@ -1364,13 +1368,130 @@ function Session_prune($uid){
 # Выход этой сессии: строка сессии удаляется; для прежнего токена — FALSE (вызывающий решает сам)
 function Session_drop($tok, $db = NULL){
 	global $z;
+	$db = $db === NULL ? $z : $db;
+	if(($a = Access_parse($tok)) !== NULL){  # #5205: выход по access закрывает его refresh-сессию
+		Exec_sql("DELETE FROM $db WHERE id=".$a["rid"]." AND t=".TOKEN." AND val LIKE 'r.%'", "Drop the refresh session");
+		return TRUE;
+	}
 	$p = Token_parse($tok);
 	if(($p === NULL) || ($p["kind"] === "mcp"))
 		return FALSE;
-	$db = $db === NULL ? $z : $db;
 	Exec_sql("DELETE FROM $db WHERE t=".TOKEN." AND val='".Token_stored_val($p["kind"], $p["exp"], $p["scope"], $p["secret"])."'"
 		, "Drop the session");
 	return TRUE;
+}
+# #5205: режим refresh/access для API-клиентов (браузер остаётся на сессиях s в куке).
+#   r.<срок>.<64 hex> — refresh: строка «Токен» r.<срок>.<sha256 секрета>[.<16 hex sha256 прежнего>], срок = вход
+#     + SESSION_LIFETIME, простой — REFRESH_TTL (ord, минуты). Каждое обновление ротирует секрет в той же строке;
+#     предъявление прежнего refresh (повтор = украден) удаляет строку — сессия устройства закрыта.
+#   a.<срок>.<id строки refresh>.<HMAC> — access на ACCESS_TTL, в базе не хранится: подпись на значении строки
+#     refresh, так что ротация, выход и смена пароля гасят его сразу. xsrf — на строку refresh, а не на access.
+function Auth_conf($name, $default){
+	$v = defined($name) ? constant($name) : getenv("INTEGRAM_$name");
+	if(($v === FALSE) || ($v === ""))
+		return $default;
+	return is_int($default) ? (int)$v : (string)$v;
+}
+function Refresh_mode(){
+	return Auth_conf("AUTH_TOKENS", "session") === "refresh";
+}
+function Refresh_parse($tok){
+	if(!is_string($tok) || !preg_match('/^r\.([0-9]{1,12})\.([0-9a-f]{64})$/', $tok, $m))
+		return NULL;
+	return array("exp" => (int)$m[1], "secret" => $m[2]);
+}
+function Refresh_row_val($exp, $secret, $prevSecret = NULL){
+	return "r.".(int)$exp.".".hash("sha256", $secret).($prevSecret === NULL ? "" : ".".substr(hash("sha256", $prevSecret), 0, 16));
+}
+# Чей refresh $p для значения строки: "current" — действующий, "previous" — прежний (повтор), "" — чужой
+function Refresh_row_matches($rowVal, $p){
+	if(!$p || !preg_match('/^r\.([0-9]{1,12})\.([0-9a-f]{64})(?:\.([0-9a-f]{16}))?$/', (string)$rowVal, $m) || ((int)$m[1] !== $p["exp"]))
+		return "";
+	$h = hash("sha256", $p["secret"]);
+	if(hash_equals($m[2], $h))
+		return "current";
+	return (isset($m[3]) && hash_equals($m[3], substr($h, 0, 16))) ? "previous" : "";
+}
+function Refresh_idle($ord, $now){
+	return (int)$ord * 60 < $now - Auth_conf("REFRESH_TTL", 30*86400);
+}
+function Refresh_xsrf($db, $rid){
+	return xsrf("r.".(int)$rid, $db);
+}
+function Access_parse($tok){
+	if(!is_string($tok) || !preg_match('/^a\.([0-9]{1,12})\.([0-9]{1,12})\.([0-9a-f]{64})$/', $tok, $m))
+		return NULL;
+	return array("exp" => (int)$m[1], "rid" => (int)$m[2], "mac" => $m[3]);
+}
+function Access_mac($db, $exp, $rid, $rowVal){
+	return hash_hmac("sha256", "$db:a.$exp.$rid:$rowVal", SALT);
+}
+function Access_issue($db, $rid, $rowVal, $now = NULL){
+	$now = $now === NULL ? time() : $now;
+	$exp = $now + Auth_conf("ACCESS_TTL", 900);
+	if(preg_match('/^r\.([0-9]{1,12})\./', (string)$rowVal, $m))
+		$exp = min($exp, (int)$m[1]);
+	return "a.$exp.".(int)$rid.".".Access_mac($db, $exp, (int)$rid, $rowVal);
+}
+function Access_check($db, $p, $rowVal, $now = NULL){
+	$now = $now === NULL ? time() : $now;
+	if(!$p || ($p["exp"] <= $now) || !preg_match('/^r\.([0-9]{1,12})\./', (string)$rowVal, $m) || ((int)$m[1] <= $now))
+		return FALSE;
+	return hash_equals(Access_mac($db, $p["exp"], $p["rid"], $rowVal), $p["mac"]);
+}
+# Новая refresh-сессия пользователя $uid: поля ответа входа (token = access)
+function Refresh_login($uid){
+	global $z;
+	$secret = secureToken();
+	$exp = time() + SESSION_LIFETIME;
+	$val = Refresh_row_val($exp, $secret);
+	$rid = Insert((int)$uid, (int)floor(time() / 60), TOKEN, $val, "Save refresh session");
+	Session_prune($uid);
+	return Refresh_pair($z, $rid, $val, "r.$exp.$secret");
+}
+function Refresh_pair($db, $rid, $val, $refresh, $now = NULL){
+	$now = $now === NULL ? time() : $now;
+	$access = Access_issue($db, $rid, $val, $now);
+	$p = Access_parse($access);
+	return array("token" => $access, "access_token" => $access, "refresh_token" => $refresh, "token_type" => "Bearer"
+		, "expires_in" => max(0, $p["exp"] - $now), "_xsrf" => Refresh_xsrf($db, $rid));
+}
+# Строка refresh-сессии по предъявленному refresh: array(строка, "current" | "previous") или NULL.
+# Кандидаты — строки с тем же сроком (секунда входа), какой из них — решает Refresh_row_matches.
+function Refresh_find($p){
+	global $z;
+	$data_set = Exec_sql("SELECT tok.id, tok.up, tok.val, tok.ord FROM $z tok, $z u WHERE tok.t=".TOKEN." AND u.id=tok.up AND u.t=".USER
+			." AND tok.val LIKE 'r.".(int)$p["exp"].".%'", "Refresh session");
+	while($row = mysqli_fetch_array($data_set))
+		if(($hit = Refresh_row_matches($row["val"], $p)) !== "")
+			return array($row, $hit);
+	return NULL;
+}
+# Обновление пары по refresh $tok: новая пара (refresh ротирован) или NULL — отказ. Повтор прежнего
+# refresh и простой закрывают сессию устройства.
+function Refresh_rotate($tok, $now = NULL){
+	global $z, $connection;
+	$now = $now === NULL ? time() : $now;
+	$p = Refresh_parse($tok);
+	if(!$p || ($p["exp"] <= $now) || !($found = Refresh_find($p)))
+		return NULL;
+	list($row, $hit) = $found;
+	if(($hit === "previous") || Refresh_idle($row["ord"], $now)){
+		Exec_sql("DELETE FROM $z WHERE id=".(int)$row["id"]." AND t=".TOKEN, $hit === "previous" ? "Refresh reuse: drop the session" : "Drop idle refresh");
+		return NULL;
+	}
+	$secret = secureToken();
+	$val = Refresh_row_val($p["exp"], $secret, $p["secret"]);
+	Exec_sql("UPDATE $z SET val='$val', ord=".(int)floor($now / 60)." WHERE id=".(int)$row["id"]." AND val='".addslashes($row["val"])."'", "Rotate refresh");
+	if(mysqli_affected_rows($connection) !== 1)  # параллельное обновление тем же refresh успело раньше
+		return NULL;
+	return Refresh_pair($z, $row["id"], $val, "r.".$p["exp"].".$secret", $now);
+}
+# Поля входа для JSON-ответа: в режиме refresh — пара токенов вместо сессии (у admin и без пользователя — как есть)
+function Login_json_fields($fields, $uid){
+	if(!Refresh_mode() || !(int)$uid)
+		return $fields;
+	return array_merge($fields, Refresh_login($uid));
 }
 # Кука входа idb_<база>: HttpOnly (скрипт страницы её не читает), SameSite, Secure на https.
 # Рядом idbs_<база>=1 — без HttpOnly и без секрета: по ней start.html и кабинет видят, куда есть вход.
@@ -3356,14 +3477,22 @@ function Validate_Token(){ # Validates the cookie token and gathers the user per
 		# #1043: сессия и короткий токен ищутся по хешу и со сроком; MCP-токен ядро не принимает
 		$tokDb = $typ === TOKEN ? Token_db_val($tok) : $tok;
 		$tokSession = $typ === TOKEN ? Token_parse($tok) : NULL;
-		$data_set = Exec_sql("SELECT u.id, u.val, role_def.id r, role_def.val role, xsrf.val xsrf, tok.id tok, tok.ord tok_ord, xsrf.id xsrf_id, act.id act_id
+		# #5205: access ищет свою строку refresh по номеру, подпись проверяется по её значению ниже
+		$tokAccess = ($typ === TOKEN) && Refresh_mode() ? Access_parse($tok) : NULL;
+		if($tokAccess !== NULL)
+			$tokDb = $tokAccess["exp"] > time() ? "" : FALSE;
+		$data_set = Exec_sql("SELECT u.id, u.val, role_def.id r, role_def.val role, xsrf.val xsrf, tok.id tok, tok.ord tok_ord, tok.val tok_val, xsrf.id xsrf_id, act.id act_id
 		                FROM $z tok, $z u LEFT JOIN ($z r CROSS JOIN $z role_def) ON r.up=u.id AND role_def.id=r.t AND role_def.t=".ROLE
 						." LEFT JOIN $z xsrf ON xsrf.up=u.id AND xsrf.t=".XSRF
 						." LEFT JOIN $z act ON act.up=u.id AND act.t=".ACTIVITY
-						." WHERE u.t=".USER." AND tok.up=u.id AND ".($tokDb === FALSE ? "0" : "tok.val='$tokDb'".Token_idle_sql("tok", $tokSession))
+						." WHERE u.t=".USER." AND tok.up=u.id AND ".($tokDb === FALSE ? "0"
+							: ($tokAccess !== NULL ? "tok.id=".$tokAccess["rid"]." AND tok.val LIKE 'r.%'" : "tok.val='$tokDb'".Token_idle_sql("tok", $tokSession)))
 						." AND tok.t=$typ", "Validate token");
+		$row = mysqli_fetch_array($data_set);
+		if($row && ($tokAccess !== NULL) && (!Access_check($z, $tokAccess, $row["tok_val"]) || Refresh_idle($row["tok_ord"], time())))
+			$row = NULL;
 		# Пользователь guest входит только с ролью guest (#5231), иначе — как посетитель без токена
-		if(($row = mysqli_fetch_array($data_set)) && (strtolower($row["val"]) !== "guest" || ($row["r"] && strtolower((string)$row["role"]) === "guest"))){
+		if($row && (strtolower($row["val"]) !== "guest" || ($row["r"] && strtolower((string)$row["role"]) === "guest"))){
 			$GLOBALS["GLOBAL_VARS"]["user"] = strtolower($row["val"]);
 			$GLOBALS["GLOBAL_VARS"]["role"] = strtolower($row["role"]);
 			$GLOBALS["GLOBAL_VARS"]["role_id"] = $row["r"];
@@ -3374,7 +3503,9 @@ function Validate_Token(){ # Validates the cookie token and gathers the user per
 				        ."[EN]No role assigned to user ".$GLOBALS["GLOBAL_VARS"]["user"]));
 			# xsrf без записи или прежней формулы (общий на базу) заменяется на производный от токена.
 			# У сессии (#1043) xsrf свой на устройство — только производный, запись ключа API не трогается.
-			if($tokSession !== NULL){
+			if($tokAccess !== NULL)
+				$xsrf = Refresh_xsrf($z, $row["tok"]);
+			elseif($tokSession !== NULL){
 				# Скользящий срок: запрос отмечает активность сессии (раз в SESSION_TOUCH) и продлевает куку;
 				# у конца жизни сессии страница браузера получает новую — xsrf страницы берётся уже от неё.
 				$fromCookie = isset($_COOKIE["idb_$z"]) && is_string($_COOKIE["idb_$z"]) && (addslashes($_COOKIE["idb_$z"]) === $tok);
@@ -14195,7 +14326,7 @@ function authJWT($u){
 		updateTokens($row);
 #		setcookie("idb_$z", $GLOBALS["GLOBAL_VARS"]["token"], time() + COOKIES_EXPIRE, "/"); # 30 days
 		setcookie("idb_$z", $GLOBALS["GLOBAL_VARS"]["token"], Auth_cookie_opts(0)); # Uon browser close
-    	api_dump(json_encode(array("_xsrf"=>$GLOBALS["GLOBAL_VARS"]["xsrf"],"token"=>$GLOBALS["GLOBAL_VARS"]["token"],"id"=>$GLOBALS["GLOBAL_VARS"]["user_id"],"user"=>$GLOBALS["GLOBAL_VARS"]["user"])), "login.json");
+    	api_dump(json_encode(Login_json_fields(array("_xsrf"=>$GLOBALS["GLOBAL_VARS"]["xsrf"],"token"=>$GLOBALS["GLOBAL_VARS"]["token"],"id"=>$GLOBALS["GLOBAL_VARS"]["user_id"],"user"=>$GLOBALS["GLOBAL_VARS"]["user"]), $GLOBALS["GLOBAL_VARS"]["user_id"])), "login.json");
 	}
 	else
 	    die("{\"error\":\"No user found\"}");
@@ -15906,9 +16037,25 @@ switch($a)  # Check actions, which don't require authentication
 			, "_xsrf" => xsrf($mcpAccess, $z)));
 		break;
 
+	# #5205: обновление пары refresh/access (POST refresh_token). Refresh ротируется в своей строке;
+	# прежний refresh, предъявленный повторно, закрывает сессию устройства (его увели).
+	case "_refresh":
+		if($_SERVER["REQUEST_METHOD"] !== "POST")
+			Mcp_json(array("error" => "invalid_request"), "405 Method Not Allowed");
+		if(!Refresh_mode())
+			Mcp_json(array("error" => "refresh_disabled"), "404 Not Found");
+		$rfPair = Refresh_rotate(isset($_POST["refresh_token"]) && is_string($_POST["refresh_token"]) ? trim($_POST["refresh_token"]) : "");
+		if($rfPair === NULL)
+			Mcp_json(array("error" => "invalid_grant"), "401 Unauthorized");
+		Mcp_json($rfPair);
+		break;
+
 	# #1043: выход браузера. Кука входа HttpOnly — скрипт страницы её не снимет, снимает сервер:
 	# эта база (или все базы браузера при all=1), строки сессий удаляются. GET уводит на вход, POST — JSON.
 	case "_logout":
+		# #5205: API-клиент закрывает свою refresh-сессию — гаснут и её access
+		if(($lgR = Refresh_parse(isset($_POST["refresh_token"]) && is_string($_POST["refresh_token"]) ? trim($_POST["refresh_token"]) : "")) !== NULL)
+			Exec_sql("DELETE FROM $z WHERE t=".TOKEN." AND val LIKE 'r.".$lgR["exp"].".".hash("sha256", $lgR["secret"])."%'", "Drop the refresh session");
 		foreach($_COOKIE as $ckName => $ckVal){
 			if((strpos($ckName, "idb_") !== 0) || !is_string($ckVal))
 				continue;
@@ -16059,7 +16206,7 @@ switch($a)  # Check actions, which don't require authentication
 			# После смены пароля заменяется и текущий токен (#1036): украденная сессия не переживает смену пароля.
 			# Смена пароля закрывает и прочие сессии пользователя: украденная сессия её не переживает.
 			if(!empty($pwdChanged))
-				Exec_sql("DELETE FROM $z WHERE up=".(int)$row["uid"]." AND t=".TOKEN." AND val REGEXP '^(s|m)[.]'", "Drop sessions on password change");
+				Exec_sql("DELETE FROM $z WHERE up=".(int)$row["uid"]." AND t=".TOKEN." AND val REGEXP '^(s|m|r)[.]'", "Drop sessions on password change");
 			updateTokens($row, Rotate_token_hashes($row, $u, $p, !empty($pwdChanged)));
 		}
 		elseif((strtolower($u) == "admin") && (Login_captcha_passed() || Login_captcha_die())
@@ -16078,7 +16225,7 @@ switch($a)  # Check actions, which don't require authentication
 		else
 			login($z, $_REQUEST["u"], "wrong");
 		if(isApi())
-			api_dump(json_encode(array("_xsrf"=>$GLOBALS["GLOBAL_VARS"]["xsrf"],"token"=>$GLOBALS["GLOBAL_VARS"]["token"],"id"=>$GLOBALS["GLOBAL_VARS"]["user_id"],"msg"=>$msg)), "login.json");
+			api_dump(json_encode(Login_json_fields(array("_xsrf"=>$GLOBALS["GLOBAL_VARS"]["xsrf"],"token"=>$GLOBALS["GLOBAL_VARS"]["token"],"id"=>$GLOBALS["GLOBAL_VARS"]["user_id"],"msg"=>$msg), $GLOBALS["GLOBAL_VARS"]["user_id"])), "login.json");
 		if($msg !== "")
 			die($msg.BACK_LINK);
 	    if(substr($GLOBALS["GLOBAL_VARS"]["uri"],0,strlen($z)+1) != "/$z")
@@ -16106,7 +16253,7 @@ switch($a)  # Check actions, which don't require authentication
 			Exec_sql("UPDATE $z SET val='".addslashes($cp)."' WHERE id=".(int)$row["id"], "Reset the password");
 			# #1036: сброс пароля гасит прежние сессии — ключ пользователя заменяется новым, сессии удаляются
 			Exec_sql("UPDATE $z SET val='".secureToken()."' WHERE up=".(int)$row["up"]." AND t=".TOKEN." AND ".str_replace("tok.", "", Token_key_sql("tok")), "Reset the token");
-			Exec_sql("DELETE FROM $z WHERE up=".(int)$row["up"]." AND t=".TOKEN." AND val REGEXP '^(s|m)[.]'", "Drop sessions on reset");
+			Exec_sql("DELETE FROM $z WHERE up=".(int)$row["up"]." AND t=".TOKEN." AND val REGEXP '^(s|m|r)[.]'", "Drop sessions on reset");
 			Exec_sql("UPDATE $z SET val='0' WHERE up=".(int)$row["up"]." AND t=".RETRIES, "Reset retries on password reset");
 			if(isApi())
 				login($z, $_REQUEST["u"], "confirm");
@@ -16189,7 +16336,7 @@ switch($a)  # Check actions, which don't require authentication
     				Update_Val($row["act"], microtime(TRUE));
     			else
     				Insert($row["id"], 1, ACTIVITY, microtime(TRUE), "Save activity time");
-    		    die('{"token":"'.$token.'","_xsrf":"'.$xsrf.'"}');
+    		    die(json_encode(Login_json_fields(array("token" => $token, "_xsrf" => $xsrf), $row["id"])));
     		}
     		else
     		    die('{"error":"user not found"}');

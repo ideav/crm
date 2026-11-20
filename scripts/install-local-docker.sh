@@ -91,6 +91,8 @@ INTEGRAM_HTTP_PORT=8080
 INTEGRAM_HTTPS_PORT=8443
 INTEGRAM_ADMIN_EMAIL=admin@example.local
 INTEGRAM_SALT=$(dotenv_quote "$salt")
+# Токены API: session — сессия устройства на год; refresh — пара refresh/access (docs/kb/00-start.md)
+INTEGRAM_AUTH_TOKENS=session
 ENV
 
 mkdir -p docker/certs
