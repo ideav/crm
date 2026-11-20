@@ -343,3 +343,35 @@ curl -sS -X POST https://<agent-host>/path \
   -d '{"db":"acme","user":"petrov","token":"<токен petrov>","message":"привет","attachments":[]}'
 # ожидаем: {"content":"..."} (или plain-text), HTTP 200; user ≠ db — не повод отказывать
 ```
+
+## 9. Учёт расхода: `POST /{db}/billing/add`
+
+Агент сообщает ядру расход базы служебным вызовом без сессии. Ядро переводит его в единицы
+ресурса тарифа и прибавляет к счётчикам базы.
+
+```bash
+curl -X POST https://host/{db}/billing/add \
+  -H "X-Billing-Token: $BILLING_SERVICE_TOKEN" \
+  -d '{"tokens": 2500, "runs": 1}'
+# 200 {"ok":true,"db":"…","added":{"ai_tokens":3,"agent_runs":1}}
+```
+
+- `tokens` — токены ИИ за вызов, `runs` — запуски агента; целые ≥ 0, хотя бы одно больше нуля.
+- Единицы: `ai_tokens = ceil(tokens / BILLING_AI_TOKENS_PER_UNIT)`,
+  `agent_runs = runs × BILLING_AGENT_RUN_UNITS`.
+- Счётчик — строка-реквизит записи базы в `my` (`t=271`, `val=<база>`) с типом
+  `BILLING_AI_TOKENS_TYPE` / `BILLING_AGENT_RUNS_TYPE`; значение — её `ord`, `val` — код
+  (`ai_tokens`, `agent_runs`). Прибавка — один `UPDATE … SET c.ord=c.ord+N`; строку создаёт
+  первый вызов под `GET_LOCK`. `ord` самой записи базы (активность) вызов не меняет.
+- Повторная доставка того же вызова прибавит расход второй раз: слать один раз на задачу.
+
+| Имя | Назначение | По умолчанию |
+| --- | --- | --- |
+| `BILLING_SERVICE_TOKEN` | токен заголовка `X-Billing-Token` | — (пусто = вызов выключен, 404) |
+| `BILLING_AI_TOKENS_TYPE` | id типа-реквизита «ИИ-токены» у записи базы | — (пусто = 503) |
+| `BILLING_AGENT_RUNS_TYPE` | id типа-реквизита «Запуски агента» | — (пусто = 503) |
+| `BILLING_AI_TOKENS_PER_UNIT` | токенов в одной единице | 1000 |
+| `BILLING_AGENT_RUN_UNITS` | единиц за один запуск | 1 |
+
+Ответы: 405 — не POST, 403 — неверный токен, 400 — тело не по формату, 404 — вызов выключен
+или в `my` нет записи базы.
