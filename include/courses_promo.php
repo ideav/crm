@@ -108,7 +108,7 @@ function Cpr_redeem_locked($cfg, $tables, $uid, $course, $code){
         Cp_log($cfg, 'promo_denied', array('user' => $uid, 'course' => $course, 'error' => $err));
         return array(200, array('ok' => false, 'error' => $err));
     }
-    $key = (isset($tables['Промокод']['req']['Ключ']) && !empty($p['Ключ'])) ? $p['Ключ'] : Cp_content_key($cfg, $course);
+    $key = (isset($tables['Промокод']['req']['Ключ']) && !empty($p['Ключ'])) ? $p['Ключ'] : Cp_course_key($cfg, $tables, $course);
     if (!$key) return array(200, array('ok' => false, 'error' => 'course'));
     $xsrf = null; $used = (int)$p['Использовано'];
     # сначала списываем место, потом выдаём доступ; не вышло — возвращаем место
