@@ -19,6 +19,8 @@
 //
 // Здесь проверяем СОСТАВЛЕННУЮ логику обоих путей на РЕАЛЬНЫХ функциях модуля.
 // Run with: node experiments/atex-production-planning-4179.test.js
+//
+// rules: none (defect #4179)
 
 process.env.TZ = 'UTC';
 global.window = {};

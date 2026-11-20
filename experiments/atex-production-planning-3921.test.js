@@ -10,6 +10,8 @@
 // станки, пока станок в отпуске не перестанет работать после отпуска.
 //
 // Run with: node experiments/atex-production-planning-3921.test.js
+//
+// rules: none (defect #3921)
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

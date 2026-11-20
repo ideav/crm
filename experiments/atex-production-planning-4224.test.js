@@ -11,6 +11,8 @@
 //       а resequenceWithinDays применял «фольга в конец» только если СТРОГО дешевле по наладке.
 //
 // Run with: node experiments/atex-production-planning-4224.test.js
+//
+// rules: FOIL-end-hard, MOVE-manual-lock-over-due
 
 var mod = require('../download/atex/js/production-planning.js');
 var P = mod.planning;

@@ -28,6 +28,8 @@
 //   E — выравнивание зовёт паровоз (`trainOnly`) и берёт ВСЕ переполненные станки ОДНИМ вызовом.
 //
 // Run with: node experiments/atex-pp-4732-settle-train-only.test.js
+//
+// rules: none (defect #4732)
 
 process.env.TZ = 'UTC';
 global.window = { db: 'ateh1', xsrf: 'x' };

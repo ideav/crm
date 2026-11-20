@@ -65,7 +65,7 @@
             current.cols.forEach(function (c) {
                 var v = rec[c[0]];
                 if (c[1].indexOf('ref:') === 0) v = PF.refId(v);
-                else if (c[1] === 'bool') v = (v === 'X') ? 1 : 0;
+                else if (c[1] === 'bool') v = PF.bool(v) ? 1 : 0;
                 vals[c[0]] = v;
             });
         }
@@ -110,7 +110,7 @@
                 title: c[0], cls: c[1] === 'number' ? 'pf-num' : '',
                 render: function (r) {
                     var v = r[c[0]];
-                    if (c[1] === 'bool') return v === 'X' ? 'да' : 'нет';
+                    if (c[1] === 'bool') return PF.bool(v) ? 'да' : 'нет';
                     if (c[1].indexOf('ref:') === 0) return PF.refVal(v);
                     return v;
                 }

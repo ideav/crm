@@ -83,7 +83,7 @@ function run_case($case){
     $src = file_get_contents(__DIR__."/../index.php");
     $code = "";
     # Api_always_json_mark может отсутствовать (ядро до #5335) — тогда маршрут идёт без неё, как было
-    foreach(array("isApi", "Api_always_json_mark", "Validate_Token", "Guest_session", "Token_parse", "Token_stored_val",
+    foreach(array("isApi", "Auth_conf", "Refresh_mode", "Access_parse", "Access_mac", "Access_check", "Refresh_idle", "Refresh_xsrf", "Api_always_json_mark", "Validate_Token", "Guest_session", "Token_parse", "Token_stored_val",
                   "Token_db_val", "Token_idle_sql", "Session_refresh_action", "Session_cookie_exp",
                   "Auth_cookie_opts", "Auth_cookie", "qrLoginIsHttps") as $fn)
         $code .= extract_function_source($src, $fn)."\n";

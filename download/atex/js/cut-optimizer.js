@@ -908,14 +908,19 @@
     }
 
     // #4848: в расчёте резки — только виды сырья с галкой «Для расчета резки».
-    // Галка приходит из JSON_OBJ как 'X' (BOOLEAN); пусто и '0' — не отмечено.
+    // Галка BOOLEAN приходит из JSON_OBJ как '1' (да) / '-1' (нет) / пусто (не задано); да — boolOn.
     // hasFlag=false (реквизита нет в этой сборке) — список НЕ режем: фильтр живёт
     // в реквизите, и старая база не должна остаться с пустым справочником.
+    // #5475: BOOLEAN Интеграма — '1' (или 'X') да, '-1' нет (хранится явно, #5442), пусто — не задано.
+    function boolOn(v) {
+        var s = String(v == null ? '' : v).trim().toLowerCase();
+        return s !== '' && s !== '0' && s !== '-1' && s !== 'false' && s !== 'нет';
+    }
+
     function materialsForCutting(list, hasFlag) {
         if (!hasFlag) return (list || []).slice();
         return (list || []).filter(function(m) {
-            var v = m && m.cutFlag;
-            return v !== undefined && v !== null && String(v).trim() !== '' && String(v).trim() !== '0';
+            return boolOn(m && m.cutFlag);
         });
     }
 
@@ -1268,7 +1273,7 @@
                     remainderM2: toNumber(row.batch_remainder_m2),
                     remainderM: toNumber(row.batch_remainder_m),
                     warehouse: row['Склад'] == null ? '' : String(row['Склад']).trim(),
-                    active: String(row.is_active == null ? '' : row.is_active).trim() !== ''
+                    active: boolOn(row.is_active)   // #5475: "-1" = нет (#5442)
                 };
             });
         }).catch(function() { self.batches = []; });

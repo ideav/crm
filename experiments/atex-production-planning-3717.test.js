@@ -6,6 +6,8 @@
 // дороже. Ручной путь (preserveOrder) фольгу больше НЕ пересортировывает — уважает порядок оператора.
 //
 // Run with: node experiments/atex-production-planning-3717.test.js
+//
+// rules: FOIL-penalty, FOIL-end-hard
 
 process.env.TZ = 'UTC';
 

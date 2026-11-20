@@ -595,12 +595,13 @@
     }
 
     function truthyFlag(value) {
+        // #5475: BOOLEAN с #5442 — "1" да, "-1" нет (хранится явно), пусто — не задано.
         if (value === true) return true;
         if (value === false || value == null) return false;
-        if (typeof value === 'number') return isFinite(value) && value !== 0;
+        if (typeof value === 'number') return isFinite(value) && value > 0;
         var s = String(value).trim().toLowerCase();
         if (!s) return false;
-        return !(s === '0' || s === 'false' || s === 'нет' || s === 'no' || s === 'off' || s === 'неактивно');
+        return !(s === '0' || s === '-1' || s === 'false' || s === 'нет' || s === 'no' || s === 'off' || s === 'неактивно');
     }
 
     function isActiveBatch(batch) {
@@ -1487,15 +1488,61 @@
     // cut_planning, что и заказы/ширины. У задания сырьё одно, поэтому в карте одно
     // имя на задание (первое непустое). Пустое (колонки нет / не заполнено) в карту
     // не попадает: подписи просто показывают обычное имя, как раньше.
+    // #5209: имя сырья берётся из Примечания позиции (position_note), если там оно указано:
+    // одно сырьё в разных заказах названо по-разному («MR377/MWR265» → в одних заказах MR377,
+    // в других MWR265), а alt_material отдаётся только позициям с «Кросс». Не разобралось —
+    // alt_material, как раньше.
     function rowsToCutAlts(rows) {
         var map = {};
         (rows || []).forEach(function(row) {
             var cutId = firstField(row, ['cut_id', 'id']);
-            var alt = firstField(row, ['alt_material']);
-            if (!cutId || !alt || map[cutId]) return;
-            map[cutId] = alt;
+            if (!cutId || map[cutId]) return;
+            var alt = materialFromNote(firstField(row, ['position_note']),
+                firstField(row, ['cut_material']), firstField(row, ['material_alt_name']))
+                || firstField(row, ['alt_material']);
+            if (alt) map[cutId] = alt;
         });
         return map;
+    }
+
+    // #5209 (комментарий к PR #5434): шапка задания — текст Примечания позиции целиком
+    // («6444 / MWR265 100 х 450 IN (…) (П) / 99мм х 9 / 20 резок (891мм)»). Колонка position_note
+    // того же cut_planning; на задание — первое непустое. Пустых в карте нет: шапка как раньше.
+    function rowsToCutNotes(rows) {
+        var map = {};
+        (rows || []).forEach(function(row) {
+            var cutId = firstField(row, ['cut_id', 'id']);
+            if (!cutId || map[cutId]) return;
+            var note = String(firstField(row, ['position_note']) || '').trim();
+            if (note) map[cutId] = note;
+        });
+        return map;
+    }
+
+    // #5209: имя сырья в Примечании позиции. Формат Примечания:
+    // «6443 / MWR265 100 х 450 IN (…) (П) / 99мм х 9 / 10 резок (891мм)», у образца
+    // « / Образец MR377 (110*30) IN / …». Берётся участок после первой «/», и если он
+    // начинается с имени ЭТОГО сырья — целиком, частью имени через «/» или альт-именем, —
+    // за которым идёт пробел, скобка или конец, возвращается это имя (в написании
+    // справочника). Иначе — пусто: чужое имя из Примечания не подставляется.
+    function materialFromNote(note, material, altName) {
+        var text = String(note == null ? '' : note);
+        var slash = text.indexOf('/');
+        if (slash < 0) return '';
+        var part = text.slice(slash + 1).replace(/^\s+/, '').replace(/^Образец\s+/i, '');
+        var lower = part.toLowerCase();
+        var mat = String(material == null ? '' : material).trim();
+        var names = [mat, String(altName == null ? '' : altName).trim()]
+            .concat(mat.split('/').map(function(s) { return s.trim(); }))
+            .filter(function(n, i, all) { return n !== '' && all.indexOf(n) === i; })
+            .sort(function(a, b) { return b.length - a.length; });
+        for (var i = 0; i < names.length; i++) {
+            var n = names[i];
+            if (lower.indexOf(n.toLowerCase()) !== 0) continue;
+            var next = part.charAt(n.length);
+            if (next === '' || /[\s(]/.test(next)) return n;
+        }
+        return '';
     }
 
     // #5060: втулка задания — из того же отчёта cut_planning (колонки «Дюймы» и
@@ -1722,6 +1769,8 @@
         cutOrderLabel: cutOrderLabel,       // #4606
         rowsToCutWidths: rowsToCutWidths,   // #4958: ширина позиции из cut_planning
         rowsToCutAlts: rowsToCutAlts,       // #4996: альт-имя сырья из cut_planning
+        rowsToCutNotes: rowsToCutNotes,     // #5209: Примечание позиции — шапка задания
+        materialFromNote: materialFromNote, // #5209: имя сырья из Примечания позиции
         rowsToCutSleeves: rowsToCutSleeves, // #5060: втулка задания из cut_planning
         cutSpecLine: cutSpecLine,           // #4958: подпись позиции в карточке очереди
         isForeignWarehouse: isForeignWarehouse,
@@ -2253,7 +2302,7 @@
     AtexSlitter.prototype.loadCutOrders = function() {
         var self = this;
         var sid = this.selectedSlitterId;
-        if (!sid) { this.cutOrders = {}; this.cutWidths = {}; this.cutAlts = {}; this.cutSleeves = {}; this.cutOrdersSlitterId = null; return Promise.resolve(); }
+        if (!sid) { this.cutOrders = {}; this.cutWidths = {}; this.cutAlts = {}; this.cutNotes = {}; this.cutSleeves = {}; this.cutOrdersSlitterId = null; return Promise.resolve(); }
         if (this.cutOrdersSlitterId === String(sid)) return Promise.resolve();
         return this.getJson('report/cut_planning?JSON_KV&FR_cut_slitter_id=' + encodeURIComponent(sid) + '&LIMIT=0,5000')
             .then(function(rows) {
@@ -2261,10 +2310,11 @@
                 self.cutOrders = core.rowsToCutOrders(list);
                 self.cutWidths = core.rowsToCutWidths(list);   // #4958
                 self.cutAlts = core.rowsToCutAlts(list);       // #4996
+                self.cutNotes = core.rowsToCutNotes(list);     // #5209: шапка — Примечание
                 self.cutSleeves = core.rowsToCutSleeves(list); // #5060
                 self.cutOrdersSlitterId = String(sid);
             })
-            .catch(function() { self.cutOrders = {}; self.cutWidths = {}; self.cutAlts = {}; self.cutSleeves = {}; self.cutOrdersSlitterId = null; });
+            .catch(function() { self.cutOrders = {}; self.cutWidths = {}; self.cutAlts = {}; self.cutNotes = {}; self.cutSleeves = {}; self.cutOrdersSlitterId = null; });
     };
 
     // #4606: подпись заказа для задания («3738» / «3738, 3742 +1»); пусто — если
@@ -2573,10 +2623,61 @@
     // #3674: события смены из защищённого отчёта report/slitter_shift_events (91520)
     // вместо сырого object/. Разобранные события раскладываем общим хвостом
     // applyLoadedEvents. Тихий фолбэк на прямое чтение (loadShiftEventsFromTable).
+    // #5545: пульт читает журнал С КОНЦА — порциями по SHIFT_EVENTS_PAGE, новые сверху, — и
+    // останавливается, как только в прочитанном есть событие «Начало/Конец смены» выбранного
+    // станка (или журнал кончился). Порция ≈ 13 рабочих дней (≈75 событий в день на ateh).
+    // Порядок «новые сверху» задан в САМОМ отчёте: сортировка колонок event_when (-1) и
+    // event_id (-2). Таблица событий сортируется параметром ORDER=-{id таблицы} — по главному
+    // значению, времени события.
+    var SHIFT_EVENTS_PAGE = 1000;
+
+    function hasShiftEventOfSlitter(events, slitterId, slitterLabel) {
+        return (events || []).some(function(ev) {
+            return (isShiftStartType(ev.type) || isShiftEndType(ev.type))
+                && shiftEventMatchesSlitter(ev, slitterId, slitterLabel);
+        });
+    }
+
+    // Читает порции, пока не найдётся смена станка или не придёт неполная порция.
+    // readPage(offset) → Promise<разобранные события порции>.
+    AtexSlitter.prototype.readShiftEventsFromEnd = function(readPage) {
+        var self = this;
+        var all = [];
+        function step(offset) {
+            return readPage(offset).then(function(list) {
+                all = all.concat(list);
+                if (list.length < SHIFT_EVENTS_PAGE) return all;
+                if (!self.selectedSlitterId) return all;
+                if (hasShiftEventOfSlitter(all, self.selectedSlitterId, self.selectedSlitterLabel())) return all;
+                return step(offset + SHIFT_EVENTS_PAGE);
+            });
+        }
+        return step(0).then(function(list) {
+            return list.sort(function(a, b) { return String(b.when).localeCompare(String(a.when)); });
+        });
+    };
+
+    // Порция пришла старыми вперёд — у отчёта потеряна сортировка: тогда в первую порцию попадает
+    // начало журнала, а не свежие события, и смена станка определяется неверно.
+    function warnIfOldestFirst(rows, source) {
+        if (!rows || rows.length < 2) return;
+        var first = Number(rows[0].event_when), last = Number(rows[rows.length - 1].event_when);
+        if (isFinite(first) && isFinite(last) && first < last) {
+            console.error('atex-slitter: ' + source + ' отдаёт события старыми вперёд — в определении '
+                + 'отчёта нет сортировки event_when по убыванию (#5545)');
+        }
+    }
+
     AtexSlitter.prototype.loadShiftEvents = function() {
         var self = this;
-        return this.getJson('report/slitter_shift_events?JSON_KV&LIMIT=0,5000').then(function(rows) {
-            var list = core.rowsToShiftEvents(Array.isArray(rows) ? rows : (rows && rows.rows) || []);
+        return this.readShiftEventsFromEnd(function(offset) {
+            return self.getJson('report/slitter_shift_events?JSON_KV&LIMIT=' + offset + ',' + SHIFT_EVENTS_PAGE)
+                .then(function(rows) {
+                    var list = Array.isArray(rows) ? rows : (rows && rows.rows) || [];
+                    if (!offset) warnIfOldestFirst(list, 'report/slitter_shift_events');
+                    return core.rowsToShiftEvents(list);
+                });
+        }).then(function(list) {
             if (list.length) { self.applyLoadedEvents(list); return; }
             // #4359: пустой отчёт — НЕ доказательство, что событий нет: сломанный или
             // недогранченный report/ отдаёт [] со статусом 200, и пульт молча считает смену
@@ -2607,8 +2708,13 @@
         var self = this;
         var meta = this.meta.event;
         if (!meta) { this.shiftEvents = []; this.events = []; this.allEvents = []; return Promise.resolve(); }
-        return this.getJson('object/' + meta.id + '/?JSON_OBJ&LIMIT=0,2000').then(function(rows) {
-            self.applyLoadedEvents(self.parseEventRows(rows));
+        return this.readShiftEventsFromEnd(function(offset) {
+            return self.getJson('object/' + meta.id + '/?JSON_OBJ&ORDER=-' + meta.id
+                + '&LIMIT=' + offset + ',' + SHIFT_EVENTS_PAGE).then(function(rows) {
+                return self.parseEventRows(rows);
+            });
+        }).then(function(list) {
+            self.applyLoadedEvents(list);
         });
     };
 
@@ -3270,7 +3376,10 @@
             cut.winding || '—',
             cut.leader || '—'
         ];
-        var lines = [el('div', { class: 'atex-sl-spec-line', text: parts.join(' / ') })];
+        // #5209: есть Примечание позиции — в шапке оно, как написано в заказе (владелец: «должно
+        // быть: 6444 / MWR265 100 х 450 IN (без трейлера в начале намотки) (П) / 99мм х 9 / …»).
+        var note = (this.cutNotes || {})[String(cut.id)];
+        var lines = [el('div', { class: 'atex-sl-spec-line', text: note || parts.join(' / ') })];
         var sleeve = (this.cutSleeves || {})[String(cut.id)];
         if (sleeve) lines.push(el('div', { class: 'atex-sl-spec-line atex-sl-spec-sleeve', text: sleeve }));
         return el('div', { class: 'atex-sl-spec' }, lines);
@@ -3486,6 +3595,25 @@
             input.addEventListener('blur', function() { self.saveJumboIfChanged(); });
         }
 
+        // #5575: кнопка «Ввод» — запись по-прежнему уходит автосохранением по выходу из
+        // ячейки, кнопка только снимает фокус (оператор промахивался мимо поля). Погашена,
+        // пока поле не правили; правка зажигает её, выход из поля — гасит.
+        var enterBtn = el('button', { class: 'atex-sl-btn atex-sl-btn-primary atex-sl-enter', type: 'button', text: 'Ввод' });
+        function setEnterLit(on) {
+            enterBtn.disabled = !on;
+            if (on) enterBtn.classList.add('is-dirty'); else enterBtn.classList.remove('is-dirty');
+        }
+        setEnterLit(false);
+        enterBtn.addEventListener('click', function() {
+            var active = document.activeElement;
+            if (active && active !== enterBtn && typeof active.blur === 'function') active.blur();
+            setEnterLit(false);
+        });
+        function trackEnter(input) {
+            input.addEventListener('input', function() { setEnterLit(true); });
+            input.addEventListener('blur', function() { setEnterLit(false); });
+        }
+
         // ── Строка корешков «Номера джамбо» НАД панелью показаний (#4916) ──
         // Корешок на каждую запись; активный — редактируемый номер (записи ещё нет —
         // черновик pendingJumbo, заводится автосохранением номера). Остальные записи
@@ -3500,6 +3628,7 @@
         });
         numberInput.addEventListener('input', function() { jumboDraft().jumboNo = numberInput.value; });
         autosaveJumbo(numberInput);
+        trackEnter(numberInput);
         var tabs = el('div', { class: 'atex-sl-jumbo-tabs' });
         (cut.jumbos || []).forEach(function(rec, i) {
             if (i === activeIndex) { tabs.appendChild(numberInput); return; }
@@ -3554,6 +3683,7 @@
         } else {
             autosave(cStart);
         }
+        trackEnter(cStart);
         // #4785 п.3: подсказки «(остаток партии: N м)» под полем нет — остаток партии
         // виден строкой партии внизу; значение поля по-прежнему подставляется из неё.
         grid.appendChild(field('Счётчик нач.', cStart));
@@ -3612,6 +3742,7 @@
                 self.saveJumboRecord(storedRec, { quiet: true, full: true });
             });
         }
+        trackEnter(runsInput);
         grid.appendChild(field('Проходов', runsInput));
 
         // ── Поля АКТИВНОЙ записи джамбо (#4914) ──
@@ -3637,19 +3768,26 @@
 
         var jumboWork = numInput(rec ? rec.spent : '', '0');
         jumboWork.addEventListener('input', function() { jumboDraft().spentDraft = jumboWork.value; });
+        trackEnter(jumboWork);
         grid.appendChild(field('Рабочий расход, м', jumboWork));
 
         var jumboOff = numInput(rec ? rec.writeoff : '', '0');
         jumboOff.addEventListener('input', function() { jumboDraft().writeoffDraft = jumboOff.value; });
+        trackEnter(jumboOff);
         grid.appendChild(field('К списанию, м', jumboOff));
 
         var defectM = numInput(rec ? rec.defectM : '', '0');
         defectM.addEventListener('input', function() { jumboDraft().defectMDraft = defectM.value; });
+        trackEnter(defectM);
         grid.appendChild(field('Брак, м', defectM));
 
         var defectQty = numInput(rec ? rec.defectQty : '', '0');
         defectQty.addEventListener('input', function() { jumboDraft().defectQtyDraft = defectQty.value; });
+        trackEnter(defectQty);
         grid.appendChild(field('Брак, шт', defectQty));
+        // #5575: «Ввод» — ячейка сетки сразу после «Брак, шт», без своей строки; подпись
+        // пустая, чтобы кнопка стояла вровень с полями.
+        grid.appendChild(field(' ', enterBtn, 'atex-sl-field-enter'));
 
         // Фото брака — файловый реквизит записи джамбо (791712)
         var photoInput = el('input', { type: 'file', accept: 'image/*', capture: 'environment', style: 'display:none' });
@@ -3671,6 +3809,7 @@
         notes.value = cut.notes || '';
         notes.addEventListener('input', function() { cut.notes = notes.value; });
         autosave(notes);
+        trackEnter(notes);
         grid.appendChild(field('Примечания', notes, 'atex-sl-field-notes'));
 
         section.appendChild(grid);

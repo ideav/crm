@@ -18,6 +18,8 @@
 // Этот случай зафиксирован тестом «пока так» — чтобы смена поведения не прошла незамеченной.
 //
 // Run with: node experiments/atex-pp-4512-fixed-never-evicted.test.js
+//
+// rules: FIXED_CUT_DAY
 
 process.env.TZ = 'UTC';
 global.window = { db: 'ateh1', xsrf: 'x' };

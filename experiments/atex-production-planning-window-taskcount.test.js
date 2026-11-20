@@ -5,6 +5,8 @@
 // предикату (inWin по dayKey), что и переналадки.
 //
 // Run with: node experiments/atex-production-planning-window-taskcount.test.js
+//
+// rules: none (defect #4070)
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

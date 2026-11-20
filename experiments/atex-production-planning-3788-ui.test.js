@@ -4,6 +4,8 @@
 // контроллерного dayIsWorking по наличию таблицы «Календарь».
 //
 // Run with: node experiments/atex-production-planning-3788-ui.test.js
+//
+// rules: none (defect #3788)
 
 process.env.TZ = 'UTC';
 

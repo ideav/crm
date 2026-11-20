@@ -1,0 +1,20 @@
+<!-- Публичная афиша базы timepad (issue #5461): /timepad/afisha. Приложение занимает весь экран поверх оболочки; код — download/timepad/app.js -->
+<link rel="stylesheet" href="/download/timepad/app.css?v=5">
+<div id="tp-root">
+  <header class="top">
+    <div class="wrap top-in">
+      <a class="logo" href="#/"><span class="logo-dot"></span>Пора</a>
+      <nav class="top-nav">
+        <a href="#/">Афиша</a>
+        <a href="#/tickets" id="nav-tickets">Мои билеты</a>
+        <a href="/start.html?db=timepad" class="top-org">Организаторам</a>
+      </nav>
+    </div>
+  </header>
+  <main id="app" class="wrap" aria-live="polite"></main>
+  <footer class="foot">
+    <div class="wrap">Пора — афиша событий на платформе Интеграм · <a href="#/cancel">Отменить запись</a> · <a href="/start.html?db=timepad">Вход для организаторов</a></div>
+  </footer>
+</div>
+<script src="/download/timepad/schedule.js?v=5"></script>
+<script src="/download/timepad/app.js?v=5"></script>

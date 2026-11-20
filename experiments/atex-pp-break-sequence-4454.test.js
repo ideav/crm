@@ -11,6 +11,8 @@
 // Поэтому разрыв стои́т ровно вдвое дороже шва сам по себе, без отдельных весов (#4510).
 //
 // Run with: node experiments/atex-pp-break-sequence-4454.test.js
+//
+// rules: PEN-no-sequence-weight, PEN-seam-credit, PEN-material
 
 process.env.TZ = 'UTC';
 global.window = { db: 'testdb', xsrf: 'x' };

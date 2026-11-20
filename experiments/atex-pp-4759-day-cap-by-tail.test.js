@@ -14,6 +14,8 @@
 // объявляет перебор законным та самая строка упаковщика, которая его создаёт (§5 ниже).
 //
 // Run with: node experiments/atex-pp-4759-day-cap-by-tail.test.js
+//
+// rules: DAY_CAPACITY, SHIFT-overrun-cuts, SHIFT-overrun-tune
 
 process.env.TZ = 'UTC';
 var mod = require('../download/atex/js/production-planning.js');

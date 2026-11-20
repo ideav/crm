@@ -8,6 +8,8 @@
 // удалять нечего) и продолжают; остальные (валидные) записи применяются.
 //
 // Run with: node experiments/atex-production-planning-3895.test.js
+//
+// rules: none (defect #3895)
 
 process.env.TZ = 'UTC';
 global.window = { db: 'testdb', xsrf: 'x' };

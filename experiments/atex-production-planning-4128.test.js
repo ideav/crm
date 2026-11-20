@@ -15,6 +15,8 @@
 //      (намотка известна в момент создания записи), не трогая уже корректную голову (#4001).
 //
 // Run with: node experiments/atex-production-planning-4128.test.js
+//
+// rules: none (defect #4128)
 
 process.env.TZ = 'UTC';
 

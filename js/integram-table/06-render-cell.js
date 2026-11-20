@@ -214,7 +214,7 @@
 
             // BOOLEAN cells use HTML icons, so skip HTML escaping for them
             if (format === 'BOOLEAN') {
-                const boolValue = value !== null && value !== undefined && value !== '' && value !== 0 && value !== '0' && value !== false;
+                const boolValue = integramBooleanIsTrue(value);  // issue #5442: '-1' = нет
                 escapedValue = boolValue ? '<span class="boolean-check"><i class="pi pi-check"></i></span>' : '<span class="boolean-uncheck"><i class="pi pi-times"></i></span>';
                 // Store the original value for editing (1 or 0, or the actual value)
                 fullValueForEditing = boolValue ? '1' : '0';

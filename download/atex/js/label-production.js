@@ -60,8 +60,12 @@
                 diePick: 'Подбор ножа',
                 minBatch: 'Мин. партия, шт',
                 itsNeeded: 'Нужно подтверждение ИТС',
-                itsConfirmed: 'Подтверждено ИТС'
-            } },
+                itsConfirmed: 'Подтверждено ИТС',
+                // Расчётное (дробное) число мастер-рулонов позиции (ideav/crm#5551): метраж вырубки / длина МР.
+                mrCalc: 'Мастер-рулонов расчётное',
+                // Ручная отметка менеджера: под позицию нужно заказать новый нож (#5569) — держит позицию.
+                dieToOrder: 'Нужно заказать нож'
+            }, optionalReqs: ['dieToOrder'] },
             sleeveTask: { name: 'Задача на втулки', reqs: {} },
             productKind: { name: 'Вид продукции', reqs: {} },
             dieState: { name: 'Состояние ножа', reqs: { selectable: 'Нож подбирается' } },
@@ -98,23 +102,31 @@
                 stopMaterials: 'Стоп-лист сырья',
                 packPlace: 'Упаковочное место'
             } },
-            die: { name: 'Нож', reqs: {
-                delivered: 'Дата поставки',
+            // Параметры ножа (размер, ручьи, вал, основа, форматы…) — у его типа: ножи одного
+            // типа взаимозаменяемы. У самого ножа — только то, что у каждого экземпляра своё.
+            dieType: { name: 'Тип ножа', reqs: {
                 labelWidth: 'Ширина этикетки, мм',
                 labelLength: 'Длина этикетки, мм',
                 streams: 'Ручьёв',
-                labelsPerRepeat: 'Этикеток на раппорте',
+                labelsPerRepeat: ['Ручьев / (этикеток) на раппорте', 'Этикеток на раппорте'],
                 labelGap: 'М/э расстояние, мм',
                 streamGap: 'Между ручьями, мм',
                 edge: 'Ширина кромки, мм',
                 cylinder: 'Вал',
-                base: 'Основа',
+                base: 'Основа сырья',
                 minFormat: 'Минимальный формат, мм',
                 optFormat: 'Оптимальный формат, мм',
                 usedFormat: 'Исп. формат, мм',
                 sleeveWidth: 'Ширина втулки, мм',
-                height: 'Высота ножа, мкм',
                 angle: 'Угол заточки',
+                code: 'Код 1С',
+                // Фактическая длина этикетки (#5551): по ней проверяется, помещается ли раппорт.
+                actualLength: 'Длина этикетки факт, мм'
+            }, optionalReqs: ['actualLength'] },
+            die: { name: 'Нож', reqs: {
+                delivered: 'Дата поставки',
+                type: 'Тип ножа',
+                height: 'Высота ножа, мкм',
                 brand: 'Марка ножа',
                 state: 'Состояние ножа',
                 runs: 'Движение пробега'
@@ -229,13 +241,63 @@
             if (!table) { missing.push(spec.name); return; }
             var reqs = {};
             Object.keys(spec.reqs).forEach(function(rk) {
-                var req = findByName(table.reqs, spec.reqs[rk]);
+                // Имя колонки — строка или список прежних/новых имён (переименование без разрыва выкладки).
+                var names = Array.isArray(spec.reqs[rk]) ? spec.reqs[rk] : [spec.reqs[rk]];
+                var req = null;
+                for (var ni = 0; ni < names.length && !req; ni++) req = findByName(table.reqs, names[ni]);
                 if (req) reqs[rk] = String(req.id);
-                else missing.push(spec.name + ' → ' + spec.reqs[rk]);
+                else if ((spec.optionalReqs || []).indexOf(rk) === -1) missing.push(spec.name + ' → ' + names[0]);
             });
             tables[key] = { id: String(table.id), name: spec.name, reqs: reqs };
         });
+        linkDieParams(tables);
         return { ok: missing.length === 0, tables: tables, missing: missing };
+    }
+
+    // Параметры ножа, которые живут в его типе (ключи реквизитов «Типа ножа»).
+    var DIE_TYPE_PARAMS = ['labelWidth', 'labelLength', 'streams', 'labelsPerRepeat', 'labelGap', 'streamGap', 'edge',
+        'cylinder', 'base', 'minFormat', 'optFormat', 'usedFormat', 'sleeveWidth', 'angle', 'actualLength'];
+
+    // Нож читается с параметрами своего типа: t.die.reqs[параметр] = id реквизита «Типа ножа»,
+    // а withDieTypes кладёт значения типа в записи ножей под теми же id. Читатели ножа
+    // (reqVal(rec, t.die.reqs.streams) и т. п.) так видят параметры типа, как свои колонки.
+    // Писать параметры в нож через t.die.reqs нельзя — у ножа этих колонок нет.
+    function linkDieParams(tables) {
+        var die = tables.die, type = tables.dieType;
+        if (!die || !type) return;
+        DIE_TYPE_PARAMS.forEach(function(k) { if (type.reqs[k]) die.reqs[k] = type.reqs[k]; });
+    }
+
+    // Записи ножей (kvRecords: { id, val, reqs }) + записи «Типа ножа» → копии ножей, в reqs
+    // которых добавлены значения реквизитов типа (вместе с ref_<id> у ссылок «Вал», «Основа
+    // сырья»). Нож без типа или с типом, которого нет в списке, параметров не получает.
+    // t — resolveProductionTables(...).tables.
+    function withDieTypes(dieRecs, t, typeRecs) {
+        var link = t && t.die && t.die.reqs ? t.die.reqs.type : '';
+        var byId = {};
+        (typeRecs || []).forEach(function(r) { byId[String(r.id)] = r; });
+        return (dieRecs || []).map(function(rec) {
+            var typeId = link ? dieTypeId(rec, link) : '';
+            var type = typeId ? byId[typeId] : null;
+            var reqs = {};
+            if (type) Object.keys(type.reqs || {}).forEach(function(k) { reqs[k] = type.reqs[k]; });
+            Object.keys((rec && rec.reqs) || {}).forEach(function(k) { reqs[k] = rec.reqs[k]; });
+            var out = {};
+            Object.keys(rec || {}).forEach(function(k) { out[k] = rec[k]; });
+            out.reqs = reqs;
+            out.typeId = type ? typeId : '';
+            out.typeName = type ? String(type.val == null ? '' : type.val) : '';
+            return out;
+        });
+    }
+
+    // id типа ножа: ссылка «Тип ножа» приходит как ref_<id> = «таблица:id» или сырым id.
+    function dieTypeId(rec, link) {
+        var reqs = (rec && rec.reqs) || {};
+        var raw = reqs['ref_' + link];
+        if (raw != null && String(raw).trim() !== '') return String(raw).replace(/^\s*\d+:/, '').split(',')[0].trim();
+        var v = reqs[link];
+        return v == null || !/^\s*\d+\s*$/.test(String(v)) ? '' : String(v).trim();
     }
 
     // Вид продукции по значению реквизита: «этикетка» / «рулон»; пусто — «рулон»
@@ -522,9 +584,11 @@
     // ── Позиция заказа этикетки: подбор ножа, минимальная партия, ИТС (ideav/crm#5324) ──
 
     // Как у позиции выбран нож — значение реквизита «Подбор ножа».
-    var DIE_PICK = { FOUND: 'подобран', MANUAL: 'вручную', NONE: 'нет ножа' };
+    // «близкий» — точного по размеру ножа нет, взят ближайший в пределах допуска (#5569).
+    var DIE_PICK = { FOUND: 'подобран', NEAR: 'близкий', MANUAL: 'вручную', NONE: 'нет ножа' };
 
     var SIZE_TOLERANCE_MM = 0.05;   // размеры в 1С — до десятых мм («102 х 120,5»)
+    var REPEAT_FIT_SLACK_MM = 0.5;  // как repeatFit в импорте 1С: округление м/э в листе
 
     function numOrNaN(v) {
         var s = String(v == null ? '' : v).trim();
@@ -539,32 +603,49 @@
         return String(v).replace('.', ',');
     }
 
+    // Этикетки раппорта ножа помещаются на окружность вала: на раппорте × (длина + м/э) ≤
+    // раппорт вала + 0,5 мм. Длина — фактическая (actualLength), без неё — номинальная. Раппорт
+    // или «на раппорте» не заданы — проверка не применяется (true).
+    function dieRepeatFits(d) {
+        var rep = numOrNaN(d.repeatMm), per = numOrNaN(d.labelsPerRepeat);
+        var len = numOrNaN(d.actualLength) > 0 ? numOrNaN(d.actualLength) : numOrNaN(d.length);
+        if (!(rep > 0) || !(per > 0) || !(len > 0)) return true;
+        var gap = numOrNaN(d.labelGap) > 0 ? numOrNaN(d.labelGap) : 0;
+        return per * (len + gap) <= rep + REPEAT_FIT_SLACK_MM + 1e-9;
+    }
+
     // Автоподбор ножа под позицию.
     //   pos  — { width, length, base, orderStreams, knifeStreams }: размер этикетки, основа
     //          сырья позиции, ручьёв в рулоне заказа (пусто = 1), ручьёв из «Типа ножей» 1С
     //          (null — не указано);
-    //   dies — [{ id, no, width, length, base, streams, selectable, revs }]: selectable —
-    //          состояние ножа с «Нож подбирается», revs — пробег, об.
-    // Нож подходит, если размер совпал точно (без поворота), основа та же, состояние
-    // подбирается, ручьёв ножа кратно ручьям заказа и равно ручьям «Типа ножей», если они
-    // указаны. Из подходящих — наименьший пробег, при равенстве — меньший номер.
-    // → { ok: true, die, candidates } | { ok: false, die: null, candidates: [], reason }:
+    //   dies — [{ id, no, width, length, base, streams, selectable, revs, labelsPerRepeat,
+    //          labelGap, actualLength, repeatMm }]: selectable — состояние ножа с «Нож
+    //          подбирается», revs — пробег, об;
+    //   opts — { sizeTolerance }: допуск размера, мм (LABEL_DIE_SIZE_TOLERANCE_MM; 0 — точно).
+    // Нож подходит, если размер совпал (без поворота) точно или каждая сторона отличается не
+    // больше допуска; основа та же, состояние подбирается, ручьёв ножа кратно ручьям заказа и
+    // равно ручьям «Типа ножей», если они указаны; этикетки помещаются на раппорт вала
+    // (dieRepeatFits). Точные важнее близких; из близких — меньшее отклонение (сумма по
+    // сторонам); дальше наименьший пробег, при равенстве — меньший номер.
+    // → { ok: true, die, candidates, near } | { ok: false, die: null, candidates: [], reason }:
     // reason называет первое невыполненное условие.
-    function pickDie(pos, dies) {
+    function pickDie(pos, dies, opts) {
         var p = pos || {};
         var w = numOrNaN(p.width), l = numOrNaN(p.length);
         var none = function(reason) { return { ok: false, die: null, candidates: [], reason: reason }; };
         if (!(w > 0) || !(l > 0)) return none('размер этикетки не задан');
+        var tol = numOrNaN(opts && opts.sizeTolerance);
+        if (!(tol > SIZE_TOLERANCE_MM)) tol = SIZE_TOLERANCE_MM;
         var size = fmtMm(w) + '×' + fmtMm(l);
         var base = refLabel(p.base);
         var orderStreams = numOrNaN(p.orderStreams);
         if (!(orderStreams > 0)) orderStreams = 1;
         var knifeStreams = p.knifeStreams == null || String(p.knifeStreams).trim() === '' ? null : numOrNaN(p.knifeStreams);
+        var within = function(d, t) { return Math.abs(numOrNaN(d.width) - w) <= t + 1e-9 && Math.abs(numOrNaN(d.length) - l) <= t + 1e-9; };
+        var dev = function(d) { return Math.abs(numOrNaN(d.width) - w) + Math.abs(numOrNaN(d.length) - l); };
 
-        var bySize = (dies || []).filter(function(d) {
-            return Math.abs(numOrNaN(d.width) - w) <= SIZE_TOLERANCE_MM && Math.abs(numOrNaN(d.length) - l) <= SIZE_TOLERANCE_MM;
-        });
-        if (!bySize.length) return none('нет ножа ' + size);
+        var bySize = (dies || []).filter(function(d) { return within(d, tol); });
+        if (!bySize.length) return none('нет ножа ' + size + (tol > SIZE_TOLERANCE_MM ? ' (допуск ±' + fmtMm(tol) + ' мм)' : ''));
         if (base === '') return none('у сырья позиции не задана основа — нож ' + size + ' не подобрать');
         var byBase = bySize.filter(function(d) { return refLabel(d.base) === base; });
         if (!byBase.length) return none('нож ' + size + ' есть только на другой основе (нужна «' + base + '»)');
@@ -578,19 +659,30 @@
             return none('нож ' + size + ' есть, но ручьёв ножа (' + bySel.map(function(d) { return d.streams; }).join(', ') + ') не кратно ' +
                 orderStreams + ' ручьям заказа' + (knifeStreams !== null ? ' или не равно ' + knifeStreams + ' из «Типа ножей»' : ''));
         }
-        var sorted = byStreams.slice().sort(function(a, b) {
+        var byRepeat = byStreams.filter(dieRepeatFits);
+        if (!byRepeat.length) {
+            return none('нож ' + size + ' есть, но этикетки не помещаются на раппорт вала (' +
+                byStreams.map(function(d) { return '№ ' + d.no; }).join(', ') + ') — проверьте вал, длину или «на раппорте»');
+        }
+        var exact = byRepeat.filter(function(d) { return within(d, SIZE_TOLERANCE_MM); });
+        var near = !exact.length;
+        var sorted = (near ? byRepeat : exact).slice().sort(function(a, b) {
+            if (near) {
+                var da = dev(a), db = dev(b);
+                if (Math.abs(da - db) > 1e-9) return da - db;
+            }
             var ma = Number(a.revs) || 0, mb = Number(b.revs) || 0;
             if (ma !== mb) return ma - mb;
             return String(a.no).localeCompare(String(b.no), 'ru', { numeric: true });
         });
-        return { ok: true, die: sorted[0], candidates: sorted };
+        return { ok: true, die: sorted[0], candidates: sorted, near: near };
     }
 
     // Нож позиции с учётом ручного выбора: pos.pick = DIE_PICK.MANUAL и pos.dieId — нож
     // выбран вручную и держится, даже если автоподбор дал бы другой; выбранного ножа нет в
-    // списке — «нет ножа», другим не подменяется. Иначе — pickDie.
+    // списке — «нет ножа», другим не подменяется. Иначе — pickDie (opts — его допуск).
     // → { ok, pick, die, candidates, reason }.
-    function positionDie(pos, dies) {
+    function positionDie(pos, dies, opts) {
         var p = pos || {};
         if (p.pick === DIE_PICK.MANUAL && p.dieId != null && String(p.dieId) !== '') {
             var id = String(p.dieId);
@@ -598,8 +690,8 @@
             if (!d) return { ok: false, pick: DIE_PICK.NONE, die: null, candidates: [], reason: 'выбранного вручную ножа ' + id + ' нет в базе' };
             return { ok: true, pick: DIE_PICK.MANUAL, die: d, candidates: [d] };
         }
-        var r = pickDie(p, dies);
-        return { ok: r.ok, pick: r.ok ? DIE_PICK.FOUND : DIE_PICK.NONE, die: r.die, candidates: r.candidates, reason: r.reason };
+        var r = pickDie(p, dies, opts);
+        return { ok: r.ok, pick: r.ok ? (r.near ? DIE_PICK.NEAR : DIE_PICK.FOUND) : DIE_PICK.NONE, die: r.die, candidates: r.candidates, reason: r.reason };
     }
 
     // Минимальная партия — этикеток с одного мастер-рулона через нож:
@@ -611,7 +703,7 @@
         var rep = numOrNaN(die.repeatMm), per = numOrNaN(die.labelsPerRepeat), st = numOrNaN(die.streams);
         var len = numOrNaN(mrLengthM);
         if (!(rep > 0)) return { ok: false, error: 'у ножа нет раппорта (вал не задан)' };
-        if (!(per > 0)) return { ok: false, error: 'у ножа не задано «Этикеток на раппорте»' };
+        if (!(per > 0)) return { ok: false, error: 'у ножа не задано «Ручьев / (этикеток) на раппорте»' };
         if (!(st > 0)) return { ok: false, error: 'у ножа не задано «Ручьёв»' };
         if (!(len > 0)) return { ok: false, error: 'длина мастер-рулона не задана' };
         var repeats = Math.floor(len * 1000 / rep + 1e-9);
@@ -620,9 +712,10 @@
 
     // Потребность позиции: этикеток = рулонов × этикеток в рулоне; раппортов =
     // ceil(этикеток / (этикеток на раппорте × ручьёв ножа)); метраж вырубки = раппорты ×
-    // раппорт; мастер-рулонов = ceil(метраж / длина МР); коэффициент использования сырья =
+    // раппорт; мастер-рулонов расчётное (дробное, masterRollsExact, 2 знака) = метраж / длина МР;
+    // мастер-рулонов = ceil этого числа (целых рулонов под резерв); коэффициент использования сырья =
     // ширина этикетки × ручьёв ножа / исп. формат ножа (3 знака).
-    // → { ok: true, labels, repeats, meters, masterRolls, useRatio } | { ok: false, labels, error }.
+    // → { ok: true, labels, repeats, meters, masterRolls, masterRollsExact, useRatio } | { ok: false, labels, error }.
     function labelPositionDemand(pos, die, mrLengthM) {
         var p = pos || {};
         var labels = (numOrNaN(p.rolls) || 0) * (numOrNaN(p.labelsPerRoll) || 0);
@@ -639,17 +732,20 @@
             repeats: repeats,
             meters: meters,
             masterRolls: len > 0 ? Math.ceil(meters / len - 1e-9) : null,
+            masterRollsExact: len > 0 ? Math.round(meters / len * 100) / 100 : null,
             useRatio: fmt > 0 && w > 0 ? Math.round(w * st / fmt * 1000) / 1000 : null
         };
     }
 
     // Что держит позицию: blocks — в планирование высечки не идёт (нет ножа; ИТС отмечен
-    // вручную как нужный и не подтверждён; автопризнака по размеру нет, #5318), warnings — видно менеджеру, но не держит (меньше минимальной партии).
-    // p — { pick, itsNeeded, itsConfirmed, labels, minBatch }. → { ready, blocks, warnings }.
+    // вручную как нужный и не подтверждён; автопризнака по размеру нет, #5318; менеджер отметил
+    // «Нужно заказать нож», #5569), warnings — видно менеджеру, но не держит (меньше минимальной партии).
+    // p — { pick, itsNeeded, itsConfirmed, dieToOrder, labels, minBatch }. → { ready, blocks, warnings }.
     function labelPositionFlags(p) {
         var x = p || {};
         var blocks = [], warnings = [];
-        if (x.pick !== DIE_PICK.FOUND && x.pick !== DIE_PICK.MANUAL) blocks.push(DIE_PICK.NONE);
+        if (x.pick !== DIE_PICK.FOUND && x.pick !== DIE_PICK.NEAR && x.pick !== DIE_PICK.MANUAL) blocks.push(DIE_PICK.NONE);
+        if (x.dieToOrder === true) blocks.push('нужно заказать нож');
         if (x.itsNeeded === true && x.itsConfirmed !== true) blocks.push('ждёт подтверждения ИТС');
         var labels = numOrNaN(x.labels), min = numOrNaN(x.minBatch);
         if (min > 0 && labels >= 0 && labels < min) warnings.push('меньше минимальной партии (' + min + ' шт)');
@@ -663,6 +759,8 @@
             PRODUCT_KIND_COLUMNS: PRODUCT_KIND_COLUMNS,
             PRODUCTION_CONFIGS: PRODUCTION_CONFIGS,
             resolveProductionTables: resolveProductionTables,
+            DIE_TYPE_PARAMS: DIE_TYPE_PARAMS,
+            withDieTypes: withDieTypes,
             RUN_KIND: RUN_KIND,
             runKindOf: runKindOf,
             dieMileage: dieMileage,

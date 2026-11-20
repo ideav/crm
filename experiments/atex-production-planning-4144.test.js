@@ -25,6 +25,8 @@
 // здесь остаётся МАШИНЕРИЯ писателя (#4144) на синтетике, не зависящей от дрейфа фикстуры.
 //
 // Run with: node experiments/atex-production-planning-4144.test.js
+//
+// rules: SHIFT-overrun-tune
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

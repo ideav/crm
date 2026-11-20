@@ -7,6 +7,8 @@
 //   • capStockToHeadroom — обрезка добора и перепроизводства до headroom (capping).
 //
 // Run with: node experiments/atex-production-planning-3445.test.js
+//
+// rules: none (defect #3445)
 
 process.env.TZ = 'UTC';
 

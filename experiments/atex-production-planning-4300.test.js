@@ -22,6 +22,8 @@
 // возвращалась. Сценарии ниже — те же, источник заправки новый.
 //
 // Run with: node experiments/atex-production-planning-4300.test.js
+//
+// rules: DUR-back-to-back
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

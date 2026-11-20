@@ -116,12 +116,20 @@
                 </div>
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 15px;">
                     <button class="btn btn-sm btn-danger" id="reset-settings-btn">Сбросить настройки</button>
+                    <button class="btn btn-sm btn-outline-primary" id="ai-report-btn" title="Описать отчёт словами — ИИ предложит, вы подтвердите">&#10024; Отчёт словами</button>
                     <button class="btn btn-secondary" id="close-settings-btn">Закрыть</button>
                 </div>
             `;
 
             document.body.appendChild(overlay);
             document.body.appendChild(modal);
+
+            // AI helper: report described in words (issue #5583)
+            const aiReportBtn = modal.querySelector('#ai-report-btn');
+            aiReportBtn.addEventListener('click', () => {
+                this.closeTableSettings();
+                this.openAiReportHelper();
+            });
 
             // Handle reset settings button
             const resetBtn = modal.querySelector('#reset-settings-btn');

@@ -5,6 +5,8 @@
 // «Настройки», и хелпер dayKeyFromOffset (индекс дня → YYYYMMDD для placementDayKey).
 //
 // Run with: node experiments/atex-production-planning-4085-scorer.test.js
+//
+// rules: FOIL-penalty, PEN-knives-decrease, PEN-knives-increase, PEN-material, PEN-leader, PEN-late, PEN-exact-due, PEN-max-distance, PLACE-tail-continuation
 
 var planning = require('../download/atex/js/production-planning.js').planning;
 var tc = planning.transitionCost, ic = planning.insertionCost, dkfo = planning.dayKeyFromOffset;
@@ -46,7 +48,7 @@ assert(lead.byFactor.leader === 2, '#4085 §8.3: сменилась втулка
 
 // ── Фольга не в конце дня → FOIL_NOTEND (60) ─────────────────────────────────────────────────────
 var foil = tc(slot(), slot({ foil: true }), { settings: {}, foilNotEnd: true });
-assert(foil.byFactor.foilNotEnd === 60, '#4085 §8.2а: фольга не в конце дня → FOIL_NOTEND_COST_MN = 60');
+assert(foil.byFactor.foilNotEnd === 80, '#4085 §8.2а: фольга не в конце дня → FOIL_NOTEND_COST_MN = 80 (#5416)');
 
 // ── Срок: день размещения ПОЗЖЕ / РАВЕН / РАНЬШЕ ─────────────────────────────────────────────────
 var late = tc(slot(), slot({ dueKey: 20260701 }), { settings: {}, placementDayKey: 20260702 });

@@ -9,6 +9,8 @@
 //   • filterStockableWidths                  — keep only stockable добор widths.
 //
 // Run with: node experiments/atex-production-planning-3391.test.js
+//
+// rules: none (defect #3391)
 
 process.env.TZ = 'UTC';
 

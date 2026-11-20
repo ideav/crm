@@ -8,6 +8,8 @@
 //                               (смена сырья + ножи с нуля) через setupActivityColumns.
 //
 // Run with: node experiments/atex-production-planning-3876.test.js
+//
+// rules: AVAIL-outage-fixed
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

@@ -9,6 +9,8 @@
 // резку по её геометрии, независимо от свежести связей позиций.
 //
 // Run with: node experiments/atex-production-planning-4298.test.js
+//
+// rules: none (defect #4298)
 
 var planning = require('../download/atex/js/production-planning.js').planning;
 var haystack = planning.cutSearchHaystack;

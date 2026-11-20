@@ -591,12 +591,13 @@
     }
 
     function truthyFlag(value) {
+        // #5475: BOOLEAN с #5442 — "1" да, "-1" нет (хранится явно), пусто — не задано.
         if (value === true) return true;
         if (value === false || value == null) return false;
-        if (typeof value === 'number') return isFinite(value) && value !== 0;
+        if (typeof value === 'number') return isFinite(value) && value > 0;
         var s = String(value).trim().toLowerCase();
         if (s === '') return false;
-        if (s === '0' || s === 'false' || s === 'нет' || s === 'no' || s === 'off') return false;
+        if (s === '0' || s === '-1' || s === 'false' || s === 'нет' || s === 'no' || s === 'off') return false;
         return true;
     }
 
@@ -605,7 +606,7 @@
         if (batch.active === true) return true;
         if (batch.active === false) return false;
         var s = String(batch.active).trim().toLowerCase();
-        return !(s === '0' || s === 'false' || s === 'нет' || s === 'no' || s === 'off' || s === 'неактивно');
+        return !(s === '0' || s === '-1' || s === 'false' || s === 'нет' || s === 'no' || s === 'off' || s === 'неактивно');   // #5475
     }
 
     function activeReqId(meta) {
@@ -7960,7 +7961,7 @@
         // KNIVES_INCREASE_COST_MN — ДОПЛАТА сверх KNIVES_CHANGE_COST_MN, когда полос стало больше
         // (#4434 п.5): доставить ножи = 30 + 50 = 80, снять = 30.
         KNIVES_CHANGE_COST_MN: 30, KNIVES_INCREASE_COST_MN: 50, MATERIAL_CHANGE_COST_MN: 15,
-        LEADER_COST_MN: 2, FOIL_NOTEND_COST_MN: 60, DEADLINE_COST_MN: 100, EXACT_DEADLINE_COST_MN: 33,
+        LEADER_COST_MN: 2, FOIL_NOTEND_COST_MN: 80, DEADLINE_COST_MN: 100, EXACT_DEADLINE_COST_MN: 33,
         CHANGE_SLITTER_COST_MN: 3, CHANGE_DAY_COST_MN: 3, SLOT_SPLIT_COST_MN: 2, MAX_DISTANCE_COST_MN: 25,
         MAX_SLOTS_DISTANCE_HR: 24, MAX_OUTAGE_PLANNABLE_HR: 48, DAY_DURATION_MN: 450, INTERVAL_DURATION_MN: 10,
         ORDER_DIFF_PENALTY_MN: 10   // #4194: смежность заказа — штраф за разрыв заказа чужой вставкой / бонус за соседство своего заказа

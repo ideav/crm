@@ -15,6 +15,8 @@
 // станка ≤ ёмкость + нахлёст настройки; ни одна карточка не кончается позже cutEnd + MAX_OVERWORK_TUNE.
 //
 // Run with: node experiments/atex-production-planning-4149.test.js
+//
+// rules: SHIFT-overrun-tune, DAY_CAPACITY
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

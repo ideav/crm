@@ -7,6 +7,8 @@
 //   D) подтверждения (панель ДО/ПОСЛЕ + «Ок»/«Отменить») больше нет — подтверждать нечего.
 //
 // Run with: node experiments/atex-pp-4401-recalc-timing-only.test.js
+//
+// rules: none (defect #4401)
 
 process.env.TZ = 'UTC';
 

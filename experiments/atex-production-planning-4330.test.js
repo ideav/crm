@@ -21,6 +21,8 @@
 // поведение переноса (гейт пропускал carry/keepIds) → дыра; true — после фикса #4330 → 0.
 //
 // Run with: node experiments/atex-production-planning-4330.test.js
+//
+// rules: DUR-back-to-back
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

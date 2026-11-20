@@ -17,6 +17,8 @@
 // задания при полном горизонте, то же должно получиться и когда в onlyIds попало только оно.
 //
 // Run with: node experiments/atex-pp-4433-tail-continuation-out-of-scope.test.js
+//
+// rules: none (defect #4433)
 
 process.env.TZ = 'UTC';
 var api = require('../download/atex/js/production-planning.js');

@@ -5,6 +5,14 @@
 // Имя базы: от 3 до 15 латинских символов и цифр, начиная с буквы
 const DB_NAME_RE = /^[a-zA-Z][a-zA-Z0-9]{2,14}$/;
 
+// BOOLEAN после #5442: «да» = 1 (или X); -1, 0, пусто = «нет» (#5478)
+function cabinetBoolIsTrue(value) {
+    if (value === null || value === undefined || value === false) return false;
+    if (value === true) return true;
+    const v = String(value).trim().toLowerCase();
+    return v !== '' && v !== '0' && v !== '-1' && v !== 'false';
+}
+
 class CabinetController {
     constructor() {
         this.userData = null;
@@ -64,8 +72,18 @@ class CabinetController {
         // Setup logout button
         this.setupLogout();
 
+        // #5420: тарифы, оплата месяца и лимит — из отчётов, которые выполняет шаблонизатор
+        await this.loadCabData();
+
         // Load user data
         await this.loadUserData();
+
+        // Партнёрский раздел: материалы с персональными ссылками, клиенты, экзамен (js/partner-cabinet.js)
+        if (window.PartnerCabinet) {
+            window.PartnerCabinet.init(document, 'https://' + this.apiConfig.host + '/my', {
+                host: 'https://ideav.ru', bot: 'Integrammbot', userId: this.userData.DBID || '0'
+            });
+        }
 
         // #5364: одобренные шаблоны баз — в выбор при создании базы, модератору — панель модерации
         if (window.DbTemplates) {
@@ -77,10 +95,10 @@ class CabinetController {
             });
         }
 
-        // Show section from URL hash, or default to 'databases'
+        // Show section from URL hash, or default to 'overview'
         const { section, subTab, extra } = this.parseUrlHash();
-        const validSections = ['databases', 'community', 'profile', 'tariff', 'balance', 'bonuses', 'referrals'];
-        const targetSection = (section && validSections.includes(section)) ? section : 'databases';
+        const validSections = ['overview', 'databases', 'community', 'profile', 'tariff', 'balance', 'bonuses', 'referrals'];
+        const targetSection = (section && validSections.includes(section)) ? section : 'overview';
         this.showSection(targetSection);
         if (subTab) this.showSubTab(targetSection, subTab);
         // Handle deep-link: #community/requests/request/{dbName}
@@ -146,6 +164,38 @@ class CabinetController {
             rememberWantedDb('');
             offer.style.display = 'none';
         };
+    }
+
+    // #5420: отчёты plans/paidThisMonth/noAdmin закрыты для клиента маской — их выполняет
+    // шаблонизатор (templates/my/cabdata.html), ЛК читает ответ /my/cabdata?JSON
+    async loadCabData() {
+        const data = window.MyMode
+            ? await window.MyMode.loadCabData('https://' + this.apiConfig.host + '/my')
+            : { plans: [], paidThisMonth: 0, limit: 0 };
+        this.cabData = data;
+        window.paidThisMonth = data.paidThisMonth;
+        this.fillPlanOptions(data.plans);
+        if (data.limit) {
+            ['usage-limit', 'balance-usage-limit'].forEach(elId => {
+                const el = document.getElementById(elId);
+                if (el) el.textContent = String(data.limit);
+            });
+        }
+        return data;
+    }
+
+    fillPlanOptions(plans) {
+        const planSelect = document.getElementById('plan-select');
+        if (!planSelect) return;
+        planSelect.textContent = '';
+        (plans || []).forEach(plan => {
+            const opt = document.createElement('option');
+            opt.value = plan.id;
+            opt.dataset.price = String(plan.price);
+            opt.dataset.limit = String(plan.limit);
+            opt.textContent = plan.name + ' — ' + plan.price + ' руб./мес.';
+            planSelect.appendChild(opt);
+        });
     }
 
     // report/292: поле DB равно '0', если имя свободно
@@ -398,10 +448,10 @@ class CabinetController {
         const aboutInput = document.getElementById('profile-about');
         if (aboutInput) aboutInput.value = this.userData.Notes || '';
 
-        // Public profile checkbox (IsPublic: empty = no, any value = yes)
+        // Public profile checkbox (IsPublic: 1/X = yes; empty, 0, -1 = no — #5442/#5478)
         const publicCheckbox = document.getElementById('profile-public');
         if (publicCheckbox) {
-            publicCheckbox.checked = !!(this.userData.IsPublic);
+            publicCheckbox.checked = cabinetBoolIsTrue(this.userData.IsPublic);
         }
 
         // Store original values for change detection
@@ -409,7 +459,7 @@ class CabinetController {
             'profile-name': this.userData.Name || '',
             'profile-phone': this.userData.Phone || '',
             'profile-about': this.userData.Notes || '',
-            'profile-public': !!(this.userData.IsPublic)
+            'profile-public': cabinetBoolIsTrue(this.userData.IsPublic)
         };
 
         // Hide save button initially
@@ -713,6 +763,13 @@ class CabinetController {
             });
         }
 
+        // #5481: только что созданная база — первой при любой сортировке
+        const newDb = (this.newDbName || '').toLowerCase();
+        if (newDb) {
+            dbs = dbs.filter(db => (db.DB || '').toLowerCase() === newDb)
+                .concat(dbs.filter(db => (db.DB || '').toLowerCase() !== newDb));
+        }
+
         // Show DB limit warning if needed (free plan: max 3 DBs)
         const planId = parseInt(this.userData && this.userData.PlanID || '0', 10);
         const createForm = document.getElementById('create-db-form');
@@ -734,10 +791,15 @@ class CabinetController {
         dbs.forEach(db => {
             const card = document.createElement('div');
             card.className = 'database-card';
+            const isNew = !!newDb && (db.DB || '').toLowerCase() === newDb;
+            if (isNew) card.classList.add('database-card-new');
 
             const templateLabel = db.Template || 'default';
             const description = db.Description || '';
             const recordCount = db.Count || '0';
+            // #5206: счётчики биллинга базы в единицах тарифа (колонки отчёта my/report/313)
+            const aiUnits = db.AIUnits || '0';
+            const agentRuns = db.AgentRuns || '0';
             const planDate = db['Plan date'] ? this.formatDate(db['Plan date']) : '-';
             const planDateRaw = db['Plan date'] || '';
             const publicName = db.PublicName || '';
@@ -759,6 +821,8 @@ class CabinetController {
                     <div class="database-stats">
                         <span class="database-stat"><span>Шаблон:</span> <strong>${this.escapeHtml(templateLabel)}</strong></span>
                         <span class="database-stat"><span>Расход:</span> <strong>${recordCount}</strong></span>
+                        <span class="database-stat" title="Расход ИИ в единицах тарифа за текущий период"><span>ИИ-токены:</span> <strong>${this.escapeHtml(aiUnits)}</strong></span>
+                        <span class="database-stat" title="Запуски ИИ-агента за текущий период"><span>Запуски агента:</span> <strong>${this.escapeHtml(agentRuns)}</strong></span>
                         <span class="database-stat database-stat-right"><span>Оплачено до:</span> <strong class="${planDatePassed ? 'plan-date-expired' : ''}">${planDate}</strong></span>
                     </div>
                     <div class="database-edit-fields">
@@ -784,6 +848,10 @@ class CabinetController {
                             <button type="button" class="btn-primary btn-small database-save-btn" style="display:none">Сохранить</button>
                             <span class="database-save-status"></span>
                             <button type="button" class="btn-secondary btn-small database-restore-admin-btn" title="Если вы смогли удалить администратора или сменили ему роль, восстановите её здесь">Восстановить админа</button>
+                        </div>
+                        <div class="database-domain">
+                            <button type="button" class="btn-secondary btn-small database-domain-toggle" title="Открывать базу по своему адресу, например crm.company.ru">Свой домен</button>
+                            <div class="database-domain-body" hidden></div>
                         </div>
                     </div>
                 </div>
@@ -826,6 +894,16 @@ class CabinetController {
             const restoreAdminBtn = card.querySelector('.database-restore-admin-btn');
             if (restoreAdminBtn) {
                 restoreAdminBtn.addEventListener('click', () => this.restoreAdmin(db.DB, restoreAdminBtn));
+            }
+
+            // #5573: свой домен базы
+            const domainToggle = card.querySelector('.database-domain-toggle');
+            const domainBody = card.querySelector('.database-domain-body');
+            if (domainToggle && domainBody) {
+                domainToggle.addEventListener('click', () => {
+                    domainBody.hidden = !domainBody.hidden;
+                    if (!domainBody.hidden) this.domainCall(db.DB, '_domain_status', domainBody);
+                });
             }
 
             container.appendChild(card);
@@ -909,6 +987,94 @@ class CabinetController {
         } finally {
             if (saveBtn) saveBtn.disabled = false;
         }
+    }
+
+    // #5573: свой домен базы. action — _domain_status | _domain_set | _domain_check | _domain_del | _domain_pay
+    async domainCall(dbName, action, body, extra) {
+        body.querySelectorAll('button').forEach(b => { b.disabled = true; });
+        try {
+            const url = 'https://' + this.apiConfig.host + '/my/' + action + '?JSON&db=' + encodeURIComponent(dbName);
+            const fd = new FormData();
+            fd.append('_xsrf', xsrf);
+            Object.keys(extra || {}).forEach(k => fd.append(k, extra[k]));
+            const resp = await fetch(url, { method: 'POST', credentials: 'include', body: fd });
+            const data = await resp.json().catch(() => null);
+            const err = Array.isArray(data) && data[0] && data[0].error ? data[0].error : (!resp.ok ? 'HTTP ' + resp.status : '');
+            if (err || !data || !data.state) {
+                showToast(err || 'Ошибка запроса', 'error');
+                if (action === '_domain_status') body.innerHTML = '<p class="database-domain-note">' + this.escapeHtml(err || 'Ошибка запроса') + '</p>';
+                return;
+            }
+            if (action === '_domain_check' && !data.dns_ok) showToast('DNS ещё не указывает на базу — проверьте запись или подождите', 'error');
+            if (action === '_domain_pay') showToast('Домен оплачен', 'success');
+            this.renderDomain(dbName, body, data);
+        } catch (e) {
+            console.error('[cabinet] domain error:', e);
+            showToast('Ошибка запроса', 'error');
+        } finally {
+            body.querySelectorAll('button').forEach(b => { b.disabled = false; });
+        }
+    }
+
+    renderDomain(dbName, body, st) {
+        const esc = s => this.escapeHtml(String(s == null ? '' : s));
+        const included = st.state === 'active' && st.until >= 4102444800;
+        const until = st.until && !included ? new Date(st.until * 1000).toLocaleDateString('ru-RU') : '';
+        const states = {
+            dns_pending: 'ждём DNS: добавьте запись ниже и нажмите «Проверить». Обновление DNS занимает до нескольких часов.',
+            not_paid: 'DNS настроен. Оплатите подключение — и база откроется по адресу домена.',
+            active: included ? 'подключено, входит в тариф.' : 'подключено, оплачено до ' + until + '.',
+            grace: 'оплата закончилась ' + until + ' — домен работает ещё 7 дней. Продлите оплату.',
+            expired: 'оплата закончилась — по домену открывается страница «Домен не оплачен». Продлите оплату.'
+        };
+        const dnsTable = rows => '<table class="database-domain-dns"><tr><th>Имя</th><th>Тип</th><th>Значение</th></tr>'
+            + rows.map(r => '<tr><td>' + esc(r[0]) + '</td><td>' + r[1] + '</td><td><code>' + esc(r[2]) + '</code></td></tr>').join('') + '</table>';
+        let html = '';
+        if (st.state === 'none') {
+            html = '<p class="database-domain-note">Укажите свой домен — база будет открываться по нему, с адресами без «/' + esc(dbName) + '». '
+                + 'Стоимость ' + esc(st.price_month) + ' ₽ в месяц или ' + esc(st.price_year) + ' ₽ в год; на тарифе «Масштабируемый» один домен входит в тариф.</p>'
+                + '<div class="database-domain-row"><input type="text" class="database-field-input database-domain-input" placeholder="crm.company.ru" autocomplete="off">'
+                + '<button type="button" class="btn-primary btn-small" data-act="set">Подключить</button></div>';
+        } else {
+            const live = st.state === 'active' || st.state === 'grace';
+            const name = live ? '<a href="https://' + esc(st.domain) + '/" target="_blank" rel="noopener">' + esc(st.domain) + '</a>' : '<strong>' + esc(st.domain) + '</strong>';
+            html = '<p class="database-domain-note">' + name + ' — ' + esc(states[st.state] || st.state) + '</p>';
+            if (st.state === 'dns_pending') {
+                html += st.apex && st.edge_ip
+                    ? dnsTable([[st.domain, 'A', st.edge_ip], [st.txt_name, 'TXT', st.txt]])
+                    : dnsTable([[st.domain, 'CNAME', st.cname]]);
+                html += '<p class="database-domain-note">В Cloudflare включите для записи режим «DNS only» (серое облако). Если у домена есть записи CAA — разрешите letsencrypt.org.</p>';
+            }
+            const canPay = st.state !== 'dns_pending' && !included;
+            html += '<div class="database-domain-row">';
+            if (st.state === 'dns_pending') html += '<button type="button" class="btn-primary btn-small" data-act="check">Проверить</button>';
+            if (canPay) html += '<button type="button" class="btn-primary btn-small" data-act="pay" data-period="month">Оплатить месяц — ' + esc(st.price_month) + ' ₽</button>'
+                + '<button type="button" class="btn-secondary btn-small" data-act="pay" data-period="year">Год — ' + esc(st.price_year) + ' ₽</button>';
+            html += '<button type="button" class="btn-secondary btn-small" data-act="del">Отвязать домен</button></div>';
+            if (canPay) html += '<p class="database-domain-note">Оплата списывается с баланса личного кабинета.</p>';
+        }
+        body.innerHTML = html;
+        body.querySelectorAll('button[data-act]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const act = btn.dataset.act;
+                if (act === 'set') {
+                    const input = body.querySelector('.database-domain-input');
+                    const v = input ? input.value.trim() : '';
+                    if (v) this.domainCall(dbName, '_domain_set', body, { domain: v });
+                } else if (act === 'check') {
+                    this.domainCall(dbName, '_domain_check', body);
+                } else if (act === 'pay') {
+                    this.domainCall(dbName, '_domain_pay', body, { period: btn.dataset.period });
+                } else if (act === 'del') {
+                    if (btn.dataset.confirm !== '1') {
+                        btn.dataset.confirm = '1';
+                        btn.textContent = 'Точно отвязать? Нажмите ещё раз';
+                        return;
+                    }
+                    this.domainCall(dbName, '_domain_del', body);
+                }
+            });
+        });
     }
 
     async restoreAdmin(dbName, btn) {
@@ -2154,8 +2320,12 @@ class CabinetController {
 
             showToast('База данных создана', 'success');
 
-            // Reload user data to refresh the list
+            // Reload user data to refresh the list; новая база — первой и подсвечена (#5481)
+            this.newDbName = dbName;
             await this.loadUserData();
+            const list = document.getElementById('databases-list');
+            const newCard = list && list.querySelector && list.querySelector('.database-card-new');
+            if (newCard && newCard.scrollIntoView) newCard.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
         } catch (err) {
             console.error('[cabinet] Error creating database:', err);
             showToast('Ошибка создания базы данных', 'error');

@@ -11,6 +11,8 @@
 // а остаток переносим на продолжение (день N+1).
 //
 // Run with: node experiments/atex-production-planning-3805.test.js
+//
+// rules: CHAIN_SETUP_ONCE
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

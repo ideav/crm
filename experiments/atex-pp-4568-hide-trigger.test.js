@@ -10,6 +10,8 @@
 // остаётся открытой, и без них в ней нечего нажать.
 //
 // Run with: node experiments/atex-pp-4568-hide-trigger.test.js
+//
+// rules: none (defect #4568)
 
 process.env.TZ = 'Europe/Moscow';
 

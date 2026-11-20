@@ -29,6 +29,7 @@ ABN_ID = 85
 JOB = 'Задание высечки'
 POS = 'Заказанное количество'
 DIE = 'Нож'
+DIE_TYPE = 'Тип ножа'  # параметры ножа — у его типа (#5431)
 CUT = 'Задание первичной резки'
 STRIP = 'Полоса раскроя'
 
@@ -45,9 +46,9 @@ REPORTS = {
         ('position_id', ('req', JOB, 'Позиция заказа'), ABN_ID),
         ('die_id', ('req', JOB, 'Нож'), ABN_ID),
         ('die_no', ('table', DIE), None),
-        ('min_format', ('req', DIE, 'Минимальный формат, мм'), None),
-        ('opt_format', ('req', DIE, 'Оптимальный формат, мм'), None),
-        ('used_format', ('req', DIE, 'Исп. формат, мм'), None),
+        ('min_format', ('req', DIE_TYPE, 'Минимальный формат, мм'), None),
+        ('opt_format', ('req', DIE_TYPE, 'Оптимальный формат, мм'), None),
+        ('used_format', ('req', DIE_TYPE, 'Исп. формат, мм'), None),
         ('material_id', ('req', POS, 'Сырьё этикетки'), ABN_ID),
         ('material', ('req', POS, 'Сырьё этикетки'), None),
     ],

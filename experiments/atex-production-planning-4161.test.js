@@ -8,6 +8,8 @@
 // Рендер добавляет красный пункт ТОЛЬКО когда N>0.
 //
 // Run with: node experiments/atex-production-planning-4161.test.js
+//
+// rules: MOVE-manual-lock-over-due, SCORE-overdue
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

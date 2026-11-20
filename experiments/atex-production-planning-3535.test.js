@@ -7,6 +7,8 @@
 //     дописываются в конце в исходном порядке groups (не теряем задания).
 //
 // Run with: node experiments/atex-production-planning-3535.test.js
+//
+// rules: none (defect #3535)
 
 process.env.TZ = 'UTC';
 

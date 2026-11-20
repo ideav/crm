@@ -111,6 +111,15 @@
                 });
             }
 
+            // crm#5437: Ctrl+V скриншота в панели чата — сразу во вложения, без сохранения
+            // файла и скрепки. Слушаем панель: вставка всплывает из поля ввода и кнопок.
+            this.panel.addEventListener('paste', function (e) {
+                var images = self.clipboardImages(e.clipboardData);
+                if (!images.length) return;
+                e.preventDefault();
+                self.addFiles(images);
+            });
+
             // Issue #3410: подхватываем незавершённую/последнюю задачу с сервера —
             // результат не теряется при перезагрузке или заходе с другого браузера.
             this.resume();
@@ -554,7 +563,27 @@
                 selection: this.collectSelection()
             });
             if (ctx && ctx.page === 'workplace') ctx = this.mergePageScreen(ctx, this.pageScreen());
+            if (ctx) {
+                var scripts = this.collectPageScripts(typeof document !== 'undefined' ? document : null, loc);
+                if (scripts.length) ctx.scripts = scripts;
+            }
             return ctx;
+        },
+
+        // python2node#1252: скрипты страницы из статики базы (/download/<база>/…js) — по ним агент
+        // читает, как работают кнопки и расчёты рабочего места. Только свой хост, без ?версии, до 10.
+        collectPageScripts: function (doc, loc) {
+            var out = [];
+            var list = doc && doc.scripts ? doc.scripts : [];
+            var host = (loc && loc.host) || '';
+            for (var i = 0; i < list.length && out.length < 10; i++) {
+                var src = list[i] && list[i].src;
+                if (!src || typeof src !== 'string') continue;
+                var m = /^(?:https?:\/\/([^\/?#]+))?(\/download\/[A-Za-z0-9_]{1,64}\/[^?#]+\.js)(?:[?#]|$)/.exec(src);
+                if (!m || (m[1] && host && m[1] !== host) || /\/\.\.?\//.test(m[2])) continue;
+                if (out.indexOf(m[2]) < 0) out.push(m[2]);
+            }
+            return out;
         },
 
         // Строка «Контекст: Сделка №5231» над полем ввода; крестик снимает контекст.
@@ -620,6 +649,41 @@
             this.renderAttachments();
         },
 
+        // crm#5437: картинки из буфера обмена. Если в буфере есть текст — это обычная
+        // вставка текста (копия ячеек Excel/таблицы несёт и text/plain, и картинку-снимок),
+        // ничего не прикрепляем. Имя у картинки из буфера — «image.png» у каждой, поэтому
+        // даём своё: «вставка-ГГГГММДД-ЧЧММСС[-N].расширение».
+        pastedSeq: 0,
+        clipboardImages: function (data) {
+            if (!data || !data.items) return [];
+            var types = data.types ? Array.prototype.slice.call(data.types) : [];
+            if (types.indexOf('text/plain') !== -1) return [];
+            var out = [];
+            for (var i = 0; i < data.items.length; i++) {
+                var item = data.items[i];
+                if (!item || item.kind !== 'file' || !/^image\//.test(item.type || '')) continue;
+                var file = item.getAsFile && item.getAsFile();
+                if (file) out.push(this.namePastedImage(file, item.type));
+            }
+            return out;
+        },
+
+        namePastedImage: function (file, type) {
+            var ext = (String(type).split('/')[1] || 'png').replace(/\+.*$/, '').replace(/^jpeg$/, 'jpg');
+            var d = new Date();
+            var pad = function (n) { return (n < 10 ? '0' : '') + n; };
+            var stamp = d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '-' +
+                pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds());
+            this.pastedSeq += 1;
+            var name = 'вставка-' + stamp + (this.pastedSeq > 1 ? '-' + this.pastedSeq : '') + '.' + ext;
+            if (typeof File === 'function') {
+                try { return new File([file], name, { type: type }); } catch (e) { /* старый Edge — ниже */ }
+            }
+            try { file.name = name; } catch (e) { /* только чтение — FormData всё равно получит имя */ }
+            if (file.name !== name) file.pastedName = name;
+            return file;
+        },
+
         removeAttachment: function (index) {
             this.attachments.splice(index, 1);
             this.renderAttachments();
@@ -634,12 +698,12 @@
                 li.className = 'ai-agent-attachment';
 
                 var icon = document.createElement('i');
-                icon.className = 'pi pi-file';
+                icon.className = /^image\//.test(file.type || '') ? 'pi pi-image' : 'pi pi-file';
                 li.appendChild(icon);
 
                 var name = document.createElement('span');
                 name.className = 'ai-agent-attachment-name';
-                name.textContent = file.name;
+                name.textContent = file.pastedName || file.name;
                 li.appendChild(name);
 
                 var remove = document.createElement('button');
@@ -703,7 +767,7 @@
             form.append('conversation', this.conversationId);
             if (!fromAction) {
                 this.attachments.forEach(function (file) {
-                    form.append('files[]', file, file.name);
+                    form.append('files[]', file, file.pastedName || file.name);
                 });
                 if (this.input) this.input.value = '';
                 this.saveDraft();
@@ -1116,14 +1180,35 @@
             this.newChatBtn = btn('pi-plus', 'Новый чат', function () { self.newConversation(); });
             this.chatsBtn = btn('pi-history', 'Чаты', function () { self.toggleChats(); });
             this.chatsBtn.setAttribute('aria-expanded', 'false');
+            this.settingsBtn = btn('pi-cog', 'Модель ИИ', function () { self.toggleSettings(); });
+            this.settingsBtn.setAttribute('aria-expanded', 'false');
             header.insertBefore(bar, this.closeBtn);
             bar.appendChild(this.closeBtn);
+
+            // crm#5498: окно выбора модели (js/ai-agent-settings.js грузится по первому нажатию).
+            this.settingsEl = this.el('div', 'ai-agent-settings');
+            this.settingsEl.hidden = true;
+            header.parentNode.insertBefore(this.settingsEl, header.nextSibling);
 
             this.chatsEl = this.el('div', 'ai-agent-chats');
             this.chatsEl.hidden = true;
             this.chatsEl.setAttribute('role', 'list');
             this.chatsEl.setAttribute('aria-label', 'Чаты');
             header.parentNode.insertBefore(this.chatsEl, header.nextSibling);
+        },
+
+        toggleSettings: function () {
+            var self = this;
+            if (!this.settingsEl) return;
+            var run = function () {
+                var open = window.AiAgentSettings.toggle(self, self.settingsEl);
+                self.settingsBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+            };
+            if (window.AiAgentSettings) return run();
+            var s = document.createElement('script');
+            s.src = '/js/ai-agent-settings.js?v=1251';
+            s.onload = run;
+            document.head.appendChild(s);
         },
 
         closeChats: function () {

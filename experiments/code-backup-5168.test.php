@@ -72,7 +72,7 @@ function extract_function_source($source, $name){
 }
 $source = file_get_contents(__DIR__."/../index.php");
 foreach(array("Code_backup", "Code_backup_dir", "Code_backup_listing", "Code_rm_dir", "Code_restore_apply",
-              "Restore_allowed") as $fn){
+              "Restore_allowed", "BlackList") as $fn){  # Code_restore_apply зовёт BlackList
     try {
         eval(extract_function_source($source, $fn));
     } catch(Exception $e){

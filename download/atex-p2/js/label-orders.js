@@ -7,9 +7,12 @@
 //     ручьёв в заказе, этикеток в рулоне, рулонов, сырьё (его основа, клей, тип и толщина
 //     подложки видны в форме), тип ножей 1С, ширина и диаметр втулки, намотка, срок;
 //   - подбор ножа при сохранении позиции и по кнопке (`positionDie` из label-production.js):
-//     точный размер, основа сырья, состояние «Нож подбирается», ручьёв ножа кратно ручьям
-//     заказа, наименьший пробег (отчёт `die_runs`); ручной выбор перекрывает автоподбор;
-//     нож не найден — «Подбор ножа = нет ножа» и причина в карточке;
+//     точный размер, а без точного — ближайший в пределах допуска LABEL_DIE_SIZE_TOLERANCE_MM
+//     («Подбор ножа = близкий», #5569), основа сырья, состояние «Нож подбирается», ручьёв ножа
+//     кратно ручьям заказа, этикетки помещаются на раппорт вала, наименьший пробег (отчёт
+//     `die_runs`); ручной выбор перекрывает автоподбор; нож не найден — «Подбор ножа = нет
+//     ножа» и причина в карточке;
+//   - «Нужно заказать нож» — ручная отметка менеджера (#5569): держит позицию, как нет ножа;
 //   - минимальная партия (`labelMinBatch`): этикеток с одного мастер-рулона длиной
 //     LABEL_MASTER_ROLL_M; меньше — предупреждение, не блокировка;
 //   - подтверждение ИТС: признак «Нужно подтверждение ИТС» ставится ВРУЧНУЮ (решение владельца
@@ -39,12 +42,13 @@
     var LP = (root && root.AtexLabelProduction) ||
         (typeof require === 'function' ? require('../../atex/js/label-production.js') : null);
     var lp = LP ? LP.core : null;
+    var PG = (root && root.AtexProgress) || (typeof require === 'function' ? require('./atex-progress.js') : null);
 
     var REPORT = 'label_positions';
     // id позиции в отчёте: колонка «<Имя>ID» рядом с «<Имя>» — грид её скрывает.
     var POSITION_ID_COLUMN = 'РулоновID';
     var RUNS_REPORT = 'die_runs';
-    var SETTINGS = { MR_LENGTH: 'LABEL_MASTER_ROLL_M', ITS_ROLES: 'LABEL_ITS_ROLES' };
+    var SETTINGS = { MR_LENGTH: 'LABEL_MASTER_ROLL_M', ITS_ROLES: 'LABEL_ITS_ROLES', DIE_TOLERANCE: 'LABEL_DIE_SIZE_TOLERANCE_MM' };
     // Кто подтверждает ИТС, если настройка LABEL_ITS_ROLES пуста: ИТС на производстве — Диспетчер.
     var ITS_ROLES_DEFAULT = 'Диспетчер';
     var MR_LENGTH_DEFAULT_M = 2000;
@@ -74,10 +78,10 @@
         return String(v == null ? '' : v).trim() !== '' && isFinite(n) ? n : NaN;
     }
 
-    // BOOLEAN Интеграма: «X» (или «1») — да, пусто — нет.
+    // BOOLEAN Интеграма: «1» (или «X») — да, «-1» — нет (хранится явно, #5442), пусто — не задано.
     function bool(v) {
         var s = String(v == null ? '' : v).trim().toLowerCase();
-        return s !== '' && s !== '0' && s !== 'false';
+        return s !== '' && s !== '0' && s !== '-1' && s !== 'false';
     }
 
     function settingValue(recs, key, db) {
@@ -123,6 +127,8 @@
                 base: reqVal(rec, r.base),
                 streams: reqVal(rec, r.streams),
                 labelsPerRepeat: reqVal(rec, r.labelsPerRepeat),
+                labelGap: reqVal(rec, r.labelGap),
+                actualLength: reqVal(rec, r.actualLength),
                 cylinder: reqVal(rec, r.cylinder),
                 repeatMm: cylId && cylinders ? cylinders[cylId] : '',
                 usedFormat: reqVal(rec, r.usedFormat),
@@ -186,8 +192,10 @@
             dieId: String(x['НожID'] || ''),
             dieNo: x['Нож'] || '',
             minBatch: x['Мин. партия'],
+            mrCalc: x['МР расчётное'],
             itsNeeded: bool(x['ИТС нужен']),
             itsConfirmed: bool(x['ИТС подтв.']),
+            dieToOrder: bool(x['Заказать нож']),
             sleeveWidth: x['Втулка, мм'] || '',
             sleeveId: String(x['Диаметр втулкиID'] || ''),
             winding: String(x['Намотка'] || '').trim(),
@@ -198,11 +206,11 @@
 
     // Расчёт позиции: нож, минимальная партия, ИТС, потребность, блокировки — и что записать
     // в позицию (`write`: ключ реквизита конфигурации → значение, «» — очистить).
-    // settings — { mrLength }. Признак «Нужно подтверждение ИТС» — ручной (pos.itsNeeded), не пересчитывается (#5318).
+    // settings — { mrLength, dieSizeTolerance }. Признак «Нужно подтверждение ИТС» — ручной (pos.itsNeeded), не пересчитывается (#5318).
     function planPosition(pos, dies, settings) {
         var s = settings || {};
         var mrLength = num(s.mrLength) > 0 ? num(s.mrLength) : MR_LENGTH_DEFAULT_M;
-        var dieRes = lp.positionDie(pos, dies);
+        var dieRes = lp.positionDie(pos, dies, { sizeTolerance: num(s.dieSizeTolerance) });
         var min = dieRes.ok ? lp.labelMinBatch(dieRes.die, mrLength) : { ok: false, error: dieRes.reason };
         var its = { needed: pos.itsNeeded === true, reason: 'отмечено вручную' };
         var demand = lp.labelPositionDemand(pos, dieRes.ok ? dieRes.die : null, mrLength);
@@ -210,6 +218,7 @@
             pick: dieRes.pick,
             itsNeeded: its.needed,
             itsConfirmed: pos.itsConfirmed,
+            dieToOrder: pos.dieToOrder === true,
             labels: demand.labels,
             minBatch: min.ok ? min.labels : ''
         });
@@ -226,6 +235,8 @@
                 minBatch: min.ok ? String(min.labels) : ''
             }
         };
+        // Расчётное (дробное) МР — только когда расчёт состоялся (#5551); без ножа прежнее значение не трогаем.
+        if (demand.ok && demand.masterRollsExact != null) out.write.mrCalc = String(demand.masterRollsExact);
         // Ширина втулки — из ножа, если в позиции её нет (её читает втулкорез).
         if (dieRes.ok && !(num(pos.sleeveWidth) > 0) && num(dieRes.die.sleeveWidth) > 0) out.write.sleeveWidth = String(num(dieRes.die.sleeveWidth));
         return out;
@@ -258,6 +269,7 @@
             die: pos.dieId || '',
             diePick: pos.pick || '',
             minBatch: num(pos.minBatch) > 0 ? String(num(pos.minBatch)) : '',
+            mrCalc: num(pos.mrCalc) > 0 ? String(num(pos.mrCalc)) : '',
             sleeveWidth: num(pos.sleeveWidth) > 0 ? String(num(pos.sleeveWidth)) : ''
         };
         return Object.keys(write).some(function(k) { return String(cur[k]) !== String(write[k]); });
@@ -496,7 +508,7 @@
 
     AtexLabelOrders.prototype.loadSettings = function() {
         var self = this;
-        var empty = { mrLength: '', itsRoles: '' };
+        var empty = { mrLength: '', itsRoles: '', dieSizeTolerance: '' };
         if (!this.settingsTable) return Promise.resolve(empty);
         var typeReq = findReq(this.settingsTable, 'Тип');
         var valReq = findReq(this.settingsTable, 'Значение');
@@ -506,7 +518,8 @@
             });
             return {
                 mrLength: settingValue(recs, SETTINGS.MR_LENGTH, self.db),
-                itsRoles: settingValue(recs, SETTINGS.ITS_ROLES, self.db)
+                itsRoles: settingValue(recs, SETTINGS.ITS_ROLES, self.db),
+                dieSizeTolerance: settingValue(recs, SETTINGS.DIE_TOLERANCE, self.db)
             };
         });
     };
@@ -528,7 +541,8 @@
             this.getJson('object/' + t.productKind.id + '/?JSON_KV&LIMIT=0,20'),
             clientTable ? optional(this.getJson('object/' + clientTable + '/?JSON_KV&LIMIT=0,5000')) : Promise.resolve(null),
             sleeveTable ? optional(this.getJson('object/' + sleeveTable + '/?JSON_KV&LIMIT=0,500')) : Promise.resolve(null),
-            this.loadSettings()
+            this.loadSettings(),
+            t.dieType ? this.getJson('object/' + t.dieType.id + '/?JSON_KV&LIMIT=0,10000') : Promise.resolve(null)
         ]).then(function(res) {
             self.settings = res[10];
             self.mileageOk = Array.isArray(res[2]);
@@ -536,7 +550,7 @@
             var selectable = {};
             kvRecords(res[4]).forEach(function(s) { if (bool(reqVal(s, selCol))) selectable[s.id] = true; });
             var cylinders = cylinderRepeats(kvRecords(res[3]), t);
-            self.dies = buildDies(kvRecords(res[1]), t, selectable, cylinders, self.mileageOk ? mileageByDie(res[2]) : null);
+            self.dies = buildDies(lp.withDieTypes(kvRecords(res[1]), t, kvRecords(res[11])), t, selectable, cylinders, self.mileageOk ? mileageByDie(res[2]) : null);
             self.materials = materialIndex(kvRecords(res[5]), t);
             self.materialList = kvRecords(res[5]);
             self.orders = kvRecords(res[6]);
@@ -558,10 +572,12 @@
 
     AtexLabelOrders.prototype.renderKpi = function() {
         var self = this;
-        var k = { total: this.rows.length, noDie: 0, its: 0, small: 0, ready: 0, stale: 0 };
+        var k = { total: this.rows.length, noDie: 0, toOrder: 0, near: 0, its: 0, small: 0, ready: 0, stale: 0 };
         this.rows.forEach(function(p) {
             var plan = self.planOf(p);
             if (plan.flags.blocks.indexOf(lp.DIE_PICK.NONE) !== -1) k.noDie++;
+            if (p.dieToOrder) k.toOrder++;
+            if (plan.die.pick === lp.DIE_PICK.NEAR) k.near++;
             if (plan.its.needed && !p.itsConfirmed) k.its++;
             if (plan.flags.warnings.length) k.small++;
             if (plan.flags.ready) k.ready++;
@@ -577,6 +593,8 @@
             tile('позиций этикетки', k.total) +
             tile('готовы к планированию', k.ready, 'is-ok') +
             tile('нет ножа', k.noDie, k.noDie ? 'is-bad' : '') +
+            tile('заказать нож', k.toOrder, k.toOrder ? 'is-bad' : '', 'Отметка менеджера «Нужно заказать нож»') +
+            (k.near ? tile('нож близкий', k.near, 'is-warn', 'Точного ножа нет — подобран ближайший в пределах ±' + (num(s.dieSizeTolerance) || 0) + ' мм (' + SETTINGS.DIE_TOLERANCE + ')') : '') +
             tile('ждут ИТС', k.its, k.its ? 'is-warn' : '', itsTitle) +
             tile('меньше мин. партии', k.small, k.small ? 'is-warn' : '', 'Мин. партия — этикеток с одного мастер-рулона ' + (s.mrLength || MR_LENGTH_DEFAULT_M) + ' м') +
             (k.stale ? tile('не подобрано', k.stale, 'is-warn', 'Подбор в позиции отличается от расчёта: нажмите «Подобрать всем»') : '');
@@ -620,8 +638,9 @@
 
         html += '<h3 class="atex-lo-sub">Нож</h3>';
         if (d) {
-            html += row('Нож', '№ ' + esc(d.no) + ' <span class="atex-lo-badge ' + (plan.die.pick === lp.DIE_PICK.MANUAL ? 'is-warn' : 'is-ok') + '">' + esc(plan.die.pick) + '</span>') +
-                row('Ручьёв / на раппорте', esc((d.streams || '—') + ' / ' + (d.labelsPerRepeat || '—'))) +
+            html += row('Нож', '№ ' + esc(d.no) + ' <span class="atex-lo-badge ' + (plan.die.pick === lp.DIE_PICK.MANUAL || plan.die.pick === lp.DIE_PICK.NEAR ? 'is-warn' : 'is-ok') + '">' + esc(plan.die.pick) + '</span>') +
+                (plan.die.pick === lp.DIE_PICK.NEAR ? row('Размер ножа', esc(d.width + ' × ' + d.length + ' мм') + '<small>точного нет — ближайший в допуске ±' + esc(num(this.settings.dieSizeTolerance)) + ' мм</small>') : '') +
+                row('Ручьев / (этикеток) на раппорте', esc((d.streams || '—') + ' / ' + (d.labelsPerRepeat || '—'))) +
                 row('Вал / раппорт', esc((d.cylinder || '—') + ' / ' + (d.repeatMm ? d.repeatMm + ' мм' : '—'))) +
                 row('Исп. формат', esc(d.usedFormat ? d.usedFormat + ' мм' : '—')) +
                 row('Пробег', esc(this.mileageOk ? fmtInt(d.revs) + ' об' : 'не прочитан'));
@@ -651,7 +670,9 @@
             html += '<h3 class="atex-lo-sub">Потребность позиции</h3>' +
                 row('Раппортов', esc(fmtInt(plan.demand.repeats))) +
                 row('Метраж вырубки', esc(fmtInt(plan.demand.meters) + ' м')) +
-                row('Мастер-рулонов ' + plan.mrLength + ' м', esc(plan.demand.masterRolls == null ? '—' : plan.demand.masterRolls)) +
+                row('Мастер-рулонов ' + plan.mrLength + ' м, расчётное', esc(plan.demand.masterRollsExact == null ? '—' : plan.demand.masterRollsExact) +
+                    '<small>метраж / длина МР (дробное, сверяется с 1С)</small>') +
+                row('Мастер-рулонов, целых', esc(plan.demand.masterRolls == null ? '—' : plan.demand.masterRolls) + '<small>округление вверх — под резерв</small>') +
                 row('Коэф. использования сырья', esc(plan.demand.useRatio == null ? '—' : plan.demand.useRatio));
         }
 
@@ -661,6 +682,7 @@
             (plan.die.pick === lp.DIE_PICK.MANUAL ? '<button class="atex-lo-btn" type="button" data-lo-action="auto">Вернуть автоподбор</button>' : '') +
             (this.canIts() ? '<button class="atex-lo-btn" type="button" data-lo-action="its-needed">' + (p.itsNeeded ? 'Снять отметку «нужен ИТС»' : 'Отметить: нужен ИТС') + '</button>' : '') +
             (plan.its.needed && this.canIts() ? '<button class="atex-lo-btn" type="button" data-lo-action="its">' + (p.itsConfirmed ? 'Снять подтверждение ИТС' : 'Подтвердить ИТС') + '</button>' : '') +
+            (this.tables.position.reqs.dieToOrder ? '<button class="atex-lo-btn" type="button" data-lo-action="die-order">' + (p.dieToOrder ? 'Снять отметку «заказать нож»' : 'Отметить: нужно заказать нож') + '</button>' : '') +
             '<button class="atex-lo-btn" type="button" data-lo-action="edit">Изменить</button>' +
             '</div>';
         el.innerHTML = html;
@@ -679,6 +701,7 @@
             case 'auto': return this.pickOne(this.current(), '');
             case 'its': return this.toggleIts(this.current());
             case 'its-needed': return this.toggleItsNeeded(this.current());
+            case 'die-order': return this.toggleDieToOrder(this.current());
             case 'form-parse': return this.parseKnifeTypeIntoForm();
             case 'form-save': return this.saveForm();
             case 'modal-cancel': return this.closeModal();
@@ -726,16 +749,20 @@
             self.busy = true;
             var errors = [];
             var chain = Promise.resolve();
-            todo.forEach(function(x) {
+            // #5504: по запросу на позицию — окно прогресса со счётчиком, до конца перечитывания.
+            var pg = (self.progressUi || PG).open('Запись подбора ножей', { total: todo.length });
+            todo.forEach(function(x, i) {
                 chain = chain.then(function() {
                     return self.post('_m_set/' + encodeURIComponent(x.p.id) + '?JSON', self.fieldsOf(x.plan.write))
-                        .catch(function(err) { errors.push(x.p.orderNo + ': ' + err.message); });
+                        .catch(function(err) { errors.push(x.p.orderNo + ': ' + err.message); })
+                        .then(function() { pg.set(i + 1, x.p.orderNo ? 'Заказ ' + x.p.orderNo : ''); });
                 });
             });
             return chain.then(function() {
                 self.message(errors.length ? 'Записано ' + (todo.length - errors.length) + ' из ' + todo.length + '; ошибки: ' + errors.join('; ') : 'Подбор записан в ' + todo.length + ' позиций.', errors.length ? 'error' : 'ok');
+                pg.step('Обновляю данные', 0);
                 return self.reload(true);
-            }).then(function() { self.busy = false; });
+            }).then(function() { pg.close(); self.busy = false; }, function(err) { pg.close(); self.busy = false; throw err; });
         });
     };
 
@@ -759,6 +786,22 @@
         if (!reqId) { this.message('В позиции нет реквизита «Нужно подтверждение ИТС».', 'error'); return Promise.resolve(); }
         var f = {};
         f['t' + reqId] = p.itsNeeded ? '' : '1';
+        this.busy = true;
+        return this.post('_m_set/' + encodeURIComponent(p.id) + '?JSON', f).then(function() {
+            return self.reload(true);
+        }).catch(function(err) { self.message('Не записано: ' + err.message, 'error'); })
+            .then(function() { self.busy = false; });
+    };
+
+    // Ручная отметка «Нужно заказать нож» (#5569): под позицию нужен новый нож — менеджер ставит,
+    // пока нож не приехал; позиция до снятия отметки в планирование высечки не идёт.
+    AtexLabelOrders.prototype.toggleDieToOrder = function(p) {
+        var self = this;
+        if (!p) return Promise.resolve();
+        var reqId = this.tables.position.reqs.dieToOrder;
+        if (!reqId) { this.message('В позиции нет реквизита «Нужно заказать нож».', 'error'); return Promise.resolve(); }
+        var f = {};
+        f['t' + reqId] = p.dieToOrder ? '' : '1';
         this.busy = true;
         return this.post('_m_set/' + encodeURIComponent(p.id) + '?JSON', f).then(function() {
             return self.reload(true);

@@ -6,6 +6,8 @@
 // Применяется в scorePosition (слой размещения), т.е. только при SLOT_PLACEMENT (повторный проход).
 //
 // Run with: node experiments/atex-production-planning-4194.test.js
+//
+// rules: PEN-order-adjacency
 
 var mod = require('../download/atex/js/production-planning.js');
 var P = mod.planning;

@@ -265,7 +265,7 @@ IF(МенюID IN([rec]),
 
 Что есть в ядре:
 
-- индексы `PRIMARY(id)`, `up_t(up,t)`, `t_up(t,up)`, `t_val(t,val(191))`, `up_ord(up,ord)`
+- индексы `PRIMARY(id)`, `up_t(up,t)`, `t_up(t,up)`, `t_val(t,val(191))`
   (`docker/mysql/010-integram-bootstrap.sql`) покрывают все основные пути — по типу, по
   родителю, по значению;
 - подсказки оптимизатору `USE INDEX` там, где фильтр не использует индекс (`HintNeeded()`,

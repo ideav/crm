@@ -101,9 +101,10 @@ function sourcesPublishedInto(dir) {
 var templates = allowedTemplates();
 assert(templates.length > 0, 'include/connection.php: список TEMPLATES читается');
 
+// Базу создают в ЛК (templates/my/main.html); templates/my/info.html — стартовая страница
+// рабочего места админа базы my, формы создания базы в ней нет (#5420).
 var cabinets = [
-    { rel: 'templates/my/main.html', select: 'new-db-template' },
-    { rel: 'templates/my/info.html', select: 'template' }
+    { rel: 'templates/my/main.html', select: 'new-db-template' }
 ];
 
 cabinets.forEach(function (cabinet) {

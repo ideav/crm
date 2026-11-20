@@ -7,6 +7,8 @@
 // может идти — неприкосновенность #4381 остаётся.
 //
 // Run with: node experiments/atex-production-planning-4830.test.js
+//
+// rules: none (defect #4830)
 
 process.env.TZ = 'UTC';
 

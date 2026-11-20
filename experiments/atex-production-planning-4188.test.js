@@ -13,6 +13,8 @@
 // (self._ppOp) в консоль. formatEmptySetupIds — компактная строка перечня для трассы.
 //
 // Run with: node experiments/atex-production-planning-4188.test.js
+//
+// rules: none (defect #4188)
 
 process.env.TZ = 'UTC';
 var api = require('../download/atex/js/production-planning.js');

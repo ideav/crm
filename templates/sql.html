@@ -752,7 +752,7 @@ function myApi(m,u,b,vars,index){ // Параметры: метод, адрес,
                                                                 .replace(':val:',json[b]['obj'].val);
                     byId('one').classList.remove('hidden');
                     byId('sql-title').classList.add('hidden');
-                    byId('interact').checked=interact=(json[b]['reqs'][95]['value']!="");
+                    byId('interact').checked=interact=(['','0','-1'].indexOf(String(json[b]['reqs'][95]['value']||'').trim())<0); // #5478: BOOLEAN -1/0 = нет
                     $('#limit').val(json[b]['reqs'][134]['value']);
                     if(json[b]['reqs'][261]['arr']) // Fetch manual joins if any
                         newApi('GET','object/44/?F_U={_global_.id}&JSON&LIMIT=1000','getFrom');

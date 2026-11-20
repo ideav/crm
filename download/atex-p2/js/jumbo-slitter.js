@@ -30,6 +30,7 @@
 
     var LP = (root && root.AtexLabelProduction) || (typeof require === 'function' ? require('../../atex/js/label-production.js') : null);
     var JM = (root && root.AtexJumboCutMap) || (typeof require === 'function' ? require('./jumbo-cut-map.js') : null);
+    var PG = (root && root.AtexProgress) || (typeof require === 'function' ? require('./atex-progress.js') : null);
     var lp = LP ? LP.core : null;
     var jc = JM ? JM.core : null;
 
@@ -276,6 +277,8 @@
         this.busy = true;
         var made = 0;
         var chain = Promise.resolve();
+        // #5504: по запросу на рулон — окно прогресса со счётчиком (+ остаток партии).
+        var pg = (this.progressUi || PG).open('Приёмка мастер-рулонов', { total: rows.length + 1 });
         rows.forEach(function(row) {
             chain = chain.then(function() {
                 var p = {};
@@ -287,25 +290,27 @@
                 if (r.rest) p['t' + r.rest] = row.scrap ? '0' : String(row.length);
                 if (r.status) p['t' + r.status] = row.scrap ? jc.ROLL_STATUS.SCRAP : jc.ROLL_STATUS.STOCK;
                 if (r.warehouse && b.warehouseId) p['t' + r.warehouse] = b.warehouseId;
-                return self.client.post('_m_new/' + t.masterRoll.id + '?JSON&up=1', p).then(function() { made++; });
+                return self.client.post('_m_new/' + t.masterRoll.id + '?JSON&up=1', p).then(function() { made++; pg.set(made, 'Рулон ' + row.no); });
             });
         });
         return chain.then(function() {
             var completed = jc.pullProgress(j.strips, j.pulls, j.created + made).pullIndex;
             var p = {};
             p['t' + t.jumboBatch.reqs.rest] = String(batchRestAfter(b.geometry.length, j.pulls, completed));
-            return self.client.post('_m_set/' + encodeURIComponent(b.id) + '?JSON', p);
+            return self.client.post('_m_set/' + encodeURIComponent(b.id) + '?JSON', p).then(function() { pg.set(made + 1, 'Остаток партии'); });
         }).then(function() {
             var done = jc.pullProgress(j.strips, j.pulls, j.created + made).done;
             return done ? self.setStatus(j, jc.JOB_STATUS.DONE).then(function() { return true; }) : false;
         }).then(function(done) {
             self.message('Принято мастер-рулонов: ' + made + ' (' + rows[0].no + ' … ' + rows[rows.length - 1].no + ')' + (done ? '. Задание выполнено.' : '.'), 'ok');
+            pg.step('Обновляю данные', 0);
             return self.reload();
         }).catch(function(err) {
             console.error('[jumbo-slitter] ❌ приёмка', err);
             self.message('Приёмка прервана после ' + made + ' рулонов: ' + err.message + '. Нажмите кнопку снова — допишутся только недостающие.', 'error');
+            pg.step('Обновляю данные', 0);
             return self.reload();
-        }).then(function() { self.busy = false; });
+        }).then(function() { pg.close(); self.busy = false; }, function(err) { pg.close(); self.busy = false; throw err; });
     };
 
     AtexJumboSlitter.prototype.close = function() {

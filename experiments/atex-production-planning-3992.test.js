@@ -7,6 +7,8 @@
 //   • явная длительность дня DAY_DURATION_MN.
 //
 // Run with: node experiments/atex-production-planning-3992.test.js
+//
+// rules: SHIFT-overrun-cuts, SHIFT-overrun-tune, SHIFT-breaks-transparent
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

@@ -64,7 +64,7 @@ $core = getenv("CORE") ?: __DIR__."/../index.php";
 $coreSrc = file_get_contents($core);
 $code = core_function($coreSrc, "ApplyMNew");
 $check = (string)core_function($coreSrc, "Number_check");
-$code .= $check.core_function($coreSrc, "RequireNumber");
+$code .= $check.core_function($coreSrc, "RequireNumber").core_function($coreSrc, "Normalize_Number").core_function($coreSrc, "Number_Storage_Val");
 if($check === "")
 	$code .= "function Number_check(){}\n";	# прежнее ядро: проверки нет, мерка краснеет по поведению
 $code .= "function Required_check(){}\n";	# обязательные поля — мерка #5219
@@ -95,6 +95,8 @@ function Get_Current_Values($i, $typ){
 		$GLOBALS["REQ_TYPS"][$m["id"]] = 0;
 }
 function checkDuplicatedReqs($id, $t){}
+function Mail_is_settings_pwd($id, $t){ return FALSE; }	# #5494: таблицы почты в стенде нет
+function Skip_hidden_pwd($t, $v){ return $v === "******" && $t == PASSWORD; }	# #5494: прежнее правило маски
 function FetchAlias($attrs, $val){ return FieldAttrsAlias($attrs, $val); }
 function Insert($up, $ord, $t, $val, $msg){
 	$GLOBALS["WRITES"][] = "$msg: $t=$val";

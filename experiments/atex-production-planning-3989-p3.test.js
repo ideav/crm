@@ -4,6 +4,8 @@
 // (renderQueue) здесь не тестируется — только источник её чисел.
 //
 // Run with: node experiments/atex-production-planning-3989-p3.test.js
+//
+// rules: SCORE-ideal-window, SCORE-excess, SCORE-combos
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

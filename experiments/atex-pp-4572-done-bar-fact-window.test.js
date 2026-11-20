@@ -13,6 +13,8 @@
 //     резкам остаётся честным, укорачивается только показ.
 //
 // Run with: node experiments/atex-pp-4572-done-bar-fact-window.test.js
+//
+// rules: none (defect #4572)
 
 process.env.TZ = 'Europe/Moscow';
 

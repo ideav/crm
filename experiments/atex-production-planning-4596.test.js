@@ -10,6 +10,8 @@
 // заданием своего станка (в норме это следующий день), частично выполненное разделяется.
 //
 // Run with: node experiments/atex-production-planning-4596.test.js
+//
+// rules: none (defect #4596)
 
 process.env.TZ = 'UTC';
 

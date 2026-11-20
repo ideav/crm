@@ -15,6 +15,8 @@
 // коммита, а не кода; проверять надо ИМЯ.
 //
 // Run with: node experiments/atex-pp-4734-rule-matrix.test.js
+//
+// rules: none (defect #4734)
 
 process.env.TZ = 'UTC';
 global.window = { db: 'testdb', xsrf: 'x' };

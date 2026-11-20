@@ -58,6 +58,20 @@
         return { ok: false, text: (res && res.error) || 'Сервер не принял запрос' };
     }
 
+    // Подсказка панели модерации ЛК my (#5452): сколько версий ждёт решения, откуда заявки и что делают кнопки
+    function moderationGuide(rows) {
+        var pending = (rows || []).filter(function (r) { return r.status === 'pending'; }).length;
+        var summary = pending
+            ? 'Ждут решения: ' + pending + ' — они в начале таблицы.'
+            : 'Заявок на модерации нет — решать сейчас нечего.';
+        var steps = [
+            'Заявка появляется, когда владелец базы фиксирует версию шаблона: в своей базе открывает «Файлы» → ссылку «Шаблон базы» → «Зафиксировать версию». Версия получает статус «на модерации».',
+            'У версии на модерации — кнопки «Одобрить» (шаблон с этой версией появится в выборе при создании базы в Личном кабинете), «Отклонить» (в Личный кабинет не попадёт) и «Снять» (отозвать заявку). Комментарий из поля выше сохраняется вместе с решением и виден владельцу базы.',
+            'У одобренной версии — только «Снять»: шаблон уходит из выбора при создании базы. Отклонённые и снятые версии остаются в таблице для истории.'
+        ];
+        return { pending: pending, summary: summary, steps: steps };
+    }
+
     function el(tag, attrs, text) {
         var e = document.createElement(tag);
         Object.keys(attrs || {}).forEach(function (k) { e.setAttribute(k, attrs[k]); });
@@ -120,14 +134,26 @@
             opts.panel.style.display = '';
             opts.panel.textContent = '';
             opts.panel.appendChild(el('h3', {}, 'Шаблоны баз: модерация'));
+            var summary = el('p', { class: 'db-templates-summary' });
+            var help = el('details', { class: 'db-templates-help' });
+            help.appendChild(el('summary', {}, 'Как проводить модерацию'));
+            var steps = el('ol');
+            moderationGuide([]).steps.forEach(function (t) { steps.appendChild(el('li', {}, t)); });
+            help.appendChild(steps);
             var note = el('input', { type: 'text', class: 'database-field-input', placeholder: 'Комментарий к решению (необязательно)' });
             var status = el('p', { class: 'db-templates-status' });
             var box = el('div');
+            opts.panel.appendChild(summary);
+            opts.panel.appendChild(help);
             opts.panel.appendChild(note);
             opts.panel.appendChild(status);
             opts.panel.appendChild(box);
             var draw = function (l) {
-                renderVersions(box, versionRows(l, true), function (row, act, btn) {
+                var rows = versionRows(l, true);
+                var g = moderationGuide(rows);
+                summary.textContent = g.summary;
+                if (!g.pending) help.setAttribute('open', '');
+                renderVersions(box, rows, function (row, act, btn) {
                     btn.disabled = true;
                     post(opts.base + '/_tpl_status?JSON', { _xsrf: opts.xsrf, id: row.id, ver: row.ver, status: act, note: note.value })
                         .then(function (r) {
@@ -182,7 +208,7 @@
     }
 
     var api = { idValid: idValid, optionsToAdd: optionsToAdd, versionActions: versionActions, versionRows: versionRows,
-        resultMessage: resultMessage, initCabinet: initCabinet, initDirAdmin: initDirAdmin };
+        resultMessage: resultMessage, moderationGuide: moderationGuide, initCabinet: initCabinet, initDirAdmin: initDirAdmin };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     else root.DbTemplates = api;
 })(typeof window !== 'undefined' ? window : this);

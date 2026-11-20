@@ -20,6 +20,8 @@
 //       непригодные времена дня → перенумерация всего дня (прежнее поведение).
 //
 // Run with: node experiments/atex-production-planning-4477.test.js
+//
+// rules: none (defect #4477)
 
 process.env.TZ = 'Europe/Moscow';
 var mod = require('../download/atex/js/production-planning.js');

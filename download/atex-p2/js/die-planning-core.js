@@ -9,7 +9,7 @@
 //   - очередь по станкам: начатые задания неподвижны, остальные идут по сроку; к текущей группе
 //     вал → нож → сырьё подтягивается следующее задание, если от этого никто не уходит в
 //     просрочку (просрочка свята); станок допустим по «Допустимым валам» и «Стоп-листу сырья»;
-//   - блокировки (нет ножа, нож списан, нет МР нужного формата) и предупреждение «ресурс ножа»;
+//   - блокировки (нет ножа, нож списан), предупреждения «ресурс ножа» и «нет МР нужного формата»;
 //   - покрытие заданий мастер-рулонами и план резерва (правила склада — master-rolls-core.js);
 //   - загрузка ножей и валов, полосы Ганта; формирование заданий из позиций заказов этикетки;
 //   - задачи на втулки под позицией (без дублей, не начатые приводятся к плану).
@@ -34,12 +34,12 @@
 
     // Настройки: ключ в «Настройке» → [поле, значение по умолчанию, допустимо ли 0].
     var SETTING_KEYS = {
-        // Смена вала: обычный станок — 45 мин, станок с туррелью — 90 (переналадка туррели).
-        cylinderChange: ['DIE_CYLINDER_CHANGE_MN', 45, true],
-        turretCylinderChange: ['DIE_TURRET_CYLINDER_CHANGE_MN', 90, true],
-        knifeChange: ['DIE_KNIFE_CHANGE_MN', 20, true],
+        // Смена вала (меняется вместе с ножом): обычный станок — 60 мин; станок с туррелью — 120 (запуск туррели, полная наладка).
+        cylinderChange: ['DIE_CYLINDER_CHANGE_MN', 60, true],
+        turretCylinderChange: ['DIE_TURRET_CYLINDER_CHANGE_MN', 120, true],
+        knifeChange: ['DIE_KNIFE_CHANGE_MN', 30, true],
         // Смена втулки: втулки надевают на 3 револьверных вала, пока идёт намотка.
-        sleeveChange: ['DIE_SLEEVE_CHANGE_MN', 15, true],
+        sleeveChange: ['DIE_SLEEVE_CHANGE_MN', 12, true],
         speed: ['DIE_SPEED_M_MIN', 44, false],
         shortRollSpeed: ['DIE_SPEED_SHORT_M_MIN', 28, false],
         shortRollM: ['DIE_SHORT_ROLL_M', 50, true],
@@ -47,11 +47,11 @@
         dayCapacityMin: ['DIE_DAY_CAPACITY_MN', 455, false],
         horizonDays: ['DIE_HORIZON_DAYS', 14, false],
         mrLength: ['LABEL_MASTER_ROLL_M', 2000, false],
+        // Допуск размера ножа к этикетке, мм (#5569): тот же, что у «Заказов этикетки»; 0 — точный подбор.
+        dieSizeTolerance: ['LABEL_DIE_SIZE_TOLERANCE_MM', 0, true],
         tolerance: ['JUMBO_FORMAT_TOLERANCE_MM', 15, true],
         // Ресурс ножа без марки, об (один оборот = один раппорт вала): медиана пробега списанных ножей из 1С.
         dieResource: ['DIE_RESOURCE_DEFAULT_REV', 300000, false],
-        // Туррель — для длинных заданий: метраж от порога (по плану заказчика — от 12,6 км; 0 — без порога).
-        turretLongM: ['DIE_TURRET_LONG_M', 12600, true],
         // Простой туррели, рабочих минут: её очередь пуста столько — она берёт обычные задания (#5376).
         turretIdle: ['TURREL_IDLE_MN', 455, true]
     };
@@ -108,7 +108,7 @@
     // Значение BOOLEAN из базы: пусто, 0, «нет», false — выключено.
     function flagOn(v) {
         var t = String(v == null ? '' : v).trim().toLowerCase();
-        return t !== '' && t !== '0' && t !== 'нет' && t !== 'false';
+        return t !== '' && t !== '0' && t !== '-1' && t !== 'нет' && t !== 'false';   // #5475: "-1" = нет (#5442)
     }
     // Строки отчёта die_planning → задания (fixed — «Зафиксировано», #5376).
     function buildJobs(rows, tz) {
@@ -126,6 +126,8 @@
                 due: dueEnd(r.due, tz), dueText: String(r.due || ''), rolls: num(r.rolls),
                 sleeveId: String(r.sleeve_id || ''), sleeve: String(r.sleeve || ''), sleeveWidth: num(r.sleeve_width),
                 materialId: String(r.material_id || ''), material: String(r.material || ''),
+                baseId: String(r.material_base_id || ''), base: String(r.material_base || ''),
+                article: String(r.article || '').trim(),
                 fixed: flagOn(r.fixed)
             };
         });
@@ -193,37 +195,61 @@
     }
     function jobRunMinutes(job, s) { return runMinutes(job.footage, s, rollLengthM(job)); }
 
-    // machine — { id, name, stopMaterials: [id сырья], active, turret, maxCylinder }.
-    // Валы станка задаёт одно число — «Макс. вал» (зубьев); списка допустимых валов нет (#5366).
-    // settings — для порога туррели (DIE_TURRET_LONG_M); без них — умолчания.
-    function machineAllows(machine, job, settings) {
+    // Ограничения станка — реквизиты станка высечки, у каждого станка свои (#5428); 0/пусто — нет ограничения.
+    // machine — { id, name, active, turret, stopMaterials: [id сырья], stopBases: [id основы сырья],
+    //   minCylinder, maxCylinder (зубьев, границы включены), minSeriesM (м), maxRollM (м), sleeveNotNarrower }.
+    // seriesM — метраж серии задания (seriesFootage); без него — метраж самого задания.
+    function cylinderInRange(machine, teeth) {
+        var lo = num(machine && machine.minCylinder), hi = num(machine && machine.maxCylinder), t = num(teeth);
+        return !(t > 0) || (!(lo > 0 && t < lo) && !(hi > 0 && t > hi));
+    }
+    function cylinderRangeText(machine) {
+        var lo = num(machine && machine.minCylinder), hi = num(machine && machine.maxCylinder);
+        return lo > 0 && hi > 0 ? lo + '–' + hi : lo > 0 ? 'от ' + lo : hi > 0 ? 'до ' + hi : 'любой';
+    }
+    // Правила серии, ролика и втулки: '' — задание проходит, иначе причина.
+    function runRulesFail(machine, job, seriesM) {
+        var minS = num(machine && machine.minSeriesM), maxR = num(machine && machine.maxRollM);
+        if (machine && machine.sleeveNotNarrower) {
+            var d = sleeveDiameterMm(job && job.sleeve), w = num(job && job.sleeveWidth);
+            if (!(d > 0)) return 'диаметр втулки не указан';
+            if (w < d) return 'ширина втулки ' + (w || '—') + ' мм меньше её диаметра (' + d + ' мм)';
+        }
+        if (maxR > 0) {
+            var roll = rollLengthM(job);
+            if (roll > maxR) return 'намотка ролика ' + Math.round(roll) + ' м больше ' + maxR + ' м';
+        }
+        if (minS > 0) {
+            var m = Math.max(num(seriesM), num(job && job.footage));
+            if (m < minS) return 'серия ' + Math.round(m) + ' м меньше ' + minS + ' м';
+        }
+        return '';
+    }
+    function machineAllows(machine, job, settings, seriesM) {
         if (machine.active === false) return { ok: false, reason: 'станок не работает' };
-        // «Макс. вал» станка (зубьев): вал больше на станок не встаёт; 0/пусто — не ограничен, вал без числа — не режется.
-        var maxCyl = num(machine.maxCylinder), teeth = num(job.cylinder);
-        if (maxCyl > 0 && teeth > maxCyl)
-            return { ok: false, reason: 'вал ' + teeth + ' больше «Макс. вала» станка (' + maxCyl + ')' };
+        // Вал без числа не режется.
+        if (!cylinderInRange(machine, job.cylinder))
+            return { ok: false, reason: 'вал ' + num(job.cylinder) + ' вне валов станка (' + cylinderRangeText(machine) + ')' };
         if (job.materialId && (machine.stopMaterials || []).indexOf(String(job.materialId)) >= 0)
             return { ok: false, reason: 'сырьё «' + (job.material || job.materialId) + '» в стоп-листе станка' };
-        // Туррель: центрифуга роняет втулку на бок и выравнивает для подачи в жёлоб — нужна ширина ≥ 2× диаметра.
-        // Задание, записанное на станок диспетчером, остаётся допустимым (ручное решение).
-        if (machine.turret && !turretFits(job, settings) && String(job.machineId || '') !== String(machine.id)) {
-            if (!turretSleeveFits(job)) {
-                var d = sleeveDiameterMm(job.sleeve);
-                return { ok: false, reason: 'туррель: ширина втулки ' + (num(job.sleeveWidth) || '—') + ' мм меньше 2× диаметра' + (d ? ' (' + 2 * d + ' мм)' : ' (диаметр втулки не указан)') };
-            }
-            return { ok: false, reason: 'туррель: задание короче ' + withDefaults(settings).turretLongM + ' м (метраж ' + (num(job.footage) || 0) + ' м)' };
-        }
+        if (job.baseId && (machine.stopBases || []).indexOf(String(job.baseId)) >= 0)
+            return { ok: false, reason: 'основа «' + (job.base || job.baseId) + '» в стоп-листе станка' };
+        // Задание, записанное на станок диспетчером, остаётся допустимым (ручное решение; на туррели её отцепляют).
+        var fail = String(job.machineId || '') === String(machine.id) ? '' : runRulesFail(machine, job, seriesM);
+        if (fail) return { ok: false, reason: (machine.turret ? 'туррель: ' : '') + fail };
         return { ok: true };
     }
-    // Задание подходит туррели: длинное (метраж ≥ DIE_TURRET_LONG_M, #5366) и на широкой втулке.
-    function turretFits(job, settings) {
-        var long = withDefaults(settings).turretLongM;
-        return turretSleeveFits(job) && !(long > 0 && num(job && job.footage) < long);
+    // Задание подходит туррели machine: проходит её правила серии, ролика и втулки.
+    function turretFits(job, machine, seriesM) {
+        return !runRulesFail(machine, job, seriesM);
     }
-    // Широкая втулка: ширина ≥ 2× её диаметра (диаметр — из названия втулки).
-    function turretSleeveFits(job) {
-        var d = sleeveDiameterMm(job && job.sleeve), w = num(job && job.sleeveWidth);
-        return d > 0 && w >= 2 * d;
+    // Серия — задания одного артикула (полностью одинаковая номенклатура): метраж серии — сумма их
+    // метражей. Задание без артикула — серия из себя самого. → { id задания: метраж серии, м }.
+    function seriesFootage(jobs) {
+        var byArt = {}, out = {};
+        (jobs || []).forEach(function(j) { if (j.article) byArt[j.article] = (byArt[j.article] || 0) + num(j.footage); });
+        (jobs || []).forEach(function(j) { out[j.id] = j.article ? byArt[j.article] : num(j.footage); });
+        return out;
     }
 
     // ── Календарь ───────────────────────────────────────────────────────────
@@ -351,6 +377,8 @@
             cands.push(j);
         });
         cands.sort(compareJobs);
+        // Метраж серии (задания одного артикула) — для «Мин. метража серии» станка (#5428).
+        var series = seriesFootage(cands);
 
         // Зафиксированные диспетчером («Зафиксировано», #5376) — как 🔒 Фазы 1: где зафиксировали, там и
         // стоят. Задание держит станок и день своего план-старта и место в дне: свободные задания в его
@@ -361,7 +389,7 @@
         var lockedSet = {};
         cands.forEach(function(j) {
             if (!j.fixed || !st[j.machineId]) return;
-            var chk = machineAllows(st[j.machineId].machine, j, s);
+            var chk = machineAllows(st[j.machineId].machine, j, s, series[j.id]);
             if (!chk.ok) { unplaced.push({ jobId: j.id, reasons: ['зафиксировано на «' + (st[j.machineId].machine.name || j.machineId) + '»: ' + chk.reason] }); lockedSet[j.id] = 'drop'; return; }
             lockedSet[j.id] = 'fixed';
         });
@@ -377,7 +405,7 @@
                 // ведомые: стояли на этом станке в тот же день перед 🔒 (после предыдущего 🔒 дня)
                 if (day != null) cands.filter(function(j) {
                     return !lockedSet[j.id] && String(j.machineId) === String(id) && num(j.start) > 0 && cal.dayOf(num(j.start)) === day &&
-                        byRecorded(j, f) < 0 && (!prevF || byRecorded(prevF, j) < 0) && machineAllows(x.machine, j, s).ok;
+                        byRecorded(j, f) < 0 && (!prevF || byRecorded(prevF, j) < 0) && machineAllows(x.machine, j, s, series[j.id]).ok;
                 }).sort(byRecorded).forEach(function(j) { lockedSet[j.id] = 'lead'; anchorDay[j.id] = dc; list.push(j); });
                 anchorDay[f.id] = dc; list.push(f);
             });
@@ -429,7 +457,7 @@
 
         // open — { id туррели: курсор, с которого она берёт неподходящие задания } (проход 2) или null.
         function assignOne(j, open, sink) {
-            var best = null, turret = null, reasons = [], fits = turretFits(j, s);
+            var best = null, turret = null, reasons = [], fits = turrets.some(function(id) { return turretFits(j, st[id].machine, series[j.id]); });
             // записанное на туррель неподходящее задание остаётся на ней, если туррель свободна сразу
             var pinned = open ? turrets.filter(function(id) {
                 return !fits && String(j.machineId || '') === String(id) && curKey(open[id]) <= curKey(st[id].cursor);
@@ -440,9 +468,9 @@
                 if (m.turret && open && fits) return;   // подходящее туррели решено в проходе 1
                 if (m.turret && !fits) {
                     // туррель как обычный станок (ограничения туррели снимаются: её отцепляют)
-                    chk = open ? machineAllows(m, Object.assign({}, j, { machineId: m.id }), s) : machineAllows(m, Object.assign({}, j, { machineId: '' }), s);
+                    chk = machineAllows(m, Object.assign({}, j, { machineId: open ? m.id : '' }), s, series[j.id]);
                     if (open && chk.ok) cur = floorCur(cur, open[id]);
-                } else chk = machineAllows(m, j, s);
+                } else chk = machineAllows(m, j, s, series[j.id]);
                 if (!chk.ok) { reasons.push((m.name || id) + ': ' + chk.reason); return; }
                 var r = tryOn(x, j, cur), t = r.t;
                 var better = !best || t.item.end < best.r.t.item.end || (t.item.end === best.r.t.item.end && t.item.setup < best.r.t.item.setup);
@@ -463,9 +491,9 @@
             var open = {}, queued = {};
             turrets.forEach(function(id) {
                 var x = st[id], last = null, its = runSeq(x, x.seq).items;
-                its.forEach(function(it, i) { if (turretFits(x.seq[i], s)) last = cal.cursorAt(it.end); });
+                its.forEach(function(it, i) { if (turretFits(x.seq[i], x.machine, series[x.seq[i].id])) last = cal.cursorAt(it.end); });
                 if (!last) (hist[id] || []).forEach(function(j) {
-                    if (!turretFits(j, s)) return;
+                    if (!turretFits(j, x.machine, series[j.id])) return;
                     var c = layoutFixed(j, x.machine).cursor;
                     if (!last || curKey(c) > curKey(last)) last = c;
                 });
@@ -575,7 +603,8 @@
             }
         }
         var cv = (c.cover || {})[job.id];
-        if (cv && num(cv.deficit) > 0) blocks.push('нет МР нужного формата');
+        // Нет МР — не блокировка: станок и день назначаются, нехватка МР видна предупреждением и во вкладке «Дефицит форматов» (#5553).
+        if (cv && num(cv.deficit) > 0) warnings.push('нет МР нужного формата');
         return { blocks: blocks, warnings: warnings };
     }
 
@@ -594,9 +623,20 @@
 
     // ── Мастер-рулоны ───────────────────────────────────────────────────────
 
+    // Порядок, в котором задания берут склад МР, — порядок построения плана: начатые (уже стоят на станке)
+    // по своему старту, затем остальные так, как их раскладывает orderQueue (compareJobs: срок, номер
+    // задания). От записанного план-старта свободных заданий он не зависит: «Применить» не перекладывает
+    // рулоны, и повторное «Упорядочить» даёт тот же план.
+    function coverOrder(a, b) {
+        var sa = isMovable(a) ? 1 : 0, sb = isMovable(b) ? 1 : 0;
+        if (sa !== sb) return sa - sb;
+        if (!sa) return (num(a.start) - num(b.start)) || (num(a.id) - num(b.id));
+        return compareJobs(a, b);
+    }
+
     // Покрытие заданий мастер-рулонами — одна мера для блокировки «нет МР нужного формата» и вкладки
     // «Дефицит форматов»; «Зарезервировать МР» показывает тот же расчёт у заданий с нехваткой.
-    // Задания идут по план-старту:
+    // Задания идут в порядке построения плана (coverOrder):
     //   нужно    = метраж задания − уже вырубленное (расход журнала по заданию);
     //   резерв   = свои рулоны на складе: резерв у рулона на это задание или поле «Мастер-рулон» задания;
     //   остатки  = метры, которые никому не нужны: свободные початые рулоны и у рулона, за которым стоит
@@ -612,7 +652,7 @@
         var o = opts || {}, moves = o.moves || [], idx = {}, byJob = {};
         (o.tasks || []).forEach(function(t) { idx[t.id] = t; });
         var list = (jobs || []).filter(function(j) { return num(j.minFormat) || num(j.usedFormat) || num(j.optFormat); })
-            .sort(function(a, b) { return a.start - b.start || (num(a.id) - num(b.id)); });
+            .sort(coverOrder);
         list.forEach(function(j) { byJob[j.id] = j; });
         var stockRolls = (rolls || []).filter(function(r) { return MR.onStock(r); });
         var consumed = function(id) {
@@ -704,13 +744,17 @@
 
     // Резерв по заданиям (задания высечки в виде задач склада MR.buildTasks): рулоны подбираются
     // правилами склада (целые, формат в допуске, не чужие), один рулон — одному заданию.
+    // Задания берут рулоны в порядке покрытия (coverOrder), если даны jobs — задания высечки; иначе по старту.
     // → [{ taskId, rollIds, deficit, need }] по заданиям с дефицитом.
-    function planReservations(tasks, rolls, moves, tolerance) {
+    function planReservations(tasks, rolls, moves, tolerance, jobs) {
         var copy = (rolls || []).map(function(r) { return Object.assign({}, r); });
+        var rank = {};
+        (jobs || []).slice().sort(coverOrder).forEach(function(j, i) { rank[j.id] = i; });
+        var rankOf = function(t) { return rank[t.id] != null ? rank[t.id] : Infinity; };
         var open = (tasks || []).filter(function(t) {
             var st = norm(t.status);
             return t.open && (st === '' || st === 'запланировано') && !t.currentRollId;
-        }).sort(function(a, b) { return a.start - b.start || (num(a.id) - num(b.id)); });
+        }).sort(function(a, b) { var ra = rankOf(a), rb = rankOf(b); return (ra !== rb ? (ra < rb ? -1 : 1) : 0) || a.start - b.start || (num(a.id) - num(b.id)); });
         var out = [];
         open.forEach(function(t) {
             var need = MR.taskNeeds([t], copy, moves, tolerance)[0];
@@ -875,7 +919,7 @@
     function formJobs(inp) {
         var s = withDefaults(inp.settings), create = [], skipped = [];
         var mrLength = num(inp.mrLength) > 0 ? num(inp.mrLength) : s.mrLength;
-        var lim = { mrLength: mrLength };
+        var lim = { mrLength: mrLength, dieSizeTolerance: s.dieSizeTolerance };
         var has = {};
         (inp.jobs || []).forEach(function(j) { if (norm(j.status) !== 'отменено' && j.positionId) has[j.positionId] = j.id; });
         (inp.positions || []).forEach(function(pos) {
@@ -1032,16 +1076,19 @@
         return (i >= 0 ? s.slice(i + 1) : s).split(',').map(function(x) { return x.trim(); }).filter(Boolean);
     }
     var INACTIVE_RE = /останов|ремонт|не работ|выведен|неисправ/i;
-    // opts.turretReq — id реквизита «Туррель» станка (BOOLEAN), opts.maxCylinderReq — «Макс. вал» (зубьев),
-    // если они есть в базе.
+    // opts — id реквизитов станка, если они есть в базе: turretReq «Туррель» (BOOLEAN), minCylinderReq
+    // «Мин. вал», maxCylinderReq «Макс. вал» (зубьев), stopBasesReq «Стоп-лист основы» (ref «Основа сырья»,
+    // несколько), minSeriesReq «Мин. метраж серии, м», maxRollReq «Макс. намотка ролика, м»,
+    // sleeveReq «Втулка не уже диаметра» (BOOLEAN) — #5428.
     function machinesFromRecords(recs, t, opts) {
-        var r = (t.machine && t.machine.reqs) || {}, tr = opts && opts.turretReq, mx = opts && opts.maxCylinderReq;
+        var r = (t.machine && t.machine.reqs) || {}, o = opts || {};
         return (recs || []).map(function(m) {
-            var status = String((m.reqs || {})[r.status] || '');
-            var tv = tr ? String((m.reqs || {})[tr] == null ? '' : (m.reqs || {})[tr]).trim().toLowerCase() : '';
+            var v = function(req) { return req ? (m.reqs || {})[req] : ''; };
+            var status = String(v(r.status) || '');
             return { id: m.id, name: m.val, stopMaterials: refIds(m, r.stopMaterials), status: status, active: !INACTIVE_RE.test(status),
-                turret: tv !== '' && tv !== '0' && tv !== 'нет' && tv !== 'false',
-                maxCylinder: mx ? num((m.reqs || {})[mx]) : 0 };
+                turret: flagOn(v(o.turretReq)), minCylinder: num(v(o.minCylinderReq)), maxCylinder: num(v(o.maxCylinderReq)),
+                stopBases: o.stopBasesReq ? refIds(m, o.stopBasesReq) : [], minSeriesM: num(v(o.minSeriesReq)),
+                maxRollM: num(v(o.maxRollReq)), sleeveNotNarrower: flagOn(v(o.sleeveReq)) };
         }).sort(function(a, b) { return (num(a.id) - num(b.id)); });
     }
     // Ножи для подбора и планирования: LO.buildDies + вал (id), формат, марка.
@@ -1087,8 +1134,8 @@
             num: num, norm: norm, readSettings: readSettings, isDone: isDone, isFinal: isFinal, isStarted: isStarted, isMovable: isMovable,
             dueEnd: dueEnd, buildJobs: buildJobs, setupKind: setupKind, setupMinutes: setupMinutes, runMinutes: runMinutes, jobFixedFields: jobFixedFields, flagOn: flagOn, movePlacement: movePlacement, rollLengthM: rollLengthM, kindOfSetup: kindOfSetup,
             machineAllows: machineAllows, createCalendar: createCalendar, orderQueue: orderQueue, compareJobs: compareJobs,
-            jobFlags: jobFlags, jobRevs: jobRevs, openRevsByDie: openRevsByDie, coverJobs: coverJobs, planReservations: planReservations,
-            toolLoad: toolLoad, ganttDay: ganttDay, recordedPlan: recordedPlan, inScope: inScope, coverGroups: coverGroups, positionPickFields: positionPickFields, queueGrid: queueGrid, turretFits: turretFits, formJobs: formJobs, jobCreateFields: jobCreateFields, jobPlanFields: jobPlanFields,
+            jobFlags: jobFlags, jobRevs: jobRevs, openRevsByDie: openRevsByDie, coverJobs: coverJobs, coverOrder: coverOrder, planReservations: planReservations,
+            toolLoad: toolLoad, ganttDay: ganttDay, recordedPlan: recordedPlan, inScope: inScope, coverGroups: coverGroups, positionPickFields: positionPickFields, queueGrid: queueGrid, turretFits: turretFits, seriesFootage: seriesFootage, cylinderInRange: cylinderInRange, cylinderRangeText: cylinderRangeText, formJobs: formJobs, jobCreateFields: jobCreateFields, jobPlanFields: jobPlanFields,
             sleeveDiameterMm: sleeveDiameterMm, pickCutter: pickCutter, sleevePlan: sleevePlan,
             sleeveCreateFields: sleeveCreateFields, sleeveUpdateFields: sleeveUpdateFields,
             refIds: refIds, machinesFromRecords: machinesFromRecords, buildDieIndex: buildDieIndex, dieInfo: dieInfo, resolveSleeveTask: resolveSleeveTask

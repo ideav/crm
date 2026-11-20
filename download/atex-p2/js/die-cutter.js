@@ -45,6 +45,7 @@
     'use strict';
 
     var LP = (root && root.AtexLabelProduction) || (typeof require === 'function' ? require('../../atex/js/label-production.js') : null);
+    var PG = (root && root.AtexProgress) || (typeof require === 'function' ? require('./atex-progress.js') : null);
     var lp = LP ? LP.core : null;
 
     var JOB_STATUS = { PLANNED: 'Запланировано', RUNNING: 'В работе', DONE: 'Выполнено' };
@@ -404,11 +405,11 @@
         });
     }
 
-    // Валы для смены: не больше «Макс. вала» станка (пусто или 0 — любой), кроме текущего (#5366).
+    // Валы для смены: в диапазоне «Мин. вал»–«Макс. вал» станка (пусто или 0 — без границы), кроме текущего (#5428).
     function compatibleCylinders(job, cylinders, machine) {
-        var max = num(machine && machine.maxCylinder);
+        var max = num(machine && machine.maxCylinder), min = num(machine && machine.minCylinder);
         return (cylinders || []).filter(function(c) {
-            return c.id !== job.cylinderId && !(max > 0 && num(c.val) > max);
+            return c.id !== job.cylinderId && !(max > 0 && num(c.val) > max) && !(min > 0 && num(c.val) < min);
         });
     }
 
@@ -806,7 +807,8 @@
                 c.serverNow(), all(t.masterRoll && t.masterRoll.id),
                 // #5366: ресурс ножа — марка и настройка; прав на чтение нет — ресурс по умолчанию.
                 all(t.dieBrand && t.dieBrand.id).catch(function() { return []; }),
-                self.loadSettings(meta).catch(function() { return []; })
+                self.loadSettings(meta).catch(function() { return []; }),
+                all(t.dieType && t.dieType.id)
             ]).then(function(r) {
                 var dr = t.die.reqs, gr = t.finishedBatch.reqs;
                 // Колонки, которых нет в общем описании таблиц (label-production.js): ищутся по имени.
@@ -822,7 +824,7 @@
                 var brandRes = {};
                 r[12].forEach(function(b) { brandRes[b.id] = reqVal(b, brandCol); });
                 var defaultRes = settingValue(r[13], RESOURCE_KEY, self.db) || RESOURCE_DEFAULT_REV;
-                var dies = r[3].map(function(d) {
+                var dies = lp.withDieTypes(r[3], t, r[14]).map(function(d) {
                     var res = lp.dieResource(brandRes[refId(d, dr.brand)], defaultRes).revs;
                     return { id: d.id, val: d.val, width: num(reqVal(d, dr.labelWidth)), length: num(reqVal(d, dr.labelLength)), state: reqVal(d, dr.state), cylinderId: refId(d, dr.cylinder), labelsPerRepeat: num(reqVal(d, dr.labelsPerRepeat)), minFormat: num(reqVal(d, dr.minFormat)), resource: isFinite(res) ? res : 0 };
                 });
@@ -837,6 +839,8 @@
                 var machineMeta = (meta || []).filter(function(x) { return String(x.id) === String(t.machine.id); })[0];
                 var maxReq = ((machineMeta && machineMeta.reqs) || []).filter(function(x) { return String(x.val).trim() === 'Макс. вал'; })[0];
                 maxReq = maxReq ? String(maxReq.id) : '';
+                var minReq = ((machineMeta && machineMeta.reqs) || []).filter(function(x) { return String(x.val).trim() === 'Мин. вал'; })[0];
+                minReq = minReq ? String(minReq.id) : '';
                 var ic = its.tables.itsCall;
                 self.state = {
                     tables: t,
@@ -845,7 +849,7 @@
                     jobs: jobs,
                     rolls: rolls,
                     runs: runsFromReport(r[1]),
-                    machines: r[2].map(function(m) { return { id: m.id, val: m.val, maxCylinder: maxReq ? num(reqVal(m, maxReq)) : 0 }; }),
+                    machines: r[2].map(function(m) { return { id: m.id, val: m.val, maxCylinder: maxReq ? num(reqVal(m, maxReq)) : 0, minCylinder: minReq ? num(reqVal(m, minReq)) : 0 }; }),
                     dies: dies,
                     cylinders: cylinders,
                     gps: r[5].map(function(g) { return { id: g.id, val: g.val, jobId: refId(g, gr.job) }; }),
@@ -1073,23 +1077,34 @@
     };
 
     // okText — текст об успехе; без него текст возвращает сама работа (writePulls).
+    // work(pg) получает окно прогресса (#5504): длинная работа зовёт pg.step(title, total) и pg.tick().
+    // Окно встаёт с задержкой — одиночная запись (наладка, событие) его не показывает.
     AtexDieCutter.prototype.run = function(work, okText) {
         var self = this;
         var result = { text: '', kind: 'ok' };
         this.busy = true;
         this.message('Записываю…', '');
+        var pg = (this.progressUi || PG).open('Записываю…', { delay: 400 });
         // Сообщение об успехе — после перечитывания данных: к этому моменту кнопки задания
         // уже обновлены («Наладка» → «Наладка завершена» без «Обновить», #5339).
-        return Promise.resolve().then(work).then(function(text) {
+        return Promise.resolve().then(function() { return work(pg); }).then(function(text) {
             // Работа может вернуть { text, kind } — например, «Задание закрыто, но статусы не записаны» (#5358).
             if (okText == null && text && typeof text === 'object') result = { text: String(text.text || ''), kind: text.kind || 'ok' };
             else result = { text: okText != null ? okText : String(text || ''), kind: 'ok' };
         }).catch(function(err) {
             console.error('[die-cutter] ❌', err);
             result = { text: 'Не записано: ' + err.message, kind: 'error' };
-        }).then(function() { return self.reload(); }).then(function() {
+        }).then(function() {
+            pg.step('Обновляю данные', 0);
+            return self.reload();
+        }).then(function() {
+            pg.close();
             self.message(result.text, result.kind);
             self.busy = false;
+        }, function(err) {
+            pg.close();
+            self.busy = false;
+            throw err;
         });
     };
 
@@ -1125,11 +1140,15 @@
         if (!plan.ok) { this.message(plan.error, 'error'); return; }
         var t = s.tables;
         var made = 0;
-        return this.run(function() {
+        return this.run(function(pg) {
             return self.client.serverNow().then(function(now) {
                 // #5330: незакрытую наладку закрывает первый съём.
                 var close = n > 0 ? setupCloseOnPull(s.events, j.id, now) : null;
-                var chain = close ? self.writeEvent(j, EVENT.SETUP_DONE, close.minutes + ' мин · ' + close.notes, null, close.minutes) : Promise.resolve();
+                var setRest = !(plan.rest == null || !t.masterRoll || !t.masterRoll.reqs.rest);
+                // #5504: по запросу на движение пробега и на партию ГП — счётчик в окне прогресса.
+                pg.step(n > 0 ? 'Записываю съёмы: ' + n : 'Дописываю хвосты', (close ? 1 : 0) + plan.runs.length + plan.gps.length + (setRest ? 1 : 0) + 1);
+                var tick = function(v) { pg.tick(); return v; };
+                var chain = close ? self.writeEvent(j, EVENT.SETUP_DONE, close.minutes + ' мин · ' + close.notes, null, close.minutes).then(tick) : Promise.resolve();
                 var kind = self.refByLabel(s.runKinds, lp.RUN_KIND.CUT);
                 if (plan.runs.length && !kind) throw new Error('в справочнике «Вид движения пробега» нет «' + lp.RUN_KIND.CUT + '»');
                 plan.runs.forEach(function(revs) {
@@ -1141,7 +1160,7 @@
                         p['t' + r.revs] = String(revs);
                         if (r.kind) p['t' + r.kind] = kind;
                         if (r.operator && self.userId) p['t' + r.operator] = self.userId;
-                        return self.client.create(t.dieRun.id, j.dieId, p).then(function() { made++; });
+                        return self.client.create(t.dieRun.id, j.dieId, p).then(function() { made++; pg.tick(); });
                     });
                 });
                 plan.gps.forEach(function(g) {
@@ -1151,22 +1170,22 @@
                         if (r.job) p['t' + r.job] = j.id;
                         if (r.qty) p['t' + r.qty] = String(g.rolls);
                         if (r.packStatus) p['t' + r.packStatus] = GP_STATUS_NEW;
-                        return self.client.create(t.finishedBatch.id, 1, p);
+                        return self.client.create(t.finishedBatch.id, 1, p).then(tick);
                     });
                 });
                 return chain.then(function() {
-                    if (plan.rest == null || !t.masterRoll || !t.masterRoll.reqs.rest) return null;
+                    if (!setRest) return null;
                     var p = {};
                     p['t' + t.masterRoll.reqs.rest] = String(plan.rest);
                     if (t.masterRoll.reqs.status) p['t' + t.masterRoll.reqs.status] = plan.rest > 0 ? ROLL_STATUS.OPENED : ROLL_STATUS.USED;
-                    return self.client.post('_m_set/' + encodeURIComponent(j.rollId) + '?JSON', p);
+                    return self.client.post('_m_set/' + encodeURIComponent(j.rollId) + '?JSON', p).then(tick);
                 }).then(function() {
                     var r = t.dieJob.reqs, p = {};
                     if (r.pullsFact) p['t' + r.pullsFact] = String(plan.fact);
                     if (plan.status && r.status) p['t' + r.status] = plan.status;
                     // Рулон взят из резерва — запоминается и в самом задании (#5339).
                     if (j.rollSource === 'reserve' && j.rollId && r.masterRoll) p['t' + r.masterRoll] = j.rollId;
-                    return self.client.post('_m_set/' + encodeURIComponent(j.id) + '?JSON', p);
+                    return self.client.post('_m_set/' + encodeURIComponent(j.id) + '?JSON', p).then(tick);
                 }).then(function() {
                     var warn = plan.warnings && plan.warnings.length ? ' Внимание: ' + plan.warnings.join('; ') + '.' : '';
                     return (n > 0 ? 'Записано съёмов: ' + n + ' (всего ' + plan.fact + (j.pullsPlan > 0 ? ' из ' + j.pullsPlan : '') + ').' : 'Хвосты дописаны.') + warn;

@@ -72,7 +72,7 @@ $missing = array();
 foreach(array("Salt", "secureToken", "xsrf", "check", "Xsrf_is_legacy", "Basic_auth_token", "Reg_confirm_code",
               "Dir_admin_add_path", "Restore_admin_allowed", "Pwd_legacy", "Pwd_prehash", "Pwd_hash", "Pwd_is_modern",
               "Pwd_verify", "Pwd_needs_rehash", "Token_key_sql", "Token_parse", "Token_stored_val", "Token_db_val",
-              "Token_match_sql", "Token_idle_sql", "Login_lock_left", "incrementRetries") as $fn){
+              "Token_match_sql", "Token_idle_sql", "Login_lock_left", "incrementRetries", "Admin_token") as $fn){
     try {
         eval(str_replace("mysqli_fetch_array(", "fk_fetch_array(", extract_function_source($source, $fn)));
     } catch(Exception $e){
@@ -188,7 +188,8 @@ if(function_exists("Restore_admin_allowed")){
     expect(restore_allowed_with(array(), array("token" => $owner), array()), "G: POST token владельца — можно");
     expect(restore_allowed_with(array(), array(), array("X-Authorization" => $owner)), "G: X-Authorization владельца — можно");
     expect(restore_allowed_with(array("idb_my" => $cab), array(), array()), "G: кабинет владельца базы — можно");
-    expect(restore_allowed_with(array("idb_abc" => hash("sha512", ADMINHASH.$z)), array(), array()), "G: мастер-токен сервера — можно");
+    expect(restore_allowed_with(array("idb_abc" => Admin_token($z)), array(), array()), "G: мастер-токен сервера — можно");
+    expect(!restore_allowed_with(array("idb_abc" => hash("sha512", ADMINHASH.$z)), array(), array()), "G: мастер-токен прежней формулы sha512(ADMINHASH.база) — отказ (#1139)");
 }
 
 # ── H) закрытые каталоги ───────────────────────────────────────────────────────────────────

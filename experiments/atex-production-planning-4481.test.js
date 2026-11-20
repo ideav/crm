@@ -19,6 +19,8 @@
 //       получает ни одной переналадки сырья.
 //
 // Run with: node experiments/atex-production-planning-4481.test.js
+//
+// rules: PEN-material
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

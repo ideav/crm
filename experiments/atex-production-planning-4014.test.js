@@ -17,6 +17,8 @@
 //   • applySplitPlan возвращает true (успех).
 //
 // Run with: node experiments/atex-production-planning-4014.test.js
+//
+// rules: none (defect #4014)
 
 process.env.TZ = 'UTC';
 global.window = { db: 'testdb', xsrf: 'x' };

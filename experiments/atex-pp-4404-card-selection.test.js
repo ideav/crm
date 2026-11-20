@@ -10,6 +10,8 @@
 // моделирует capture/bubble и stopPropagation, иначе тест ничего не доказывал бы.
 //
 // Run with: node experiments/atex-pp-4404-card-selection.test.js
+//
+// rules: none (defect #4404)
 
 // Tests for ideav/crm#4401 — кнопка «↻ Пересчитать наладку»:
 //   A) НЕ переставляет задания — пишет только тайминг (три хранимые колонки), planStart не трогает,

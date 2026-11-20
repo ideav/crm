@@ -17,6 +17,8 @@
 // настроечно-СГРУППИРОВАННЫЙ станок почти вдвое, см. #3968.)
 //
 // Run with: node experiments/atex-production-planning-3965.test.js
+//
+// rules: none (defect #3965)
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

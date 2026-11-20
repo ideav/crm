@@ -36,6 +36,8 @@
 //   F — набор без отбрасывания ведёт себя как раньше: отчёт совпадает с «до».
 //
 // Run with: node experiments/atex-pp-4759-audit-after-drop.test.js
+//
+// rules: DAY_CAPACITY, FROZEN_DAY
 
 process.env.TZ = 'UTC';
 global.window = { db: 'ateh1', xsrf: 'x' };

@@ -1,8 +1,9 @@
 // Рабочее место atex «Импорт из 1С» (роли Администратор, Диспетчер; ideav/crm#5308).
 //
 // Две вкладки — выгрузки 1С в .xlsx:
-//   - «Заказы этикетки» — «Выгруженные заказы этикетка.xlsx»: заказ = «Заказ клиента», позиция =
-//     пара «Заказ клиента» + артикул (вид продукции «этикетка»);
+//   - «Заказы этикетки» — «Выгруженные заказы этикетка.xlsx»: заказ = «Заказ поставщику»
+//     (внутренний заказ), позиция = пара «Заказ поставщику» + артикул (вид продукции «этикетка»),
+//     «Заказ клиента» — поле позиции;
 //   - «База ножей» — книга с листом «Ножи» (номер ножа — ключ) и, если есть, листом «План»:
 //     пробег ножа — колонка «Пробег» листа «Ножи», а пустая — «Суммарный пробег ножа» листа «План».
 // Файл читается SheetJS (/js/xlsx0.18.5.full.min.js) в браузере, сверка и план — модуль
@@ -28,6 +29,9 @@
 
     var LI = (root && root.AtexLabelImport) ||
         (typeof require === 'function' ? require('./label-import-core.js') : null);
+    // Окно прогресса длительных операций (#5504): сверка читает позиции каждого заказа файла.
+    var PG = (root && root.AtexProgress) ||
+        (typeof require === 'function' ? require('./atex-progress.js') : null);
 
     var RUNS_REPORT = 'die_runs';
     var CONCURRENCY = 5;        // ТЗ atex §15: не больше 5 запросов разом
@@ -42,9 +46,12 @@
     };
 
     var HINTS = {
-        orders: 'Выгрузка «Выгруженные заказы этикетка» (.xlsx). Ключ сверки — «Заказ клиента» + артикул: ' +
+        orders: 'Выгрузка заказов этикетки из 1С (.xlsx). Заказ — «Заказ поставщику» (внутренний заказ), «Заказ клиента» пишется в позицию. ' +
+            'Ключ сверки — «Заказ поставщику» + артикул: ' +
             'существующая позиция обновляется, новая создаётся в заказе. Примечание и статус позиции пишутся только при создании. ' +
-            'Сырьё подбирается по обозначению в номенклатуре («П/Гл», «П/П») и клею, срок = дата поступления + ' + LI.DUE_DAYS_DEFAULT +
+            'Количество — в рулонах; при единице «тыс. шт» или пометке «(в шт)» в номенклатуре оно пересчитывается из этикеток. ' +
+            'Сырьё — по марке мастер-рулона в комментарии («MONOCHROME 0043 SG/HM/YG …»), без марки — по обозначению в номенклатуре ' +
+            '(«П/Гл», «П/П») и клею; срок = дата поступления + ' + LI.DUE_DAYS_DEFAULT +
             ' дн. (настройка ' + LI.DUE_DAYS_KEY + '); у существующей позиции они заполняются, только если пусты.',
         knives: 'Книга с листом «Ножи» (и «План» — оттуда берётся «Суммарный пробег ножа»). Ключ — «Номер ножа». ' +
             'Пробег пишется одной записью «начальный остаток»: повторный импорт её перезаписывает, вырубку не трогает. ' +
@@ -107,12 +114,35 @@
         this.parsed = { orders: null, knives: null };
         this.files = { orders: '', knives: '' };
         this.plan = { orders: null, knives: null };
+        // Позиции по id заказа из последней сверки: повторная сверка после записи берёт их
+        // для заказов, которых запись не касалась (#5512).
+        this.positionsByOrder = {};
         this.filter = '';
         this.busy = false;
         this.loading = '';
         this.loadingSince = 0;
         this.loadingTimer = null;
+        this.progressUi = PG;
     }
+
+    // Отдать кадр браузеру: окно прогресса успевает отрисоваться перед синхронным расчётом.
+    function yieldFrame() {
+        return new Promise(function(resolve) { setTimeout(resolve, 0); });
+    }
+
+    // Выполнить fn(p) в окне прогресса: своё окно открывается и закрывается здесь (и при ошибке),
+    // переданное снаружи только продолжается (запись + повторная сверка — одно окно).
+    AtexLabelImport.prototype.withProgress = function(p, title, fn) {
+        if (p) return fn(p);
+        var own = this.progressUi.open(title);
+        return Promise.resolve().then(function() { return fn(own); }).then(function(v) {
+            own.close();
+            return v;
+        }, function(err) {
+            own.close();
+            throw err;
+        });
+    };
 
     // Начать/закончить показ индикатора загрузки в таблице предпросмотра.
     AtexLabelImport.prototype.setLoading = function(text) {
@@ -172,15 +202,6 @@
         el.textContent = text || '';
     };
 
-    AtexLabelImport.prototype.progress = function(done, total, text) {
-        var el = this.$('atex-limp-progress');
-        if (!el) return;
-        el.hidden = total == null;
-        if (total == null) return;
-        el.querySelector('.atex-limp-progress-bar').style.width = (total ? Math.round(done / total * 100) : 0) + '%';
-        el.querySelector('span').textContent = text || '';
-    };
-
     AtexLabelImport.prototype.start = function() {
         var self = this;
         this.root.addEventListener('click', function(e) {
@@ -234,6 +255,8 @@
         this.message('Читаю «' + file.name + '»…');
         this.plan[tab] = null;
         this.setLoading('Читаю «' + file.name + '»');
+        var p = this.progressUi.open('Импорт «' + file.name + '»');
+        p.step('Читаю файл', 0);
         return Promise.all([this.withXlsx(), file.arrayBuffer()]).then(function(r) {
             var XLSX = r[0];
             var wb = XLSX.read(new Uint8Array(r[1]), { type: 'array' });
@@ -252,11 +275,11 @@
             self.parsed[tab] = parsed;
             self.files[tab] = file.name;
             self.setLoading('Сверяю с базой' + (tab === 'knives' ? ' (база ножей — до 10 с)' : ''));
-            return self.replan(tab);
+            return self.replan(tab, p);
         }).catch(function(err) {
             console.error('[label-import] ❌', err);
             self.message('Файл не разобран: ' + err.message, 'error');
-        }).then(function() { self.setLoading(''); });
+        }).then(function() { p.close(); self.setLoading(''); });
     };
 
     AtexLabelImport.prototype.checkTables = function(tab) {
@@ -266,18 +289,27 @@
     };
 
     // Сверка с базой: читает, что нужно для ключей файла, и строит план.
-    AtexLabelImport.prototype.replan = function(tab) {
+    // p — окно прогресса вызывающего (загрузка файла, запись); без него сверка открывает своё.
+    // touched — номера заказов, тронутых записью (LI.touchedOrders): позиции остальных заказов
+    // берутся из прошлой сверки. Без него читаются позиции всех заказов файла.
+    AtexLabelImport.prototype.replan = function(tab, p, touched) {
         var self = this;
         this.checkTables(tab);
         this.message('Сверяю с базой…');
         var t0 = Date.now();
-        var load = tab === 'knives' ? this.loadKnifeContext() : this.loadOrderContext(this.parsed.orders);
-        return load.then(function(ctx) {
-            var plan = tab === 'knives' ? LI.planKnives(self.parsed.knives, ctx, {}) : LI.planOrders(self.parsed.orders, ctx, {});
-            self.plan[tab] = plan;
-            self.message('Сверено за ' + ((Date.now() - t0) / 1000).toFixed(1) + ' с. Проверьте предпросмотр и нажмите «Записать».');
-            self.render();
-            return plan;
+        return this.withProgress(p, 'Сверка с базой', function(pg) {
+            var load = tab === 'knives' ? self.loadKnifeContext(pg) : self.loadOrderContext(self.parsed.orders, pg, touched);
+            return load.then(function(ctx) {
+                pg.step('Сверяю файл с базой', 0);
+                return yieldFrame().then(function() { return ctx; });
+            }).then(function(ctx) {
+                var plan = tab === 'knives' ? LI.planKnives(self.parsed.knives, ctx, {}) : LI.planOrders(self.parsed.orders, ctx, {});
+                self.plan[tab] = plan;
+                var verdict = LI.planVerdict(tab, plan, self.parsed[tab]);
+                self.message('Сверено за ' + ((Date.now() - t0) / 1000).toFixed(1) + ' с. ' + verdict.text, verdict.kind);
+                self.render();
+                return plan;
+            });
         });
     };
 
@@ -285,12 +317,15 @@
         return this.getJson('object/' + this.tables[key].id + '/?JSON_KV&LIMIT=0,100000' + (extra || '')).then(LI.kvRecords);
     };
 
-    AtexLabelImport.prototype.loadKnifeContext = function() {
+    AtexLabelImport.prototype.loadKnifeContext = function(p) {
         var self = this;
-        return Promise.all([
+        var reads = [
             this.objects('die'), this.getJson('report/' + RUNS_REPORT + '?JSON_KV&LIMIT=0,1000000'),
-            this.objects('cylinder'), this.objects('base'), this.objects('brand'), this.objects('state'), this.objects('runKind')
-        ]).then(function(r) {
+            this.objects('cylinder'), this.objects('base'), this.objects('brand'), this.objects('state'), this.objects('runKind'),
+            this.objects('dieType')
+        ];
+        p.step('Читаю базу ножей и пробег (до 10 с)', reads.length);
+        return Promise.all(reads.map(function(r) { return p.track(r); })).then(function(r) {
             var runs = Array.isArray(r[1]) ? r[1] : [];
             var runsCol = self.tables.die.reqs && self.tables.dieRun ? self.tables.dieRun.id : '';
             var withRuns = r[0].filter(function(d) { return Number(d.reqs[runsCol]) > 0; }).length;
@@ -298,27 +333,45 @@
                 throw new Error('отчёт «' + RUNS_REPORT + '» вернул 0 движений, а у ' + withRuns + ' ножей они есть — повторный импорт задвоил бы пробег');
             }
             return LI.knifeContext(self.tables, {
-                dies: r[0], runs: runs, cylinders: r[2], bases: r[3], brands: r[4], states: r[5], runKinds: r[6]
+                dies: r[0], types: r[7], runs: runs, cylinders: r[2], bases: r[3], brands: r[4], states: r[5], runKinds: r[6]
             });
         });
     };
 
-    AtexLabelImport.prototype.loadOrderContext = function(parsed) {
+    AtexLabelImport.prototype.loadOrderContext = function(parsed, p, touched) {
         var self = this;
         var opt = function(key) { return self.tables[key] ? self.objects(key) : Promise.resolve([]); };
-        return Promise.all([
+        var reads = [
             this.objects('order'), this.objects('client'), this.objects('article'), this.objects('productKind'),
-            opt('orderStatus'), opt('positionStatus'), opt('core'), opt('unit'), opt('material'), opt('setting')
-        ]).then(function(r) {
+            opt('orderStatus'), opt('positionStatus'), opt('core'), opt('unit'), opt('material'), opt('setting'),
+            opt('dieType'), opt('cylinder')   // сверка МР из комментария 1С с расчётом (#5551)
+        ];
+        p.step('Читаю заказы и справочники', reads.length);
+        return Promise.all(reads.map(function(r) { return p.track(r); })).then(function(r) {
             var numbers = {};
             (parsed.items || []).forEach(function(i) { numbers[i.order] = true; });
             var hit = r[0].filter(function(o) { return numbers[String(o.val).trim()]; });
-            return pool(hit, CONCURRENCY, function(o) { return self.objects('position', '&F_U=' + encodeURIComponent(o.id)); }).then(function(lists) {
-                var positions = [];
-                lists.forEach(function(list, i) { (list || []).forEach(function(p) { p.up = hit[i].id; positions.push(p); }); });
+            var cache = touched ? self.positionsByOrder : {};
+            var fetch = hit.filter(function(o) { return !cache[o.id] || touched[String(o.val).trim()]; });
+            // Позиции читаются по заказу — на выгрузку сотни запросов, отсюда счётчик в окне.
+            p.step(touched ? 'Перечитываю позиции изменённых заказов' : 'Читаю позиции заказов из файла', fetch.length);
+            return pool(fetch, CONCURRENCY, function(o) {
+                return p.track(self.objects('position', '&F_U=' + encodeURIComponent(o.id))).then(function(list) {
+                    p.set(p.done, 'Заказ ' + String(o.val).trim());
+                    return list;
+                });
+            }).then(function(lists) {
+                var fresh = {};
+                fetch.forEach(function(o, i) { fresh[o.id] = lists[i] || []; });
+                var positions = [], byOrder = {};
+                hit.forEach(function(o) {
+                    var list = byOrder[o.id] = fresh[o.id] || cache[o.id] || [];
+                    list.forEach(function(p) { p.up = o.id; positions.push(p); });
+                });
+                self.positionsByOrder = byOrder;
                 return LI.orderContext(self.tables, {
                     orders: r[0], positions: positions, clients: r[1], articles: r[2], productKinds: r[3],
-                    orderStatuses: r[4], positionStatuses: r[5], cores: r[6], units: r[7], materials: r[8], settings: r[9], db: self.db
+                    orderStatuses: r[4], positionStatuses: r[5], cores: r[6], units: r[7], materials: r[8], settings: r[9], dieTypes: r[10], cylinders: r[11], db: self.db
                 });
             });
         });
@@ -343,7 +396,7 @@
     };
 
     AtexLabelImport.prototype.write = function() {
-        var self = this, tab = this.tab, plan = this.plan[tab];
+        var self = this, tab = this.tab, plan = this.plan[tab], pg = null;
         if (this.busy || !plan || !plan.ops.length) return;
         var c = plan.counts;
         var what = tab === 'knives' ? 'ножей' : 'позиций';
@@ -354,15 +407,15 @@
             if (!yes) return;
             self.busy = true;
             self.render();
-            self.progress(0, plan.ops.length, 'Запись…');
+            pg = self.progressUi.open('Запись в базу «' + self.db + '»', { total: plan.ops.length, detail: 'Отправляю первый пакет' });
             return LI.runBatches(plan.ops, function(ops) { return self.sendBatch(ops); }, {
                 batchSize: BATCH_SIZE,
-                onProgress: function(p) { self.progress(p.done, p.total, 'Пакет ' + p.batch + ' из ' + p.batches + ': ' + p.done + ' / ' + p.total + ' операций'); }
+                onProgress: function(p) { pg.set(p.done, 'Пакет ' + p.batch + ' из ' + p.batches); }
             }).then(function(res) {
                 var sec = (res.ms / 1000).toFixed(1);
                 console.log('[label-import] ✅ запись ' + tab + ': ' + plan.ops.length + ' операций, ' + res.batches + ' пакетов, ' + sec + ' с, ошибок ' + res.failed.length);
                 if (res.failed.length) console.error('[label-import] ❌ не записано', res.failed);
-                return self.replan(tab).then(function(after) {
+                return self.replan(tab, pg, tab === 'orders' ? LI.touchedOrders(plan.ops) : null).then(function(after) {
                     var a = after.counts;
                     self.message('Записано за ' + sec + ' с (' + res.batches + ' пакет.)' +
                         (res.failed.length ? '; не записано операций: ' + res.failed.length + ' — первая: ' + res.failed[0].error : '') +
@@ -374,8 +427,8 @@
             console.error('[label-import] ❌', err);
             self.message('Запись прервана: ' + err.message + '. Перечитайте файл — сверка покажет, что уже записано.', 'error');
         }).then(function() {
+            if (pg) pg.close();
             self.busy = false;
-            self.progress(0, null);
             self.render();
         });
     };
@@ -386,6 +439,7 @@
         this.$('atex-limp-file-name').textContent = this.files[tab] ? this.files[tab] : '';
         var btn = this.$('atex-limp-write');
         btn.disabled = this.busy || !plan || !plan.ops.length;
+        btn.title = !plan ? 'Сначала выберите файл' : (!plan.ops.length ? 'Записывать нечего: файл совпадает с базой' : '');
         btn.querySelector('span').textContent = plan && plan.ops.length ? 'Записать (' + plan.ops.length + ' операций)' : 'Записать';
 
         var kpi = this.$('atex-limp-kpi');

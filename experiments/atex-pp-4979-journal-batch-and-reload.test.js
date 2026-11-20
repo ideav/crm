@@ -22,6 +22,8 @@
 //   F — `reloadPlan({strips:false})` не тянет полосы там, где цепочки не менялись.
 //
 // Run with: node experiments/atex-pp-4979-journal-batch-and-reload.test.js
+//
+// rules: none (defect #4979)
 
 process.env.TZ = 'Europe/Moscow';
 global.window = { db: 'ateh1', xsrf: 'x' };

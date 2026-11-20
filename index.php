@@ -171,6 +171,14 @@ define("LOG_READ_LIMIT", 10000);  # чтение журнала (#5103): стр�
 define("LOG_READ_BLOCK", 65536);  # файл читается с конца блоками этого размера
 define("LOG_READ_SCAN_MB", 256);  # больше за один запрос не просматривается — продолжение по курсору
 define("LOG_READ_SKEW_S", 300);  # запас since на строки, записанные не по порядку ts
+# ИИ-агент: задачи (AI_AGENT_JOBS_*) и история диалогов (AI_AGENT_CHAT*). Объявлены здесь, а не
+# рядом с функциями: маршрут callback агента стоит выше их объявлений и завершает запрос сразу —
+# функции в PHP видны во всём файле, а define() ниже маршрута ещё не выполнен (crm#5435).
+if(!defined("AI_AGENT_JOBS_MAX")) define("AI_AGENT_JOBS_MAX", 20);
+if(!defined("AI_AGENT_JOBS_TTL")) define("AI_AGENT_JOBS_TTL", 24 * 3600);
+if(!defined("AI_AGENT_CHATS_MAX")) define("AI_AGENT_CHATS_MAX", 50);
+if(!defined("AI_AGENT_CHAT_TURNS_MAX")) define("AI_AGENT_CHAT_TURNS_MAX", 100);
+if(!defined("AI_AGENT_CHAT_TITLE_LEN")) define("AI_AGENT_CHAT_TITLE_LEN", 60);
 # The kind of a row queued by Insert_batch() - see its comment. Defined up here because the top-level
 # code calling it runs before the line the function is declared on: functions hoist, define() does not.
 define("BATCH_ASIS", -1);
@@ -193,6 +201,7 @@ define("RETRIES", 301); # #3581: счётчик попыток входа дол
                         # залипал на лимите и давал «превышено» при «пустом» Retries.
 define("RETRIES_LIMIT", 5);
 define("CHECKCODE_RETRIES_LIMIT", 2);
+define("CAPTCHA_AFTER_RETRIES", 2);   # #1139: со стольких неудач подряд у логина вход только с капчей
 define("TOKEN", 125);
 # python2node#1043: сессии на устройство, MCP-токены, блокировка подбора (функции — в блоке auth-1043)
 defined("SESSION_IDLE") || define("SESSION_IDLE", 30*86400);
@@ -205,6 +214,9 @@ define("MCP_TOKEN_TTL_DAYS", 90);    # наибольший срок MCP-ток�
 define("MCP_SCOPES", "read:r,write:w,delete:d,rights:g,schema:s");
 define("LOGIN_LOCK_S", 900);         # после RETRIES_LIMIT неудач подряд вход закрыт на столько секунд
 defined("AUTH_COOKIE_SAMESITE") || define("AUTH_COOKIE_SAMESITE", "Lax");
+# #5205: режим refresh/access для API-клиентов — AUTH_TOKENS ("session" | "refresh"), ACCESS_TTL (сек, 900),
+# REFRESH_TTL (простой refresh, сек, 30 дн.). Задаются define в include/connection.php или INTEGRAM_<имя>;
+# читаются функцией Auth_conf при запросе (connection.php подключается ниже этих строк).
 define("SECRET", 130);
 define("QR_LOGIN_TTL", 120);  # Вход по QR: время жизни кода, сек (#4667)
 define("QR_LOGIN_MAX", 200);  # Вход по QR: одновременных сессий на базу
@@ -212,6 +224,11 @@ define("QR_LOGIN_MAX_IP", 5); # Вход по QR: одновременных с�
 define("QR_CODE_MASK", "/^[a-f0-9]{32,64}$/");  # Вход по QR: формат кода и секрета
 define("VERSION", 120);  # cache-bust версия ассетов (?0{_global_.version}); НЕ бить при правках js/css — версию поднимать посуффиксно в шаблоне (?{_global_.version}.N), см. docs/WORKSPACE_DEVELOPMENT_GUIDE.md §2
 define("VAL_LIM", 127);  # Maximum length of the value (val) field on UI
+
+# Свой домен базы (#5573): проверка Caddy перед выпуском сертификата и перевод чистого адреса
+# своего домена в /<база>/… — до разбора REQUEST_URI.
+require_once __DIR__."/include/custom_domain.php";
+Cd_route();
 
 $com = explode("?", strtolower($_SERVER["REQUEST_URI"]));
 $com = explode("/", $com[0]);
@@ -274,6 +291,7 @@ if((isset($com[2]) ? $com[2] : "") === "ai"
 
 $locale = isset($_COOKIE[$z."_locale"]) ? $_COOKIE[$z."_locale"] : (isset($_COOKIE["my_locale"]) ? $_COOKIE["my_locale"] : "RU");
 include "include/connection.php";
+Secrets_guard($z);  # #1139: дефолтные секреты на сервере — отказ, а не воспроизводимый мастер-токен
 # Check the DB existence
 # #4539: проверочный запрос НЕ ставится под добивание (Sql_running/KILL QUERY). Он короткий по
 # построению — `LIMIT 1` по только что открытому соединению, — и добивать в нём нечего: серверный
@@ -304,6 +322,9 @@ if(!$billing && ($z !== "auth.asp")){
 	}
 	my_die(t9n("[RU]Не удалось открыть базу «{$z}»[EN]Failed to open the «{$z}» database"), "500 Internal Server Error");
 }
+# Служебный вызов биллинга (#5206): POST /{db}/billing/add, без сессии, по X-Billing-Token.
+if((isset($com[2]) ? $com[2] : "") === "billing" && (isset($com[3]) ? $com[3] : "") === "add")
+    handleBillingAdd($z);
 																									
 # The trace cookie to be deleted upon the session close
 if(isset($_GET["TRACE_IT"]) || isset($_COOKIE["TRACE_IT"])){
@@ -340,6 +361,8 @@ if(strlen($rawInput)){
 # Строка запроса пишется при завершении PHP — с пользователем, кодом ответа и временем (#5104).
 # Секреты в параметрах маскирует logParams(): `c`/`s` — код и секрет входа по QR (#4677).
 register_shutdown_function("logRequest");
+if(($z === "my") && ((isset($com[2]) ? $com[2] : "") === "coresso")) # ideav/python2node#1288: вход в базу на новом ядре
+    Core_sso_enter();
 if(($z === "my") && ((isset($com[2]) ? $com[2] : "") === "register")){ # Register the user
     # Check if this is a confirmation request
     if(isset($_GET["c"]) && isset($_GET["u"])){
@@ -362,7 +385,8 @@ if(($z === "my") && ((isset($com[2]) ? $com[2] : "") === "register")){ # Registe
         			Exec_sql("UPDATE $z SET val='".$row["token"]."' WHERE id=".$row["pid"], "Update user's password");
         			updateTokens($row, array((string)$row["token"]));  # до подтверждения в токене лежал хеш пароля
                 	createDb($row["uid"], "", $row["email"], $row["pwd"]);
-            		header("Location: /$z");
+                	$back = Sso_back_redirect();  # ideav/courses#84: назад в базу, откуда отправили на регистрацию
+            		header("Location: ".($back !== "" ? $back : "/$z"));
             		die();
                 }
     	}
@@ -422,6 +446,10 @@ if(($z === "my") && ((isset($com[2]) ? $com[2] : "") === "register")){ # Registe
         # Inform the admin
         mysendmail(ADMINEMAIL, "Registration from $campId ".$_SERVER["SERVER_NAME"].": $email"
         	, "Email: ".$email."\nhttps://".$_SERVER["SERVER_NAME"]."/$db/object/".USER);
+        # Пришёл с лендинга курсов (cookie ig_src ставит кнопка «Стать агентом» на ideav.ru/kurs/) — в чат заявок
+        if(isset($_COOKIE["ig_src"]) && preg_match('/^[a-z0-9-]{1,32}$/', $_COOKIE["ig_src"]))
+            regNotifyTelegram($_COOKIE["ig_src"], $email, $id, isset($_COOKIE["_aff"]) ? (int)$_COOKIE["_aff"] : 0, $campId
+                , isset($_COOKIE["ig_utm"]) && is_string($_COOKIE["ig_utm"]) ? $_COOKIE["ig_utm"] : "");
         # Send the confirmation letter to the new user
         mysendmail($email, t9n("[RU]Регистрация на сервисе [EN]Registration from ").$_SERVER["SERVER_NAME"]
         	, t9n("[RU]\r\nЗдравствуйте![EN]Hello my friend,")."\r\n\r\n"
@@ -628,6 +656,8 @@ elseif(($z == "my") && !empty($_GET['code'])){
 		# #4667: телефон пришёл сюда со страницы подтверждения входа по QR — вернуть его
 		# туда же, а не в рабочее место (адрес собирается из куки, значения проверены).
 		$qrBack = qrLoginPendingRedirect();
+		if($qrBack === "")
+			$qrBack = Sso_back_redirect();  # ideav/courses#84: назад в базу, откуда отправили на вход в my
 		header("Location: ".($qrBack !== "" ? $qrBack : "/".(!$isYandex && strlen($db) ? $db : $z)));
     }
     else
@@ -675,6 +705,7 @@ define("MAIL_MASK", "/.+@.+\..+/i");  # Mask for the email validation
 define("LOGIN_PAGE", " <A HREF=\"/$z\">Продолжить</A>.");  # Path to the login page
 define("BACK_LINK" , " <A href=\"#\" onclick=\"history.back();\">Go back</A>");
 define("PASSWORDSTARS" , "******");
+define("UNIQUE_LOCK_WAIT", 10);	# Секунд ждать блокировку уникального значения (UniqueKeyLock, issue #5465)
 
 define("REPORT", 22);
 define("LEVEL", 47);
@@ -693,6 +724,7 @@ require_once __DIR__ . "/include/delimiters.php";
 require_once __DIR__ . "/include/json_archive.php";
 require_once __DIR__ . "/include/import_reconcile.php";
 require_once __DIR__ . "/include/schema_json.php";	# #5242: схема одним JSON, поля по именам
+require_once __DIR__ . "/include/mail.php";	# #5494: отправка писем через SMTP ящика клиента
 require_once __DIR__ . "/include/ext_views.php";	# #5373: read-only вьюхи для внешнего SQL-клиента
 require_once __DIR__ . "/include/ws_push.php";	# #5269: события изменений для демона web-socket
 # Default LIMIT parameter for queries with no filter
@@ -734,9 +766,19 @@ $GLOBALS["GLOBAL_VARS"]["version"] = VERSION;
 $GLOBALS["GLOBAL_VARS"]["newapi"] = [];
 
 # ################# FUNCTIONS #################
+# Локальная установка (kit на localhost): ей разрешены заглушки, которые на сервере — ошибка конфигурации.
+function Is_local_server(){
+    $sn = strtolower(isset($_SERVER["SERVER_NAME"]) ? (string)$_SERVER["SERVER_NAME"] : "");
+    return in_array($sn, array("localhost", "127.0.0.1", "::1", "[::1]"), TRUE) || (substr($sn, -10) === ".localhost");
+}
+# #1139: ключ-заглушка (или незаданный ключ) пропускает капчу только на localhost; на сервере — отказ
 function verifyCaptcha($token) {
-    if (SMARTCAPTCHA_SERVER_KEY === 'ysc2_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX') return true;
-    if (empty($token)) return false;
+    if ((SMARTCAPTCHA_SERVER_KEY === 'ysc2_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX') || (SMARTCAPTCHA_SERVER_KEY === '')) {
+        if (Is_local_server()) return true;
+        wlog("Captcha: SMARTCAPTCHA_SERVER_KEY is not configured", "log");
+        return false;
+    }
+    if (empty($token) || !is_string($token)) return false;
     $url = 'https://smartcaptcha.yandexcloud.net/validate';
     $params = http_build_query([
         'secret' => SMARTCAPTCHA_SERVER_KEY,
@@ -755,6 +797,49 @@ function verifyCaptcha($token) {
     if ($result === false) return false;
     $data = json_decode($result, true);
     return isset($data['status']) && $data['status'] === 'ok';
+}
+# Капча входа проверяется не больше раза за запрос: токен SmartCaptcha одноразовый.
+function Login_captcha_passed(){
+    static $ok = NULL;
+    if($ok === NULL)
+        $ok = verifyCaptcha(isset($_POST["smart-token"]) ? $_POST["smart-token"] : "");
+    return $ok;
+}
+function Login_captcha_die(){
+    $captchaMsg = t9n("[RU]Проверка капчи не пройдена. Пожалуйста, попробуйте снова.[EN]Captcha verification failed. Please try again.");
+    if(isApi()){
+        header("HTTP/1.0 403 Forbidden");
+        api_dump(json_encode(["error" => $captchaMsg, "msg" => $captchaMsg, "captcha" => "required"], JSON_UNESCAPED_UNICODE));
+    }
+    my_die($captchaMsg);
+}
+# #1139: капча обязательна (без поблажки за чужую валидную куку) с CAPTCHA_AFTER_RETRIES неудач подряд
+# у логина и всегда — для входа admin паролем сервера: у него нет счётчика неудач.
+function Login_captcha_required($retries){
+    $parts = explode(":", (string)$retries, 2);
+    return (int)$parts[0] >= CAPTCHA_AFTER_RETRIES;
+}
+# #1139 (B1): мастер-токен и xsrf супер-админа сервера (user_id 0). HMAC с ключом из ADMINHASH и SALT:
+# одного мастер-пароля мало, чтобы собрать токен; сменили SALT — все мастер-токены отозваны.
+function Admin_token($db){
+    return hash_hmac("sha512", "token:".$db, ADMINHASH.SALT);
+}
+function Admin_xsrf($db){
+    return hash_hmac("sha512", "xsrf:".$db, ADMINHASH.SALT);
+}
+# #1139 (B1): с дефолтными (или пустыми) секретами ядро на сервере не работает — иначе мастер-токен
+# воспроизводим и даёт admin в любой базе. На localhost (kit) — разрешено.
+function Secrets_are_default($z){
+    $sn = isset($_SERVER["SERVER_NAME"]) ? $_SERVER["SERVER_NAME"] : "";
+    return (SALT === "") || (SALT === "yyy") || (ADMINHASH === "")
+        || (ADMINHASH === sha1($sn.$z."xxx")) || (ADMINHASH === sha1($sn.$z));
+}
+function Secrets_guard($z){
+    if(!Secrets_are_default($z) || Is_local_server())
+        return;
+    wlog("Config: default or empty MASTER_PASSWORD/SALT — refusing to run", "log");
+    header("HTTP/1.0 500 Internal Server Error");
+    die("Server configuration error");
 }
 
 # Issue #2906: a returning visitor who already holds a valid auth token (an idb_*
@@ -776,6 +861,36 @@ function hasValidTokenCookie(){
         if($res && mysqli_fetch_array($res)) return true;
     }
     return false;
+}
+
+# ideav/courses#26: регистрация с лендинга курсов (ideav.ru/kurs/agents.html) — сообщение в Telegram-чат заявок.
+# Канал и очередь — те же, что у форм сайта: telegram-config.php и intake-shared.php рядом с ядром
+# (их выкладывает backlogram). Нет файлов (другой хост) — молча ничего не делаем; сбой доставки
+# регистрацию не ломает: сообщение остаётся в очереди, его доберёт cron tg-deliver.php.
+function regNotifyTelegram($src, $email, $uid, $aff, $campId, $utm = ""){
+    $dir = __DIR__;
+    if(!is_file("$dir/telegram-config.php") || !is_file("$dir/intake-shared.php")) return;
+    try{
+        require_once "$dir/telegram-config.php";
+        require_once "$dir/intake-shared.php";
+        # Метки рекламы с лендинга (cookie ig_utm): одна строка без управляющих символов, до 300 знаков
+        $utm = mb_substr(trim(preg_replace('/[\x00-\x1F\x7F]+/', ' ', (string)$utm)), 0, 300);
+        $labels = array("kurs-agents" => "Курсы (ideav.ru/kurs): регистрация агента");
+        $text = "Новая регистрация с сайта\n"
+            ."Источник: ".(isset($labels[$src]) ? $labels[$src] : $src)."\n"
+            ."Почта: ".stripslashes($email)."\n"
+            ."Номер в my (для ?aff=): $uid\n"
+            ."Пригласил агент (aff): ".($aff > 0 ? $aff : "нет")."\n"
+            ."Кампания Директа: ".($campId !== "" ? html_entity_decode($campId) : "нет")."\n"
+            ."Метки рекламы: ".($utm !== "" ? $utm : "нет")."\n"
+            ."Регистрация ещё не подтверждена по ссылке из письма.";
+        $saved = intake_spool_save(intake_spool_dir(), array("text" => $text, "parse_mode" => "", "caption" => ""), array());
+        if($saved !== null && intake_spool_deliver($saved))
+            intake_spool_cleanup($saved);
+    }
+    catch(Throwable $e){
+        error_log("regNotifyTelegram: ".$e->getMessage());
+    }
 }
 
 function mail2DB($email, $uid){
@@ -972,6 +1087,8 @@ function isApi(){
 function Api_always_json_mark($a){
     if($a === "_m_batch")
         $GLOBALS["dumpAPI"] = 1;
+    if($a === "_mail")	# #5494: ответ всегда JSON, 401 без токена тоже JSON
+        $GLOBALS["dumpAPI"] = 1;
 }
 # <bad-path-5186>
 # #5186: адрес с вебрута не похож на имя базы (DB_MASK). Браузеру — HTML-страница вместо
@@ -1147,14 +1264,14 @@ function Token_stored_val($kind, $exp, $scope, $secret){
 function Token_db_val($tok, $now = NULL){
 	$p = Token_parse($tok);
 	if($p === NULL)
-		return (string)$tok;
+		return preg_match('/^(r|a)[.]/', (string)$tok) ? FALSE : (string)$tok;  # #5205: refresh/access — не ключ API
 	if(($p["kind"] === "mcp") || ($p["exp"] <= ($now === NULL ? time() : $now)))
 		return FALSE;
 	return Token_stored_val($p["kind"], $p["exp"], $p["scope"], $p["secret"]);
 }
 # Условие SQL на строку токена: прежний ключ пользователя, а не сессия/MCP-токен
 function Token_key_sql($alias){
-	return "$alias.val NOT REGEXP '^(s|m|mcp)[.][0-9]+[.]'";
+	return "$alias.val NOT REGEXP '^(s|m|mcp|r)[.][0-9]+[.]'";
 }
 # Условие SQL на простой сессии: последний запрос не раньше SESSION_IDLE назад (ord — минуты)
 function Token_idle_sql($alias, $parsed, $now = NULL){
@@ -1226,10 +1343,11 @@ function Session_prune_ids($rows, $now, $max = SESSION_MAX){
 	$drop = array();
 	$live = array();
 	foreach($rows as $id => $row)
-		if(preg_match('/^(s|m|mcp)\.([0-9]{1,12})\./', (string)$row["val"], $m)){
-			if(((int)$m[2] <= $now) || (($m[1] === "s") && ((int)$row["ord"] * 60 < $now - SESSION_IDLE)))
+		if(preg_match('/^(s|m|mcp|r)\.([0-9]{1,12})\./', (string)$row["val"], $m)){
+			if(((int)$m[2] <= $now) || (($m[1] === "s") && ((int)$row["ord"] * 60 < $now - SESSION_IDLE))
+					|| (($m[1] === "r") && Refresh_idle($row["ord"], $now)))
 				$drop[] = $id;
-			elseif($m[1] === "s")
+			elseif(($m[1] === "s") || ($m[1] === "r"))
 				$live[] = $id;
 		}
 	if(count($live) > $max)
@@ -1239,7 +1357,7 @@ function Session_prune_ids($rows, $now, $max = SESSION_MAX){
 function Session_prune($uid){
 	global $z;
 	$rows = array();
-	$data_set = Exec_sql("SELECT id, val, ord FROM $z WHERE up=".(int)$uid." AND t=".TOKEN." AND val REGEXP '^(s|m|mcp)[.]' ORDER BY id"
+	$data_set = Exec_sql("SELECT id, val, ord FROM $z WHERE up=".(int)$uid." AND t=".TOKEN." AND val REGEXP '^(s|m|mcp|r)[.]' ORDER BY id"
 				, "Sessions of the user");
 	while($row = mysqli_fetch_array($data_set))
 		$rows[$row["id"]] = array("val" => $row["val"], "ord" => $row["ord"]);
@@ -1251,13 +1369,130 @@ function Session_prune($uid){
 # Выход этой сессии: строка сессии удаляется; для прежнего токена — FALSE (вызывающий решает сам)
 function Session_drop($tok, $db = NULL){
 	global $z;
+	$db = $db === NULL ? $z : $db;
+	if(($a = Access_parse($tok)) !== NULL){  # #5205: выход по access закрывает его refresh-сессию
+		Exec_sql("DELETE FROM $db WHERE id=".$a["rid"]." AND t=".TOKEN." AND val LIKE 'r.%'", "Drop the refresh session");
+		return TRUE;
+	}
 	$p = Token_parse($tok);
 	if(($p === NULL) || ($p["kind"] === "mcp"))
 		return FALSE;
-	$db = $db === NULL ? $z : $db;
 	Exec_sql("DELETE FROM $db WHERE t=".TOKEN." AND val='".Token_stored_val($p["kind"], $p["exp"], $p["scope"], $p["secret"])."'"
 		, "Drop the session");
 	return TRUE;
+}
+# #5205: режим refresh/access для API-клиентов (браузер остаётся на сессиях s в куке).
+#   r.<срок>.<64 hex> — refresh: строка «Токен» r.<срок>.<sha256 секрета>[.<16 hex sha256 прежнего>], срок = вход
+#     + SESSION_LIFETIME, простой — REFRESH_TTL (ord, минуты). Каждое обновление ротирует секрет в той же строке;
+#     предъявление прежнего refresh (повтор = украден) удаляет строку — сессия устройства закрыта.
+#   a.<срок>.<id строки refresh>.<HMAC> — access на ACCESS_TTL, в базе не хранится: подпись на значении строки
+#     refresh, так что ротация, выход и смена пароля гасят его сразу. xsrf — на строку refresh, а не на access.
+function Auth_conf($name, $default){
+	$v = defined($name) ? constant($name) : getenv("INTEGRAM_$name");
+	if(($v === FALSE) || ($v === ""))
+		return $default;
+	return is_int($default) ? (int)$v : (string)$v;
+}
+function Refresh_mode(){
+	return Auth_conf("AUTH_TOKENS", "session") === "refresh";
+}
+function Refresh_parse($tok){
+	if(!is_string($tok) || !preg_match('/^r\.([0-9]{1,12})\.([0-9a-f]{64})$/', $tok, $m))
+		return NULL;
+	return array("exp" => (int)$m[1], "secret" => $m[2]);
+}
+function Refresh_row_val($exp, $secret, $prevSecret = NULL){
+	return "r.".(int)$exp.".".hash("sha256", $secret).($prevSecret === NULL ? "" : ".".substr(hash("sha256", $prevSecret), 0, 16));
+}
+# Чей refresh $p для значения строки: "current" — действующий, "previous" — прежний (повтор), "" — чужой
+function Refresh_row_matches($rowVal, $p){
+	if(!$p || !preg_match('/^r\.([0-9]{1,12})\.([0-9a-f]{64})(?:\.([0-9a-f]{16}))?$/', (string)$rowVal, $m) || ((int)$m[1] !== $p["exp"]))
+		return "";
+	$h = hash("sha256", $p["secret"]);
+	if(hash_equals($m[2], $h))
+		return "current";
+	return (isset($m[3]) && hash_equals($m[3], substr($h, 0, 16))) ? "previous" : "";
+}
+function Refresh_idle($ord, $now){
+	return (int)$ord * 60 < $now - Auth_conf("REFRESH_TTL", 30*86400);
+}
+function Refresh_xsrf($db, $rid){
+	return xsrf("r.".(int)$rid, $db);
+}
+function Access_parse($tok){
+	if(!is_string($tok) || !preg_match('/^a\.([0-9]{1,12})\.([0-9]{1,12})\.([0-9a-f]{64})$/', $tok, $m))
+		return NULL;
+	return array("exp" => (int)$m[1], "rid" => (int)$m[2], "mac" => $m[3]);
+}
+function Access_mac($db, $exp, $rid, $rowVal){
+	return hash_hmac("sha256", "$db:a.$exp.$rid:$rowVal", SALT);
+}
+function Access_issue($db, $rid, $rowVal, $now = NULL){
+	$now = $now === NULL ? time() : $now;
+	$exp = $now + Auth_conf("ACCESS_TTL", 900);
+	if(preg_match('/^r\.([0-9]{1,12})\./', (string)$rowVal, $m))
+		$exp = min($exp, (int)$m[1]);
+	return "a.$exp.".(int)$rid.".".Access_mac($db, $exp, (int)$rid, $rowVal);
+}
+function Access_check($db, $p, $rowVal, $now = NULL){
+	$now = $now === NULL ? time() : $now;
+	if(!$p || ($p["exp"] <= $now) || !preg_match('/^r\.([0-9]{1,12})\./', (string)$rowVal, $m) || ((int)$m[1] <= $now))
+		return FALSE;
+	return hash_equals(Access_mac($db, $p["exp"], $p["rid"], $rowVal), $p["mac"]);
+}
+# Новая refresh-сессия пользователя $uid: поля ответа входа (token = access)
+function Refresh_login($uid){
+	global $z;
+	$secret = secureToken();
+	$exp = time() + SESSION_LIFETIME;
+	$val = Refresh_row_val($exp, $secret);
+	$rid = Insert((int)$uid, (int)floor(time() / 60), TOKEN, $val, "Save refresh session");
+	Session_prune($uid);
+	return Refresh_pair($z, $rid, $val, "r.$exp.$secret");
+}
+function Refresh_pair($db, $rid, $val, $refresh, $now = NULL){
+	$now = $now === NULL ? time() : $now;
+	$access = Access_issue($db, $rid, $val, $now);
+	$p = Access_parse($access);
+	return array("token" => $access, "access_token" => $access, "refresh_token" => $refresh, "token_type" => "Bearer"
+		, "expires_in" => max(0, $p["exp"] - $now), "_xsrf" => Refresh_xsrf($db, $rid));
+}
+# Строка refresh-сессии по предъявленному refresh: array(строка, "current" | "previous") или NULL.
+# Кандидаты — строки с тем же сроком (секунда входа), какой из них — решает Refresh_row_matches.
+function Refresh_find($p){
+	global $z;
+	$data_set = Exec_sql("SELECT tok.id, tok.up, tok.val, tok.ord FROM $z tok, $z u WHERE tok.t=".TOKEN." AND u.id=tok.up AND u.t=".USER
+			." AND tok.val LIKE 'r.".(int)$p["exp"].".%'", "Refresh session");
+	while($row = mysqli_fetch_array($data_set))
+		if(($hit = Refresh_row_matches($row["val"], $p)) !== "")
+			return array($row, $hit);
+	return NULL;
+}
+# Обновление пары по refresh $tok: новая пара (refresh ротирован) или NULL — отказ. Повтор прежнего
+# refresh и простой закрывают сессию устройства.
+function Refresh_rotate($tok, $now = NULL){
+	global $z, $connection;
+	$now = $now === NULL ? time() : $now;
+	$p = Refresh_parse($tok);
+	if(!$p || ($p["exp"] <= $now) || !($found = Refresh_find($p)))
+		return NULL;
+	list($row, $hit) = $found;
+	if(($hit === "previous") || Refresh_idle($row["ord"], $now)){
+		Exec_sql("DELETE FROM $z WHERE id=".(int)$row["id"]." AND t=".TOKEN, $hit === "previous" ? "Refresh reuse: drop the session" : "Drop idle refresh");
+		return NULL;
+	}
+	$secret = secureToken();
+	$val = Refresh_row_val($p["exp"], $secret, $p["secret"]);
+	Exec_sql("UPDATE $z SET val='$val', ord=".(int)floor($now / 60)." WHERE id=".(int)$row["id"]." AND val='".addslashes($row["val"])."'", "Rotate refresh");
+	if(mysqli_affected_rows($connection) !== 1)  # параллельное обновление тем же refresh успело раньше
+		return NULL;
+	return Refresh_pair($z, $row["id"], $val, "r.".$p["exp"].".$secret", $now);
+}
+# Поля входа для JSON-ответа: в режиме refresh — пара токенов вместо сессии (у admin и без пользователя — как есть)
+function Login_json_fields($fields, $uid){
+	if(!Refresh_mode() || !(int)$uid)
+		return $fields;
+	return array_merge($fields, Refresh_login($uid));
 }
 # Кука входа idb_<база>: HttpOnly (скрипт страницы её не читает), SameSite, Secure на https.
 # Рядом idbs_<база>=1 — без HttpOnly и без секрета: по ней start.html и кабинет видят, куда есть вход.
@@ -1671,6 +1906,19 @@ function qrLoginPendingRedirect(){
     if(count($parts) !== 2 || !preg_match(DB_MASK, $parts[0]) || !preg_match(QR_CODE_MASK, $parts[1]))
         return "";
     return "/".$parts[0]."/qrlogin?c=".$parts[1];
+}
+# ideav/courses#84: базы со входом через кабинет my. Список задаётся на сервере в include/connection.php:
+# define("SSO_DBS", array("<база>" => "<роль новых пользователей>")); нет константы — вход как обычно.
+function Sso_role($db){
+    return defined("SSO_DBS") && is_array(SSO_DBS) && ($db !== "my") && isset(SSO_DBS[$db]) ? (string)SSO_DBS[$db] : "";
+}
+# После входа в кабинет — обратно в базу из SSO_DBS, откуда отправили на вход (кука sso_back, см. Sso_enter)
+function Sso_back_redirect(){
+    $db = isset($_COOKIE["sso_back"]) && is_string($_COOKIE["sso_back"]) ? $_COOKIE["sso_back"] : "";
+    if($db === "")
+        return "";
+    setcookie("sso_back", "", Auth_cookie_opts(time() - 3600, FALSE));
+    return preg_match(DB_MASK, $db) && (Sso_role($db) !== "") ? "/$db/" : "";
 }
 function login($z="", $u="", $message="", $details=""){
 	wlog(" @".$_SERVER["REMOTE_ADDR"], "log");
@@ -2549,6 +2797,10 @@ function Construct_WHERE($key, $filter, $cur_typ, $join_req=0)
 					}
 		}
 		$value = BuiltIn($value); # Check for a built-in phrases
+		# issue #5442: у BOOLEAN «не пусто» (%) = да ("1"); "-1" (нет) в «да» не попадает.
+		# true/X/0/false сводятся к хранимым "1" / "-1".
+		if(!isset($GLOBALS["REF_typs"][$key]) && isset($GLOBALS["REV_BT"][$key]) && ($GLOBALS["REV_BT"][$key] == "BOOLEAN"))
+			$value = Boolean_Filter_Val($value);
 		$sql_value = Escape_Filter_Val($value); # Экранированная копия для подстановки в SQL
 		if($value == "%")
 			$search_val = "IS ".($NOT_flag ? "" : "NOT")." NULL";
@@ -2680,6 +2932,20 @@ function Construct_WHERE($key, $filter, $cur_typ, $join_req=0)
 			    # We might get a statement here, thus check if we got no letters and stuff
 			    if((double)str_replace(" ", "", $value) != 0)
     			    $value = str_replace(" ", "", $value);
+				# Issue #5471: «равно»/«не равно» по NUMBER/SIGNED — значение приводится так же, как при сохранении,
+				# и подставляется строкой в кавычках: число против longtext val не даёт использовать индекс (t, val).
+				# Ноль не трогаем: при сохранении 0 не приводится ("0.0"/"00" лежат как пришли) — прежнее числовое сравнение.
+				$num_eq = FALSE;
+				if(($EQ === "=") && !isset($in) && !isset($inID) && !isset($GLOBALS["REF_typs"][$key])
+						&& isset($GLOBALS["REV_BT"][$key]) && in_array($GLOBALS["REV_BT"][$key], array("NUMBER", "SIGNED"))
+						&& (strpos($value, "%") === FALSE) && !preg_match("/\[([^\[\]]+)\]/", $value)
+						&& (($canon = Normalize_Number($value)) !== FALSE)){
+					$canon = (string)Number_Storage_Val($GLOBALS["REV_BT"][$key], $canon);
+					if((double)$canon != 0){
+						$value = $canon;
+						$num_eq = TRUE;
+					}
+				}
 				$sql_value = Escape_Filter_Val($value); # значение изменилось — пересчитываем
 				# Check if we got only one range border, and then transform it into an exact match
 				if((!isset($filter["TO"])) || (!isset($filter["FR"])) || ($value === "%")){
@@ -2717,7 +2983,9 @@ function Construct_WHERE($key, $filter, $cur_typ, $join_req=0)
             						$GLOBALS["where"] .= " AND a$key.val $search_val ";
         					    elseif(isset($inID))
             						$GLOBALS["where"] .= " AND a$key.id $search_val ";
-							    elseif(is_numeric($value))
+							    elseif($is_date) # issue #5469: дата ггггммдд — строковым литералом, иначе приведение типа мимо индекса (t,val)
+    								$GLOBALS["where"] .= " AND a$key.val$NOT_EQ$EQ'$sql_value' ";
+							    elseif(is_numeric($value) && !$num_eq)
     								$GLOBALS["where"] .= " AND a$key.val$NOT_EQ$EQ$value ";
 							    else
     								$GLOBALS["where"] .= " AND a$key.val='$sql_value' ";
@@ -2903,19 +3171,23 @@ function Rec_masks_denial($id, $fields = NULL, $typ = 0)
 	}
 	if(isset($GLOBALS["GRANTS"]["mask"][$typ]))
 		$masked[$typ] = "val";	# Маска на таблицу — по главному значению записи
-	$vals = array();
+	$vals = $ids = array();	# $ids — id записи, которой принадлежит значение: по нему сравнивают маски @N
 	if(count($masked) && $id){
-		if(isset($masked[$typ]))
+		if(isset($masked[$typ])){
 			$vals[$typ][] = $val;
-		$data_set = Exec_sql("SELECT t, val FROM $z WHERE up=$id", "Get record values for masks");
+			$ids[$typ][] = $id;
+		}
+		$data_set = Exec_sql("SELECT id, t, val FROM $z WHERE up=$id", "Get record values for masks");
 		while($row = mysqli_fetch_array($data_set))
-			if(isset($masked[(int)$row["t"]]) && ($masked[(int)$row["t"]] === "val"))
+			if(isset($masked[(int)$row["t"]]) && ($masked[(int)$row["t"]] === "val")){
 				$vals[(int)$row["t"]][] = $row["val"];
+				$ids[(int)$row["t"]][] = (int)$row["id"];
+			}
 			elseif(!isset($reqs[(int)$row["t"]]) && is_numeric($row["val"])
 					&& isset($masked[(int)$row["val"]]) && ($masked[(int)$row["val"]] === "ref"))
 				$vals[(int)$row["val"]][] = $row["t"];	# Ссылка: up=запись, t=цель, val=колонка
 	}
-	$new = array();
+	$new = $newIds = array();
 	if(is_array($fields))
 		foreach($fields as $key => $v){
 			$req = (int)substr($key, 1);
@@ -2923,20 +3195,25 @@ function Rec_masks_denial($id, $fields = NULL, $typ = 0)
 				continue;
 			if($masked[$req] === "ref")
 				$new[$req] = is_array($v) ? $v : explode(",", (string)$v);
-			else
+			else{
 				$new[$req] = array(is_array($v) ? "" : BuiltIn((string)$v));
+				$newIds[$req] = array($req === $typ ? $id : 0);	# Новое значение главного поля — у этой записи
+			}
 		}
-	foreach(array($vals, $new) as $set)
+	foreach(array(array($vals, $ids), array($new, $newIds)) as list($set, $setIds))
 		foreach($set as $req => $list)
-			if(($msg = Mask_denial($req, $list, $masked[$req])) !== "")
+			if(($msg = Mask_denial($req, $list, $masked[$req], isset($setIds[$req]) ? $setIds[$req] : array())) !== "")
 				return $msg;
 	if($up > 1)	# Подчинённая запись наследует маски родителя
 		return Rec_masks_denial($up);
 	return "";
 }
-function Mask_denial($req, $list, $kind)
+# Маска @N / !@N / @IN(…) задаёт id записи, а не значение: значение колонки на неё не подставляется
+# (MySQL приводит '~код' к 0, и маска @0 пропускала любую запись). Сравнивается id из $ids;
+# у записи, которой ещё нет (создание), id не известен — такая маска её не задерживает.
+function Mask_denial($req, $list, $kind, $ids = array())
 {
-	foreach($list as $v){
+	foreach($list as $i => $v){
 		$v = trim((string)$v);
 		if($v === "")
 			continue;
@@ -2944,7 +3221,15 @@ function Mask_denial($req, $list, $kind)
 			continue;	# Нечисловую ссылку отобьёт RequireRefId/checkNewRef
 		$ok = FALSE;
 		foreach($GLOBALS["GRANTS"]["mask"][$req] as $mask => $level){
-			$cond = Fetch_WHERE_for_mask($req, $v, $mask);
+			$on = $v;
+			if(($kind === "val") && preg_match('/^\s*!?@/', (string)$mask)){
+				$on = isset($ids[$i]) ? (int)$ids[$i] : 0;
+				if(!$on){
+					$ok = TRUE;
+					break;
+				}
+			}
+			$cond = Fetch_WHERE_for_mask($req, $on, $mask);
 			if($cond === ""){
 				$ok = TRUE;
 				break;
@@ -3194,14 +3479,22 @@ function Validate_Token(){ # Validates the cookie token and gathers the user per
 		# #1043: сессия и короткий токен ищутся по хешу и со сроком; MCP-токен ядро не принимает
 		$tokDb = $typ === TOKEN ? Token_db_val($tok) : $tok;
 		$tokSession = $typ === TOKEN ? Token_parse($tok) : NULL;
-		$data_set = Exec_sql("SELECT u.id, u.val, role_def.id r, role_def.val role, xsrf.val xsrf, tok.id tok, tok.ord tok_ord, xsrf.id xsrf_id, act.id act_id
+		# #5205: access ищет свою строку refresh по номеру, подпись проверяется по её значению ниже
+		$tokAccess = ($typ === TOKEN) && Refresh_mode() ? Access_parse($tok) : NULL;
+		if($tokAccess !== NULL)
+			$tokDb = $tokAccess["exp"] > time() ? "" : FALSE;
+		$data_set = Exec_sql("SELECT u.id, u.val, role_def.id r, role_def.val role, xsrf.val xsrf, tok.id tok, tok.ord tok_ord, tok.val tok_val, xsrf.id xsrf_id, act.id act_id
 		                FROM $z tok, $z u LEFT JOIN ($z r CROSS JOIN $z role_def) ON r.up=u.id AND role_def.id=r.t AND role_def.t=".ROLE
 						." LEFT JOIN $z xsrf ON xsrf.up=u.id AND xsrf.t=".XSRF
 						." LEFT JOIN $z act ON act.up=u.id AND act.t=".ACTIVITY
-						." WHERE u.t=".USER." AND tok.up=u.id AND ".($tokDb === FALSE ? "0" : "tok.val='$tokDb'".Token_idle_sql("tok", $tokSession))
+						." WHERE u.t=".USER." AND tok.up=u.id AND ".($tokDb === FALSE ? "0"
+							: ($tokAccess !== NULL ? "tok.id=".$tokAccess["rid"]." AND tok.val LIKE 'r.%'" : "tok.val='$tokDb'".Token_idle_sql("tok", $tokSession)))
 						." AND tok.t=$typ", "Validate token");
+		$row = mysqli_fetch_array($data_set);
+		if($row && ($tokAccess !== NULL) && (!Access_check($z, $tokAccess, $row["tok_val"]) || Refresh_idle($row["tok_ord"], time())))
+			$row = NULL;
 		# Пользователь guest входит только с ролью guest (#5231), иначе — как посетитель без токена
-		if(($row = mysqli_fetch_array($data_set)) && (strtolower($row["val"]) !== "guest" || ($row["r"] && strtolower((string)$row["role"]) === "guest"))){
+		if($row && (strtolower($row["val"]) !== "guest" || ($row["r"] && strtolower((string)$row["role"]) === "guest"))){
 			$GLOBALS["GLOBAL_VARS"]["user"] = strtolower($row["val"]);
 			$GLOBALS["GLOBAL_VARS"]["role"] = strtolower($row["role"]);
 			$GLOBALS["GLOBAL_VARS"]["role_id"] = $row["r"];
@@ -3212,7 +3505,9 @@ function Validate_Token(){ # Validates the cookie token and gathers the user per
 				        ."[EN]No role assigned to user ".$GLOBALS["GLOBAL_VARS"]["user"]));
 			# xsrf без записи или прежней формулы (общий на базу) заменяется на производный от токена.
 			# У сессии (#1043) xsrf свой на устройство — только производный, запись ключа API не трогается.
-			if($tokSession !== NULL){
+			if($tokAccess !== NULL)
+				$xsrf = Refresh_xsrf($z, $row["tok"]);
+			elseif($tokSession !== NULL){
 				# Скользящий срок: запрос отмечает активность сессии (раз в SESSION_TOUCH) и продлевает куку;
 				# у конца жизни сессии страница браузера получает новую — xsrf страницы берётся уже от неё.
 				$fromCookie = isset($_COOKIE["idb_$z"]) && is_string($_COOKIE["idb_$z"]) && (addslashes($_COOKIE["idb_$z"]) === $tok);
@@ -3249,17 +3544,22 @@ function Validate_Token(){ # Validates the cookie token and gathers the user per
             getGrants($row["r"]);
 #print_r($GLOBALS); die($v." ".$attrs." ".count($blocks[$attrs][strtolower($attrs)]));
 		}
-		elseif((isset($_COOKIE["idb_$z"]) && $_COOKIE["idb_$z"] === hash("sha512", ADMINHASH.$z)) || ($tok === hash("sha512", ADMINHASH.$z))){
+		elseif((isset($_COOKIE["idb_$z"]) && is_string($_COOKIE["idb_$z"]) && hash_equals(Admin_token($z), $_COOKIE["idb_$z"]))
+				|| (is_string($tok) && hash_equals(Admin_token($z), $tok))){
 			$GLOBALS["GLOBAL_VARS"]["user"] = $GLOBALS["GLOBAL_VARS"]["role"] = "admin";
 			$GLOBALS["GLOBAL_VARS"]["user_id"] = 0;
 			$GLOBALS["GLOBAL_VARS"]["role_id"] = ADMINROLE;
-			$xsrf = hash("sha512", $z.ADMINHASH);
+			$xsrf = Admin_xsrf($z);
 		}
 		elseif(($typ === TOKEN) && isset($_COOKIE["idb_$z"]) && is_string($_COOKIE["idb_$z"])
 				&& ($_COOKIE["idb_$z"] !== "gtuoeksetn") && (addslashes($_COOKIE["idb_$z"]) === $tok))
 			Auth_cookie($z, "", 0);  # кука с истёкшей или неизвестной сессией: скрипт её не снимет (HttpOnly)
 		$GLOBALS["tzone"] = isset($_COOKIE["tzone"]) ? (int)$_COOKIE["tzone"] : 0;  # PHP 8: "" + 1 — TypeError
 	}
+	# ideav/courses#84: в базе из SSO_DBS вошедший в my входит своим пользователем — и вместо гостя тоже
+	if((!isset($GLOBALS["GLOBAL_VARS"]["user"]) || ($GLOBALS["GLOBAL_VARS"]["user"] === "guest")) && !isApi()
+			&& defined("SSO_DBS") && (Sso_role($z) !== "") && isset($_COOKIE["idb_my"]) && is_string($_COOKIE["idb_my"]))
+		Sso_login_my();
 	if(!isset($GLOBALS["GLOBAL_VARS"]["user"])){ # Check, if we got a Guest user defined
 										  
 		$data_set = Exec_sql("SELECT u.id u, tok.val tok, tok.id token, xsrf.id xsrf, xsrf.val xsrf_val, role_def.id r, role_def.val role"
@@ -3312,6 +3612,8 @@ function Validate_Token(){ # Validates the cookie token and gathers the user per
         		}
     		}
 		}
+		if(!isset($GLOBALS["GLOBAL_VARS"]["user"]) && defined("SSO_DBS") && (Sso_role($z) !== ""))
+			Sso_enter();  # ideav/courses#84: вход через кабинет my
 		if(!isset($GLOBALS["GLOBAL_VARS"]["user"])){
 			login($z, "", "InvalidToken");
 			die();
@@ -3320,6 +3622,114 @@ function Validate_Token(){ # Validates the cookie token and gathers the user per
 	$GLOBALS["GLOBAL_VARS"]["xsrf"] = isset($xsrf) ? $xsrf : xsrf($_SERVER["REMOTE_ADDR"], "guest");
     $GLOBALS["GLOBAL_VARS"]["token"] = $tok;
 	return isset($GLOBALS["GLOBAL_VARS"]["user"]);  # Return TRUE in case the token is OK
+}
+# ideav/courses#84: вход в базу $z из SSO_DBS по куке кабинета my (зовётся из Validate_Token для страницы без
+# входа или гостя). Владелец базы в my входит владельцем (пользователь $z). Прочий вошедший в my получает
+# пользователя my<id my> этой базы — при первом входе он заводится с почтой из my и ролью из SSO_DBS, без
+# пароля; роль admin не выдаётся. Дальше — сессия и повтор запроса (die). Возврат: FALSE — сессии my нет,
+# TRUE — сессия есть, но войти нельзя (нет роли или пользователя владельца).
+function Sso_login_my(){
+	global $z;
+	if(!isset($_COOKIE["idb_my"]) || !is_string($_COOKIE["idb_my"])
+			|| !($my = mysqli_fetch_array(Exec_sql("SELECT u.id, email.val email, db.id own FROM my tok, my u LEFT JOIN my email ON email.up=u.id AND email.t=".EMAIL
+				." LEFT JOIN my db ON db.up=u.id AND db.t=".DATABASE." AND db.val='$z'"
+				." WHERE u.t=".USER." AND tok.up=u.id AND ".Token_match_sql("tok", $_COOKIE["idb_my"])." AND tok.t=".TOKEN." LIMIT 1"
+				, "SSO: cabinet user"))))
+		return FALSE;
+	$login = $my["own"] ? $z : "my".(int)$my["id"];
+	$uid = Restore_id("SELECT id FROM $z WHERE t=".USER." AND val='$login' ORDER BY id LIMIT 1", "SSO: find the user");
+	if(!$uid){
+		if($my["own"])
+			return TRUE;
+		$role = Restore_id("SELECT id FROM $z WHERE t=".ROLE." AND up!=0 AND val='".addslashes(Sso_role($z))."' ORDER BY id LIMIT 1", "SSO: find the role");
+		$col = Restore_id("SELECT req.id FROM $z req JOIN $z ref ON ref.id=req.t AND ref.up=0 AND ref.t=".ROLE." WHERE req.up=".USER." LIMIT 1"
+			, "SSO: find the role column");
+		if(!$role || !$col || ((int)$role === ADMINROLE) || (mb_strtolower(Sso_role($z)) === "admin"))
+			return TRUE;
+		$uid = Insert(1, 1, USER, $login, "SSO: new user");
+		if((string)$my["email"] !== "")
+			Insert($uid, 1, EMAIL, $my["email"], "SSO: email");
+		Insert($uid, 1, $role, $col, "SSO: role");
+	}
+	if(isset($_COOKIE["sso_back"]))
+		setcookie("sso_back", "", Auth_cookie_opts(time() - 3600, FALSE));
+	Auth_cookie($z, Session_new($uid), NULL);
+	login($z, "", "reenter");
+}
+# ideav/courses#84: страница базы из SSO_DBS без входа и без гостя. Вошедший в my входит (Sso_login_my);
+# без входа в my — на вход в кабинет с возвратом сюда (кука sso_back, Sso_back_redirect); ?aff=<id агента>
+# запоминается в куке _aff, регистрация в my пишет её новому пользователю. Возврат — обычный вход в базу.
+function Sso_enter(){
+	global $z;
+	if(Sso_login_my())
+		return;
+	if(isset($_GET["aff"]) && is_string($_GET["aff"]) && preg_match('/^[1-9][0-9]{0,9}$/', $_GET["aff"]) && !isset($_COOKIE["_aff"]))
+		setcookie("_aff", $_GET["aff"], Auth_cookie_opts(time() + 180 * 86400, FALSE));
+	setcookie("sso_back", $z, Auth_cookie_opts(time() + 86400, FALSE));
+	header("Location: /start.html?".http_build_query(array("db" => "my", "r" => "InvalidToken", "uri" => $_SERVER["REQUEST_URI"])));
+	die();
+}
+# ideav/python2node#1288: вход вошедшего в my в базу на новом ядре (python2node) без второго пароля.
+# Константа в include/connection.php: define("CORE_SSO_DBS", array("<база>" => "https://<хост ядра>")); нет константы —
+# маршрут /my/coresso отвечает отказом. Ключ подписи тот же, что у core_token ИИ-агента (#5131): CORE_JWT_PRIVATE_KEY.
+# Токен — RS256-JWT {iss, aud = база, sub = id в my, email, jti, iat, exp}; живёт CORE_JWT_TTL, но не дольше 300 с.
+# Ядро принимает его ОДИН раз (jti) POST-формой на /api/v1/<база>/login/crm и ставит свою cookie сессии.
+# Токен уходит только в теле POST: в адресе он попал бы в журналы и Referer.
+function Core_sso_back($raw){
+	if(!is_string($raw) || $raw === "" || strlen($raw) > 1024 || $raw[0] !== "/" || (strpos($raw, "//") === 0)
+			|| (strpos($raw, "\\") !== FALSE) || preg_match('/[\x00-\x1f\x7f]/', $raw))
+		return "/";
+	return $raw;
+}
+function Core_sso_url($base){
+	return (is_string($base) && preg_match('#^https://[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]{1,5})?$#i', $base)) ? $base : "";
+}
+function Core_sso_token($db, $email, $sub, $now = NULL){
+	$key = aiConfigValue(array("CORE_JWT_PRIVATE_KEY"));
+	if($key === "" || $email === "" || !($key = openssl_pkey_get_private(str_replace("\\n", "\n", $key))))
+		return "";
+	$ttl = (int)aiConfigValue(array("CORE_JWT_TTL"));
+	if($ttl <= 0 || $ttl > 300)
+		$ttl = 300;
+	$iss = aiConfigValue(array("CORE_JWT_ISS"));
+	$now = $now === NULL ? time() : (int)$now;
+	$b64 = function($s){ return rtrim(strtr(base64_encode($s), "+/", "-_"), "="); };
+	$jwt = $b64(json_encode(array("alg" => "RS256", "typ" => "JWT")))
+		.".".$b64(json_encode(array("iss" => $iss !== "" ? $iss : "crm", "aud" => $db, "sub" => (string)$sub, "email" => $email,
+			"jti" => bin2hex(random_bytes(16)), "iat" => $now, "exp" => $now + $ttl), JSON_UNESCAPED_UNICODE));
+	return openssl_sign($jwt, $signature, $key, OPENSSL_ALGO_SHA256) ? $jwt.".".$b64($signature) : "";
+}
+# Страница с автоотправляемой формой: браузер сам делает POST на ядро. Форма — не ссылка: токена нет в URL.
+function Core_sso_page($base, $db, $token, $back){
+	$h = function($s){ return htmlspecialchars((string)$s, ENT_QUOTES, "UTF-8"); };
+	return "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name=\"referrer\" content=\"no-referrer\"><title>...</title></head><body>"
+		."<form method=\"post\" action=\"".$h($base."/api/v1/".$db."/login/crm")."\">"
+		."<input type=\"hidden\" name=\"token\" value=\"".$h($token)."\"><input type=\"hidden\" name=\"redirect\" value=\"".$h($back)."\">"
+		."<noscript><button type=\"submit\">Continue</button></noscript></form>"
+		."<script>document.forms[0].submit();</script></body></html>";
+}
+# GET /my/coresso?db=<база>&back=<путь на ядре>. Нет сессии my — на вход в кабинет с возвратом сюда.
+function Core_sso_enter(){
+	$map = defined("CORE_SSO_DBS") && is_array(CORE_SSO_DBS) ? CORE_SSO_DBS : array();
+	$db = isset($_GET["db"]) && is_string($_GET["db"]) ? $_GET["db"] : "";
+	$base = (preg_match(DB_MASK, $db) && ($db !== "my") && isset($map[$db])) ? Core_sso_url($map[$db]) : "";
+	if($base === "")
+		my_die("Sign-in to this database is not configured");
+	if(!isset($_COOKIE["idb_my"]) || !is_string($_COOKIE["idb_my"])
+			|| !($my = mysqli_fetch_array(Exec_sql("SELECT u.id, email.val email FROM my tok, my u LEFT JOIN my email ON email.up=u.id AND email.t=".EMAIL
+				." WHERE u.t=".USER." AND tok.up=u.id AND ".Token_match_sql("tok", $_COOKIE["idb_my"])." AND tok.t=".TOKEN." LIMIT 1"
+				, "Core SSO: cabinet user")))){
+		header("Location: /start.html?".http_build_query(array("db" => "my", "r" => "InvalidToken", "uri" => $_SERVER["REQUEST_URI"])));
+		die();
+	}
+	$token = Core_sso_token($db, trim((string)$my["email"]), (int)$my["id"]);
+	if($token === "")
+		my_die("The cabinet account has no email or core sign-in is not configured");
+	header("Content-Type: text/html; charset=utf-8");
+	header("Cache-Control: no-store");
+	header("Referrer-Policy: no-referrer");
+	print(Core_sso_page($base, $db, $token, Core_sso_back(isset($_GET["back"]) ? $_GET["back"] : "/")));
+	die();
 }
 # Вход гостем (#5221, #5231): посетитель без токена работает пользователем guest, если тот
 # заведён и его роль — guest. Токен гостя общий для всех посетителей, поэтому вход — в этом же запросе:
@@ -3395,6 +3805,41 @@ function Get_Align($typ){
 	}
 	return "LEFT";
 }
+# issue #5442: BOOLEAN различает три состояния — "1" (да), "-1" (нет, хранится явно),
+# строки нет (не задано). Запись: да — "1", "true", "X", любое иное непустое; нет — "-1", "0",
+# "false"; пусто (и пробел) — "" => строка реквизита удаляется.
+function Boolean_Store_Val($val){
+	if(is_bool($val))
+		return $val ? "1" : "-1";
+	$b = strtolower(trim((string)$val));
+	if($b === "")
+		return "";
+	if(($b === "-1") || ($b === "0") || ($b === "false"))
+		return "-1";
+	return "1";
+}
+# Хранимое значение BOOLEAN для показа: API — "1" / "-1"; интерфейс — "X" / "" (нет = пусто).
+function Boolean_View_Val($val, $api){
+	$b = Boolean_Store_Val($val);
+	if($api)
+		return $b;
+	return $b === "1" ? "X" : "";
+}
+# Значение фильтра по BOOLEAN: «не пусто» (%) = да; да / нет любой записью — хранимые "1" / "-1".
+# Прочее (IN(...), [подстановки], диапазоны) — как есть.
+function Boolean_Filter_Val($value){
+	$b = strtolower(trim((string)$value));
+	if($b === "%")
+		return "1";
+	if(in_array($b, array("1", "true", "x", "-1", "0", "false"), TRUE))
+		return Boolean_Store_Val($b);
+	return $value;
+}
+# Значение BOOLEAN для JSON: "1" / "-1"; пусто (строки нет) — null.
+function Boolean_Api_Val($val){
+	$b = Boolean_Store_Val($val);
+	return $b === "" ? NULL : $b;
+}
 function Format_Val($typ, $val){
 	global $z;
 	if($val != "NULL"){
@@ -3428,11 +3873,8 @@ function Format_Val($typ, $val){
     				if($v != 0)
     					$val = $v;
     				break;
-    			case "BOOLEAN":
-    			    if(($val === "") || ($val === "0") || (strtolower($val) === "false") || ($val === "-1") || ($val === " "))
-    					$val = "";
-    				else
-    					$val = "1";
+    			case "BOOLEAN":	# issue #5442: "1" = да, "-1" = нет (хранится), пусто = не задано (строка удаляется)
+    				$val = Boolean_Store_Val($val);
     				break;
     			case "SIGNED":
     				$v = (double)str_replace(",", ".", str_replace(array(" ", chr(0xC2).chr(0xA0)), "", $val));
@@ -3478,9 +3920,8 @@ function Format_Val_View($typ, $val, $id=0)
 				if(!isApi())
 					$val = date("d.m.Y H:i:s", (int)$val + $GLOBALS["tzone"]);	# Microtime
 				break;
-			case "BOOLEAN":
-				if($val != "")
-					$val = "X";
+			case "BOOLEAN":	# issue #5442: API отдаёт 1 / -1, интерфейс — X / пусто
+				$val = Boolean_View_Val($val, isApi());
 				break;
 			case "NUMBER":
 				if((float)$val != 0)  # PHP 8: "З-1" != 0 — true, и значение показывалось как «0»
@@ -4130,6 +4571,8 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 					$GLOBALS["STORED_REPS"][$id]["refs"][$row["ord"]] = $row["refr"];
 			    #trace("_ check length of '".$row["val"]."' = ".strlen($row["val"]));
 				$GLOBALS["STORED_REPS"][$id][$row["col"]][$row["ord"]] = trim($row["val"]);
+				if(trim($row["val"]) === "-1")	# issue #5442: возможно, BOOLEAN «нет» (Скрыть и т.п.) - проверим ниже
+					$rep_false[] = array("col" => $row["col"], "ord" => $row["ord"]);
 				if($row["base"] === "1"){  // Free links are treated as SHORT
 					$row["base"] = "3";
 					$GLOBALS["FREE_LINKS"][$row["typ"]] = 1;
@@ -4144,7 +4587,32 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 			else{	# It's a Param
 				$GLOBALS["STORED_REPS"][$id]["params"][$row["col"]] = $row["val"];
 				$GLOBALS["STORED_REPS"][$id]["rep_params"][$row["param"]] = $row["val"];
+				if(trim($row["val"]) === "-1")	# issue #5442: возможно, BOOLEAN «нет» - проверим ниже
+					$rep_false[] = array("col" => $row["col"], "param" => $row["param"]);
 			}
+		# issue #5442: флаг-BOOLEAN запроса со значением "-1" (нет) - то же, что флага нет
+		if(isset($rep_false)){
+			$cols = array();
+			foreach($rep_false as $f)
+				$cols[(int)$f["col"]] = 1;
+			$bool_cols = array();
+			$data_set = Exec_sql("SELECT r.id FROM $z r JOIN $z term ON term.id=r.t WHERE r.id IN(".implode(",", array_keys($cols)).") AND term.t=".$GLOBALS["BT"]["BOOLEAN"], "Get BOOLEAN report flags");
+			while($row = mysqli_fetch_array($data_set))
+				$bool_cols[$row["id"]] = 1;
+			foreach($rep_false as $f)
+				if(isset($bool_cols[$f["col"]])){
+					if(isset($f["param"])){
+						unset($GLOBALS["STORED_REPS"][$id]["params"][$f["col"]]);
+						unset($GLOBALS["STORED_REPS"][$id]["rep_params"][$f["param"]]);
+					}
+					else{
+						unset($GLOBALS["STORED_REPS"][$id][$f["col"]][$f["ord"]]);
+						if(empty($GLOBALS["STORED_REPS"][$id][$f["col"]]))
+							unset($GLOBALS["STORED_REPS"][$id][$f["col"]]);
+					}
+				}
+			unset($rep_false);
+		}
         $GLOBALS["STORED_REPS"][$id]["columns_flip"] = array_flip($GLOBALS["STORED_REPS"][$id]["columns"]);
         # Add dynamically created columns
 		if(isset($_REQUEST["SELECT"]) && $exe){
@@ -6190,25 +6658,13 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 				    trace("A new record under ".$value["up"][$n]);
 					if(isset($new_id_needed[$value["up"][$n]])) # Fetch the new ID of our parent
 						$value["up"][$n] = $new_id_needed[$value["up"][$n]];
-					if(preg_match_all('/[а-яА-Яa-zA-Z0-9\s]+/u', $value["val"][$n], $items) === 0){
-						$items = [$value["val"][$n]];
-						$batch = false;
-					}
-					else{
-						$items = $items[0];
-						$cache = [];
-						$batch = true;
-					}
+					# One row with the prepared value as is: text is never split (issue #5463),
+					# a Ref carries its target in t, extra multi-ref targets come from tList
+					$items = [$value["val"][$n]];
 					$ord = $value["ord"][$n] == 0 ? Calc_Order($value["up"][$n], $value["t"][$n]) : $value["ord"][$n];
 					foreach($items as $k => $v){
 						if(($k === 0) && isset($new_id_needed[$key."_".$value["new_id"][$n]]))	# Save the new ID in case some Reqs need to know it
 							$new_id_needed[$key."_".$value["new_id"][$n]] = Insert($value["up"][$n], $ord++, $value["t"][$n], $v, "INSERT new rec, get ID");
-						elseif($batch){
-							if(!isset($cache[$value["t"][$n].":$v"])){ // Do not create duplicates
-								Insert_batch($value["up"][$n], $ord++, $value["t"][$n], $v, "INSERT new rec ($n)");
-								$cache[$value["t"][$n].":$v"] = 1;
-							}
-						}
 						else
 							Insert_batch($value["up"][$n], $ord++, $value["t"][$n], $v, "INSERT new rec ($n)");
 						trace("  ref ".$GLOBALS["STORED_REPS"][$id]["ref_typ"][$v]);
@@ -6228,8 +6684,7 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 							}
 						}
 					}
-					if($batch)
-						Insert_batch("", "", "", "", "Flush Insert new Ref by val");
+					Insert_batch("", "", "", "", "Flush Insert new Ref by val");
 				}
 				elseif(substr($fields[$key],-4)===".ord")
 					Exec_sql("UPDATE $z SET ord=".(int)$value["val"][$n]." WHERE id=$i", "UPDATE Ord");
@@ -6417,7 +6872,7 @@ function Report_tx_begin($id){
 			|| !(isset($_REQUEST["confirmed"]) || isset($GLOBALS["STORED_REPS"][$id]["rep_params"]["EXECUTE"])))
 		return FALSE;
 	$flag = trim((string)$GLOBALS["STORED_REPS"][$id]["rep_params"]["InTransaction"]);
-	if(($flag === "") || ($flag === "0"))
+	if(Boolean_Store_Val($flag) !== "1")	# issue #5442: "-1" (нет), "0" и пусто — без транзакции
 		return FALSE;
 	if(!mysqli_begin_transaction($GLOBALS["connection"]))
 		die_info("Couldn't start the transaction for report #$id ".mysqli_error($GLOBALS["connection"]));
@@ -6833,6 +7288,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 										, "Get Object & type name");
 					if($row = mysqli_fetch_array($data_set))
 					{
+						Check_Rec_masks($id);	# #5462: запись вне масок роли не читается и по id
 						$blocks[$block]["title"][] = $row[0]." ".Format_Val_View($row[1], $row[2], $id);
 						$GLOBALS["REV_BT"][$row["id"]] = $GLOBALS["REV_BT"][$row["t"]];
 					}
@@ -7445,6 +7901,9 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
     			if(isApi()){
     				$GLOBALS["GLOBAL_VARS"]["api"]["reqs"][$key]["type"] = $GLOBALS["REQS"][$key]["val"];
     				$GLOBALS["GLOBAL_VARS"]["api"]["reqs"][$key]["order"] = $GLOBALS["REQS"][$key]["ord"];
+    				# issue #5442: BOOLEAN — "1" / "-1"; строки нет (и нет значения по умолчанию) — null
+    				if(($GLOBALS["REV_BT"][$base_typ] == "BOOLEAN") && !isset($GLOBALS["REF_typs"][$key]))
+    					$v = Boolean_Api_Val((isset($row["id"]) ? $row["id"] : 0) > 0 ? $v : Format_Val($base_typ, $v));
     				$GLOBALS["GLOBAL_VARS"]["api"]["reqs"][$key]["value"] = $v;
     				$GLOBALS["GLOBAL_VARS"]["api"]["reqs"][$key]["base"] = $GLOBALS["REV_BT"][$base_typ];
     				if(isset($GLOBALS["REF_typs"][$key])){
@@ -7536,7 +7995,8 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 			# Logical Reqs are sent with "CHECKED" attribute
 			if($GLOBALS["REV_BT"][$blocks[$blocks[$block]["PARENT"]]["CUR_VARS"]["typ"]] == strtoupper(substr($block_name, 9)))
 				if($GLOBALS["REV_BT"][$blocks[$blocks[$block]["PARENT"]]["CUR_VARS"]["base_typ"]] == "BOOLEAN")
-					$blocks[$block]["checked"][] = ($blocks[$blocks[$block]["PARENT"]]["CUR_VARS"]["val"]!="" ? "CHECKED" : "");
+					# issue #5442: отмечена только при «да»; "-1" (нет) и пусто — не отмечена
+					$blocks[$block]["checked"][] = (Boolean_Store_Val(html_entity_decode($blocks[$blocks[$block]["PARENT"]]["CUR_VARS"]["val"])) === "1" ? "CHECKED" : "");
 		case "&editreq_file":
 			$blocks[$block]["reqid"][] = $blocks[$blocks[$block]["PARENT"]]["CUR_VARS"]["reqid"];
 		case "&editreq_reference":
@@ -8538,8 +8998,8 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
             						}
     						    }
     						    elseif(isset($existing) && isset($reqs[$key])){
-    						         # Drop false BOOLEAN: -1 or FALSE
-    						        if($GLOBALS["base"][$key] === "11" /* BOOLEAN */ && (strtolower($object[$order]) === "false" || $object[$order] === "-1" || $object[$order] === " "))
+    						         # issue #5442: BOOLEAN "-1"/false - хранимое «нет»; пробел (пусто) - удалить
+    						        if($GLOBALS["base"][$key] === "11" /* BOOLEAN */ && ($val === ""))
     						            Delete($ids[$key]);
     						        elseif($reqs[$key] !== $val)
     						            if($val === " ")
@@ -8548,8 +9008,8 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
         						            Update_Val($ids[$key], $val);
     						    }
     							else{ // Ordinary attribute of some base type
-    							    # Skip false BOOLEAN: -1 or FALSE
-						            if($GLOBALS["base"][$key] === "11" /* BOOLEAN */ && (strtolower($object[$order]) === "false" || $object[$order] === "-1" || $object[$order] === " "))
+    							    # issue #5442: BOOLEAN "-1"/false пишется как «нет»; пробел (пусто) - не писать
+						            if($GLOBALS["base"][$key] === "11" /* BOOLEAN */ && ($val === ""))
 						                # issue #4140: an earlier line of this file may have queued a value for this column
 						                Drop_batch_column($new_id, BATCH_SCALAR, $key);
 						            elseif($val !== " ")
@@ -8631,13 +9091,18 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 												, isset($GLOBALS["obj_subst"]) ? $GLOBALS["obj_subst"] : Array()
 												, function($id) use ($z){ return (bool)mysqli_fetch_array(Exec_sql("SELECT 1 FROM $z WHERE id=$id", "Check literal value")); }
 												, $count, $GLOBALS["warning"]);
-										if($rec_reqs === NULL)
-											Insert_batch($new_id, 1, $key, $value, "Import req");
-										else{	# issue #5236: совпало - не трогать, отличается - обновить, пробел (BOOLEAN false) - удалить
+										# issue #5442: BOOLEAN - "1" (да) / "-1" (нет, false, 0) пишутся; пробел - не задано
+										$is_bool = isset($GLOBALS["base"][$key]) && ((string)$GLOBALS["base"][$key] === "11" /* BOOLEAN */);
+										if($is_bool && ($value !== " "))
+											$value = Boolean_Store_Val($value);
+										if($rec_reqs === NULL){
+											if(!$is_bool || ($value !== " "))
+												Insert_batch($new_id, 1, $key, $value, "Import req");
+										}
+										else{	# issue #5236: совпало - не трогать, отличается - обновить, пробел - удалить
 											if(!isset($rec_reqs[$key]))
 												$rec_reqs[$key] = array();
-											$clear = ($value === " ") || (isset($GLOBALS["base"][$key]) && ((string)$GLOBALS["base"][$key] === "11" /* BOOLEAN */)
-													&& ((strtolower($value) === "false") || ($value === "-1")));
+											$clear = ($value === " ");
 											Import_req_set($new_id, $key, $value, $clear, $rec_reqs[$key], "Import req");
 										}
 									}
@@ -10700,17 +11165,24 @@ function Make_tree($text, $cur_block)
 # The template may be chosen by the request (?name=file), but only a plain file name is accepted
 				$req_file = isset($_GET[$res[2]]) && is_string($_GET[$res[2]]) && preg_match("/^[A-Za-z0-9_\-]+$/", $_GET[$res[2]])
 				            ? $_GET[$res[2]] : $res[2];
-			    if($res[2] == "a")
-			        $text = Get_file($GLOBALS["GLOBAL_VARS"]["action"].".html", FALSE);
-				else
-					$text = Get_file($req_file.".html", FALSE);
+				$name = ($res[2] == "a") ? $GLOBALS["GLOBAL_VARS"]["action"] : $req_file;
+# A template never includes itself: main.html and any file being parsed up the chain fall back
+# to info.html, and info.html already in the chain inserts nothing (GET /<db>/main recursed)
+				$chain = isset($GLOBALS["TPL_FILE_CHAIN"]) ? $GLOBALS["TPL_FILE_CHAIN"] : array();
+				$text = (strcasecmp($name, "main") && !in_array(strtolower($name), $chain, TRUE))
+				        ? Get_file($name.".html", FALSE) : "";
 				if(strlen($text) == 0)
-					$text = Get_file("info.html");   # Default content is in info.html
+				{
+					$name = "info";
+					$text = in_array("info", $chain, TRUE) ? "" : Get_file("info.html");   # Default content is in info.html
+				}
 				$file_block = "$cur_block." . (isset($_REQUEST[$res[2]]) && is_string($_REQUEST[$res[2]]) && preg_match("/^&?[A-Za-z0-9_\-]+$/", $_REQUEST[$res[2]])
 				                               ? $_REQUEST[$res[2]] : $res[2]);
 				$insertion_point = "{_block_.$file_block}";
 				$blocks[$file_block]["PARENT"] = $cur_block;
+				$GLOBALS["TPL_FILE_CHAIN"][] = strtolower($name);
 				Make_tree($text, $file_block);
+				array_pop($GLOBALS["TPL_FILE_CHAIN"]);
 				$blocks[$cur_block]["CONTENT"] .= $insertion_point.$res[3];
 #				die($_REQUEST[$res[2]].".html".$text.$cur_block);
 			}
@@ -11196,7 +11668,7 @@ function Restore_admin_allowed(){
 	foreach($tokens as $tok){
 		if(!is_string($tok) || ($tok === ""))
 			continue;
-		if(hash_equals(hash("sha512", ADMINHASH.$z), $tok))
+		if(hash_equals(Admin_token($z), $tok))
 			return TRUE;
 		if(mysqli_fetch_array(Exec_sql("SELECT u.id FROM $z u, $z tok WHERE u.t=".USER." AND u.val='$z' AND tok.up=u.id"
 				." AND tok.t=".TOKEN." AND ".Token_match_sql("tok", $tok)." LIMIT 1", "Restore admin: owner token")))
@@ -11405,6 +11877,10 @@ function Code_restore_apply($source){
 			return array("error" => t9n("[RU]В архиве чужой путь $n — восстановление не начато, файлы не тронуты"
 				."[EN]Foreign path $n in the archive — the restore has not started, the files are intact"));
 		}
+		# имена из архива проходят тот же BlackList, что и загрузка, — каждый сегмент после точки,
+		# не только последний: при php через AddHandler Apache исполняет и shell.php.jpg
+		foreach(array_slice(explode(".", basename($n)), 1) as $ext)
+			BlackList($ext);
 		$names[] = $n;
 	}
 	$zip->close();
@@ -11848,11 +12324,63 @@ function handleAiAgentRequest($com){
     # восстановления результата при повторном открытии панели, в т.ч. с другого
     # браузера). Сам ответ агента сохраняется на сервере и переживает таймаут.
     $method = isset($_SERVER["REQUEST_METHOD"]) ? strtoupper((string)$_SERVER["REQUEST_METHOD"]) : "GET";
+    if((isset($com[4]) ? $com[4] : "") === "settings")
+        return aiAgentSettingsRequest();
     if($method === "GET")
         return aiAgentStatusRequest($com);
     if($method !== "POST")
         aiAgentError(t9n("[RU]ИИ-агент принимает GET (статус) или POST (запрос)[EN]The AI agent accepts GET (status) or POST (request)"), 405);
     return aiAgentSubmitRequest($com);
+}
+# Issue #5498: модель ИИ-чата — наш агент или свой LLM-прокси базы. Настройка — строки таблицы
+# «Настройка» (269) с «Тип» (271) = AI_LLM_*: значение — главное значение строки. Читает их сам
+# сервис агента токеном пользователя (python2node agent-chat, custom_llm.py); сюда приходит окно
+# шестерёнки чата. Ключ прокси во фронт не отдаётся: только «задан / не задан» и id строк, чтобы
+# окно сохранило правку штатными _m_set/_m_new (право записи в 269 проверяет ядро).
+function aiAgentSettingKeys(){
+    return array("AI_LLM_PROVIDER" => "provider", "AI_LLM_URL" => "url", "AI_LLM_MODEL" => "model", "AI_LLM_TOKEN" => "token");
+}
+# Строки «Настройки» AI_LLM_* → {provider, url, model, hasToken, ids{Тип: id}}.
+function aiAgentSettingsFromRows($rows){
+    $keys = aiAgentSettingKeys();
+    $out = array("provider" => "", "url" => "", "model" => "", "hasToken" => false, "ids" => (object)array());
+    $ids = array();
+    foreach($rows as $row){
+        $key = isset($row["k"]) ? (string)$row["k"] : "";
+        if(!isset($keys[$key]) || isset($ids[$key]))
+            continue;
+        $ids[$key] = (string)$row["id"];
+        $val = trim((string)$row["val"]);
+        if($keys[$key] === "token")
+            $out["hasToken"] = $val !== "";
+        else
+            $out[$keys[$key]] = $val;
+    }
+    if(count($ids))
+        $out["ids"] = $ids;
+    $out["mode"] = ($out["url"] !== "" && $out["hasToken"]) ? "custom" : "ours";
+    return $out;
+}
+# GET /{db}/ai/agent/settings — состояние настройки для окна шестерёнки.
+function aiAgentSettingsRequest(){
+    aiAgentRequireUser();
+    $grant = Grant_1level(269);   # доступ роли к таблице «Настройка»: READ | WRITE | FALSE
+    $canRead = $grant === "READ" || $grant === "WRITE";
+    $out = array("canRead" => $canRead, "canEdit" => $grant === "WRITE");
+    if($canRead)
+        $out = array_merge($out, aiAgentSettingsFromRows(aiAgentSettingRows()));
+    api_dump(json_encode($out, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "ai-agent-settings.json");
+}
+# Строки «Настройки» с «Тип» = AI_LLM_*: [{id, val, k}].
+function aiAgentSettingRows(){
+    global $z;
+    $in = "'".implode("','", array_keys(aiAgentSettingKeys()))."'";
+    $rows = array();
+    $data = Exec_sql("SELECT o.id, o.val, k.val k FROM $z o JOIN $z k ON k.up=o.id AND k.t=271"
+        ." WHERE o.t=269 AND k.val IN ($in) ORDER BY o.id", "AI agent settings");
+    while($row = mysqli_fetch_array($data))
+        $rows[] = $row;
+    return $rows;
 }
 # Имя текущего пользователя в нижнем регистре ("" — не вошёл).
 function aiAgentCurrentUser(){
@@ -12393,6 +12921,21 @@ function aiAgentScreenContext($raw){
         if($v !== "" && ($k !== "url" || $v[0] === "/"))
             $ctx[$k] = $v;
     }
+    # python2node#1252: скрипты страницы — только статика своей базы /download/<база>/…js
+    # (без ?версии и ..), до 10 штук: агент читает по ним алгоритм кнопок.
+    if(isset($src["scripts"]) && is_array($src["scripts"])){
+        $scripts = array();
+        foreach($src["scripts"] as $v){
+            if(!is_string($v) || count($scripts) >= 10)
+                continue;
+            $p = preg_replace('/[?#].*$/s', "", trim($v));
+            if(preg_match('~^/download/[A-Za-z0-9_]{1,64}/(?:[A-Za-z0-9_.-]{1,100}/){0,4}[A-Za-z0-9_.-]{1,100}\.js$~', $p)
+                    && !preg_match('~/\.{1,2}/~', $p) && !in_array($p, $scripts, true))
+                $scripts[] = $p;
+        }
+        if(count($scripts))
+            $ctx["scripts"] = $scripts;
+    }
     # crm#5113: экран рабочего места — плоский объект: строки (text — до 3000 символов),
     # числа, логические, списки скаляров до 30. Не больше 20 полей и 6000 символов JSON.
     if($page === "workplace" && isset($src["screen"]) && is_array($src["screen"])){
@@ -12504,6 +13047,15 @@ function callIntegramAgent($db, $message, $attachments, $payment, $jobId="", $ca
                 $request["core_token"] = $jwt.".".$b64($signature);
         }
     }
+    # python2node#1242: в «Настройке» задан адрес своей модели (crm#5498). Агент читает её правами
+    # пользователя и без доступа к 269 её не увидит — флаг даёт ему сказать, что модель не
+    # применена. Сам ключ не передаётся.
+    # Харнессы experiments/ гоняют callIntegramAgent без БД (нет Exec_sql) — там флага нет.
+    if(function_exists("Exec_sql") && function_exists("aiAgentSettingRows")){
+        $llm = aiAgentSettingsFromRows(aiAgentSettingRows());
+        if($llm["url"] !== "")
+            $request["llm_configured"] = true;
+    }
     # Где сейчас пользователь (python2node#847); без контекста поле не передаётся.
     if(is_array($context) && count($context))
         $request["context"] = $context;
@@ -12568,8 +13120,7 @@ function callIntegramAgent($db, $message, $attachments, $payment, $jobId="", $ca
 # видит только свои задачи (aiAgentStatusRequest, issue #839).
 # Пер-база храним последние AI_AGENT_JOBS_MAX задач не старше AI_AGENT_JOBS_TTL.
 # ============================================================
-if(!defined("AI_AGENT_JOBS_MAX")) define("AI_AGENT_JOBS_MAX", 20);
-if(!defined("AI_AGENT_JOBS_TTL")) define("AI_AGENT_JOBS_TTL", 24 * 3600);
+# Константы AI_AGENT_JOBS_MAX, AI_AGENT_JOBS_TTL — в начале файла (до маршрута callback).
 
 function aiAgentJobsFile($db){
     # "trg:<база>" — задачи кнопок и триггеров (python2node#866), отдельный файл: не вытесняют задачи чата
@@ -12784,9 +13335,8 @@ function aiAgentJobLatest($db, $user=null, $conversation=""){
 # (logs/.htaccess), а время жизни истории не зависит от временного каталога и TTL задач.
 # Держим AI_AGENT_CHATS_MAX последних диалогов и AI_AGENT_CHAT_TURNS_MAX ходов в каждом.
 # ============================================================
-if(!defined("AI_AGENT_CHATS_MAX")) define("AI_AGENT_CHATS_MAX", 50);
-if(!defined("AI_AGENT_CHAT_TURNS_MAX")) define("AI_AGENT_CHAT_TURNS_MAX", 100);
-if(!defined("AI_AGENT_CHAT_TITLE_LEN")) define("AI_AGENT_CHAT_TITLE_LEN", 60);
+# Константы AI_AGENT_CHATS_MAX, AI_AGENT_CHAT_TURNS_MAX, AI_AGENT_CHAT_TITLE_LEN — в начале
+# файла (до маршрута callback).
 
 function aiAgentChatIdValid($id){
     return is_string($id) && preg_match('/^[a-f0-9]{8,64}$/', $id) === 1;
@@ -13693,7 +14243,30 @@ function FindUniqueRecordDuplicate($typ, $skipId, $up, $val, $keyValues, $includ
 	$result = Exec_sql($sql, "Check composite unique Obj");
 	return mysqli_fetch_array($result);
 }
+# Issue #5465: проверка дубля (SELECT) и вставка (INSERT) — разные запросы, и два параллельных _m_new с одним
+# значением оба не находили дубля и оба вставляли (на ideav.ru/timepad 2 слота из 25 при 12 гостях на слот).
+# Именованная блокировка MySQL на «таблица + родитель + значение» держится от проверки до конца запроса:
+# второй запрос ждёт, пока первый вставит запись, и видит её. Блокировка сессионная — конец скрипта
+# (и обрыв: my_die, die) снимает её вместе с соединением; перед отложенными триггерами её снимает
+# BtRunDeferred. Составной ключ блокируется по таблице и родителю.
+function UniqueKeyLock($typ, $up, $val, $includeVal){
+	$name = "iu_".md5($GLOBALS["z"]."|".(int)$typ."|".(int)$up.($includeVal ? "|".$val : ""));
+	if(isset($GLOBALS["UNIQUE_LOCKS"][$name]))
+		return;
+	$row = mysqli_fetch_array(Exec_sql("SELECT GET_LOCK('$name', ".UNIQUE_LOCK_WAIT.")", "Lock unique key"));
+	if(!$row || (string)$row[0] !== "1")
+		my_die(t9n("[RU]Запись с таким значением сейчас создаётся другим запросом, повторите позже[EN]A record with this value is being created by another request, try again later"), "409 Conflict");
+	$GLOBALS["UNIQUE_LOCKS"][$name] = TRUE;
+}
+function UniqueKeyUnlock(){
+	if(empty($GLOBALS["UNIQUE_LOCKS"]))
+		return;
+	foreach(array_keys($GLOBALS["UNIQUE_LOCKS"]) as $name)
+		Exec_sql("SELECT RELEASE_LOCK('$name')", "Unlock unique key");
+	$GLOBALS["UNIQUE_LOCKS"] = array();
+}
 function FindUniqueRecordDuplicateFromRequest($typ, $skipId, $up, $val, $request, $includeVal=true){
+	UniqueKeyLock($typ, $up, $val, $includeVal);
 	$keyReqs = UniqueKeyReqs($typ);
 	$keyValues = UniqueKeyValuesFromRequest($typ, $skipId, $request, $keyReqs);
 	return FindUniqueRecordDuplicate($typ, $skipId, $up, $val, $keyValues, $includeVal);
@@ -13757,7 +14330,7 @@ function authJWT($u){
 		updateTokens($row);
 #		setcookie("idb_$z", $GLOBALS["GLOBAL_VARS"]["token"], time() + COOKIES_EXPIRE, "/"); # 30 days
 		setcookie("idb_$z", $GLOBALS["GLOBAL_VARS"]["token"], Auth_cookie_opts(0)); # Uon browser close
-    	api_dump(json_encode(array("_xsrf"=>$GLOBALS["GLOBAL_VARS"]["xsrf"],"token"=>$GLOBALS["GLOBAL_VARS"]["token"],"id"=>$GLOBALS["GLOBAL_VARS"]["user_id"],"user"=>$GLOBALS["GLOBAL_VARS"]["user"])), "login.json");
+    	api_dump(json_encode(Login_json_fields(array("_xsrf"=>$GLOBALS["GLOBAL_VARS"]["xsrf"],"token"=>$GLOBALS["GLOBAL_VARS"]["token"],"id"=>$GLOBALS["GLOBAL_VARS"]["user_id"],"user"=>$GLOBALS["GLOBAL_VARS"]["user"]), $GLOBALS["GLOBAL_VARS"]["user_id"])), "login.json");
 	}
 	else
 	    die("{\"error\":\"No user found\"}");
@@ -13768,6 +14341,82 @@ function updateBilling(){
 	if(!$connection)
 		return;
 	mysqli_query($connection, "UPDATE my SET ord=ord+".min(50, max(1, floor(substr(microtime(TRUE) - $time_start, 0, 6)*50)))." WHERE t=".DATABASE." AND val='$z'");
+}
+# Счётчики биллинга базы (#5206): расход ИИ-токенов и запуски агента в единицах ресурса тарифа.
+# Счётчик — строка-реквизит записи базы в my (t=DATABASE, val=<база>) с типом BILLING_*_TYPE,
+# значение — её ord; прибавка — один UPDATE, строка создаётся один раз. ord записи базы
+# (активность, updateBilling) не меняется. Пересчёт в единицы:
+#   ai_tokens  = ceil(tokens / BILLING_AI_TOKENS_PER_UNIT)  (по умолчанию 1000 токенов = 1 ед.)
+#   agent_runs = runs * BILLING_AGENT_RUN_UNITS             (по умолчанию 1 запуск = 1 ед.)
+function billingUnits($tokens, $runs){
+    $perUnit = (int)aiConfigValue(array("BILLING_AI_TOKENS_PER_UNIT"));
+    if($perUnit <= 0)
+        $perUnit = 1000;
+    $runUnits = (int)aiConfigValue(array("BILLING_AGENT_RUN_UNITS"));
+    if($runUnits <= 0)
+        $runUnits = 1;
+    return array("ai_tokens" => $tokens > 0 ? (int)ceil($tokens / $perUnit) : 0,
+        "agent_runs" => $runs > 0 ? $runs * $runUnits : 0);
+}
+# Прибавляет $units к счётчику $type базы $db. TRUE — прибавлено, FALSE — записи базы в my нет.
+# Строку счётчика создаёт первый вызов под GET_LOCK, чтобы параллельные вызовы не завели две.
+function billingCounterAdd($connection, $db, $type, $code, $units){
+    $db = mysqli_real_escape_string($connection, (string)$db);
+    $type = (int)$type;
+    $units = (int)$units;
+    $upd = "UPDATE my c JOIN my db ON c.up=db.id SET c.ord=c.ord+$units"
+        ." WHERE db.t=".DATABASE." AND db.val='$db' AND c.t=$type";
+    mysqli_query($connection, $upd);
+    if(mysqli_affected_rows($connection) > 0)
+        return TRUE;
+    $lock = "billing_".$db."_".$type;
+    mysqli_query($connection, "SELECT GET_LOCK('$lock', 5)");
+    mysqli_query($connection, $upd);
+    $done = mysqli_affected_rows($connection) > 0;
+    if(!$done){
+        mysqli_query($connection, "INSERT INTO my (up, ord, t, val) SELECT db.id, $units, $type, '$code'"
+            ." FROM my db WHERE db.t=".DATABASE." AND db.val='$db' LIMIT 1");
+        $done = mysqli_affected_rows($connection) > 0;
+    }
+    mysqli_query($connection, "SELECT RELEASE_LOCK('$lock')");
+    return $done;
+}
+# POST /{db}/billing/add — служебный вызов: {"tokens": N, "runs": M}, заголовок X-Billing-Token.
+# Выключен, пока не задан BILLING_SERVICE_TOKEN (404); без типов счётчиков — 503.
+# Возвращает array("code" => HTTP-код, "body" => ответ); $headers — с ключами в нижнем регистре.
+function billingAddRequest($connection, $db, $method, $headers, $body){
+    $secret = aiConfigValue(array("BILLING_SERVICE_TOKEN"));
+    if($secret === "")
+        return array("code" => 404, "body" => array("error" => t9n("[RU]Биллинг не включён[EN]Billing is not enabled")));
+    if($method !== "POST")
+        return array("code" => 405, "body" => array("error" => t9n("[RU]Только POST[EN]POST only")));
+    $given = isset($headers["x-billing-token"]) ? (string)$headers["x-billing-token"] : "";
+    if($given === "" || !hash_equals($secret, $given))
+        return array("code" => 403, "body" => array("error" => t9n("[RU]Неверный токен биллинга[EN]Invalid billing token")));
+    $types = array("ai_tokens" => (int)aiConfigValue(array("BILLING_AI_TOKENS_TYPE")),
+        "agent_runs" => (int)aiConfigValue(array("BILLING_AGENT_RUNS_TYPE")));
+    if($types["ai_tokens"] <= 0 || $types["agent_runs"] <= 0)
+        return array("code" => 503, "body" => array("error" => t9n("[RU]Не заданы типы счётчиков биллинга[EN]Billing counter types are not set")));
+    $in = json_decode((string)$body, true);
+    $bad = !is_array($in);
+    foreach(array("tokens", "runs") as $k)
+        if(!$bad && isset($in[$k]) && (!is_int($in[$k]) || $in[$k] < 0))
+            $bad = TRUE;
+    $units = $bad ? array() : billingUnits(isset($in["tokens"]) ? $in["tokens"] : 0, isset($in["runs"]) ? $in["runs"] : 0);
+    if($bad || $units["ai_tokens"] + $units["agent_runs"] === 0)
+        return array("code" => 400, "body" => array("error" => t9n("[RU]Нужны целые tokens и/или runs больше нуля[EN]Positive integer tokens and/or runs required")));
+    foreach($units as $code => $n)
+        if($n > 0 && !billingCounterAdd($connection, $db, $types[$code], $code, $n))
+            return array("code" => 404, "body" => array("error" => t9n("[RU]Нет записи базы[EN]No database record")));
+    return array("code" => 200, "body" => array("ok" => TRUE, "db" => (string)$db, "added" => $units));
+}
+function handleBillingAdd($db){
+    global $connection;
+    $headers = array_change_key_case(function_exists("getallheaders") ? (array)getallheaders() : array(), CASE_LOWER);
+    $r = billingAddRequest($connection, $db, isset($_SERVER["REQUEST_METHOD"]) ? $_SERVER["REQUEST_METHOD"] : "", $headers, file_get_contents("php://input"));
+    if($r["code"] !== 200)
+        header("HTTP/1.0 ".$r["code"]." ".aiChatHttpStatusText($r["code"]));
+    api_dump(json_encode($r["body"], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "billing.json");
 }
 # <m-batch-4981> Пакетная запись: _m_save, _m_set, _m_new и _m_del одним запросом (issue #4981, #4988)
 # Ошибка одной операции пакета.
@@ -13961,7 +14610,9 @@ function RequireRefId($t, $val)
 # обычный минус; апостроф между разрядами (1'000) — разделитель. Запятая — десятичный знак;
 # если есть и точка, и запятая, десятичный — последний из них, а другой — разделитель групп
 # по три цифры (1.234,56 и 1,234.56). Возвращает число строкой без разделителей.
-function RequireNumber($t, $val)
+# Issue #5471: нормализация числа, общая для записи (RequireNumber) и фильтра (Construct_WHERE):
+# каноническая числовая строка или FALSE, если значение не число. Без my_die.
+function Normalize_Number($val)
 {
 	$num = is_array($val) ? "" : (string)preg_replace('/[\s\p{Z}\x{200B}-\x{200D}\x{2060}\x{FEFF}]+/u', "", (string)$val);
 	$num = (string)preg_replace('/[\x{2212}\x{2013}]/u', "-", $num);
@@ -13969,7 +14620,17 @@ function RequireNumber($t, $val)
 	if(preg_match('/^[+-]?\d{1,3}(?:([.,])\d{3})*(?!\1)[.,]\d*$/', $num, $m) && isset($m[1]) && ($m[1] !== ""))
 		$num = str_replace($m[1], "", $num);	# 1.234,56 / 1,234.56: разделитель групп — прочь
 	$num = str_replace(",", ".", $num);
-	if(!is_numeric($num))
+	return is_numeric($num) ? $num : FALSE;
+}
+# Как значение NUMBER/SIGNED приводится при сохранении: (int) для NUMBER, (double) для SIGNED.
+function Number_Storage_Val($base, $num)
+{
+	return $base === "NUMBER" ? (int)$num : (double)$num;
+}
+function RequireNumber($t, $val)
+{
+	$num = Normalize_Number($val);
+	if($num === FALSE)
 		my_die(t9n("[RU]Значение должно быть числом[EN]Value must be a number").": t$t = ".(is_array($val) ? "array" : $val));
 	return $num;
 }
@@ -14075,10 +14736,12 @@ function ApplyMSet($id, $req, $files)
         					# Format the value
 							if($t == PASSWORD) // Encrypt the password
         						$val = Pwd_hash($val);
+        					elseif(Mail_is_settings_pwd($obj, $t))	# #5494: пароль приложения почты - шифротекст сервера; маска ****** значение не трогает
+        						$val = ($val === PASSWORDSTARS) ? $cur_val : Mail_secret_encrypt($val);
         					elseif(($GLOBALS["REV_BT"][$row["t"]] == "NUMBER") && ($val != 0))
-        						$val = $val === "" ? "" : (int)RequireNumber($t, $val);
+        						$val = $val === "" ? "" : Number_Storage_Val("NUMBER", RequireNumber($t, $val));
         					elseif(($GLOBALS["REV_BT"][$row["t"]] == "SIGNED") && ($val != 0))
-        						$val = $val === "" ? "" : (double)RequireNumber($t, $val);
+        						$val = $val === "" ? "" : Number_Storage_Val("SIGNED", RequireNumber($t, $val));
         					else
         						$val = Format_Val($row["t"], $val);
         					if($cur_id){ # The Req exists
@@ -14480,6 +15143,8 @@ function ApplyMNew($id, $up, $files)
 					}
 					elseif($t == PASSWORD)
 						Insert($i, 1, $t, Pwd_hash($v), "Insert a first time password");
+					elseif(Mail_is_settings_pwd($i, $t))	# #5494: пароль приложения почты - шифротекст сервера
+						Insert($i, 1, $t, Mail_secret_encrypt($v), "Insert encrypted mail password");
 					else
 						Insert($i, 1, $t, $v, "Insert new non-empty req");
 				}
@@ -14588,7 +15253,7 @@ function ApplyMSave($id, $req, $files)
 				$hasSubmittedKeyReqs = $unique ? false : UniqueKeyRequestHasSubmittedKeyReq($req, $keyReqs);
 				if($unique || $hasSubmittedKeyReqs){
 					$uniqueVal = $cur_val;
-					if(isset($req["t$typ"]) && !(($typ == TOKEN || $typ == XSRF || $typ == PASSWORD) && $req["t$typ"] === PASSWORDSTARS))
+					if(isset($req["t$typ"]) && !Skip_hidden_pwd($typ, $req["t$typ"]))	# #5494: маска не перезаписывает PWD-реквизиты
 						$uniqueVal = UniqueKeyNormalizeValue($typ, $req["t$typ"]);
 					CheckUniqueRecordFromRequest($typ, $id, $up, $uniqueVal, $req, (bool)$unique);
 				}
@@ -14608,7 +15273,7 @@ function ApplyMSave($id, $req, $files)
 				    $v = Format_Val($t, $value);
 				else
 				    $v = $value;
-				if((($t == TOKEN) || ($t == XSRF) || ($t == PASSWORD)) && ($v === PASSWORDSTARS)) // Skip hidden PWDs
+				if(Skip_hidden_pwd($t, $v)) // Skip hidden PWDs (#5494: also PWD-typed requisites)
 			        continue;
 
 				if(isset($req["NEW_$t"]) && isset($GLOBALS["REF_typs"][$t]))
@@ -14717,6 +15382,8 @@ function ApplyMSave($id, $req, $files)
 						else{
         					if($t == PASSWORD) // Encrypt the password in case it's updated
         						$v = Pwd_hash($v);
+        					elseif(Mail_is_settings_pwd($id, $t))	# #5494: пароль приложения почты - шифротекст сервера
+        						$v = Mail_secret_encrypt($v);
             				trace("BuiltIn $v of ".$t." = ".BuiltIn($v));
             				trace(" base = ".$GLOBALS["REV_BT"][$t]);
         					#$v = Format_Val($t, BuiltIn($v));
@@ -14940,7 +15607,7 @@ function BtLoadUser($ref){
 	global $z;
 	if((is_int($ref) || ctype_digit((string)$ref)) && (int)$ref === 0 && isset($GLOBALS["GLOBAL_VARS"]["user_id"]) && (string)$GLOBALS["GLOBAL_VARS"]["user_id"] === "0")
 		return array("user" => "admin", "user_id" => 0, "role" => "admin", "role_id" => ADMINROLE
-			, "token" => hash("sha512", ADMINHASH.$z), "xsrf" => hash("sha512", $z.ADMINHASH), "grants" => FALSE);
+			, "token" => Admin_token($z), "xsrf" => Admin_xsrf($z), "grants" => FALSE);
 	$where = (is_int($ref) || ctype_digit((string)$ref)) ? "u.id=".(int)$ref : "u.val='".addslashes((string)$ref)."'";
 	$row = mysqli_fetch_array(Exec_sql("SELECT u.id, u.val, role_def.id r, role_def.val role, tok.val tok, xsrf.val xsrf FROM $z u"
 			." LEFT JOIN ($z r CROSS JOIN $z role_def) ON r.up=u.id AND role_def.id=r.t AND role_def.t=".ROLE
@@ -15145,6 +15812,7 @@ function BtDefer($key, $fn){
 function BtRunDeferred(){
 	if(empty($GLOBALS["BT_DEFERRED"]))
 		return;
+	UniqueKeyUnlock();	# #5465: запись сохранена — триггеры не держат блокировку уникального значения
 	if(function_exists("fastcgi_finish_request"))
 		@fastcgi_finish_request();
 	ob_start(function($buffer){ return ""; });	# вывод ядра после ответа никуда не идёт
@@ -15373,9 +16041,25 @@ switch($a)  # Check actions, which don't require authentication
 			, "_xsrf" => xsrf($mcpAccess, $z)));
 		break;
 
+	# #5205: обновление пары refresh/access (POST refresh_token). Refresh ротируется в своей строке;
+	# прежний refresh, предъявленный повторно, закрывает сессию устройства (его увели).
+	case "_refresh":
+		if($_SERVER["REQUEST_METHOD"] !== "POST")
+			Mcp_json(array("error" => "invalid_request"), "405 Method Not Allowed");
+		if(!Refresh_mode())
+			Mcp_json(array("error" => "refresh_disabled"), "404 Not Found");
+		$rfPair = Refresh_rotate(isset($_POST["refresh_token"]) && is_string($_POST["refresh_token"]) ? trim($_POST["refresh_token"]) : "");
+		if($rfPair === NULL)
+			Mcp_json(array("error" => "invalid_grant"), "401 Unauthorized");
+		Mcp_json($rfPair);
+		break;
+
 	# #1043: выход браузера. Кука входа HttpOnly — скрипт страницы её не снимет, снимает сервер:
 	# эта база (или все базы браузера при all=1), строки сессий удаляются. GET уводит на вход, POST — JSON.
 	case "_logout":
+		# #5205: API-клиент закрывает свою refresh-сессию — гаснут и её access
+		if(($lgR = Refresh_parse(isset($_POST["refresh_token"]) && is_string($_POST["refresh_token"]) ? trim($_POST["refresh_token"]) : "")) !== NULL)
+			Exec_sql("DELETE FROM $z WHERE t=".TOKEN." AND val LIKE 'r.".$lgR["exp"].".".hash("sha256", $lgR["secret"])."%'", "Drop the refresh session");
 		foreach($_COOKIE as $ckName => $ckVal){
 			if((strpos($ckName, "idb_") !== 0) || !is_string($ckVal))
 				continue;
@@ -15394,6 +16078,13 @@ switch($a)  # Check actions, which don't require authentication
 		$lgU = isset($_GET["u"]) && is_string($_GET["u"]) ? $_GET["u"] : "";
 		header("Location: /start.html?".http_build_query($lgU === "" ? array("db" => $z) : array("db" => $z, "u" => $lgU)));
 		die();
+
+	# backlogram#930: нужна ли капча на start.html. Куки входа idb_* HttpOnly — страница их не видит,
+	# сервер видит: есть валидная не-гостевая кука хоть одной базы — капчу не показываем.
+	case "_captcha":
+		header("Content-Type: application/json; charset=utf-8");
+		header("Cache-Control: no-store");
+		die(json_encode(array("bypass" => hasValidTokenCookie())));
 
 	case "jwt":
         $params = verifyJWT($_POST["jwt"], JWT_PUBLIC_KEY);
@@ -15420,14 +16111,10 @@ switch($a)  # Check actions, which don't require authentication
 			$GLOBALS["tzone"] = round(((int)$_POST["tzone"] - time() - date("Z"))/1800)*1800; # Round the time zone shift to 30 min
 			setcookie("tzone", $GLOBALS["tzone"], time() + COOKIES_EXPIRE, "/"); # 30 days
 		}
-		if(isset($_POST["smart-token"]) && !hasValidTokenCookie() && !verifyCaptcha($_POST["smart-token"])){
-			$captchaMsg = t9n("[RU]Проверка капчи не пройдена. Пожалуйста, попробуйте снова.[EN]Captcha verification failed. Please try again.");
-			if(isApi()){
-				header("HTTP/1.0 403 Forbidden");
-				api_dump(json_encode(["error" => $captchaMsg, "msg" => $captchaMsg], JSON_UNESCAPED_UNICODE));
-			}
-			my_die($captchaMsg);
-		}
+		# Присланная капча обязана быть верной (свою валидную куку — #2906 — вправе не решать);
+		# обязательной капча становится после неудач (ниже, по счётчику логина) и для входа admin.
+		if(isset($_POST["smart-token"]) && !hasValidTokenCookie() && !Login_captcha_passed())
+			Login_captcha_die();
 		$msg = "";
 		$p = isset($_POST["pwd"]) && is_string($_POST["pwd"]) ? $_POST["pwd"] : "";
 		$sql = "SELECT u.id uid, u.val, pwd.id pwd_id, pwd.val pwd, tok.id tok, tok.val token, act.id act, xsrf.id xsrf, retries.id retries_id, retries.val retries
@@ -15455,6 +16142,8 @@ switch($a)  # Check actions, which don't require authentication
 			$lockLeft = Login_lock_left($row["retries"], time());
 			if($lockLeft > 0)
 				Login_locked_die($u, $lockLeft);
+			if(Login_captcha_required($row["retries"]) && !Login_captcha_passed())
+				Login_captcha_die();  # #1139: пароль не сверяем — перебор без капчи не узнаёт ответа
 			if(!Pwd_verify($p, $row["pwd"])){
 				incrementRetries($row["uid"], $row["retries_id"], $row["retries"]);
 				$row = false;
@@ -15521,15 +16210,16 @@ switch($a)  # Check actions, which don't require authentication
 			# После смены пароля заменяется и текущий токен (#1036): украденная сессия не переживает смену пароля.
 			# Смена пароля закрывает и прочие сессии пользователя: украденная сессия её не переживает.
 			if(!empty($pwdChanged))
-				Exec_sql("DELETE FROM $z WHERE up=".(int)$row["uid"]." AND t=".TOKEN." AND val REGEXP '^(s|m)[.]'", "Drop sessions on password change");
+				Exec_sql("DELETE FROM $z WHERE up=".(int)$row["uid"]." AND t=".TOKEN." AND val REGEXP '^(s|m|r)[.]'", "Drop sessions on password change");
 			updateTokens($row, Rotate_token_hashes($row, $u, $p, !empty($pwdChanged)));
 		}
-		elseif((strtolower($u) == "admin") && (hash("sha512", sha1($_SERVER["SERVER_NAME"].$z.$p).$z) === hash("sha512", ADMINHASH.$z))){
+		elseif((strtolower($u) == "admin") && (Login_captcha_passed() || Login_captcha_die())
+				&& hash_equals(ADMINHASH, sha1($_SERVER["SERVER_NAME"].$z.$p))){
 			$GLOBALS["GLOBAL_VARS"]["user"] = $GLOBALS["GLOBAL_VARS"]["role"] = "admin";
 			$GLOBALS["GLOBAL_VARS"]["user_id"] = 0;
-			$GLOBALS["GLOBAL_VARS"]["xsrf"] = hash("sha512", $z.ADMINHASH);
-			$GLOBALS["GLOBAL_VARS"]["token"] = hash("sha512", ADMINHASH.$z);
-			setcookie("idb_$z", hash("sha512", ADMINHASH.$z), Auth_cookie_opts(0));
+			$GLOBALS["GLOBAL_VARS"]["xsrf"] = Admin_xsrf($z);
+			$GLOBALS["GLOBAL_VARS"]["token"] = Admin_token($z);
+			setcookie("idb_$z", Admin_token($z), Auth_cookie_opts(0));
 		}
 		elseif(isApi()){
 			header("HTTP/1.0 401 Unauthorized");
@@ -15539,7 +16229,7 @@ switch($a)  # Check actions, which don't require authentication
 		else
 			login($z, $_REQUEST["u"], "wrong");
 		if(isApi())
-			api_dump(json_encode(array("_xsrf"=>$GLOBALS["GLOBAL_VARS"]["xsrf"],"token"=>$GLOBALS["GLOBAL_VARS"]["token"],"id"=>$GLOBALS["GLOBAL_VARS"]["user_id"],"msg"=>$msg)), "login.json");
+			api_dump(json_encode(Login_json_fields(array("_xsrf"=>$GLOBALS["GLOBAL_VARS"]["xsrf"],"token"=>$GLOBALS["GLOBAL_VARS"]["token"],"id"=>$GLOBALS["GLOBAL_VARS"]["user_id"],"msg"=>$msg), $GLOBALS["GLOBAL_VARS"]["user_id"])), "login.json");
 		if($msg !== "")
 			die($msg.BACK_LINK);
 	    if(substr($GLOBALS["GLOBAL_VARS"]["uri"],0,strlen($z)+1) != "/$z")
@@ -15567,7 +16257,7 @@ switch($a)  # Check actions, which don't require authentication
 			Exec_sql("UPDATE $z SET val='".addslashes($cp)."' WHERE id=".(int)$row["id"], "Reset the password");
 			# #1036: сброс пароля гасит прежние сессии — ключ пользователя заменяется новым, сессии удаляются
 			Exec_sql("UPDATE $z SET val='".secureToken()."' WHERE up=".(int)$row["up"]." AND t=".TOKEN." AND ".str_replace("tok.", "", Token_key_sql("tok")), "Reset the token");
-			Exec_sql("DELETE FROM $z WHERE up=".(int)$row["up"]." AND t=".TOKEN." AND val REGEXP '^(s|m)[.]'", "Drop sessions on reset");
+			Exec_sql("DELETE FROM $z WHERE up=".(int)$row["up"]." AND t=".TOKEN." AND val REGEXP '^(s|m|r)[.]'", "Drop sessions on reset");
 			Exec_sql("UPDATE $z SET val='0' WHERE up=".(int)$row["up"]." AND t=".RETRIES, "Reset retries on password reset");
 			if(isApi())
 				login($z, $_REQUEST["u"], "confirm");
@@ -15650,7 +16340,7 @@ switch($a)  # Check actions, which don't require authentication
     				Update_Val($row["act"], microtime(TRUE));
     			else
     				Insert($row["id"], 1, ACTIVITY, microtime(TRUE), "Save activity time");
-    		    die('{"token":"'.$token.'","_xsrf":"'.$xsrf.'"}');
+    		    die(json_encode(Login_json_fields(array("token" => $token, "_xsrf" => $xsrf), $row["id"])));
     		}
     		else
     		    die('{"error":"user not found"}');
@@ -15738,7 +16428,7 @@ switch($a)  # Check actions, which don't require authentication
     				Insert($row["id"], 1, ROLE, ADMINROLE, "Restore admin role");
 			}
 			else{ # No admin found
-   				$id = Insert($row["id"], 1, USER, $z, "Restore admin ");
+   				$id = Insert(1, 0, USER, $z, "Restore admin ");
    				Insert($id, 1, ROLE, ADMINROLE, "Set admin role");
 			}
 		}
@@ -15833,6 +16523,11 @@ if(Validate_Token())
 				break;
 			}
 			api_dump(json_encode(array("status" => "ok", "content" => base64_encode($fetchData), "length" => strlen($fetchData))), "fetchurl.json");
+			break;
+
+		# Issue #5494: отправка письма с вложением через SMTP ящика клиента.
+		case "_mail":
+			Mail_endpoint($com);
 			break;
 
 		case "_m_up":
@@ -16444,10 +17139,37 @@ if(Validate_Token())
 			$template=strtolower($_REQUEST["template"]);
 			newDb($db, $template, $row["name"], $row["email"], "");
             $id = Insert($GLOBALS["GLOBAL_VARS"]["user_id"], 1, DATABASE, $db, "Register extra DB");
+            # #5481: ord записи базы — счётчик «Расход» (updateBilling); при вставке под пользователем
+            # он выставляется сам, новая база начинает с нуля
+            Exec_sql("UPDATE $z SET ord=0 WHERE id=$id", "Reset new DB counter");
             Insert($id, 1, 275, date("Ymd"), "Insert new DB date");
             Insert($id, 1, 283, $template, "Insert new DB template");
             Insert($id, 1, 276, $_POST["descr"], "Insert new DB notes");
 			api_dump(json_encode(array("status"=>"Ok","id"=>$id)), "_new_db.json");
+			break;
+
+		# #5573: свой домен базы — состояние, привязка, проверка DNS, отвязка, оплата с баланса
+		case "_domain_status":
+		case "_domain_set":
+		case "_domain_check":
+		case "_domain_del":
+		case "_domain_pay":
+			if($z !== "my")
+				my_die(t9n("[RU]Домен подключается в Личном кабинете[EN]Domains are managed in your private space"));
+			$cdDb = isset($_REQUEST["db"]) ? (string)$_REQUEST["db"] : "";
+			if($a !== "_domain_status")
+				check();
+			if($a === "_domain_set")
+				$cdRes = Cd_action_set($cdDb, isset($_POST["domain"]) ? $_POST["domain"] : "");
+			elseif($a === "_domain_check")
+				$cdRes = Cd_check($cdDb);
+			elseif($a === "_domain_del")
+				$cdRes = Cd_action_del($cdDb);
+			elseif($a === "_domain_pay")
+				$cdRes = Cd_action_pay($cdDb, isset($_POST["period"]) ? $_POST["period"] : "month");
+			else
+				$cdRes = Cd_status($cdDb);
+			api_dump(json_encode($cdRes, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "_domain.json");
 			break;
 
 		# #5364: шаблоны баз — список (в my — для выбора при создании базы и модерации; в своей базе — её шаблон)

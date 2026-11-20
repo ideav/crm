@@ -5,6 +5,8 @@
 // переносим) покрыт чистыми функциями в atex-production-planning-4346.test.js.
 //
 // Run with: node experiments/atex-production-planning-4346-ui.test.js
+//
+// rules: none (defect #4346)
 
 process.env.TZ = 'UTC';
 

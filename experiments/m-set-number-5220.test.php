@@ -93,13 +93,16 @@ function Update_Val($id, $val){ $GLOBALS["CHANGES"][] = array("update_val", $id,
 function Insert($up, $ord, $t, $val, $msg){ $GLOBALS["CHANGES"][] = array("insert", $up, $t, $val); return 555; }
 function Delete($id, $root = 0){ $GLOBALS["CHANGES"][] = array("delete", $id); }
 function checkDuplicatedReqs($id, $t){}
+function Mail_is_settings_pwd($id, $t){ return FALSE; }	# #5494: таблицы почты в стенде нет
+function Skip_hidden_pwd($t, $v){ return $v === "******" && $t == PASSWORD; }	# #5494: прежнее правило маски
 function OpFail($msg){ throw new \Exception($msg); }
 function my_die($msg, $code = ""){ throw new \Exception(($code === "" ? "400 Bad Request" : $code).": $msg"); }
 
 $coreSrc = file_get_contents(__DIR__."/../index.php");
 $helper = core_function($coreSrc, "RequireNumber");
+$helperDeps = core_function($coreSrc, "Normalize_Number").core_function($coreSrc, "Number_Storage_Val");
 ok($helper !== "", "в ядре есть проверка числового значения RequireNumber");
-eval("namespace Test5220;\n".core_function($coreSrc, "ApplyMSet").$helper);
+eval("namespace Test5220;\n".core_function($coreSrc, "ApplyMSet").$helper.$helperDeps);
 if(!function_exists(__NAMESPACE__."\\RequireNumber")){
     function RequireNumber($t, $val){ return $val; }   # прежнее поведение: проверки нет
 }

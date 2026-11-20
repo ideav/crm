@@ -107,8 +107,8 @@ function run_case($case){
     $src = file_get_contents(__DIR__."/../index.php");
     $code = "";
     # python2node#1043: Validate_Token зовёт разбор токена сессии и флаги куки — берутся из ядра как есть
-    foreach(array("Validate_Token", "Guest_session", "Token_parse", "Token_stored_val", "Token_db_val", "Token_idle_sql",
-                  "Session_refresh_action", "Session_cookie_exp", "Auth_cookie_opts", "Auth_cookie", "qrLoginIsHttps") as $fn)
+    foreach(array("Validate_Token", "Auth_conf", "Refresh_mode", "Access_parse", "Access_mac", "Access_check", "Refresh_idle", "Refresh_xsrf", "Guest_session", "Token_parse", "Token_stored_val", "Token_db_val", "Token_idle_sql",
+                  "Session_refresh_action", "Session_cookie_exp", "Auth_cookie_opts", "Auth_cookie", "qrLoginIsHttps", "Admin_token", "Admin_xsrf") as $fn)
         $code .= extract_function_source($src, $fn)."\n";
     eval("namespace G5221;\n".stubs()."\n".$code);
 

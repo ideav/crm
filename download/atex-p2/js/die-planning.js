@@ -24,6 +24,7 @@
     'use strict';
 
     var DP = (root && root.AtexDiePlanning) || (typeof require === 'function' ? require('./die-planning-core.js') : null);
+    var PG = (root && root.AtexProgress) || (typeof require === 'function' ? require('./atex-progress.js') : null);
     var C = DP ? DP.core : null;
     var MRA = (root && root.AtexMasterRolls) || (typeof require === 'function' ? require('./master-rolls-core.js') : null);
     var MR = MRA ? MRA.core : null;
@@ -104,7 +105,8 @@
             var lost = ['dieJob', 'die', 'cylinder', 'machine', 'material', 'dieState'].filter(function(k) { return !t[k]; });
             if (lost.length) throw new Error('в базе нет таблиц: ' + lost.join(', '));
             var settingsTable = meta.filter(function(x) { return String(x.val).trim() === 'Настройка'; })[0] || null;
-            var sreq = function(tb, name) { var r = ((tb && tb.reqs) || []).filter(function(x) { return String(x.val).trim() === name; })[0]; return r ? String(r.id) : ''; };
+            // реквизит-ссылка носит имя типа («Основа сырья»), а своё имя — в псевдониме («Стоп-лист основы»): ищем и по нему (#5553)
+            var sreq = function(tb, name) { var r = ((tb && tb.reqs) || []).filter(function(x) { return String(x.val).trim() === name || String((x.field_attrs && x.field_attrs.alias) || '').trim() === name; })[0]; return r ? String(r.id) : ''; };
             var cutterTable = meta.filter(function(x) { return String(x.val).trim() === 'Втулкорез'; })[0] || null;
             var kv = function(tid) { return tid ? c.getJson('object/' + tid + '/?JSON_KV&LIMIT=0,100000').then(LO.kvRecords) : Promise.resolve([]); };
             return Promise.all([
@@ -118,7 +120,8 @@
                 optional(c.getJson('report/die_planning_sleeves?JSON_KV&LIMIT=0,100000')),
                 MRA.loadState(c),
                 optional(JCA.loadState(c, LP, {})),
-                c.serverNow()
+                c.serverNow(),
+                t.dieType ? kv(t.dieType.id) : Promise.resolve([])
             ]).then(function(r) {
                 self.build(meta, res, { settingsTable: settingsTable, cutterTable: cutterTable, sreq: sreq }, r);
                 var missing = res.missing.filter(function(m) { return /^(Задание высечки|Нож|Станок высечки|Вал)/.test(m); });
@@ -143,7 +146,7 @@
         r[4].forEach(function(s) { if (LO.bool(s.reqs[t.dieState.reqs.selectable])) selectable[s.id] = true; });
         var cylinders = LO.cylinderRepeats(r[3], t);
         var mileage = Array.isArray(r[10]) ? LO.mileageByDie(r[10]) : null;
-        var dies = C.buildDieIndex(r[2], t, selectable, cylinders, mileage);
+        var dies = C.buildDieIndex(LP.withDieTypes(r[2], t, r[15]), t, selectable, cylinders, mileage);
         var brandRes = {};
         r[7].forEach(function(b) { brandRes[b.id] = (b.reqs[t.dieBrand.reqs.resource] || ''); });
         var mr = r[12], jc = r[13];
@@ -160,7 +163,10 @@
         var machineTable = meta.filter(function(x) { return String(x.id) === String(t.machine.id); })[0];
         var jobTable = meta.filter(function(x) { return String(x.id) === String(t.dieJob.id); })[0];
         var fixedReq = extra.sreq(jobTable, 'Зафиксировано');
-        var machines = C.machinesFromRecords(r[6], t, { turretReq: extra.sreq(machineTable, 'Туррель'), maxCylinderReq: extra.sreq(machineTable, 'Макс. вал') });
+        var machines = C.machinesFromRecords(r[6], t, { turretReq: extra.sreq(machineTable, 'Туррель'),
+            minCylinderReq: extra.sreq(machineTable, 'Мин. вал'), maxCylinderReq: extra.sreq(machineTable, 'Макс. вал'),
+            stopBasesReq: extra.sreq(machineTable, 'Стоп-лист основы'), minSeriesReq: extra.sreq(machineTable, 'Мин. метраж серии, м'),
+            maxRollReq: extra.sreq(machineTable, 'Макс. намотка ролика, м'), sleeveReq: extra.sreq(machineTable, 'Втулка не уже диаметра') });
         var diInfo = C.dieInfo(dies, brandRes, settings.dieResource);
         var rolls = mr.rolls.map(function(x) { return { id: x.id, no: x.no, format: x.format, materialId: x.materialId, rest: x.rest, status: x.status }; });
         var queue = jc && jc.openJobs ? JC.queueSupply(jc.openJobs, settings.mrLength) : [];
@@ -397,12 +403,14 @@
             '<p class="atex-dp-muted">Пробег пишет только пульт высечки движениями; здесь — прогноз.</p>';
     };
 
-    // Подсказка к станку: «Макс. вал», стоп-лист, туррель.
+    // Подсказка к станку: валы, стоп-листы, правила серии/ролика/втулки, туррель (#5428).
     AtexDiePlanningApp.prototype.machineHint = function(id) {
         var m = this.state.machines.filter(function(x) { return x.id === id; })[0];
         if (!m) return '';
-        return esc(m.maxCylinder > 0 ? ' · вал ≤ ' + m.maxCylinder : ' · любой вал') + (m.stopMaterials.length ? ' · стоп-лист: ' + m.stopMaterials.length : '') + (m.turret ? ' · туррель: втулка ≥ 2× диаметра' + (this.state.settings && this.state.settings.turretLongM > 0 ? ', метраж ≥ ' + this.state.settings.turretLongM + ' м' : '') +
-            (this.state.settings ? ', обычные — после простоя ' + this.state.settings.turretIdle + ' мин' : '') : '');
+        return esc(' · валы: ' + C.cylinderRangeText(m) + (m.stopMaterials.length ? ' · стоп-лист сырья: ' + m.stopMaterials.length : '') +
+            ((m.stopBases || []).length ? ' · стоп-лист основы: ' + m.stopBases.length : '') + (m.minSeriesM > 0 ? ' · серия ≥ ' + m.minSeriesM + ' м' : '') +
+            (m.maxRollM > 0 ? ' · ролик ≤ ' + m.maxRollM + ' м' : '') + (m.sleeveNotNarrower ? ' · втулка не уже диаметра' : '') +
+            (m.turret ? ' · туррель' + (this.state.settings ? ', обычные — после простоя ' + this.state.settings.turretIdle + ' мин' : '') : ''));
     };
 
     // «Зафиксировано» (#5376): 🔒 — «Упорядочить» оставляет задание на его станке и в его порядке.
@@ -675,13 +683,18 @@
         if (this.busy) return;
         this.busy = true;
         this.$('atex-dp-modal-ok').disabled = true;
-        steps.reduce(function(p, step) { return p.then(function() { return step().then(function() { done++; }); }); }, Promise.resolve()).then(function() {
+        // #5504: шаги идут цепочкой по запросу — окно прогресса со счётчиком, до конца перечитывания.
+        var pg = (this.progressUi || PG).open('Запись в базу', { total: steps.length });
+        steps.reduce(function(p, step) { return p.then(function() { return step().then(function() { done++; pg.set(done); }); }); }, Promise.resolve()).then(function() {
             self.busy = false;
             self.closeModal();
+            pg.step('Обновляю данные', 0);
             var r = self.reload(doneText);
+            Promise.resolve(r).then(function() { pg.close(); }, function() { pg.close(); });
             if (after && r && r.then) r.then(function() { if (self.state) after(); });
         }).catch(function(err) {
             console.error('[die-planning] ❌ запись', err);
+            pg.close();
             self.busy = false;
             self.$('atex-dp-modal-ok').disabled = false;
             self.$('atex-dp-modal-error').textContent = 'Ошибка записи (выполнено шагов: ' + done + ' из ' + steps.length + '): ' + err.message;
@@ -774,7 +787,7 @@
     // Зарезервировать МР.
     AtexDiePlanningApp.prototype.openReserve = function() {
         var self = this, s = this.state, tol = s.settings.tolerance;
-        var plan = C.planReservations(s.mr.tasks, s.mr.rolls, s.mr.moves, tol);
+        var plan = C.planReservations(s.mr.tasks, s.mr.rolls, s.mr.moves, tol, s.jobs.filter(function(j) { return !C.isFinal(j); }));
         var picks = plan.filter(function(p) { return p.rollIds.length; }), short = plan.filter(function(p) { return p.deficit > 0; });
         var rollById = {};
         s.mr.rolls.forEach(function(r) { rollById[r.id] = r; });

@@ -7,6 +7,8 @@
 // освобождающегося другого станка, получает +MAX_DISTANCE_COST_MN → мин.штраф уводит на простаивающий.
 //
 // Run with: node experiments/atex-production-planning-4106.test.js
+//
+// rules: PEN-max-distance
 
 var P = require('../download/atex/js/production-planning.js').planning;
 var passed = 0, total = 0;

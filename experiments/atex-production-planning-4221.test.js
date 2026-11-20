@@ -10,6 +10,8 @@
 //   3) замок СТАНКА — задание не мигрирует на другой станок, где вставка дешевле.
 //
 // Run with: node experiments/atex-production-planning-4221.test.js
+//
+// rules: MOVE-manual-pins-day, MOVE-manual-position, MOVE-manual-single-slitter
 
 var P = require('../download/atex/js/production-planning.js').planning;
 

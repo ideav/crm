@@ -10,6 +10,8 @@
 //
 // Данные — блок ножей «110*8» Станка 1 (slitter 1277) из output(27).xlsx (лист «Комбинации»).
 // Run with: node experiments/atex-production-planning-4205.test.js
+//
+// rules: ISLAND-merge
 
 var mod = require('../download/atex/js/production-planning.js');
 var P = mod.planning;

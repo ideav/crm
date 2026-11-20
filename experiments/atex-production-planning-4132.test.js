@@ -17,6 +17,8 @@
 // Данные дня — РЕАЛЬНЫЕ, из вложений к issue #4132 («Задание в производство_2026-07-09.xlsx»).
 //
 // Run with: node experiments/atex-production-planning-4132.test.js
+//
+// rules: SHIFT-breaks-transparent
 
 process.env.TZ = 'UTC';
 global.window = { db: 'testdb', xsrf: 'x' };

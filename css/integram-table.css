@@ -1672,7 +1672,8 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     color: var(--color-error, #d32f2f);
 }
 
-.edit-form .form-control {
+.edit-form .form-control,
+.it-ai-helper-modal .form-control {
     width: 100%;
     padding: 12px 16px;
     border: 1px solid var(--md-divider);
@@ -1684,13 +1685,15 @@ span.integram-title-link:not(.integram-parent-record-link):hover {
     transition: var(--md-transition);
 }
 
-.edit-form .form-control:focus {
+.edit-form .form-control:focus,
+.it-ai-helper-modal .form-control:focus {
     outline: none;
     border-color: var(--md-primary);
     box-shadow: 0 0 0 2px rgba(25, 118, 210, 0.12);
 }
 
-.edit-form .form-control::placeholder {
+.edit-form .form-control::placeholder,
+.it-ai-helper-modal .form-control::placeholder {
     color: var(--md-text-hint);
 }
 

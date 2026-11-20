@@ -15,6 +15,8 @@
 // WIND_600=4 → намотка 1 прохода = 4 мин (порог WIND_600, #5198); голова — 0 проходов, продолжение — 23 прохода.
 //
 // Run with: node experiments/atex-production-planning-3889.test.js
+//
+// rules: none (defect #3889)
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

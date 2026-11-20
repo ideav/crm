@@ -4,7 +4,7 @@
 // Источник — «Партия ГП этикетки», которую пульт высечки создаёт на каждый съём (статус
 // «к упаковке», «Количество» = рулонов). Одна строка отчёта label_packer — одна партия вместе
 // с заданием высечки, позицией заказа, заказом и клиентом.
-//   - рулон: длина = этикеток в рулоне × (длина этикетки + м/э расстояние ножа); диаметр
+//   - рулон: длина = этикеток в рулоне × (фактическая длина этикетки ножа + м/э расстояние); диаметр
 //     = √(d² + 4·L·t/π), d — диаметр втулки, L — длина намотки, t — толщина материала;
 //     ширина рулона — «Ширина втулки, мм» позиции. Нет данных — рулон «не определён»,
 //     короб выбирает упаковщик;
@@ -79,6 +79,7 @@
             positionId: cell(row, 'position_id'),
             labelWidth: num(row.label_width),
             labelLength: num(row.label_length),
+            actualLength: num(row.die_actual_length),
             perRoll: num(row.labels_per_roll),
             sleeveWidth: num(row.sleeve_width),
             sleeve: cell(row, 'sleeve'),
@@ -102,7 +103,9 @@
     function rollParams(item) {
         var it = item || {};
         var missing = [];
-        var pitch = num(it.labelLength) > 0 ? num(it.labelLength) + Math.max(0, num(it.dieGap)) : 0;
+        // Шаг этикетки на ленте — фактическая длина ножа (у номинала 58 × 40 — 39,3 мм) + м/э.
+        var len = num(it.actualLength) > 0 ? num(it.actualLength) : num(it.labelLength);
+        var pitch = len > 0 ? len + Math.max(0, num(it.dieGap)) : 0;
         if (!(num(it.perRoll) > 0)) missing.push('этикеток в рулоне');
         if (!(num(it.labelLength) > 0)) missing.push('длина этикетки');
         var lengthM = pitch > 0 && num(it.perRoll) > 0 ? num(it.perRoll) * pitch / 1000 : 0;

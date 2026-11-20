@@ -10,6 +10,8 @@
 // как потерянный, — подпись на карточке.
 //
 // Run with: node experiments/atex-pp-4617-chain-note.test.js
+//
+// rules: none (defect #4617)
 
 process.env.TZ = 'UTC';
 global.window = { db: 'ateh', xsrf: 'x' };

@@ -2,6 +2,8 @@
 // В конце .atex-pp-strip-row — «Срок изготовления» позиций задания; строка красится по
 // сроку относительно «Даты план»: раньше → красный (is-overdue), дальше план+DAYS_FORECAST
 // → жёлтый (is-far), в окне → без класса.
+//
+// rules: none (defect #3769)
 var assert = require('assert');
 var planning = require('../download/atex/js/production-planning.js').planning;
 

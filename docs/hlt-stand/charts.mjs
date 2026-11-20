@@ -1,13 +1,15 @@
 // Графики нагрузочного стенда hlt (issue #5286): одна разметка на две страницы.
 //   load-charts.html — пишется целиком;
 //   sizing.html      — заменяется блок между <!--CHARTS-START--> и <!--CHARTS-END-->.
-// Источник: ramp-2610.json (лесенки потоков A/D, агрегат от объёма B, срезы E — одна партия 26.10).
+// Источники: ramp-2610.json (лесенки потоков A/D, агрегат от объёма B, срезы фильтром мимо индекса E — 26.10),
+//   filter-5468.json (срезы по диапазону дат — фильтр по индексу, F — 09.11, issue #5468).
 // Запуск из docs/hlt-stand: node charts.mjs
 import fs from 'fs';
 
 const RAMP = JSON.parse(fs.readFileSync('ramp-2610.json', 'utf8'));
+const FILT = JSON.parse(fs.readFileSync('filter-5468.json', 'utf8'));
 // медиана по сырым прогонам (при чётном числе — среднее двух средних; в файле при 2 прогонах лежит меньший)
-for (const r of RAMP) if (r.ms && r.ms.length) {
+for (const r of [...RAMP, ...FILT]) if (r.ms && r.ms.length) {
   const m = r.ms.slice().sort((x, y) => x - y), h = m.length >> 1;
   r.median = m.length % 2 ? m[h] : Math.round((m[h - 1] + m[h]) / 2);
 }
@@ -105,9 +107,20 @@ const knee = rows => rows.find(r => r.rps >= 0.9 * peak(rows)).threads;
 const vol = (q, w) => RAMP.filter(r => r.part === 'B' && r.scenario === q + '_all' && r.table.endsWith(w) && r.median)
   .map(r => [ROWS[r.table], r.median / 1000]).sort((a, b) => a[0] - b[0]);
 const whole = (q, t) => { const r = RAMP.find(x => x.part === 'B' && x.scenario === q + '_all' && x.table === t); return r && r.median ? r.median / 1000 : null; };
+// срез по диапазону дат (часть F): [строк в срезе, медиана, мин, макс], с; период — для подписи
+// «день» (FR = TO) в срезы не входит: ядро сводит его к равенству без кавычек и идёт мимо индекса (#5469) — см. dayTrap.
+// Строк в срезе — по agg1: у agg3/agg5 отчёт группирует по справочнику, cnt первой строки — одна группа.
+const PERIOD = { week: 'неделя', month: 'месяц', quarter: 'квартал', year: 'год' };
+const PERIOD_ACC = { 'неделя': 'неделю', 'месяц': 'месяц', 'квартал': 'квартал', 'год': 'год' };
+const periodRows = (t, p) => (FILT.find(r => r.table === t && r.scenario === 'agg1_date_' + p) || {}).rows;
+const dateSlices = (q, t) => FILT.filter(r => r.table === t && r.scenario.startsWith(q + '_date_') && r.median && PERIOD[r.scenario.split('_')[2]])
+  .map(r => { const p = r.scenario.split('_')[2]; return [periodRows(t, p), r.median / 1000, r.ms[0] / 1000, r.ms[r.ms.length - 1] / 1000, PERIOD[p]]; })
+  .sort((a, b) => a[0] - b[0]);
+const dayTrap = q => filtOne('T_1M_W12', q + '_date_day');
+const filtOne = (t, sc) => { const r = FILT.find(x => x.table === t && x.scenario === sc); return r && r.median ? r.median / 1000 : null; };
+// срез фильтром мимо индекса (часть E, 26.10): числовой диапазон по коду
 const slices = (q, t) => {
   const pts = {};
-  // одна партия: перезамер всех срезов 26.10 (часть E)
   for (const r of RAMP) if (r.part === 'E' && r.table === t && r.scenario.startsWith(q + '_') && r.median)
     pts[r.scenario.split('_')[1]] = [r.median / 1000, Math.min(...r.ms) / 1000, Math.max(...r.ms) / 1000];
   return Object.entries(pts).map(([k, v]) => [parseFloat(k) * 1000, ...v]).sort((a, b) => a[0] - b[0]);
@@ -165,27 +178,32 @@ const T3 = table(['строк', ...AGG.flatMap(([q]) => [q + ' (12)', q + ' (45)
     const p = vol(q, w).find(x => x[0] === n); return p ? fmtSec(p[1]) : '—';
   }))]));
 
-function sliceFig(t, label) {
-  const series = AGG.map(([q, name, color]) => ({ name, color, pts: slices(q, t), tipX: x => 'срез ' + fmtNum(x), tipY: fmtSec }));
-  const top = Math.ceil(Math.max(...series.flatMap(s => s.pts.map(p => p[3] || p[1])), ...AGG.map(([q]) => whole(q, t) || 0)) / 20) * 20;
-  const hl = AGG.map(([q, , color], i) => ({ y: whole(q, t), color, label: i === 0 ? 'вся таблица' : '',
-    legend: i === 0 ? 'пунктир — тот же отчёт по всей таблице' : null })).filter(h => h.y);
-  return chart({
-    title: `Срез почти не экономит: ${label}`,
-    note: 'отчёт с фильтром по диапазону кода, 1 поток; точка — медиана 2 прогонов, вертикальная черта — разброс прогонов (за порогом — 1 прогон); замер 26.10.2026',
-    xTitle: 'Строк в срезе (диапазон кода)', yTitle: 'Время отчёта, с', xLog: true,
-    xTicks: [[1000, '1 тыс.'], [5000, '5 тыс.'], [10000, '10 тыс.'], [50000, '50 тыс.'], [100000, '100 тыс.']],
-    yTicks: Array.from({ length: top / 20 + 1 }, (_, i) => [i * 20, (i * 20) + ' с']), series, hlines: hl, cap: CAP,
-  });
-}
-const F4 = sliceFig('T_1M_W12', 'таблица 1 млн строк, 12 реквизитов');
-const F5 = sliceFig('T_1M_W45', 'таблица 500 тыс. строк, 45 реквизитов');
-const T4 = table(['срез', ...['T_1M_W12', 'T_1M_W45'].flatMap(t => AGG.map(([q]) => q + ' ' + t.slice(-3)))],
-  [1000, 5000, 10000, 50000, 100000, 'вся'].map(s => [s === 'вся' ? 'вся таблица' : fmtNum(s),
-    ...['T_1M_W12', 'T_1M_W45'].flatMap(t => AGG.map(([q]) => {
-      const v = s === 'вся' ? whole(q, t) : (slices(q, t).find(p => p[0] === s) || [])[1];
-      return v ? fmtSec(v) : '—';
-    }))]));
+// срезы: фильтр по диапазону дат (по индексу) против фильтра мимо индекса и всей таблицы — T_1M_W12
+const ST = 'T_1M_W12';
+const idxSeries = AGG.map(([q, name, color]) => ({ name: name + ' — фильтр по датам', color, pts: dateSlices(q, ST).map(p => p.slice(0, 4)),
+  tipX: x => 'срез ' + fmtNum(x) + ' строк', tipY: fmtSec }));
+const castSeries = AGG.map(([q, name, color]) => ({ name: name + ' — фильтр мимо индекса', color, dash: true,
+  pts: slices(q, ST).map(p => [p[0], p[1]]), tipX: x => 'срез ' + fmtNum(x) + ' строк', tipY: fmtSec })).filter(s => s.pts.length);
+const sliceAll = [...idxSeries, ...castSeries].flatMap(s => s.pts.map(p => p[3] || p[1]));
+const sliceMin = Math.min(...idxSeries.flatMap(s => s.pts.map(p => p[2] || p[1])));
+const F4 = chart({
+  title: 'Срез по диапазону дат: время отчёта определяет срез, а не таблица',
+  note: 'таблица 1 млн строк, 12 реквизитов; отчёт с фильтром по диапазону дат (неделя, месяц, квартал, год), 1 поток, медиана 4 прогонов, вертикальная черта — разброс прогонов, замер 09.11.2026. ' +
+    'Пунктир — тот же отчёт с фильтром, который не попадает в индекс (числовой диапазон по коду, замер 26.10): MySQL читает всю таблицу. Обе оси логарифмические',
+  xTitle: 'Строк в срезе', yTitle: 'Время отчёта', xLog: true, yLog: true,
+  xTicks: [[1000, '1 тыс.'], [10000, '10 тыс.'], [100000, '100 тыс.'], [1000000, '1 млн']],
+  yTicks: [0.1, 1, 10, 100, 1000].filter(v => v * 10 > sliceMin && v / 10 < Math.max(...sliceAll, ...AGG.map(([q]) => whole(q, ST) || 0))).map(v => [v, fmtSec(v)]),
+  series: [...idxSeries, ...castSeries], cap: CAP,
+  hlines: AGG.map(([q, , color], i) => ({ y: whole(q, ST), color, label: i === 0 ? 'вся таблица' : '',
+    legend: i === 0 ? 'тонкий пунктир — тот же отчёт по всей таблице' : null })).filter(h => h.y),
+});
+const F5 = '';
+const T4 = table(['период', 'строк в срезе', ...AGG.map(([q]) => q)],
+  [...dateSlices('agg1', ST).map(p => [p[4], fmtNum(p[0]),
+    ...AGG.map(([q]) => { const x = dateSlices(q, ST).find(d => d[0] === p[0]); return x ? fmtSec(x[1]) : '—'; })]),
+   ['вся таблица (26.10)', fmtNum(ROWS[ST]), ...AGG.map(([q]) => whole(q, ST) ? fmtSec(whole(q, ST)) : '—')],
+   ...[1000, 100000].map(n => ['мимо индекса (26.10): код 0…' + fmtNum(n), fmtNum(n),
+     ...AGG.map(([q]) => { const x = slices(q, ST).find(d => d[0] === n); return x ? fmtSec(x[1]) : '—'; })])]);
 
 const r50 = rows => rows.find(r => r.threads === 50);
 const p95at = (rows, t) => rows.find(r => r.threads === t).p95 / 1000;
@@ -202,17 +220,21 @@ const v1 = vol('agg1', 'W12');
 const growth = v1[v1.length - 1][1] / v1[0][1];
 const usRow = AGG.flatMap(([q]) => ['W12', 'W45'].map(w => vol(q, w).find(p => p[0] === 100000)))
   .filter(Boolean).map(p => p[1] / 1e5 * 1e6);
-const share = ['T_1M_W12', 'T_1M_W45'].flatMap(t => AGG.map(([q]) => {
-  const s1 = (slices(q, t).find(p => p[0] === 1000) || [])[1], w = whole(q, t);
-  return s1 && w ? s1 / w : null;
-})).filter(Boolean);
+const dAgg1 = dateSlices('agg1', ST), dDay = dAgg1[0], dYear = dAgg1[dAgg1.length - 1];
+const idxUs = AGG.map(([q]) => { const p = dateSlices(q, ST); const l = p[p.length - 1]; return l ? l[1] / l[0] * 1e6 : null; }).filter(Boolean);
+const cast1 = filtOne(ST, 'agg1_cast1k');
 const lastOk = AGG.flatMap(([q]) => ['W12', 'W45'].flatMap(w => vol(q, w))).filter(p => p[1] <= CAP).reduce((a, p) => Math.max(a, p[0]), 0);
-const pctR = a => Math.round(Math.min(...a) * 100) + '–' + Math.round(Math.max(...a) * 100) + ' %';
 const SUM2 = `<ul class="out">
 <li>время отчёта растёт пропорционально объёму таблицы: от 1 тыс. до 1 млн строк — в <b>${Math.round(growth)}</b> раза;
 на 100 тыс. строк это <b>${Math.round(Math.min(...usRow))}–${Math.round(Math.max(...usRow))} мкс на строку</b> (2 vCPU);</li>
 <li>в порог ${CAP} с укладываются отчёты по таблицам до <b>${fmtNum(lastOk)} строк</b>; по миллиону строк отчёт идёт дольше минуты — для интерактива он не годится;</li>
-<li>фильтр по диапазону почти не помогает: срез 1 тыс. строк из миллиона стоит <b>${pctR(share)}</b> полного прохода, а не 0.1 % — EAV-джойн читает всю таблицу, фильтр применяется после чтения.</li>
+<li>фильтр отчёта, попадающий в индекс, сначала выбирает строки среза и только их джойнит и агрегирует: за ${PERIOD_ACC[dDay[4]]} (${fmtNum(dDay[0])} строк из 1 млн) — <b>${fmtSec(dDay[1])}</b>,
+за ${PERIOD_ACC[dYear[4]]} (${fmtNum(dYear[0])} строк) — <b>${fmtSec(dYear[1])}</b>, против ${fmtSec(whole('agg1', ST))} по всей таблице. Время отчёта задаёт срез
+(≈<b>${Math.round(Math.min(...idxUs))}–${Math.round(Math.max(...idxUs))} мкс на строку среза</b> за год), размер таблицы на него не влияет;</li>
+<li>отчёт по большой таблице проектируется вместе с фильтром — как в любой реляционной СУБД. Фильтр, который в индекс не попадает, заставляет читать всю таблицу
+при любом срезе: тот же отчёт с числовым диапазоном по коду (ядро сравнивает <code>CAST(val AS FLOAT)</code>) на 1 тыс. строк идёт <b>${fmtSec(cast1)}</b>,
+фильтр на одну дату («от» = «до») ядро сейчас сравнивает числом — <b>${fmtSec(dayTrap('agg1'))}</b> на 400 строк
+(<a href="https://github.com/ideav/crm/issues/5469">#5469</a>). Кто не позаботился о фильтре на больших объёмах, получит полный проход таблицы на каждый запрос.</li>
 </ul>`;
 
 // D: лесенка потоков для тяжёлых отчётов, с критерием остановки
@@ -305,20 +327,16 @@ DATA.sel.mul = Object.fromEntries([1, 2, 4, 5, 10, 25, 50].map(t => [String(t), 
 DATA.sel.calm = calm.threads; DATA.sel.knee = k1; DATA.sel.plateau = Math.round(peak(R1));
 delete DATA.sel.x50;
 DATA.sel.ramp = { 100: R1.map(r => [r.threads, r.p95]), 500: R5.map(r => [r.threads, r.p95]) };  // sel1_100 и sel5_500
-// агрегат: срезы — МНК по партии E (a — с при нулевом срезе, b — с на тысячу строк среза), вся таблица — часть B
-const fit = pts => {
-  const n = pts.length, sx = pts.reduce((s, p) => s + p[0], 0), sy = pts.reduce((s, p) => s + p[1], 0);
-  const sxx = pts.reduce((s, p) => s + p[0] * p[0], 0), sxy = pts.reduce((s, p) => s + p[0] * p[1], 0);
-  const b = (n * sxy - sx * sy) / (n * sxx - sx * sx);
-  return { a: +((sy - b * sx) / n).toFixed(2), b: +b.toFixed(4) };
-};
+// агрегат: срез фильтром по индексу — кусочно-линейная интерполяция по партии F ([тыс. строк среза, с]; от размера
+// таблицы не зависит; время растёт быстрее среза — на годе срез уже не помещается в буферный пул), вся таблица — часть B.
+// Срезы по датам сняты на T_1M_W12, для W45 берутся те же точки (srcW12).
 for (const [w, t] of [['W12', 'T_1M_W12'], ['W45', 'T_1M_W45']]) {
   DATA.agg[w].refRows = ROWS[t];
   DATA.agg[w].whole = {};
   for (const [q] of AGG) {
     const j = q.slice(3);
-    const pts = slices(q, t).map(([s, v]) => [s / 1000, +v.toFixed(1)]);  // разброс в модель не идёт
-    DATA.agg[w].j[j] = { ...fit(pts), pts };
+    const pts = dateSlices(q, ST).map(([s, v]) => [+(s / 1000).toFixed(1), +v.toFixed(2)]);  // разброс в модель не идёт
+    DATA.agg[w].j[j] = { pts, ...(w === 'W12' ? {} : { srcW12: true }) };
     DATA.agg[w].whole[j] = vol(q, w).map(([n, v]) => [n, +v.toFixed(2)]);
   }
 }

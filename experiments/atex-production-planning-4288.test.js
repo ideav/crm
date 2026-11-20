@@ -15,6 +15,8 @@
 // притягивается к «своему» станку/старту дня.
 //
 // Run with: node experiments/atex-production-planning-4288.test.js
+//
+// rules: PLACE-day-start-loading
 
 var planning = require('../download/atex/js/production-planning.js').planning;
 var P = planning;

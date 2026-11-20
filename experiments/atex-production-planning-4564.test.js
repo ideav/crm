@@ -13,6 +13,8 @@
 //     закрытие выполненной части и передача цепочки дробления остатку.
 //
 // Run with: node experiments/atex-production-planning-4564.test.js
+//
+// rules: none (defect #4564)
 
 process.env.TZ = 'UTC';
 

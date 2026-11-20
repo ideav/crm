@@ -13,6 +13,8 @@
 // цепочки (есть «←» и/или «→»), а не только голова.
 //
 // Run with: node experiments/atex-production-planning-4304-split-warn.test.js
+//
+// rules: none (defect #4304)
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

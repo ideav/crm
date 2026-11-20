@@ -11,6 +11,8 @@
 //   E) кнопка показывается и по расхождению СТАРТОВ, а не только колонок тайминга.
 //
 // Run with: node experiments/atex-pp-4408-honest-starts.test.js
+//
+// rules: DUR-back-to-back
 
 process.env.TZ = 'UTC';
 

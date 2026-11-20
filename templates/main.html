@@ -10,7 +10,7 @@
     <link rel="stylesheet" href="/css/styles.css">
     <link rel="stylesheet" href="/assets/vendor/primeicons/primeicons.css">
     <link rel="stylesheet" href="/css/main-app.css?v=5221">
-    <link rel="stylesheet" href="/css/ai-chat.css?v=5203">
+    <link rel="stylesheet" href="/css/ai-chat.css?v=5498">
     <style>
         html { font-size: .82rem; }
         /* Brand background */
@@ -161,6 +161,29 @@
             grants=JSON.parse(atob('{_global_.grants}')),
             wsUrl = '{_global_.ws}',
             action = '{_global_.action}';
+        // Issue #5403: post(a) — как в templates/report.html, чтобы кнопки колонок-действий
+        // отчёта (onclick="post('_m_new/…')") работали в любом рабочем месте на main.html.
+        // Отправляет POST на /<база>/<a> с текущим xsrf (он обновляется при перелогине).
+        function post(a) {
+            var f = document.getElementById('post');
+            if (!f) {
+                f = document.createElement('form');
+                f.method = 'POST';
+                f.id = 'post';
+                f.style.display = 'none';
+                var x = document.createElement('input');
+                x.type = 'hidden';
+                x.name = '_xsrf';
+                f.appendChild(x);
+                document.body.appendChild(f);
+            }
+            if (f._xsrf) f._xsrf.value = xsrf;
+            f.action = '/' + db + '/' + a;
+            f.submit();
+            var e = window.event;
+            if (e) { if (e.preventDefault) e.preventDefault(); else e.returnValue = false; }
+            return false;
+        }
         var menuData = [
         <!-- Begin: MyRoleMenu -->
         {menu_id:'{menu_id}',menu_up:'{menu_up}',name:'{name}',href:'{href}',icon:'{icon}'},
@@ -340,7 +363,7 @@
                 <button id="ai-agent-attach" type="button" class="ai-chat-icon-btn" title="Прикрепить файл" aria-label="Прикрепить файл">
                     <i class="pi pi-paperclip"></i>
                 </button>
-                <textarea id="ai-agent-input" class="database-field-input" rows="2" placeholder="Сообщение для ИИ-агента"></textarea>
+                <textarea id="ai-agent-input" class="database-field-input" rows="2" placeholder="Сообщение для ИИ-агента (картинку можно вставить Ctrl+V)"></textarea>
                 <button id="ai-agent-send" type="button" class="ai-chat-icon-btn ai-agent-send" title="Отправить" aria-label="Отправить">
                     <i class="pi pi-send"></i>
                 </button>
@@ -382,8 +405,8 @@
 
     <script src="/js/app.js?v=20261022-1043"></script>
     <script src="/js/ws-client.js?v=5269"></script>
-    <script src="/js/ai-agent-chat.js?v=1027"></script>
-    <script src="/js/main-app.js?v=5222-1043"></script>
+    <script src="/js/ai-agent-chat.js?v=1252"></script>
+    <script src="/js/main-app.js?v=5508"></script>
     <script src="/js/form-submit.js" defer></script>
     <script>
     function getChangePasswordFields(){

@@ -7,6 +7,8 @@
 // Отсюда заголовок тикета: «данные о партии утеряны … лишнее время переналадки».
 //
 // Run with: node experiments/atex-production-planning-4452.test.js
+//
+// rules: DUR-setup-on-change
 
 process.env.TZ = 'UTC';
 global.window = { db: 'testdb', xsrf: 'x' };

@@ -16,6 +16,8 @@
 //   D — перебор случайных раскладок: сумма колонок дня НИКОГДА не превышает потолок смены.
 //
 // Run with: node experiments/atex-pp-4499-columns-from-packer.test.js
+//
+// rules: none (defect #4499)
 
 process.env.TZ = 'UTC';
 global.window = { db: 'ateh', xsrf: 'x' };

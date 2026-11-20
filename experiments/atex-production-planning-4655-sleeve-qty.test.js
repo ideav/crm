@@ -6,6 +6,8 @@
 // реальными складскими остатками втулок были для планировщика пусты.
 //
 // Run with: node experiments/atex-production-planning-4655-sleeve-qty.test.js
+//
+// rules: none (defect #4655)
 
 process.env.TZ = 'UTC';
 

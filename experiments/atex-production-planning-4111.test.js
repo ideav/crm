@@ -15,6 +15,8 @@
 // зеркалит splitMachineQueue), остаток уносит на продолжение (скан вперёд по chainRoot/firstPartId).
 //
 // Run with: node experiments/atex-production-planning-4111.test.js
+//
+// rules: SHIFT-overrun-tune, SPLIT-boundaries
 
 process.env.TZ = 'UTC';
 var api = require('../download/atex/js/production-planning.js');

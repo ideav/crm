@@ -16,6 +16,8 @@
 //   6) мерка недобора строит scope тем же переносом, что и запись (#4749/#4765).
 //
 // Run with: node experiments/atex-pp-4770-action-frame.test.js
+//
+// rules: none (defect #4770)
 
 process.env.TZ = 'Europe/Moscow';
 global.window = { db: 'testdb', xsrf: 'x' };

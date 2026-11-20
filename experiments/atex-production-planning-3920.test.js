@@ -16,6 +16,8 @@
 // не выталкивает соседей. #4099: реальные нахлёсты БОЛЬШЕ НЕ устраняются встык — рисуем как есть.
 //
 // Run with: node experiments/atex-production-planning-3920.test.js
+//
+// rules: none (defect #3920)
 
 process.env.TZ = 'UTC';
 

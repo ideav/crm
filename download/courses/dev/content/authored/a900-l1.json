@@ -1,0 +1,33 @@
+{
+ "id": "l1",
+ "course": "a900",
+ "n": 1,
+ "title": "Заказы и клиенты",
+ "html": "<p>Заказы ведём в одной таблице. <a href=\"https://example.com/doc\" target=\"_blank\" rel=\"noopener\">Пример</a>.</p>",
+ "tasks": [
+  {
+   "kind": "quiz",
+   "pass": 0.5,
+   "questions": [
+    {
+     "q": "Где хранить заказы?",
+     "options": [
+      {
+       "k": "а",
+       "text": "В одной таблице «Заказы»"
+      },
+      {
+       "k": "б",
+       "text": "В пяти файлах"
+      }
+     ],
+     "hash": "ea8190c5ee2903e4f3d5b67112bb9f6e332f1a970cc7bbed07a109b07d1cb1b8",
+     "explain": "Одна таблица — один источник правды."
+    }
+   ]
+  }
+ ],
+ "attachments": [],
+ "prev": null,
+ "next": "l2"
+}

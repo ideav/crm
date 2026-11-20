@@ -10,6 +10,8 @@
 // наружу (ops.placement) и по нему строятся подсказки ТОЛЬКО для тронутых планом заданий.
 //
 // Run with: node experiments/atex-production-planning-4462.test.js
+//
+// rules: none (defect #4462)
 
 process.env.TZ = 'UTC';
 var mod = require('../download/atex/js/production-planning.js');

@@ -40,7 +40,7 @@
                 return PF.children(PF.tid('Строка карты'), c.i).then(function (rows) {
                     var t = PF.table('Строка карты');
                     var ri = 1 + t.reqs.findIndex(function (q) { return q.name === 'Обязателен'; });
-                    st.lines[c.r[0]] = rows.filter(function (x) { return x.r[ri] === 'X'; }).length;
+                    st.lines[c.r[0]] = rows.filter(function (x) { return PF.bool(x.r[ri]); }).length;
                 });
             }));
         });

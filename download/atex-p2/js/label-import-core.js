@@ -5,13 +5,16 @@
 //   1. разбор листа выгрузки (сетка ячеек, первая строка с нужными заголовками — шапка):
 //      parseKnifeSheet (лист «Ножи», пробег — из колонки «Пробег» или из «Суммарного пробега ножа»
 //      листа «План»), parseOrderSheet («Выгруженные заказы этикетка»);
-//   2. сверка с базой по ключу — нож = «Номер ножа», позиция = «Заказ клиента» + артикул:
+//   2. сверка с базой по ключу — нож = «Номер ножа», позиция = «Заказ поставщику» + артикул:
 //      planKnives / planOrders → строки предпросмотра (новая / обновится / без изменений / дубль /
 //      ошибка) и список операций. Ни разбор, ни план ничего не пишут;
 //   3. запись после «Подтвердить»: runBatches шлёт операции пакетами _m_batch (до 1000 операций в
 //      пакете у ядра; запись и её подчинённые — в одном пакете, ссылки внутри пакета — ":idN").
 //
 // Правила повторного импорта (ТЗ Фазы 2 §5.6, docs/atex_phase2_labels_tz.md):
+//   - параметры ножа (размер, ручьи, вал, основа, форматы, угол…) — свойства его «Типа ножа»
+//     (#5431): у ножа с типом они не пишутся, расхождение файла с типом — предупреждение строки;
+//     ножу без типа тип подбирается по размеру, углу, ручьям, м/э и валу, не нашёлся — заводится;
 //   - пустое значение в файле поле не стирает: вал, заполненный в Интеграме у ножа с валом «0»
 //     в 1С, переживает повторный импорт;
 //   - состояние ножа пишется только при создании ножа — дальше его ведёт рабочее место «Ножи и
@@ -39,14 +42,18 @@
     // ключ → { name: имя таблицы, reqs: { ключ: имя колонки | [имена] } }. Имя колонки —
     // псевдоним или имя реквизита (для ссылки без псевдонима — имя таблицы-цели).
     var IMPORT_TABLES = {
+        // Параметры ножа живут в его типе (#5427, #5431); у ножа — номер, тип и то, что у экземпляра своё.
         die: { name: 'Нож', reqs: {
-            delivered: 'Дата поставки', labelWidth: 'Ширина этикетки, мм', labelLength: 'Длина этикетки, мм',
-            streams: 'Ручьёв', labelsPerRepeat: 'Этикеток на раппорте', labelGap: 'М/э расстояние, мм',
-            streamGap: 'Между ручьями, мм', edge: 'Ширина кромки, мм', cylinder: 'Вал', base: ['Основа', 'Основа сырья'],
-            minFormat: 'Минимальный формат, мм', optFormat: 'Оптимальный формат, мм', usedFormat: 'Исп. формат, мм',
-            sleeveWidth: 'Ширина втулки, мм', height: 'Высота ножа, мкм', angle: 'Угол заточки',
+            delivered: 'Дата поставки', type: 'Тип ножа', height: 'Высота ножа, мкм',
             brand: 'Марка ножа', state: 'Состояние ножа'
         } },
+        dieType: { name: 'Тип ножа', reqs: {
+            labelWidth: 'Ширина этикетки, мм', labelLength: 'Длина этикетки, мм',
+            streams: 'Ручьёв', labelsPerRepeat: ['Ручьев / (этикеток) на раппорте', 'Этикеток на раппорте'], labelGap: 'М/э расстояние, мм',
+            streamGap: 'Между ручьями, мм', edge: 'Ширина кромки, мм', cylinder: 'Вал', base: ['Основа сырья', 'Основа'],
+            minFormat: 'Минимальный формат, мм', optFormat: 'Оптимальный формат, мм', usedFormat: 'Исп. формат, мм',
+            sleeveWidth: 'Ширина втулки, мм', angle: 'Угол заточки', actualLength: 'Длина этикетки факт, мм'
+        }, optionalReqs: ['actualLength'] },
         dieRun: { name: 'Движение пробега', reqs: { revs: 'Обороты пробега', kind: 'Вид движения пробега' } },
         cylinder: { name: 'Вал', reqs: { repeat: 'Раппорт, мм' } },
         base: { name: 'Основа сырья', reqs: {} },
@@ -61,8 +68,8 @@
             labelWidth: 'Ширина этикетки, мм', labelLength: 'Длина этикетки, мм', labelsPerRoll: 'Этикеток в рулоне',
             knifeType: 'Тип ножей', core: 'Диаметр втулки', winding: 'Тип намотки', unit: 'Ед.изм.',
             status: ['Статус позиции', 'Статус'], note: 'Примечание',
-            material: 'Сырьё этикетки', due: 'Срок изготовления'
-        }, optionalReqs: ['material', 'due'] },
+            material: 'Сырьё этикетки', due: 'Срок изготовления', mrCalc: 'Мастер-рулонов расчётное'
+        }, optionalReqs: ['material', 'due', 'mrCalc'] },
         material: { name: 'Сырьё этикетки', optional: true, reqs: { base: ['Основа сырья', 'Основа'], glue: 'Клей' }, optionalReqs: ['base', 'glue'] },
         setting: { name: 'Настройка', optional: true, reqs: { type: 'Тип', value: 'Значение' }, optionalReqs: ['type', 'value'] },
         client: { name: 'Клиент', reqs: {} },
@@ -76,8 +83,8 @@
 
     // Без этих таблиц и колонок вкладка не работает; остальные — необязательные (поле не пишется).
     var REQUIRED = {
-        knives: ['die', 'dieRun', 'cylinder', 'base', 'brand', 'state', 'runKind',
-            'die.labelWidth', 'die.labelLength', 'dieRun.revs', 'dieRun.kind'],
+        knives: ['die', 'dieType', 'dieRun', 'cylinder', 'base', 'brand', 'state', 'runKind',
+            'die.type', 'dieType.labelWidth', 'dieType.labelLength', 'dieRun.revs', 'dieRun.kind'],
         orders: ['order', 'position', 'client', 'article', 'productKind',
             'order.client', 'position.productKind', 'position.article', 'position.labelWidth', 'position.labelLength']
     };
@@ -234,7 +241,7 @@
 
     var KNIFE_COLS = {
         no: ['Номер ножа'], delivered: ['Дата поставки'], labelWidth: ['Ширина этикетки'],
-        labelLength: ['Длинна этикетки', 'Длина этикетки'], streams: ['кол-во ручев', 'кол-во ручьев', 'Ручьев'],
+        labelLength: ['Длинна этикетки', 'Длина этикетки'], actualLength: ['Длинна этикетки _1', 'Длина этикетки факт*'], streams: ['кол-во ручев', 'кол-во ручьев', 'Ручьев'],
         labelsPerRepeat: ['этикеток на раппорте'], labelGap: ['м/э расстояние, мм'], streamGap: ['между ручьями, мм'],
         edge: ['ширина кромки, мм'], cylinder: ['Вал'], repeat: ['раппорт'], height: ['высота ножа, мкм'],
         angle: ['угол заточки'], base: ['сырье', 'Основа'], brand: ['Доп', 'Марка ножа'], state: ['Состояние ножа*'],
@@ -244,18 +251,27 @@
 
     var PLAN_COLS = { no: ['номер ножа'], total: ['Суммарный пробег ножа'] };
 
-    // Поля ножа: ключ реквизита, вид значения, только при создании.
+    // Поля строки листа «Ножи»: ключ реквизита, вид значения, только при создании; type — параметр
+    // «Типа ножа», а не самого ножа.
     var KNIFE_FIELDS = [
-        { key: 'delivered', kind: 'date' }, { key: 'labelWidth', kind: 'num' }, { key: 'labelLength', kind: 'num' },
-        { key: 'streams', kind: 'int' }, { key: 'labelsPerRepeat', kind: 'int' }, { key: 'labelGap', kind: 'num' },
-        { key: 'streamGap', kind: 'num' }, { key: 'edge', kind: 'num' }, { key: 'cylinder', kind: 'ref' },
-        { key: 'base', kind: 'ref' }, { key: 'minFormat', kind: 'int' }, { key: 'optFormat', kind: 'int' },
-        { key: 'usedFormat', kind: 'int' }, { key: 'sleeveWidth', kind: 'num' }, { key: 'height', kind: 'int' },
-        { key: 'angle', kind: 'text' }, { key: 'brand', kind: 'ref' }, { key: 'state', kind: 'ref', createOnly: true }
+        { key: 'delivered', kind: 'date' }, { key: 'labelWidth', kind: 'num', type: true }, { key: 'labelLength', kind: 'num', type: true },
+        { key: 'actualLength', kind: 'num', type: true, fill: true },
+        { key: 'streams', kind: 'int', type: true }, { key: 'labelsPerRepeat', kind: 'int', type: true }, { key: 'labelGap', kind: 'num', type: true },
+        { key: 'streamGap', kind: 'num', type: true }, { key: 'edge', kind: 'num', type: true }, { key: 'cylinder', kind: 'ref', type: true },
+        { key: 'base', kind: 'ref', type: true }, { key: 'minFormat', kind: 'int', type: true }, { key: 'optFormat', kind: 'int', type: true },
+        { key: 'usedFormat', kind: 'int', type: true }, { key: 'sleeveWidth', kind: 'num', type: true }, { key: 'height', kind: 'int' },
+        { key: 'angle', kind: 'text', type: true }, { key: 'brand', kind: 'ref' }, { key: 'state', kind: 'ref', createOnly: true }
     ];
+    var DIE_FIELDS = KNIFE_FIELDS.filter(function(f) { return !f.type; });
+    var TYPE_FIELDS = KNIFE_FIELDS.filter(function(f) { return f.type; });
+
+    // По этим параметрам новый нож узнаёт свой тип (те же, что у подбора типов в
+    // docs/scripts/knife_types_5427.py, плюс ручьи и вал — от них зависит производство).
+    // Остальные параметры типа на выбор не влияют; расхождение с файлом — предупреждение.
+    var TYPE_MATCH_KEYS = ['labelWidth', 'labelLength', 'angle', 'streamGap', 'labelGap', 'streams', 'cylinder'];
 
     var NUM_LABEL = {
-        labelWidth: 'ширина этикетки', labelLength: 'длина этикетки', streams: 'ручьёв', labelsPerRepeat: 'этикеток на раппорте',
+        labelWidth: 'ширина этикетки', labelLength: 'длина этикетки', actualLength: 'фактическая длина этикетки', streams: 'ручьёв', labelsPerRepeat: 'ручьев / (этикеток) на раппорте',
         labelGap: 'м/э расстояние', streamGap: 'между ручьями', edge: 'ширина кромки', minFormat: 'минимальный формат',
         optFormat: 'оптимальный формат', usedFormat: 'исп. формат', sleeveWidth: 'ширина втулки', height: 'высота ножа'
     };
@@ -329,7 +345,7 @@
             else v.labelWidth = w;
         }
 
-        ['streams', 'labelsPerRepeat', 'labelGap', 'streamGap', 'edge', 'minFormat', 'optFormat', 'usedFormat', 'sleeveWidth', 'height'].forEach(function(k) {
+        ['actualLength', 'streams', 'labelsPerRepeat', 'labelGap', 'streamGap', 'edge', 'minFormat', 'optFormat', 'usedFormat', 'sleeveWidth', 'height'].forEach(function(k) {
             var n = cellNum(get(k));
             if (n == null) return;
             if (isNaN(n)) { warnings.push(NUM_LABEL[k] + ' «' + cellText(get(k)) + '» — не число, поле не заполняется'); return; }
@@ -353,6 +369,8 @@
                 var chk = lp.checkDieRepeat(fmtNum(rep), teeth);   // ячейка Excel: 419.00300000000004
                 if (!chk.ok) warnings.push(chk.error + ' — раппорт 1С не берётся, вал — по номеру');
             }
+            var fit = repeatFit(v, teeth);
+            if (fit) warnings.push(fit);
         }
 
         var base = cellText(get('base'));
@@ -381,25 +399,54 @@
         return { row: rowNo, key: key, values: v, mileage: mileage, mileageSource: source, warnings: warnings, errors: errors };
     }
 
+    // Этикетки раппорта ножа помещаются на окружность вала: «на раппорте» × (длина + м/э) ≤ раппорт
+    // вала. Длина — фактическая («Длинна этикетки _1»: 39,3 у ножа «58 х 40»), без неё — номинальная.
+    // Допуск 0,5 мм — округление м/э в листе (1,98 вместо 1,975). → текст предупреждения или ''.
+    function repeatFit(v, teeth) {
+        var len = v.actualLength > 0 ? v.actualLength : v.labelLength;
+        if (!(len > 0) || !(v.labelsPerRepeat > 0) || !(teeth > 0)) return '';
+        var need = v.labelsPerRepeat * (len + (v.labelGap > 0 ? v.labelGap : 0));
+        var have = lp ? lp.cylinderRepeatMm(teeth) : teeth * 3.175;
+        if (need <= have + 0.5) return '';
+        return v.labelsPerRepeat + ' этикеток × (' + fmtNum(len).replace('.', ',') + ' + ' + fmtNum(v.labelGap || 0).replace('.', ',') + ') = ' +
+            fmtNum(Math.round(need * 10) / 10).replace('.', ',') + ' мм не помещаются на раппорт вала ' + teeth + ' (' +
+            fmtNum(Math.round(have * 10) / 10).replace('.', ',') + ' мм)' + (v.actualLength > 0 ? '' : ' — фактической длины этикетки в файле нет, взята номинальная') +
+            ' — проверьте вал, длину или «на раппорте»';
+    }
+
     // ── Лист заказов ─────────────────────────────────────────────────────────────────────
 
     var ORDER_COLS = {
-        partner: ['Партнер', 'Партнёр'], order: ['Заказ Клиента'], supplierOrder: ['Заказ поставщику'],
+        partner: ['Партнер', 'Партнёр'], order: ['Заказ поставщику'], clientOrder: ['Заказ Клиента'],
         article: ['Артикул'], nomenclature: ['Номенклатура'], comment: ['Заказ.Комментарий', 'Комментарий'],
         received: ['Заказ.Дата поступления', 'Дата поступления'], knifeType: ['Тип ножей'], box: ['Короб'],
         unit: ['Единица хранения'], qty: ['Заказано количество']
     };
 
-    // «85 х 38 5000 шт. П/Гл каучук намотка внутрь вт 76 (П)» → { width, length, perRoll, core, winding }
-    // или null. «D х 40 …» — круглая этикетка, ширина = длине.
-    var NOMEN_RE = /^\s*([DДdд]|\d+(?:[.,]\d+)?)\s*[хХxX×*]\s*(\d+(?:[.,]\d+)?)\s+(\d[\d\s]*?)\s*шт/;
+    // «85 х 38 5000 шт. П/Гл каучук намотка внутрь вт 76 (П)» → { width, length, perRoll, core, winding,
+    // material, glue, perRollRaw, qtyIn } или null. Круглая этикетка — «D х 40 …» или «D-20 2000 шт.»:
+    // ширина = длине. «27 х 44 7/1500 шт.» — этикеток в рулоне 1500 (perRollRaw = «7/1500»).
+    // qtyIn — в чём «Заказано количество» по пометке в номенклатуре: 'labels' («(в шт)»),
+    // 'thousands' («(в тыс. шт.)», «(тыс.шт.)»), '' — пометки нет.
+    var NOMEN_RE = /^\s*([DДdд]|\d+(?:[.,]\d+)?)\s*[хХxX×*]\s*(\d+(?:[.,]\d+)?)\s+((?:\d+\s*\/\s*)?\d[\d\s]*?)\s*шт/;
+    var NOMEN_ROUND_RE = /^\s*[DДdд]\s*[-–—]?\s*(\d+(?:[.,]\d+)?)\s+((?:\d+\s*\/\s*)?\d[\d\s]*?)\s*шт/;
     function parseNomenclature(s) {
-        var m = NOMEN_RE.exec(String(s == null ? '' : s));
-        if (!m) return null;
-        var length = Number(m[2].replace(',', '.'));
-        var width = /^[DДdд]$/.test(m[1]) ? length : Number(m[1].replace(',', '.'));
-        var perRoll = Number(m[3].replace(/\s+/g, ''));
+        s = String(s == null ? '' : s);
+        var m = NOMEN_RE.exec(s), width, length, perRollRaw;
+        if (m) {
+            length = Number(m[2].replace(',', '.'));
+            width = /^[DДdд]$/.test(m[1]) ? length : Number(m[1].replace(',', '.'));
+            perRollRaw = m[3];
+        } else {
+            m = NOMEN_ROUND_RE.exec(s);
+            if (!m) return null;
+            width = length = Number(m[1].replace(',', '.'));
+            perRollRaw = m[2];
+        }
+        perRollRaw = perRollRaw.replace(/\s+/g, '');
+        var perRoll = Number(perRollRaw.split('/').pop());
         if (!(width > 0) || !(length > 0) || !(perRoll > 0)) return null;
+        var qtyIn = /тыс\.?\s*шт/i.test(s) ? 'thousands' : (/(^|[\s(])в\s+шт/i.test(s) ? 'labels' : '');
         var core = /вт\.?\s*(\d+)/i.exec(s);
         var winding = /намотка\s+внутрь/i.test(s) ? 'внутрь' : (/намотка\s+наруж/i.test(s) ? 'наружу' : '');
         // Сырьё — слово сразу за «шт.» («П/Гл», «П/П»), клей — по списку известных («каучук», «акрил»).
@@ -407,11 +454,39 @@
         var material = mat && !/^(намотка|вт\.?|каучук|акрил)/i.test(mat[1]) ? mat[1] : '';
         var gl = /(каучук|акрил\S*|hot\s*melt)/i.exec(s);
         return { width: width, length: length, perRoll: perRoll, core: core ? core[1] : '', winding: winding,
-            material: material, glue: gl ? gl[1] : '' };
+            material: material, glue: gl ? gl[1] : '', matte: /матов/i.test(s), perRollRaw: perRollRaw, qtyIn: qtyIn };
     }
 
-    // Лист заказов → { ok, error, items, duplicates, skipped }. Строки «Итого» и строки партнёра
-    // без заказа и артикула — в `skipped`; повтор пары «Заказ клиента» + артикул — в `duplicates`.
+    // Количество строки в рулонах. «Заказано количество» в 1С — рулоны, кроме двух случаев:
+    // единица хранения «тыс. шт…» — тысячи этикеток; пометка «(в шт)» / «(в тыс. шт.)» в номенклатуре —
+    // этикетки (множитель — по единице хранения: она у 1С — учётная). → { rolls, labels, source } | { error }
+    function rollsOf(qty, unit, label) {
+        var qtyText = fmtNum(qty);
+        var unitThousands = /тыс/i.test(String(unit || ''));
+        var inLabels = unitThousands || !!(label && label.qtyIn);
+        if (!inLabels) {
+            if (Math.round(qty) !== qty) return { error: 'количество «' + qtyText + '» — нужно целое число рулонов больше нуля' };
+            return { rolls: qty, labels: null, source: '' };
+        }
+        if (!label) return { error: 'количество «' + qtyText + '» в этикетках, а этикеток в рулоне из номенклатуры не разобрано' };
+        var labels = Math.round(qty * (unitThousands ? 1000 : 1) * 1000) / 1000;
+        var rolls = labels / label.perRoll;
+        var src = 'в 1С ' + qtyText + (unitThousands ? ' тыс.' : '') + ' шт этикеток = ' + groupDigits(labels) + ' / ' + label.perRoll + ' в рулоне';
+        if (Math.abs(rolls - Math.round(rolls)) > 1e-9) {
+            return { error: 'количество ' + groupDigits(labels) + ' этикеток не делится на ' + label.perRoll + ' в рулоне (' +
+                fmtNum(rolls) + ' рул.) — проверьте количество или «шт в рулоне» в 1С' };
+        }
+        rolls = Math.round(rolls);
+        if (!(rolls > 0)) return { error: 'количество «' + qtyText + '» — нужно больше нуля' };
+        return { rolls: rolls, labels: labels, source: src + ' = ' + rolls + ' рул.' };
+    }
+
+    function groupDigits(n) { return String(fmtNum(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ' '); }
+
+    // Лист заказов → { ok, error, items, duplicates, skipped }. Номер записи «Заказ» (item.order) —
+    // «Заказ поставщику», внутренний заказ (#5419); «Заказ клиента» (item.clientOrder) — поле позиции.
+    // Строки «Итого» и строки партнёра без заказа и артикула — в `skipped`; повтор пары
+    // «Заказ поставщику» + артикул — в `duplicates`.
     function parseOrderSheet(grid) {
         var h = findHeader(grid, ORDER_COLS, ['order', 'article', 'nomenclature', 'qty']);
         if (!h.ok) return { ok: false, error: 'лист заказов: ' + h.error, items: [], duplicates: [], skipped: 0 };
@@ -419,7 +494,7 @@
         for (var r = h.row + 1; r < grid.length; r++) {
             var row = grid[r] || [];
             var get = function(k) { return cellText(cell(row, h.cols, k)); };
-            var order = get('order').replace(/\.0+$/, ''), article = get('article');
+            var order = get('order').replace(/\.0+$/, ''), clientOrder = get('clientOrder').replace(/\.0+$/, ''), article = get('article');
             if (/^итого/i.test(cellText(row[0])) || (order === '' && article === '')) { skipped++; continue; }
             var key = order + ' / ' + article;
             if (order !== '' && article !== '' && firstRow[key] != null) {
@@ -428,21 +503,32 @@
             }
             firstRow[key] = r + 1;
             var errors = [], warnings = [];
-            if (order === '') errors.push('нет «Заказ клиента»');
+            if (order === '') {
+                errors.push('нет «Заказ поставщику»' + (clientOrder ? ' (заказ клиента ' + clientOrder + ')' : '') +
+                    ' — позицию не к чему привязать, строка не импортируется');
+            } else if (clientOrder === '') warnings.push('нет «Заказ клиента» — поле позиции не заполняется');
             if (article === '') errors.push('нет артикула');
-            var qty = cellNum(cell(row, h.cols, 'qty'));
-            if (qty == null || isNaN(qty) || !(qty > 0) || Math.round(qty) !== qty) {
-                errors.push('количество «' + get('qty') + '» — нужно целое число рулонов больше нуля');
-            }
             var nom = get('nomenclature');
             var p = parseNomenclature(nom);
-            if (!p) errors.push('номенклатура «' + nom + '» не разобрана: нужен вид «Ш х Д N шт. …», например «85 х 38 5000 шт.»');
+            if (!p) errors.push('номенклатура «' + nom + '» не разобрана: нужен вид «Ш х Д N шт. …» или «D-20 N шт. …», например «85 х 38 5000 шт.»');
+            else if (/\//.test(p.perRollRaw)) warnings.push('«' + p.perRollRaw + ' шт.» в номенклатуре — этикеток в рулоне взято ' + p.perRoll);
+            var qty = cellNum(cell(row, h.cols, 'qty'));
+            var q = null;
+            if (qty == null || isNaN(qty) || !(qty > 0)) errors.push('количество «' + get('qty') + '» — нужно число больше нуля');
+            else {
+                q = rollsOf(qty, get('unit'), p);
+                if (q.error) { errors.push(q.error); q = null; }
+                else if (p && p.qtyIn === 'thousands' && !/тыс/i.test(get('unit'))) {
+                    warnings.push('в номенклатуре пометка «тыс. шт», а единица хранения «' + get('unit') + '» — количество взято в штуках этикеток');
+                }
+            }
             var received = excelDate(cell(row, h.cols, 'received'));
             if (!received && get('received')) warnings.push('дата поступления «' + get('received') + '» не разобрана');
             items.push({
                 row: r + 1, key: key, order: order, article: article, partner: get('partner'),
-                supplierOrder: get('supplierOrder'), nomenclature: nom, comment: get('comment'), received: received,
-                knifeType: get('knifeType'), box: get('box'), unit: get('unit'), rolls: qty,
+                clientOrder: clientOrder, nomenclature: nom, comment: get('comment'), received: received,
+                knifeType: get('knifeType'), box: get('box'), unit: get('unit'), rolls: q ? q.rolls : null,
+                qtySource: q ? q.source : '', inLabels: !!(q && q.labels != null),
                 label: p, warnings: warnings, errors: errors
             });
         }
@@ -482,15 +568,22 @@
         return out;
     }
 
-    // Данные базы для сверки ножей. data — { dies, runs (строки отчёта die_runs), cylinders, bases,
-    // brands, states, runKinds }: записи — kvRecords.
+    // Данные базы для сверки ножей. data — { dies, types (записи «Типа ножа»), runs (строки отчёта
+    // die_runs), cylinders, bases, brands, states, runKinds }: записи — kvRecords.
     function knifeContext(tables, data) {
         var d = data || {};
-        var dies = {}, dupInBase = {};
+        var dies = {}, dupInBase = {}, dieCount = {};
         (d.dies || []).forEach(function(r) {
             var key = String(r.val).trim();
+            var typeId = tables.die.reqs.type ? refId(r, tables.die.reqs.type) : '';
+            if (typeId) dieCount[typeId] = (dieCount[typeId] || 0) + 1;
             if (dies[key]) dupInBase[key] = true;
-            else dies[key] = { id: r.id, values: valuesOf(r, tables.die, KNIFE_FIELDS), labels: r.reqs };
+            else dies[key] = { id: r.id, typeId: typeId, values: valuesOf(r, tables.die, DIE_FIELDS), labels: r.reqs };
+        });
+        var types = [], typeById = {}, typeNames = {};
+        (d.types || []).forEach(function(r) {
+            var tp = { id: r.id, name: String(r.val).trim(), values: tables.dieType ? valuesOf(r, tables.dieType, TYPE_FIELDS) : {}, dies: dieCount[r.id] || 0 };
+            types.push(tp); typeById[tp.id] = tp; typeNames[norm(tp.name)] = true;
         });
         var runsByDie = {};
         (d.runs || []).forEach(function(r) {
@@ -505,6 +598,7 @@
         (d.runKinds || []).forEach(function(r) { if (lp && lp.runKindOf(r.val) === lp.RUN_KIND.INITIAL) initialKindId = r.id; });
         return {
             tables: tables, dies: dies, dupInBase: dupInBase, runsByDie: runsByDie, initialKindId: initialKindId,
+            types: types, typeById: typeById, typeNames: typeNames,
             dict: { cylinder: cylinder, base: dictByLabel(d.bases), brand: dictByLabel(d.brands), state: state },
             labels: {
                 cylinder: labelIndex(d.cylinders), base: labelIndex(d.bases), brand: labelIndex(d.brands), state: labelIndex(d.states)
@@ -530,6 +624,101 @@
 
     function counts0() { return { new: 0, update: 0, same: 0, duplicate: 0, error: 0, warnings: 0 }; }
 
+    function fieldOf(key) { return KNIFE_FIELDS.filter(function(f) { return f.key === key; })[0]; }
+
+    // Параметры файла, которые расходятся с типом: [«Ручьёв» 4, у типа 3]. Новый вал (его ещё нет
+    // в справочнике) у типа быть не может — тоже расхождение.
+    function typeDiff(tp, target, labels, ctx, values) {
+        var names = (ctx.tables.dieType && ctx.tables.dieType.reqNames) || {};
+        var vals = values || tp.values;
+        var out = [];
+        TYPE_FIELDS.forEach(function(f) {
+            if (!(f.key in target)) return;
+            var want = target[f.key], have = vals[f.key];
+            if (typeof want !== 'object' && sameValue(f.kind, have, want)) return;
+            var haveLabel = f.kind === 'ref' ? ((ctx.labels[f.key] || {})[have] || have) : have;
+            out.push('«' + (names[f.key] || f.key) + '» ' + labels[f.key] + ', у типа ' + (haveLabel || 'пусто'));
+        });
+        return out;
+    }
+
+    // Число для имени типа — как в каталоге 1С: без хвостовых нулей, с запятой; «70°» → «70».
+    function typeNamePart(v) {
+        if (v == null || v === '') return '?';
+        var n = cellNum(String(v).replace(/°/g, ''));
+        return n == null || isNaN(n) ? String(v) : fmtNum(n).replace('.', ',');
+    }
+
+    // Значения типа подходят к файлу по TYPE_MATCH_KEYS: параметр, которого в файле нет, не
+    // сравнивается; новый вал файла ({ ref }) подходит только к типу с тем же новым валом.
+    function typeFits(values, target) {
+        return TYPE_MATCH_KEYS.every(function(k) {
+            if (!(k in target)) return true;
+            var want = target[k], have = values[k];
+            if (typeof want === 'object') return !!have && typeof have === 'object' && have.ref === want.ref;
+            return typeof have !== 'object' && sameValue(fieldOf(k).kind, have, want);
+        });
+    }
+
+    // Поля типа с fill (фактическая длина этикетки) заполняются из файла, если у типа они пусты;
+    // заполненное не меняется — расхождение остаётся предупреждением typeDiff. Несколько ножей
+    // одного типа заполняют поле один раз: следующие сравниваются с уже записанным (ctx.fill —
+    // заполненное этим импортом, { idТипа: { ключ: значение } }). Операция — в ctx.fillOps.
+    // → значения типа с учётом заполненного.
+    function fillType(tp, target, labels, ctx, row) {
+        var t = ctx.tables;
+        var done = ctx.fill[tp.id] = ctx.fill[tp.id] || {};
+        var vals = {};
+        Object.keys(tp.values).forEach(function(k) { vals[k] = tp.values[k]; });
+        Object.keys(done).forEach(function(k) { vals[k] = done[k]; });
+        TYPE_FIELDS.forEach(function(f) {
+            if (!f.fill || !(f.key in target) || !t.dieType.reqs[f.key]) return;
+            if (String(vals[f.key] == null ? '' : vals[f.key]).trim() !== '') return;
+            var op = { op: 'set', id: tp.id, group: 'type:' + tp.id, fields: {} };
+            op.fields['t' + t.dieType.reqs[f.key]] = target[f.key];
+            ctx.fillOps.push(op);
+            done[f.key] = vals[f.key] = target[f.key];
+            row.changes.push({ field: t.dieType.reqNames[f.key] + ' (тип «' + tp.name + '»)', from: '—', to: labels[f.key] });
+        });
+        return vals;
+    }
+
+    // Тип для ножа без типа: подходящий из справочника (из нескольких — тот, у которого больше
+    // ножей, затем меньший id), затем — заведённый этим же импортом, иначе — новый тип с
+    // параметрами файла. Новый тип называется как типы, заведённые по ножам без каталога:
+    // «Ш х Д (угол/между ручьями/м.э)»; имя занято — с номером ножа в скобках.
+    // pending — типы, заведённые этим импортом: [{ value: { ref }, name, values }].
+    // → { value: id | { ref }, name } | null (в базе нет «Типа ножа»); операция нового типа — в ops.
+    function knifeType(item, target, labels, ctx, pending, ops, row) {
+        var t = ctx.tables;
+        if (!t.dieType || !t.die.reqs.type) return null;
+        var cands = (ctx.types || []).filter(function(tp) { return typeFits(tp.values, target); })
+            .sort(function(a, b) { return (b.dies - a.dies) || (Number(a.id) - Number(b.id)); });
+        if (cands.length) {
+            var tp = cands[0];
+            if (cands.length > 1) row.warnings.push('подходит типов: ' + cands.length + ', выбран «' + tp.name + '» — у него больше ножей');
+            var diff = typeDiff(tp, target, labels, ctx, fillType(tp, target, labels, ctx, row));
+            if (diff.length) row.warnings.push('параметры в файле расходятся с типом «' + tp.name + '»: ' + diff.join('; ') + ' — актуален тип');
+            return { value: tp.id, name: tp.name };
+        }
+        var mine = pending.filter(function(x) { return typeFits(x.values, target); })[0];
+        if (mine) return mine;
+        var name = typeNamePart(target.labelWidth) + ' х ' + typeNamePart(target.labelLength) + ' (' +
+            [target.angle, target.streamGap, target.labelGap].map(typeNamePart).join('/') + ')';
+        var taken = function(n) {
+            return (ctx.typeNames || {})[norm(n)] || pending.some(function(x) { return norm(x.name) === norm(n); });
+        };
+        if (taken(name)) name += ' [' + item.key + ']';
+        var op = { op: 'new', table: t.dieType.id, up: 1, ref: 'type:' + name, group: 'type:' + name, fields: {} };
+        op.fields['t' + t.dieType.id] = name;
+        TYPE_FIELDS.forEach(function(f) { if (f.key in target) op.fields['t' + t.dieType.reqs[f.key]] = target[f.key]; });
+        ops.push(op);
+        row.warnings.push('типа с такими параметрами нет — будет создан «' + name + '»');
+        var made = { value: { ref: op.ref }, name: name, values: target };
+        pending.push(made);
+        return made;
+    }
+
     // План импорта ножей. → { rows, counts, ops }. rows — по строкам файла: { row, key, status
     // ('new'|'update'|'same'|'duplicate'|'error'), summary, changes: [{ field, from, to }], warnings,
     // errors, mileage, mileageSource }. ops — операции для runBatches; значение ссылки на запись,
@@ -539,7 +728,10 @@
         var now = String(o.now != null ? o.now : Math.floor(Date.now() / 1000));
         var t = ctx.tables;
         var rows = [], ops = [], counts = counts0();
-        var newCyl = {};
+        var newCyl = {}, newTypes = [];
+        // ctx не меняется: заполнение типов этого прогона — в своей копии.
+        var fillCtx = Object.create(ctx);
+        fillCtx.fill = {}; fillCtx.fillOps = [];
 
         (parsed.items || []).forEach(function(item) {
             var row = { row: item.row, key: item.key, status: '', summary: knifeSummary(item.values), changes: [],
@@ -557,13 +749,18 @@
             }
             if (row.errors.length) { row.status = 'error'; counts.error++; return; }
 
+            // Тип ножа: у ножа с типом параметры не трогаются — актуален тип (#5431), расхождение
+            // файла с типом — предупреждение. Ножу без типа тип подбирается или заводится.
+            var curType = existing && existing.typeId ? (ctx.typeById || {})[existing.typeId] : null;
             var target = {}, labels = {};
             KNIFE_FIELDS.forEach(function(f) {
                 var val = item.values[f.key];
-                if (val == null || val === '' || !t.die.reqs[f.key]) return;
+                var owner = f.type ? t.dieType : t.die;
+                if (val == null || val === '' || !owner || !owner.reqs[f.key]) return;
                 if (f.kind !== 'ref') { target[f.key] = f.kind === 'date' || f.kind === 'text' ? String(val) : fmtNum(val); labels[f.key] = target[f.key]; return; }
                 var id = f.key === 'cylinder' ? ctx.dict.cylinder[val] : ctx.dict[f.key][norm(val)];
                 if (id) { target[f.key] = id; labels[f.key] = val; return; }
+                if (f.key === 'cylinder' && curType) { target[f.key] = { ref: 'cylinder:' + val }; labels[f.key] = val; return; }
                 if (f.key === 'cylinder') {
                     if (!newCyl[val]) {
                         newCyl[val] = { op: 'new', table: t.cylinder.id, up: 1, ref: 'cylinder:' + val, group: 'cylinder:' + val, fields: {} };
@@ -581,15 +778,23 @@
 
             var dieRef = 'die:' + item.key;
             var group = dieRef;
+            var typeLink = null;
+            if (curType) {
+                var diff = typeDiff(curType, target, labels, ctx, fillType(curType, target, labels, fillCtx, row));
+                if (diff.length) row.warnings.push('параметры в файле расходятся с типом «' + curType.name + '»: ' + diff.join('; ') + ' — актуален тип, он не меняется');
+            } else {
+                typeLink = knifeType(item, target, labels, fillCtx, newTypes, ops, row);
+            }
             if (!existing) {
                 var op = { op: 'new', table: t.die.id, up: 1, ref: dieRef, group: group, fields: {} };
                 op.fields['t' + t.die.id] = item.key;
-                Object.keys(target).forEach(function(k) { op.fields['t' + t.die.reqs[k]] = target[k]; });
+                DIE_FIELDS.forEach(function(f) { if (f.key in target) op.fields['t' + t.die.reqs[f.key]] = target[f.key]; });
+                if (typeLink) op.fields['t' + t.die.reqs.type] = typeLink.value;
                 ops.push(op);
                 row.status = 'new';
             } else {
                 var set = { op: 'set', id: existing.id, group: group, fields: {} };
-                KNIFE_FIELDS.forEach(function(f) {
+                DIE_FIELDS.forEach(function(f) {
                     if (f.createOnly || !(f.key in target)) return;
                     var want = target[f.key];
                     if (typeof want !== 'object' && sameValue(f.kind, existing.values[f.key], want)) return;
@@ -597,8 +802,13 @@
                     var from = f.kind === 'ref' ? ((ctx.labels[f.key] || {})[existing.values[f.key]] || existing.values[f.key]) : existing.values[f.key];
                     row.changes.push({ field: t.die.reqNames[f.key], from: from || '—', to: labels[f.key] });
                 });
+                if (typeLink) {
+                    set.fields['t' + t.die.reqs.type] = typeLink.value;
+                    row.changes.push({ field: t.die.reqNames.type, from: '—', to: typeLink.name });
+                }
                 if (Object.keys(set.fields).length) ops.push(set);
             }
+            Array.prototype.push.apply(ops, fillCtx.fillOps.splice(0));
             if (runPlan && runPlan.op === 'new') {
                 var run = { op: 'new', table: t.dieRun.id, up: existing ? existing.id : { ref: dieRef }, group: group, fields: {} };
                 run.fields['t' + t.dieRun.id] = now;
@@ -625,6 +835,41 @@
         return { rows: rows, counts: counts, ops: ops };
     }
 
+    // Номера заказов, которые трогает план (группа операции «order:<номер>»): после записи
+    // повторная сверка перечитывает позиции только этих заказов (#5512).
+    function touchedOrders(ops) {
+        var out = {};
+        (ops || []).forEach(function(op) {
+            var g = op && typeof op.group === 'string' ? op.group : '';
+            if (g.indexOf('order:') === 0) out[g.slice(6)] = true;
+        });
+        return out;
+    }
+
+    // Строка состояния после сверки (#5506). Пустой план — «записывать нечего» с причиной, а не
+    // приглашение нажать неактивную «Записать». → { text, kind }.
+    function planVerdict(tab, plan, parsed) {
+        var c = (plan && plan.counts) || counts0();
+        var ops = plan && plan.ops ? plan.ops.length : 0;
+        if (ops) {
+            return { text: 'Проверьте предпросмотр и нажмите «Записать»: новых ' + c.new + ', обновится ' + c.update + '.', kind: '' };
+        }
+        var why = [];
+        if (c.same) why.push(c.same + ' ' + (tab === 'knives' ? 'ножей' : 'позиций') + ' совпадают с базой');
+        if (c.error) why.push(c.error + ' строк с ошибками не пишутся');
+        if (c.duplicate) why.push(c.duplicate + ' дублей пропущено');
+        var text = 'Записывать нечего' + (why.length ? ': ' + why.join(', ') : ': в файле нет строк для записи') + '.';
+        if (tab === 'knives') {
+            var rows = (plan && plan.rows) || [];
+            var withMileage = rows.filter(function(r) { return r.mileage != null; }).length;
+            if (!withMileage) {
+                text += ' Пробега в файле нет: он берётся из колонки «Пробег» листа «Ножи» или из «Суммарного пробега ножа» листа «План»' +
+                    (parsed && parsed.planSheet === false ? ', а листа «План» в книге нет.' : '.');
+            }
+        }
+        return { text: text, kind: '' };
+    }
+
     function knifeSummary(v) {
         var parts = [];
         if (v.labelWidth != null && v.labelLength != null) parts.push(fmtNum(v.labelWidth) + '×' + fmtNum(v.labelLength));
@@ -642,7 +887,9 @@
         { key: 'knifeType', kind: 'text' }, { key: 'core', kind: 'ref' }, { key: 'winding', kind: 'text' },
         { key: 'unit', kind: 'ref' }, { key: 'status', kind: 'ref', createOnly: true }, { key: 'note', kind: 'text', createOnly: true },
         // Сырьё и срок подбирает импорт, но выбор менеджера не затирает: у существующей позиции они пишутся, только если пусты.
-        { key: 'material', kind: 'ref', fillOnly: true }, { key: 'due', kind: 'text', fillOnly: true }
+        { key: 'material', kind: 'ref', fillOnly: true }, { key: 'due', kind: 'text', fillOnly: true },
+        // Расчётное МР по типу ножа (#5551): ножной подбор в «Заказах этикетки» его перепишет по выбранному ножу.
+        { key: 'mrCalc', kind: 'num', fillOnly: true }
     ];
 
     // Настройка «срок = поступление + N дней»: допущение тест-цикла (14), владелец подтвердит.
@@ -681,7 +928,24 @@
         return '';
     }
 
+    // Номер марки сырья по правилу планировщика («Сырье» в «Плане на производство»: 43, 44, 45, 47, 52, 53, 55, 56):
+    // П/Гл — 43, ЭКО — 44, ТОП — 45, Vellum — 56; П/П — по клею и «матовый»: каучук 47 / матовый 55, акрил 52 / матовый 53.
+    // Совпадает с «Планом» в 98 % строк. → число или 0.
+    function materialNumber(label) {
+        var t = label && label.material ? norm(label.material).replace(/\s+/g, '') : '';
+        if (/^п\/гл|^пгл/.test(t)) return 43;
+        if (t === 'эко') return 44;
+        if (t === 'топ') return 45;
+        if (/^vellum/.test(t)) return 56;
+        if (t === 'п/п' || t === 'пп') {
+            var acryl = /^акрил/.test(norm(label.glue));
+            return acryl ? (label.matte ? 53 : 52) : (label.matte ? 55 : 47);
+        }
+        return 0;
+    }
+
     // Сырьё позиции по обозначению и клею из номенклатуры. materials — [{ id, name, base, glue }].
+    // Комментарий 1С на сырьё не влияет: в нём ручной подбор мастер-рулонов (владелец, #5552).
     // → { ok, id, name, base } | { ok:false, reason }
     function matchMaterial(label, materials) {
         var token = label && label.material ? String(label.material).trim() : '';
@@ -691,6 +955,12 @@
         if (!list.length) return { ok: false, reason: 'справочник «Сырьё этикетки» пуст' };
         var exact = list.filter(function(m) { return norm(m.name) === norm(token) || (glue && norm(m.name) === norm(token + ' ' + glue)); });
         if (exact.length === 1) return { ok: true, id: exact[0].id, name: exact[0].name, base: exact[0].base };
+        var no = materialNumber(label);
+        if (no) {
+            var prefix = '00' + no + ' ';
+            var byNo = list.filter(function(m) { return norm(m.name).indexOf(prefix) === 0; });
+            if (byNo.length === 1) return { ok: true, id: byNo[0].id, name: byNo[0].name, base: byNo[0].base };
+        }
         var hint = baseHint(token);
         if (!hint) return { ok: false, reason: 'материал «' + token + '» из 1С не опознан' };
         var cand = list.filter(function(m) { return norm(m.base) === hint; });
@@ -703,7 +973,8 @@
 
     // Предупреждения по типам: текст без чисел и названий в «…» → { type, count, rows: [номер строки], samples: [текст] }.
     function warningType(text) {
-        return String(text).replace(/«[^»]*»/g, '«…»').replace(/\d+(?:[.,]\d+)?/g, 'N').replace(/\s+/g, ' ').trim();
+        // Число, приклеенное к букве («1С»), — часть названия, а не значение.
+        return String(text).replace(/«[^»]*»/g, '«…»').replace(/\d+(?:[.,]\d+)?(?![A-Za-zА-Яа-яЁё])/g, 'N').replace(/\s+/g, ' ').trim();
     }
     function groupWarnings(rows) {
         var by = {}, order = [];
@@ -759,7 +1030,7 @@
             if (n != null && !isNaN(n) && n >= 0) dueDays = Math.round(n);
         }
         return {
-            tables: tables, orders: orders, dupInBase: dupInBase, positions: positions, materials: materials, dueDays: dueDays,
+            mr: mrContext(tables, d), tables: tables, orders: orders, dupInBase: dupInBase, positions: positions, materials: materials, dueDays: dueDays,
             dict: {
                 client: dictByLabel(d.clients), article: dictByLabel(d.articles), productKind: dictByLabel(d.productKinds),
                 core: coreDict(d.cores), unit: dictByLabel(d.units)
@@ -854,7 +1125,7 @@
                 var put = function(k, v, label) { if (v == null || v === '' || !t.position.reqs[k]) return; pt[k] = v; plabels[k] = label != null ? label : v; };
                 put('productKind', kindId, lp ? lp.PRODUCT_KIND.LABEL : 'этикетка');
                 put('article', ensure('article', item.article), item.article);
-                put('clientOrder', item.order);
+                put('clientOrder', item.clientOrder);
                 put('labelWidth', fmtNum(lab.width));
                 put('labelLength', fmtNum(lab.length));
                 put('labelsPerRoll', fmtNum(lab.perRoll));
@@ -867,13 +1138,18 @@
                 var due = t.position.reqs.due ? addDays(item.received, ctx.dueDays) : '';
                 put('due', due);
                 if (matchRes && matchRes.ok) put('material', matchRes.id, matchRes.name);
-                if (item.unit) {
-                    if (ctx.dict.unit[norm(item.unit)]) put('unit', ctx.dict.unit[norm(item.unit)], item.unit);
-                    else row.warnings.push('единица «' + item.unit + '» — нет в справочнике «Ед.изм.»');
+                var mrRes = checkMasterRolls(item, ctx.mr);
+                if (mrRes.warning) row.warnings.push(mrRes.warning);
+                if (mrRes.calc != null) put('mrCalc', fmtNum(mrRes.calc));
+                // Количество позиции — рулоны: пересчитанное из этикеток пишется с единицей «шт» (рулонов).
+                var unit = item.inLabels ? 'шт' : item.unit;
+                if (unit) {
+                    if (ctx.dict.unit[norm(unit)]) put('unit', ctx.dict.unit[norm(unit)], unit);
+                    else row.warnings.push('единица «' + unit + '» — нет в справочнике «Ед.изм.»');
                 }
                 put('status', ctx.positionStatusNew);
-                put('note', ['Номенклатура 1С: ' + item.nomenclature, item.supplierOrder ? 'заказ поставщику ' + item.supplierOrder : '',
-                    item.box ? 'короб ' + item.box : ''].filter(Boolean).join('; '));
+                put('note', ['Номенклатура 1С: ' + item.nomenclature, item.qtySource,
+                    item.box ? 'короб ' + item.box : '', item.comment ? 'комментарий 1С: ' + item.comment.replace(/\s*\n\s*/g, ' / ') : ''].filter(Boolean).join('; '));
 
                 var rolls = fmtNum(item.rolls);
                 var posList = existing ? ((ctx.positions[existing.id] || {})[norm(item.article)] || []) : [];
@@ -920,7 +1196,7 @@
         });
         (parsed.duplicates || []).forEach(function(d) {
             rows.push({ row: d.row, key: d.key, order: d.key.split(' / ')[0], status: 'duplicate', summary: '', changes: [],
-                warnings: ['повтор пары «Заказ клиента» + артикул — первое вхождение в строке ' + d.firstRow + ', эта строка пропущена'], errors: [] });
+                warnings: ['повтор пары «Заказ поставщику» + артикул — первое вхождение в строке ' + d.firstRow + ', эта строка пропущена'], errors: [] });
             counts.duplicate++;
         });
         rows.sort(function(a, b) { return a.row - b.row; });
@@ -930,7 +1206,8 @@
     function orderSummary(item) {
         var l = item.label;
         return (l ? fmtNum(l.width) + '×' + fmtNum(l.length) + ', ' + l.perRoll + ' шт/рул' : '') +
-            (item.rolls > 0 ? ', ' + item.rolls + ' рул.' : '');
+            (item.rolls > 0 ? ', ' + item.rolls + ' рул.' : '') +
+            (item.qtySource ? ' (' + item.qtySource + ')' : '');
     }
 
     // ── Запись пакетами ──────────────────────────────────────────────────────────────────
@@ -999,6 +1276,74 @@
         });
     }
 
+    // ── Число мастер-рулонов из комментария 1С и сверка с расчётом (#5551) ────────────────
+
+    // «MONOCHROME 0043 SG/HM/YG 0,300 х 2000 (П) - 41 шт» → [41]: количество МР по каждой марке
+    // комментария. Опора — толщина «0,300» (или диапазон «0,246-270») перед «х длина МР»:
+    // «58 х 40 1500 шт.» не подходит. Строка без количества («со склада высечки») не считается.
+    var MR_COUNT_RE = /\d[,.]\d+(?:\s*[-–]\s*\d+)?\s*[хХxX]\s*(\d{3,5})\s*(?:\([^)]*\))?\s*[-–—]?\s*(\d+(?:[.,]\d+)?)\s*шт/gi;
+    function mrRollsFromComment(comment) {
+        var out = [], m;
+        MR_COUNT_RE.lastIndex = 0;
+        while ((m = MR_COUNT_RE.exec(String(comment == null ? '' : comment)))) out.push({ count: Number(m[2].replace(',', '.')), lengthM: Number(m[1]) });
+        return out;
+    }
+    function mrCountFromComment(comment) {
+        return mrRollsFromComment(comment).map(function(r) { return r.count; });
+    }
+
+    // Допуск количества МР от 1С к расчёту (владелец, #5551).
+    var MR_TOLERANCE = 0.1;
+
+    // Данные для сверки МР: типы ножей по названию (= «Тип ножей» из 1С), раппорты валов, длина МР.
+    function mrContext(tables, d) {
+        var out = { types: {}, mrLength: 2000 };
+        if (!tables.dieType) return out;
+        var cyl = {};
+        (d.cylinders || []).forEach(function(r) {
+            var col = tables.cylinder && tables.cylinder.reqs.repeat;
+            var rep = col ? cellNum(reqText(r, col)) : NaN;
+            var n = cellNum(r.val);
+            cyl[r.id] = rep > 0 ? rep : (n > 0 ? Math.round(n * 3.175 * 1000) / 1000 : 0);
+        });
+        (d.dieTypes || []).forEach(function(r) {
+            var v = valuesOf(r, tables.dieType, TYPE_FIELDS);
+            var key = norm(r.val);
+            if (key && !out.types[key]) out.types[key] = { streams: cellNum(v.streams), perRepeat: cellNum(v.labelsPerRepeat), repeatMm: cyl[v.cylinder] || 0 };
+        });
+        var len = cellNum(settingValue(((tables.setting && tables.setting.reqs.value) ? (d.settings || []) : []).map(function(r) {
+            return { key: r.val, type: tables.setting.reqs.type ? reqText(r, tables.setting.reqs.type) : '', value: reqText(r, tables.setting.reqs.value) };
+        }), 'LABEL_MASTER_ROLL_M', d.db));
+        if (len > 0) out.mrLength = len;
+        return out;
+    }
+
+    // Расчётное число МР позиции по типу ножа: раппорты = ceil(этикетки / (на раппорте × ручьёв)),
+    // метраж = раппорты × раппорт, МР = метраж / длина МР (те же шаги, что «Потребность позиции»
+    // в «Заказах этикетки», labelPositionDemand). Рулоны × этикеток в рулоне — из строки файла.
+    // → { calc (дробное, 2 знака) | null, file (МР из комментария 1С) | null, warning | '' }.
+    function checkMasterRolls(item, mr) {
+        var res = { calc: null, file: null, warning: '' };
+        if (!mr || !item || !item.label || !(item.rolls > 0)) return res;
+        var type = mr.types[norm(item.knifeType)];
+        if (!type || !(type.streams > 0) || !(type.perRepeat > 0) || !(type.repeatMm > 0)) return res;
+        var labels = item.rolls * item.label.perRoll;
+        var meters = Math.round(Math.ceil(labels / (type.perRepeat * type.streams) - 1e-9) * type.repeatMm) / 1000;
+        res.calc = Math.round(meters / mr.mrLength * 100) / 100;
+        // Рулоны другой длины («0,240 х 1000 - 1 шт») — в МР длины из настройки: 1 × 1000 м = 0,5 МР по 2000 м.
+        var rolls = mrRollsFromComment(item.comment);
+        if (!rolls.length) return res;
+        res.file = Math.round(rolls.reduce(function(a, r) { return a + r.count * (r.lengthM || mr.mrLength) / mr.mrLength; }, 0) * 100) / 100;
+        var lo = res.calc * (1 - MR_TOLERANCE), hi = res.calc * (1 + MR_TOLERANCE);
+        // Целое «вверх» — штатный запас: 21 при расчёте 20,64 — не ошибка.
+        var inTol = res.file >= lo - 1e-9 && res.file <= hi + 1e-9;
+        if (!inTol && res.file !== Math.ceil(res.calc - 1e-9)) {
+            res.warning = 'расчёт МР сделан неверно: в комментарии 1С ' + fmtNum(res.file) + ' МР, по ножу «' + item.knifeType + '» расчётное ' +
+                fmtNum(res.calc) + ' (допуск ±10%: ' + fmtNum(Math.round(lo * 100) / 100) + '–' + fmtNum(Math.round(hi * 100) / 100) + ')';
+        }
+        return res;
+    }
+
     return {
         IMPORT_TABLES: IMPORT_TABLES,
         resolveImportTables: resolveImportTables,
@@ -1010,6 +1355,7 @@
         findHeader: findHeader,
         parseNomenclature: parseNomenclature,
         matchMaterial: matchMaterial,
+        materialNumber: materialNumber,
         addDays: addDays,
         settingValue: settingValue,
         groupWarnings: groupWarnings,
@@ -1023,6 +1369,12 @@
         orderContext: orderContext,
         planKnives: planKnives,
         planOrders: planOrders,
-        runBatches: runBatches
+        touchedOrders: touchedOrders,
+        planVerdict: planVerdict,
+        runBatches: runBatches,
+        mrCountFromComment: mrCountFromComment,
+        checkMasterRolls: checkMasterRolls,
+        mrContext: mrContext,
+        MR_TOLERANCE: MR_TOLERANCE
     };
 });

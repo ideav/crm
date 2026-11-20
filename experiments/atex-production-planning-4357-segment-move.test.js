@@ -18,6 +18,8 @@
 // со своими 109, перенос доживает до конца. ГОЛОВУ не отвязываем: её перенос двигает всю цепочку.
 //
 // Run with: node experiments/atex-production-planning-4357-segment-move.test.js
+//
+// rules: none (defect #4357)
 
 var mod = require('../download/atex/js/production-planning.js');
 var P = mod.planning;

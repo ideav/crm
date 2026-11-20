@@ -146,7 +146,14 @@ async function validateToken(host, dbName) {
 // of issuing a network request for every remaining cookie on every page load.
 // (Stale cookies for the not-yet-checked dbs are cleaned up lazily when those dbs
 // are actually validated.)
-async function hasValidAuthToken(host) {
+//
+// backlogram#930: с probeDb решение сначала берётся у сервера (serverCaptchaBypass) —
+// он видит HttpOnly-куки idb_*; перебор меток idbs_* ниже — только когда сервер не ответил.
+async function hasValidAuthToken(host, probeDb) {
+    if (probeDb) {
+        const server = await serverCaptchaBypass(host, probeDb);
+        if (server !== null) return server;
+    }
     const dbNames = CookieUtil.getAllIdb();
     for (const db of dbNames) {
         const data = await validateToken(host, db);
@@ -156,6 +163,22 @@ async function hasValidAuthToken(host) {
         }
     }
     return false;
+}
+
+// ideav/backlogram#930: куки входа idb_* — HttpOnly, странице видны только метки idbs_*,
+// а метки ставит не каждый путь входа и снимает validateToken при сбое. Сервер видит сами
+// куки: GET /{db}/_captcha?JSON → { bypass }. true/false — ответ сервера; null — ответа нет
+// (ядро без _captcha, сбой сети), тогда решает перебор меток hasValidAuthToken.
+async function serverCaptchaBypass(host, db) {
+    try {
+        const response = await fetch(apiScheme() + host + '/' + encodeURIComponent(db) + '/_captcha?JSON',
+            { method: 'GET', credentials: 'include' });
+        if (!response.ok) return null;
+        const data = await response.json();
+        return data && typeof data.bypass === 'boolean' ? data.bypass : null;
+    } catch (err) {
+        return null;
+    }
 }
 
 // ============================================================
@@ -209,6 +232,27 @@ function showToast(message, type = 'info') {
     const remove = () => { if (toast.parentNode) toast.remove(); };
     setTimeout(remove, 5000);
     toast.addEventListener('click', remove);
+}
+
+// ============================================================
+// Цели Метрики регистрации (ideav/courses#26)
+// ============================================================
+// Счётчик ideav.ru подключён в start.html. Регистрация принята (письмо подтверждения ушло) →
+// цель reg_ok; пришёл с лендинга курсов (cookie ig_src ставит кнопка «Стать агентом» на
+// ideav.ru/kurs/) → ещё и цель kurs_agent_reg. Метки ig_src и ig_utm (реклама, её читает ядро)
+// одноразовые: после регистрации снимаются.
+// Без Метрики на странице (on-prem) — ничего не делает.
+const REG_METRIKA_ID = 108758829;
+function reachRegistrationGoal() {
+    const src = CookieUtil.get('ig_src');
+    try {
+        if (typeof window.ym === 'function') {
+            window.ym(REG_METRIKA_ID, 'reachGoal', 'reg_ok', src ? { src: src } : undefined);
+            if (src === 'kurs-agents') window.ym(REG_METRIKA_ID, 'reachGoal', 'kurs_agent_reg');
+        }
+    } catch (e) { /* цель не важнее регистрации */ }
+    if (src) CookieUtil.delete('ig_src');
+    if (CookieUtil.get('ig_utm') !== null) CookieUtil.delete('ig_utm');
 }
 
 // ============================================================
@@ -608,6 +652,15 @@ class AuthManager {
                     } catch (e) { /* ignore parse errors */ }
                     return { success: false, message: 'Неверное имя пользователя или пароль' };
                 }
+                // #1139: после неудач подряд (и для входа admin) сервер требует капчу — 403 с captcha: "required"
+                if (response.status === 403) {
+                    try {
+                        const errData = await response.json();
+                        if (errData.captcha === 'required') {
+                            return { success: false, captchaRequired: true, message: errData.error || 'Пройдите проверку капчи' };
+                        }
+                    } catch (e) { /* ignore parse errors */ }
+                }
                 throw new Error('HTTP ' + response.status);
             }
 
@@ -750,7 +803,9 @@ class App {
 
     _getPostLoginUriForDb(selectedDb) {
         if (!this._postLoginUri) return '';
-        if (!selectedDb || this._postLoginDb !== selectedDb) return '';
+        // ideav/courses#84: база со входом через кабинет (кука sso_back от сервера) — после входа в my назад в неё
+        const ssoBack = selectedDb === 'my' && !!this._postLoginDb && CookieUtil.get('sso_back') === this._postLoginDb;
+        if (!selectedDb || (this._postLoginDb !== selectedDb && !ssoBack)) return '';
         return this._postLoginUri;
     }
 
@@ -901,7 +956,8 @@ class App {
                     this.postLoginRedirect(selectedDb);
                 } else {
                     showToast(result.message, 'error');
-                    resetCaptcha('login-captcha-container');
+                    if (result.captchaRequired) this._forceCaptcha();
+                    else resetCaptcha('login-captcha-container');
                     loginInProgress = false;
                 }
             });
@@ -1293,6 +1349,7 @@ class App {
                 const result = await this.auth.register(email, password, confirmPassword, !agree || agree.checked, captchaToken);
                 showToast(result.message, result.success ? 'success' : 'error');
                 if (result.success) {
+                    reachRegistrationGoal();
                     this.hideAuthPanel();
                 } else {
                     resetCaptcha('register-captcha-container');
@@ -1327,8 +1384,12 @@ class App {
         // authorized in a workspace and will never see the captcha. It now runs
         // lazily, right before the captcha decision, via _ensureCaptchaBypass().
 
-        // Handle redirect reasons from the backend: show login form and a visible message
-        const urlParams = new URLSearchParams(window.location.search);
+        this.openAuthFromParams(new URLSearchParams(window.location.search));
+        this.openAuthFromHash();
+    }
+
+    // Причины перенаправления с бэкенда (?r=) и ссылки входа (?db=, ?u=): форма входа и сообщение.
+    openAuthFromParams(urlParams) {
         if (urlParams.get('r') === 'dBNotExists') {
             const dbParam = urlParams.get('db');
             const details = urlParams.get('d');
@@ -1362,8 +1423,9 @@ class App {
             const msg = details ? details : 'Ошибка авторизации';
             showToast(msg, 'error');
             this.showAuthPanel();
-        } else if (urlParams.get('db') && this.auth.allIdbDbs.length === 0) {
-            // Redirected here after logout with ?db=<name> but no auth cookies remain — show login form
+        } else if (urlParams.get('db') && !this.auth.allIdbDbs.includes(urlParams.get('db'))) {
+            // ?db=<name> без входа в эту базу — форма входа в неё: кнопка «Войти» гостя, выход из базы.
+            // Входы в другие базы форму не отменяют (#5457); гостевая кука idb_* — HttpOnly и без метки idbs_*.
             const dbParam = urlParams.get('db');
             const usernameParam = urlParams.get('u');
             if (dbParam !== 'my' && !this.auth.validDbs.includes(dbParam)) {
@@ -1404,8 +1466,6 @@ class App {
                 loginPasswordInput.focus();
             }
         }
-
-        this.openAuthFromHash();
     }
 
     // start.html#reg (или #register) — форма сразу на вкладке «Регистрация».
@@ -1455,9 +1515,17 @@ class App {
     async _ensureCaptchaBypass() {
         if (this._captchaBypassChecked) return this._captchaBypass;
         this._captchaBypassChecked = true;
-        this._captchaBypass = await hasValidAuthToken(this.apiConfig.host);
+        this._captchaBypass = await hasValidAuthToken(this.apiConfig.host, this._captchaProbeDb());
         if (this._captchaBypass) this._hideCaptchaWidgets();
         return this._captchaBypass;
+    }
+
+    // backlogram#930: база, у которой сервер спрашивают про капчу: из ?db=, иначе last_db, иначе my.
+    _captchaProbeDb() {
+        const fromUrl = /[?&]db=([^&#]*)/.exec((window.location && window.location.search) || '');
+        const lastDb = /(?:^|;\s*)last_db=([^;]*)/.exec((document && document.cookie) || '');
+        const db = (fromUrl && decodeURIComponent(fromUrl[1])) || (lastDb && decodeURIComponent(lastDb[1])) || '';
+        return db || 'my';
     }
 
     async _initCaptchaWidgets() {
@@ -1483,6 +1551,21 @@ class App {
     _loginBlockedByCaptcha(captchaToken) {
         if (this._captchaBypass) return false;
         return captchaToken === null && isCaptchaRendered('login-captcha-container');
+    }
+
+    // #1139: сервер потребовал капчу — поблажка за валидную куку снимается, капча рисуется заново.
+    _forceCaptcha() {
+        this._captchaBypass = false;
+        this._captchaBypassChecked = true;
+        ['login-captcha-container', 'register-captcha-container'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.style.display = '';
+        });
+        if (document.getElementById('login-captcha-container')?.dataset.widgetId !== undefined) {
+            resetCaptcha('login-captcha-container');
+            return;
+        }
+        this._initCaptchaWidgets();
     }
 
     // Issue #2906: hide the captcha containers when a valid token bypasses the captcha.

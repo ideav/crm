@@ -7,6 +7,8 @@
 // при сроке 22.07. Голова стоит В СРОК — красной плашки быть не должно; хвост уехал за срок — должна.
 //
 // Run with: node experiments/atex-production-planning-4304-split-warn-ui.test.js
+//
+// rules: none (defect #4304)
 
 process.env.TZ = 'UTC';
 

@@ -30,6 +30,7 @@
 
     var LP = (root && root.AtexLabelProduction) || (typeof require === 'function' ? require('../../atex/js/label-production.js') : null);
     var JM = (root && root.AtexJumboCutMap) || (typeof require === 'function' ? require('./jumbo-cut-map.js') : null);
+    var PG = (root && root.AtexProgress) || (typeof require === 'function' ? require('./atex-progress.js') : null);
     var lp = LP ? LP.core : null;
     var jc = JM ? JM.core : null;
 
@@ -402,10 +403,13 @@
         var t = this.state.tables;
         this.busy = true;
         var jobId = '';
+        // #5504: задание + запрос на полосу — окно прогресса со счётчиком.
+        var pg = (this.progressUi || PG).open('Запись задания первичной резки', { total: 1 + v.strips.length, delay: 300 });
         return this.client.post('_m_new/' + t.jumboJob.id + '?JSON&up=1', jc.jobFields(t, { start: start, batchId: b.id, minutes: minutes, edge: v.edge }))
             .then(function(res) {
                 jobId = String((res && (res.id || res.obj)) || '');
                 if (!jobId) throw new Error('сервер не вернул id задания');
+                pg.tick('Полосы');
                 var chain = Promise.resolve();
                 v.strips.forEach(function(s) {
                     chain = chain.then(function() {
@@ -413,7 +417,7 @@
                         p['t' + t.jumboStrip.id] = String(s.format);
                         if (t.jumboStrip.reqs.count) p['t' + t.jumboStrip.reqs.count] = String(s.count);
                         if (t.jumboStrip.reqs.purpose) p['t' + t.jumboStrip.reqs.purpose] = s.purpose;
-                        return self.client.post('_m_new/' + t.jumboStrip.id + '?JSON&up=' + encodeURIComponent(jobId), p);
+                        return self.client.post('_m_new/' + t.jumboStrip.id + '?JSON&up=' + encodeURIComponent(jobId), p).then(function() { pg.tick(); });
                     });
                 });
                 return chain;
@@ -421,6 +425,7 @@
                 self.message('Задание первичной резки записано: партия ' + b.no + ', ' + jc.mapLabel(v.strips) + '.', 'ok');
                 self.selectedBatchId = '';
                 self.variants = [];
+                pg.step('Обновляю данные', 0);
                 return self.reload();
             }).catch(function(err) {
                 console.error('[jumbo-cutting] ❌ запись задания', err);
@@ -429,7 +434,7 @@
                     self.message('Задание не записано: ' + err.message + (jobId ? ' (частично записанное задание удалено)' : ''), 'error');
                     return self.reload();
                 });
-            }).then(function() { self.busy = false; });
+            }).then(function() { pg.close(); self.busy = false; }, function(err) { pg.close(); self.busy = false; throw err; });
     };
 
     AtexJumboCutting.prototype.askDelete = function(jobId) {

@@ -12,6 +12,8 @@
 // допустимого нахлёста, но не раздут за него (#3939: без безграничного нахлёста, бейджа 542).
 //
 // Run with: node experiments/atex-production-planning-3955.test.js
+//
+// rules: SHIFT-overrun-tune
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

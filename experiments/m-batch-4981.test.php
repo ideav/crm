@@ -273,6 +273,8 @@ if($part === "firstcol"){
     function Insert($up, $ord, $t, $val, $msg){ $GLOBALS["INSERTED"][] = array($up, $ord, $t, $val); return 555; }
     function Delete($id, $root = 0){ $GLOBALS["DELETED"][] = $id; }
     function checkDuplicatedReqs($id, $t){}
+function Mail_is_settings_pwd($id, $t){ return FALSE; }	# #5494: таблицы почты в стенде нет
+function Skip_hidden_pwd($t, $v){ return $v === "******" && $t == PASSWORD; }	# #5494: прежнее правило маски
     function checkNewRef($val, $t, $fatal = TRUE){ return TRUE; }
     function GetRefOrd($obj, $t){ return 1; }
     function FieldAttrsHasMulti($attrs){ return FALSE; }

@@ -207,7 +207,7 @@ function setDefValue(i,h){
         byId(i).value=h;
         break;
     case 'BOOLEAN':
-        if(h.length)
+        if(h.length && h!=='-1')  // issue #5442: -1 = нет
             byId(i).checked=true;
     default:
         byId(i).innerHTML=h;

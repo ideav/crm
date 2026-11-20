@@ -13,6 +13,8 @@
 // так и разложил этот день (трасса: «в хвост дня положена настройка 45 мин»), разбор — #5162.
 //
 // Run with: node experiments/atex-pp-5157-dayfill-setup-tail.test.js
+//
+// rules: DAY_FILL
 
 process.env.TZ = 'UTC';
 var mod = require('../download/atex/js/production-planning.js');

@@ -12,6 +12,8 @@
 // без настроек планировщик пакует как раньше (до cutEndMin, #3821) — это проверяем отдельно.
 //
 // Run with: node experiments/atex-production-planning-3847.test.js
+//
+// rules: SHIFT-overrun-cuts, SHIFT-overrun-tune
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

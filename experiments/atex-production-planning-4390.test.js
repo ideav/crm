@@ -13,6 +13,8 @@
 //   по ФАКТИЧЕСКОМУ дню после раскладки (при сдвиге — предупреждение).
 //
 // Run with: node experiments/atex-production-planning-4390.test.js
+//
+// rules: MOVE-manual-pins-day
 
 var mod = require('../download/atex/js/production-planning.js');
 var planning = mod.planning;

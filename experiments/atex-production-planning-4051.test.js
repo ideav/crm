@@ -5,6 +5,8 @@
 // позиции теперь есть и в отчёте cut_planning (колонка due_date) → supply.dueKey; cutDueKeys
 // с флагом includeSupplyFallback берёт срок из обеспечения, если в genPositions его нет.
 // Флаг ВЫКЛючён у #4050 (штраф дня размещения) — поведение раскладки не меняется.
+//
+// rules: none (defect #4051)
 var assert = require('assert');
 var planning = require('../download/atex/js/production-planning.js').planning;
 

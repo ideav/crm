@@ -162,6 +162,13 @@
         var s = String(v), i = s.indexOf(':');
         return i < 0 ? s : s.slice(i + 1);
     };
+    // BOOLEAN после #5442: «да» = 1 (или X из старых шаблонов); -1, 0, пусто = «нет» (#5478)
+    PF.bool = function (v) {
+        if (v === undefined || v === null || v === false) return false;
+        if (v === true) return true;
+        var s = String(v).trim().toLowerCase();
+        return s !== '' && s !== '0' && s !== '-1' && s !== 'false';
+    };
     PF.num = function (v) {
         if (v === undefined || v === null || v === '') return null;
         var n = parseFloat(String(v).replace(',', '.'));
@@ -369,7 +376,7 @@
                 controls[f.key] = function () { return ta.value; };
             } else if (f.type === 'bool') {
                 var cb = el('input', {type: 'checkbox', id: id, class: 'pf-check'});
-                cb.checked = (v === 'X' || v === 1 || v === '1' || v === true);
+                cb.checked = PF.bool(v);
                 ctrl = cb;
                 controls[f.key] = function () { return cb.checked ? 1 : 0; };
             } else {

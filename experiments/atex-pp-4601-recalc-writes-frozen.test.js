@@ -16,6 +16,8 @@
 //   C — «⏩ Пересчитать отсюда» — тоже кнопка оператора, тоже { manual: true } (#4588).
 //
 // Run with: node experiments/atex-pp-4601-recalc-writes-frozen.test.js
+//
+// rules: none (defect #4601)
 
 process.env.TZ = 'Europe/Moscow';
 global.window = { db: 'testdb', xsrf: 'x' };

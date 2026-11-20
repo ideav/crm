@@ -7,6 +7,8 @@
 //   • production-planning.appendCoreStrip — втулочная полоса встаёт в свою позицию по ширине.
 //
 // Run with: node experiments/atex-strip-width-order.test.js
+//
+// rules: CUT-desc-width
 
 process.env.TZ = 'UTC';
 

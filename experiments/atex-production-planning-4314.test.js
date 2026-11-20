@@ -15,6 +15,8 @@
 // нарисованным ровно так же, как в #4300/#4312.
 //
 // Run with: node experiments/atex-production-planning-4314.test.js
+//
+// rules: DUR-setup-on-change
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

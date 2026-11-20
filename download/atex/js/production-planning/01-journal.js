@@ -12,7 +12,9 @@
     //   RUNS_CHANGE   — у задания меняется «Кол-во резок план»: было → стало
     //   CHAIN_CREATE  — рождение продолжения (родитель, сколько проходов уносит)
     //   CHAIN_DELETE  — снятие сегмента (сколько проходов на нём стояло)
-    //   OP_DROPPED    — операцию снял страж (правило реестра §15, режим `drop`)
+    //   OP_DROPPED    — операцию снял страж (правило реестра §15, режим `drop`); WORK_REFUSED /
+    //                   RATCHET_REFUSED — цепочку снял шлюз сохранности работы / храповик. Все три
+    //                   начинают «Детали» с `правило=<ID>: ` (#5411, `journalGuardRows`)
     //   CHAIN_BALANCE — Σ проходов цепочки ДО и ПОСЛЕ операций; расхождение = потеря
     //   SETTLE_SPLIT  — «Урегулировать» делит частично выполненное: сделано + остаток
     //   DAY_OVER      — станко-день выше потолка смены по ХРАНИМЫМ минутам
@@ -315,39 +317,62 @@
         });
     }
 
-    // Что снял страж: разница исходных операций и прошедших. Отдельно помечаем снятый `create` —
-    // именно он оставляет урезанную голову без продолжения (корень #4536/#4598).
-    //   before — операции ДО стража, guard — результат guardPlanOps.
-    function journalGuardDrops(ctx, before, guard) {
-        if (!journalMeta(ctx) || !before || !guard) return Promise.resolve(0);
-        var after = guard.ops || {};
-        var keptU = {}, keptC = {}, keptD = {};
-        ((after.updates) || []).forEach(function(u) { keptU[String(u.cutId)] = true; });
-        ((after.creates) || []).forEach(function(c) { keptC[String(c.parentCutId) + '|' + c.plannedRuns] = true; });
-        ((after.deletes) || []).forEach(function(id) { keptD[String(id)] = true; });
-        var rules = (guard.violations || []).map(function(v) { return v && v.rule; }).filter(Boolean);
-        var why = rules.length ? ' правила: ' + rules.slice(0, 6).join(', ') : '';
+    // #5411: ЧТО СНЯЛ СТРАЖ И КАКИМ ПРАВИЛОМ. Каждая строка начинается с `правило=<ID>[,<ID>…]: ` —
+    // по этому префиксу журнал считает срабатывания каждого правила реестра. GATE_WORK_KEPT —
+    // сохранность работы (#4645): свойство самого шлюза, а не правила реестра.
+    //   OP_DROPPED (cut пуст)  — сводка по правилу `drop`: `before` = сколько операций снято;
+    //   OP_DROPPED (cut, ⛔)    — снятый `create` продолжения: он оставляет урезанную голову без
+    //                            остатка (корень #4536/#4598), поэтому — построчно;
+    //   OP_DROPPED (cut, #4536) — цепочка снята целиком из-за отброшенной операции;
+    //   WORK_REFUSED / RATCHET_REFUSED — цепочка снята шлюзом сохранности работы / храповиком.
+    // Чистая: строит строки по отчёту `guardPlanOps`, ничего не пишет.
+    var JOURNAL_GUARD_MAX_ROWS = 60;
+    function journalGuardRows(guard) {
+        if (!guard) return [];
+        var tag = function(rules) {
+            var list = (rules || []).filter(Boolean);
+            return 'правило=' + (list.length ? list.join(',') : 'UNKNOWN') + ': ';
+        };
         var rows = [];
-        ((before.updates) || []).forEach(function(u) {
-            if (keptU[String(u.cutId)]) return;
-            rows.push({ event: 'OP_DROPPED', cut: u.cutId, after: u.plannedRuns,
-                        details: 'снят update (проходов должно было стать ' + u.plannedRuns + ')' + why });
+        var byRule = {}, order = [];
+        (guard.drops || []).forEach(function(d) {
+            if (!byRule[d.rule]) { byRule[d.rule] = { update: 0, delete: 0, create: 0 }; order.push(d.rule); }
+            byRule[d.rule][d.kind] = (byRule[d.rule][d.kind] || 0) + 1;
         });
-        ((before.creates) || []).forEach(function(c) {
-            if (keptC[String(c.parentCutId) + '|' + c.plannedRuns]) return;
-            rows.push({ event: 'OP_DROPPED', cut: c.parentCutId, after: c.plannedRuns,
-                        details: '⛔ снят CREATE продолжения на ' + c.plannedRuns +
-                                 ' проходов — голова останется без остатка' + why });
+        order.forEach(function(rule) {
+            var n = byRule[rule];
+            rows.push({ event: 'OP_DROPPED', before: n.update + n.delete + n.create,
+                        details: tag([rule]) + 'снято операций: update ' + n.update + ', delete ' + n.delete +
+                                 ', create ' + n.create });
         });
-        ((before.deletes) || []).forEach(function(id) {
-            if (keptD[String(id)]) return;
-            rows.push({ event: 'OP_DROPPED', cut: id, details: 'снят delete' + why });
+        (guard.drops || []).forEach(function(d) {
+            if (d.kind !== 'create') return;
+            rows.push({ event: 'OP_DROPPED', cut: d.cutId, after: d.plannedRuns,
+                        details: tag([d.rule]) + '⛔ снят CREATE продолжения на ' + d.plannedRuns +
+                                 ' проходов — голова останется без остатка' });
         });
-        if ((guard.restoredChains || []).length) {
-            rows.push({ event: 'OP_DROPPED', before: (guard.restoredChains || []).length,
-                        details: '#4536: операции сняты ЦЕЛИКОМ по цепочкам ' + (guard.restoredChains || []).join(', ') });
-        }
-        return planJournalRows(ctx, rows);
+        (guard.restoredChains || []).forEach(function(ch) {
+            rows.push({ event: 'OP_DROPPED', cut: ch,
+                        details: tag((guard.restoredRules || {})[String(ch)]) +
+                                 '#4536: операции задания сняты ЦЕЛИКОМ по цепочке ' + ch });
+        });
+        (guard.lostWorkChains || []).forEach(function(ch) {
+            rows.push({ event: 'WORK_REFUSED', cut: ch,
+                        details: tag(['GATE_WORK_KEPT']) + '#4645: набор операций отнимал проходы у цепочки ' + ch +
+                                 ' — операции сняты целиком, запись оставлена как хранится' });
+        });
+        (guard.ratchetChains || []).forEach(function(ch) {
+            rows.push({ event: 'RATCHET_REFUSED', cut: ch,
+                        details: tag((guard.ratchetRules || {})[String(ch)]) +
+                                 '#4751: набор операций ухудшал жёсткое правило по цепочке ' + ch +
+                                 ' — операции сняты целиком, запись оставлена как хранится' });
+        });
+        return rows.slice(0, JOURNAL_GUARD_MAX_ROWS);
+    }
+
+    function journalGuardDrops(ctx, guard) {
+        if (!journalMeta(ctx) || !guard) return Promise.resolve(0);
+        return planJournalRows(ctx, journalGuardRows(guard));
     }
 
     // Подробности одного применения плана. snapshot — задания ДО (id, plannedRuns, firstPartId),

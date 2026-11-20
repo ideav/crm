@@ -5,6 +5,8 @@
 // живом пути slotPlacement — перебор точек вставки ставит срочное на ранний день из-за штрафа опоздания.
 //
 // Run with: node experiments/atex-production-planning-4050.test.js
+//
+// rules: PEN-late, PEN-exact-due
 
 process.env.TZ = 'UTC';
 var planning = require('../download/atex/js/production-planning.js').planning;

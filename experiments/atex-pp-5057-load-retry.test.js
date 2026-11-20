@@ -7,6 +7,8 @@
 // позициями и вся резка уходит в «ОТХОДЫ» без номеров заказов.
 //
 // Run with: node experiments/atex-pp-5057-load-retry.test.js
+//
+// rules: none (defect #5057)
 
 process.env.TZ = 'UTC';
 
