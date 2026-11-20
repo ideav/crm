@@ -2,7 +2,7 @@
 <script>
     document.title = 'Миграция конфигурации - ' + '{_global_.z}'.charAt(0).toUpperCase() + '{_global_.z}'.slice(1);
 </script>
-<script src="/js/migr-obfuscate.js?{_global_.version}"></script>
+<script src="/js/migr-obfuscate.js?{_global_.version}.1"></script>
 <style>
     .mig{ max-width:1080px; margin:0 auto; padding:16px 18px 60px; color:var(--text-primary,#1f2937); }
     .mig *{ box-sizing:border-box; }
@@ -59,6 +59,7 @@
                         <input type="checkbox" id="mig-obfuscate"> <b>обфускация данных</b> (обезличить суммы, названия и тексты)
                     </label>
                 </div>
+                <div class="mig-note">Переносятся: таблицы с подписями и свойствами колонок, ссылками и подчинёнными таблицами, их записи, запросы со всеми полями колонок (фильтры, функции, форматы, «скрыть», сортировка, SET). Не переносятся: роли и их права, пароли пользователей, служебные объекты с ID ниже порога. Пользователь получает роль по её ID в базе-приёмнике.</div>
                 <textarea class="mig-json" id="mig-export-json" placeholder="Здесь появится JSON конфигурации…" readonly></textarea>
                 <div class="mig-summary" id="mig-export-summary"></div>
             </div>
@@ -196,18 +197,22 @@
             var meta = await getJson('metadata');
             var refTargets = obfuscate ? OBF.buildRefTargets(meta) : {}; // id справочников (rule 5)
             var dictKept = []; // названия справочников, сохранённых как есть (rule 5)
-            var tables = (Array.isArray(meta) ? meta : []).filter(function(t){ return parseInt(t.id, 10) >= threshold; });
+            var metaList = Array.isArray(meta) ? meta : [];
+            var metaById = {};
+            metaList.forEach(function(t){ metaById[String(t.id)] = t; });
+            var subTables = subordinateIds(metaList);
+            var tables = metaList.filter(function(t){ return parseInt(t.id, 10) >= threshold; });
             for(var ti = 0; ti < tables.length; ti++){
                 var t = tables[ti];
-                var cols = (t.reqs || []).map(function(r){
-                    return { old_req_id:String(r.id), name:String(r.val), type_code:parseInt(r.type, 10) || 3, old_type_id:String(r.orig), ref_target: r.ref_id ? String(r.ref_id) : null, attrs: r.attrs || '' };
-                });
-                var tableObj = { old_id:String(t.id), name:String(t.val), base_code:parseInt(t.type, 10) || 3, unique:(String(t.unique) === '1'), columns:cols, records:[] };
+                var cols = (t.reqs || []).map(exportColumn);
+                var tableObj = { old_id:String(t.id), name:String(t.val), base_code:parseInt(t.type, 10) || 3, unique:(String(t.unique) === '1'), subordinate:!!subTables[String(t.id)], columns:cols, records:[] };
                 var obfNote = '';
                 if(opt.data){
                     // при обфускации тянем максимум 200 записей (rule 2); >30 достаточно, чтобы решить судьбу справочника (rule 5)
                     var limit = obfuscate ? ('0,' + OBF.OBF_MAX_RECORDS) : '0,100000';
-                    var recs = await getJson('object/' + t.id + '?JSON_OBJ&LIMIT=' + limit);
+                    // Без F_U ядро отдаёт только записи с up=1, а записи подчинённой таблицы лежат
+                    // под записями родителя: F_U=0 — все записи типа (Prepare_parent_filter, issue #5410).
+                    var recs = await getJson('object/' + t.id + '?JSON_OBJ' + (tableObj.subordinate ? '&F_U=0' : '') + '&LIMIT=' + limit);
                     var mapped = (Array.isArray(recs) ? recs : []).map(function(rec){ return { old_id:String(rec.i), up:String(rec.u), values: rec.r }; });
                     if(obfuscate){
                         var res = OBF.processTable({ records:mapped, columns:cols, tableId:t.id, tableName:t.val, tableBaseCode:tableObj.base_code, refTargets:refTargets });
@@ -232,9 +237,11 @@
                     var columns = (Array.isArray(qcols) ? qcols : []).map(function(c){
                         var src = String(c.r[0] || '');
                         var srcId = src.indexOf(':') > -1 ? src.split(':')[0] : src;
-                        return { source_old_id:srcId, name:String(c.r[1] || ''), formula:String(c.r[2] || ''), func:String(c.r[5] || ''), format:String(c.r[9] || ''), sort:String(c.r[10] || '') };
+                        var fields = recordFields(metaById['28'], c.r);
+                        var nameField = fields['100'];
+                        return { source_old_id:srcId, name:nameField ? nameField.value : String(c.r[1] || ''), fields:fields };
                     });
-                    pkg.queries.push({ old_id:String(q.i), name:String(q.r[0]), columns:columns });
+                    pkg.queries.push({ old_id:String(q.i), name:String(q.r[0]), fields:recordFields(metaById['22'], q.r), columns:columns });
                     log('запрос «' + q.r[0] + '» (id ' + q.i + '): колонок ' + columns.length, 'ok');
                 }
             }
@@ -295,6 +302,107 @@
         return out;
     }
 
+    // Подчинённые таблицы по схеме: термин, который стоит реквизитом-массивом у другого (arr_id).
+    function subordinateIds(metaList){
+        var out = {};
+        metaList.forEach(function(t){ (t.reqs || []).forEach(function(r){ if(r.arr_id){ out[String(r.arr_id)] = true; } }); });
+        return out;
+    }
+
+    // Колонка таблицы из metadata. Для ссылки ref — id таблицы-цели, ref_id — строка-определение
+    // ссылки; val ссылки — имя цели, подпись колонки лежит в field_attrs.alias (issue #5410).
+    function exportColumn(r){
+        var fa = r.field_attrs || null;
+        var alias = fa && fa.alias ? String(fa.alias) : '';
+        return { old_req_id:String(r.id), name:alias || String(r.val), term_name:String(r.val), type_code:parseInt(r.type, 10) || 3, old_type_id:String(r.orig),
+            ref_target: r.ref ? String(r.ref) : null, arr_id: r.arr_id ? String(r.arr_id) : null, attrs: r.attrs || '', field_attrs: fa };
+    }
+
+    // Значения реквизитов записи (r[0] — главное значение, r[i+1] — reqs[i]) по id реквизита.
+    // Ссылка приходит как «id:значение»: id нужен для сопоставления с перенесёнными записями,
+    // а значение — чтобы найти запись в базе-приёмнике по тексту (функции, форматы).
+    function recordFields(metaT, r){
+        var out = {};
+        ((metaT && metaT.reqs) || []).forEach(function(req, i){
+            if(req.arr_id){ return; }
+            var v = r ? r[i + 1] : null;
+            if(v == null || v === ''){ return; }
+            v = String(v);
+            if(req.ref){
+                var p = v.indexOf(':');
+                out[String(req.id)] = p > -1 ? { value:v.slice(p + 1), ref_id:v.slice(0, p) } : { value:v };
+            } else {
+                out[String(req.id)] = { value:v };
+            }
+        });
+        return out;
+    }
+
+    // Роль колонки при импорте. Пакет прежнего формата: arr_id нет, а в ref_target лежит
+    // строка-определение ссылки; таблица-цель в обоих форматах — old_type_id (orig).
+    function columnKind(c, pkgTables){
+        var orig = c.old_type_id ? String(c.old_type_id) : '';
+        if(c.arr_id){ return { arr:String(c.arr_id) }; }
+        if(c.ref_target){ return { ref: orig || String(c.ref_target) }; }
+        var sub = pkgTables[orig];
+        if(sub && (sub.columns || []).length){ return { arr:orig }; }
+        return {};
+    }
+
+    // Порядок записей: таблица после родительских (подчинённая под записью родителя), по
+    // возможности — после таблиц, на которые ссылается. Петли ссылок разрешаются дописью.
+    function tableImportOrder(tables, pkgTables){
+        var hard = {}, soft = {};
+        tables.forEach(function(t){ hard[t.old_id] = []; soft[t.old_id] = []; });
+        tables.forEach(function(t){
+            (t.columns || []).forEach(function(c){
+                var k = columnKind(c, pkgTables);
+                if(k.arr && hard[k.arr] && k.arr !== String(t.old_id)){ hard[k.arr].push(String(t.old_id)); }
+                if(k.ref && pkgTables[k.ref] && k.ref !== String(t.old_id)){ soft[t.old_id].push(k.ref); }
+            });
+        });
+        var done = {}, out = [], rest = tables.slice();
+        function ready(list){ return list.every(function(id){ return done[id]; }); }
+        while(rest.length){
+            var cand = rest.filter(function(t){ return ready(hard[t.old_id]); });
+            if(!cand.length){ cand = rest; }
+            var pick = cand.filter(function(t){ return ready(soft[t.old_id]); })[0] || cand[0];
+            done[pick.old_id] = true;
+            out.push(pick);
+            rest.splice(rest.indexOf(pick), 1);
+        }
+        return out;
+    }
+
+    // Значение ссылки из пакета: «id[,id…]:текст». ids — новые id, если перенесены все записи.
+    function refValue(v, idMap){
+        var p = v.indexOf(':');
+        var idPart = p > -1 ? v.slice(0, p) : v;
+        var text = p > -1 ? v.slice(p + 1) : v;
+        if(!/^\d+(,\d+)*$/.test(idPart)){ return { text:v }; }
+        var oldIds = idPart.split(',');
+        var mapped = oldIds.map(function(o){ return idMap[o]; });
+        if(mapped.every(Boolean)){ return { ids:mapped.join(',') }; }
+        return { oldIds:oldIds, text:text };
+    }
+
+    function stripRefId(v){ var s = String(v || ''); return /^\d+:/.test(s) ? s.slice(s.indexOf(':') + 1) : s; }
+
+    // Реквизиты записи запроса или колонки запроса: ссылка на перенесённую запись — новым id,
+    // остальные ссылки — текстом (ядро находит запись по значению), прочее — как есть.
+    function applyRecordFields(params, fields, known, idMap){
+        Object.keys(fields || {}).forEach(function(reqId){
+            if(known && Object.keys(known).length && !known[reqId]){ return; }
+            var f = fields[reqId];
+            var v = f.value;
+            if(f.ref_id != null){
+                var ids = String(f.ref_id).split(',').map(function(o){ return idMap[o]; });
+                if(ids.every(Boolean)){ v = ids.join(','); }
+            }
+            params['t' + reqId] = v;
+        });
+    }
+
     function normDir(d){ return String(d || '').replace(/^\/+/, '').replace(/\/+$/, ''); }
     async function collectFiles(root, into){
         var visited = {};
@@ -352,11 +460,23 @@
         try{
             // read target structure for term-reuse decisions
             var meta = await getJson('metadata');
-            var tableIds = {}, origSet = {};
+            var tableIds = {}, origSet = {}, tgtReqs = {};
             (Array.isArray(meta) ? meta : []).forEach(function(t){
                 tableIds[String(t.id)] = true;
-                (t.reqs || []).forEach(function(r){ origSet[String(r.orig)] = true; });
+                tgtReqs[String(t.id)] = {};
+                (t.reqs || []).forEach(function(r){ origSet[String(r.orig)] = true; tgtReqs[String(t.id)][String(r.id)] = true; });
             });
+
+            async function applyColumnAttrs(reqId, c, withRequired){
+                if(!reqId){ return; }
+                var fa = c.field_attrs;
+                if(!fa){ await post('_d_alias/' + reqId, { val:c.name }); return; } // пакет прежнего формата
+                var p = { val:fa['default'] || '', alias:c.name };
+                if(fa.multi){ p.multi = 1; }
+                if(fa.key){ p.key = 1; }
+                if(withRequired){ p.set_null = 1; }
+                await post('_d_attrs/' + reqId, p);
+            }
 
             // create-or-reuse a global term (type). Returns { id, fresh }.
             async function getTerm(code, name){
@@ -374,53 +494,100 @@
             }
 
             // ---- TABLES ----
+            var serviceMax = parseInt(pkg.service_max, 10) || 460;
             if(opt.tables && Array.isArray(pkg.tables)){
+                var pkgTables = {};
+                pkg.tables.forEach(function(t){ pkgTables[String(t.old_id)] = t; });
+                // 1) термины всех таблиц — раньше колонок: ссылка и подчинённая таблица указывают
+                //    на таблицу по id, а цель может идти в пакете позже (issue #5410)
                 for(var ti = 0; ti < pkg.tables.length; ti++){
                     var t = pkg.tables[ti];
                     var tterm = await getTerm(t.base_code, t.name);
-                    var newTableId = tterm.id;
-                    if(t.unique){ await post('_d_save', { origId:newTableId, val: tterm.renamed || t.name, t:t.base_code, unique:1 }); }
-                    idMap[t.old_id] = newTableId;
-                    log('таблица «' + t.name + '» → id ' + newTableId + (tterm.renamed ? ' (как «' + tterm.renamed + '»)' : (tterm.fresh ? '' : ' (переиспользована)')), 'ok');
-                    // columns
-                    for(var ci = 0; ci < (t.columns || []).length; ci++){
-                        var c = t.columns[ci];
-                        var newReqId;
-                        if(c.ref_target && idMap[c.ref_target]){
-                            var rf = await post('_d_ref/' + idMap[c.ref_target], {});
+                    if(t.unique){ await post('_d_save', { origId:tterm.id, val: tterm.renamed || t.name, t:t.base_code, unique:1 }); }
+                    idMap[t.old_id] = tterm.id;
+                    log('таблица «' + t.name + '» → id ' + tterm.id + (tterm.renamed ? ' (как «' + tterm.renamed + '»)' : (tterm.fresh ? '' : ' (переиспользована)')), 'ok');
+                }
+                // 2) колонки
+                for(var tj = 0; tj < pkg.tables.length; tj++){
+                    var tc = pkg.tables[tj];
+                    var newTableId = idMap[tc.old_id];
+                    for(var ci = 0; ci < (tc.columns || []).length; ci++){
+                        var c = tc.columns[ci];
+                        var kind = columnKind(c, pkgTables);
+                        var newReqId = null;
+                        if(kind.arr && idMap[kind.arr]){
+                            newReqId = recId(await post('_d_req/' + newTableId, { t:idMap[kind.arr] }));
+                        } else if(kind.ref && (idMap[kind.ref] || parseInt(kind.ref, 10) < serviceMax)){
+                            // служебная цель (Пользователь, Роль…) есть в каждой базе под тем же id
+                            var rf = await post('_d_ref/' + (idMap[kind.ref] || kind.ref), {});
                             var refType = objId(rf); track(refType, 'type');
-                            var rq = await post('_d_req/' + newTableId, { t:refType });
-                            newReqId = recId(rq);
+                            newReqId = recId(await post('_d_req/' + newTableId, { t:refType }));
                         } else {
-                            var colTerm = await getTerm(c.type_code, c.name);
-                            var rq2 = await post('_d_req/' + newTableId, { t:colTerm.id });
-                            newReqId = recId(rq2);
+                            if(kind.ref){ log('  колонка «' + c.name + '»: таблицы-цели ' + kind.ref + ' нет в пакете — перенесена текстом', 'warn'); }
+                            var colTerm = await getTerm(c.type_code, c.term_name || c.name);
+                            newReqId = recId(await post('_d_req/' + newTableId, { t:colTerm.id }));
                         }
                         track(newReqId, 'req');
-                        await post('_d_alias/' + newReqId, { val:c.name });
+                        await applyColumnAttrs(newReqId, c, false);
                         idMap[c.old_req_id] = newReqId;
                     }
-                    // records
-                    for(var ri = 0; ri < (t.records || []).length; ri++){
-                        var rec = t.records[ri];
-                        var params = { up: rec.up === '1' ? 1 : (idMap[rec.up] || 1) };
-                        params['t' + newTableId] = rec.values[0];
-                        for(var vi = 0; vi < (t.columns || []).length; vi++){
-                            var col = t.columns[vi];
+                }
+                // 3) записи: родительская таблица раньше подчинённой, справочник — по возможности
+                //    раньше ссылающихся; ссылки на ещё не созданные записи дописываются после всех
+                var pendingRefs = [];
+                var order = tableImportOrder(pkg.tables, pkgTables);
+                for(var to = 0; to < order.length; to++){
+                    var tr = order[to];
+                    var trId = idMap[tr.old_id];
+                    var recs = (tr.records || []).slice().sort(function(a, b){ return (parseInt(a.old_id, 10) || 0) - (parseInt(b.old_id, 10) || 0); });
+                    var made = 0, orphans = 0;
+                    for(var ri = 0; ri < recs.length; ri++){
+                        var rec = recs[ri];
+                        var upId = (rec.up === '1' || rec.up == null) ? 1 : idMap[rec.up];
+                        if(!upId){
+                            if(tr.subordinate){ orphans++; continue; }
+                            upId = 1;
+                        }
+                        var params = { up:upId };
+                        params['t' + trId] = rec.values[0];
+                        var deferred = [];
+                        for(var vi = 0; vi < (tr.columns || []).length; vi++){
+                            var col = tr.columns[vi];
+                            var ck = columnKind(col, pkgTables);
                             var val = rec.values[vi + 1];
-                            if(val == null || val === ''){ continue; }
-                            if(col.ref_target){
-                                var refv = String(val); var refId = refv.indexOf(':') > -1 ? refv.split(':')[0] : refv;
-                                val = idMap[refId] || val;
+                            if(ck.arr || val == null || val === '' || !idMap[col.old_req_id]){ continue; }
+                            if(ck.ref){
+                                var rv = refValue(String(val), idMap);
+                                if(rv.ids){ val = rv.ids; }
+                                else if(pkgTables[ck.ref] && rv.oldIds){ deferred.push({ req:idMap[col.old_req_id], oldIds:rv.oldIds }); continue; }
+                                else { val = rv.text; }
                             }
                             params['t' + idMap[col.old_req_id]] = val;
                         }
-                        var rr2 = await post('_m_new/' + newTableId, params);
-                        var newRecId = recId(rr2);
+                        var newRecId = recId(await post('_m_new/' + trId, params));
                         track(newRecId, 'record');
+                        made++;
                         if(rec.old_id){ idMap[rec.old_id] = newRecId; }
+                        deferred.forEach(function(d){ d.rec = newRecId; pendingRefs.push(d); });
                     }
-                    log('  записей создано: ' + (t.records || []).length, 'dim');
+                    log('  «' + tr.name + '»: записей создано ' + made + (orphans ? ', без родительской записи пропущено ' + orphans : ''), orphans ? 'warn' : 'dim');
+                }
+                for(var pi = 0; pi < pendingRefs.length; pi++){
+                    var pr = pendingRefs[pi];
+                    var ids = pr.oldIds.map(function(o){ return idMap[o]; }).filter(Boolean);
+                    if(!ids.length || !pr.rec){ continue; }
+                    var sp = {};
+                    sp['t' + pr.req] = ids.join(',');
+                    await post('_m_set/' + pr.rec, sp);
+                }
+                // 4) «обязательно» — после записей, чтобы дописанные позже ссылки не мешали созданию
+                for(var tk = 0; tk < pkg.tables.length; tk++){
+                    var cols4 = pkg.tables[tk].columns || [];
+                    for(var c4 = 0; c4 < cols4.length; c4++){
+                        if(cols4[c4].field_attrs && cols4[c4].field_attrs.required && idMap[cols4[c4].old_req_id]){
+                            await applyColumnAttrs(idMap[cols4[c4].old_req_id], cols4[c4], true);
+                        }
+                    }
                 }
             }
 
@@ -428,17 +595,23 @@
             if(opt.queries && Array.isArray(pkg.queries)){
                 for(var qi = 0; qi < pkg.queries.length; qi++){
                     var q = pkg.queries[qi];
-                    var qr = await post('_m_new/22', { up:1, t22:q.name });
+                    var qp = { up:1, t22:q.name };
+                    applyRecordFields(qp, q.fields, tgtReqs['22'], idMap);
+                    var qr = await post('_m_new/22', qp);
                     var newQid = recId(qr); track(newQid, 'record');
                     log('запрос «' + q.name + '» → id ' + newQid, 'ok');
                     for(var qci = 0; qci < (q.columns || []).length; qci++){
                         var qc = q.columns[qci];
                         var src = idMap[qc.source_old_id] || qc.source_old_id;
                         var cp = { up:newQid, t28:src, t100:qc.name };
-                        if(qc.formula){ cp.t101 = qc.formula; }
-                        if(qc.func){ cp.t104 = qc.func; }
-                        if(qc.format){ cp.t84 = qc.format; }
-                        if(qc.sort){ cp.t109 = qc.sort; }
+                        if(qc.fields){
+                            applyRecordFields(cp, qc.fields, tgtReqs['28'], idMap);
+                        } else { // пакет прежнего формата: функция и формат там записаны как «id:значение»
+                            if(qc.formula){ cp.t101 = qc.formula; }
+                            if(qc.func){ cp.t104 = stripRefId(qc.func); }
+                            if(qc.format){ cp.t84 = stripRefId(qc.format); }
+                            if(qc.sort){ cp.t109 = qc.sort; }
+                        }
                         var qcr = await post('_m_new/28', cp);
                         track(recId(qcr), 'record');
                     }

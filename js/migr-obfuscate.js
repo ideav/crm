@@ -80,7 +80,7 @@
     }
 
     // Собрать множество id таблиц, на которые ссылаются (справочники), из metadata.
-    // Два сигнала: колонка-ссылка (r.ref_id -> id справочника) и серверный флаг
+    // Два сигнала: колонка-ссылка (r.ref -> id справочника; r.ref_id — строка-определение ссылки) и серверный флаг
     // t.referenced (само его наличие означает, что таблица t — справочник; значение
     // флага — id реквизита-ссылки, поэтому в множество идёт собственный id таблицы).
     function buildRefTargets(meta){
@@ -88,7 +88,7 @@
         (Array.isArray(meta) ? meta : []).forEach(function(t){
             if(!t){ return; }
             if(t.referenced){ set[String(t.id)] = true; }
-            (t.reqs || []).forEach(function(r){ if(r && r.ref_id){ set[String(r.ref_id)] = true; } });
+            (t.reqs || []).forEach(function(r){ if(r && r.ref){ set[String(r.ref)] = true; } });
         });
         return set;
     }
