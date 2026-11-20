@@ -36,6 +36,10 @@ services:
       INTEGRAM_MASTER_PASSWORD: ${INTEGRAM_MASTER_PASSWORD:?Set INTEGRAM_MASTER_PASSWORD in .env.local}
       INTEGRAM_ADMIN_EMAIL: ${INTEGRAM_ADMIN_EMAIL:-admin@example.local}
       INTEGRAM_SALT: ${INTEGRAM_SALT:-integram-local-salt}
+      # Токены API: session | refresh (пара refresh/access, docs/kb/00-start.md), сроки — секунды
+      INTEGRAM_AUTH_TOKENS: ${INTEGRAM_AUTH_TOKENS:-session}
+      INTEGRAM_ACCESS_TTL: ${INTEGRAM_ACCESS_TTL:-900}
+      INTEGRAM_REFRESH_TTL: ${INTEGRAM_REFRESH_TTL:-2592000}
       INTEGRAM_SMTP_DEBUG: ${INTEGRAM_SMTP_DEBUG:-false}
       # Почта для писем пользователям (в т.ч. «Забыли пароль?»). Без реальных
       # SMTP_USERNAME/SMTP_PASSWORD письма не отправляются — вход это не ломает.

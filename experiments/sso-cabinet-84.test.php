@@ -191,7 +191,7 @@ function run_case($case){
     $GLOBALS["GUEST"] = !empty($guest);
     $src = file_get_contents(__DIR__."/../index.php");
     $code = "";
-    foreach(array("Validate_Token", "Sso_role", "Sso_enter", "Sso_back_redirect", "Restore_id", "Token_parse", "Token_stored_val",
+    foreach(array("Validate_Token", "Auth_conf", "Refresh_mode", "Access_parse", "Access_mac", "Access_check", "Refresh_idle", "Refresh_xsrf", "Sso_role", "Sso_enter", "Sso_back_redirect", "Restore_id", "Token_parse", "Token_stored_val",
                   "Token_db_val", "Token_idle_sql", "Token_match_sql", "Session_refresh_action", "Session_cookie_exp",
                   "Auth_cookie_opts", "Auth_cookie", "qrLoginIsHttps", "Admin_token", "Admin_xsrf", "Guest_session") as $fn)
         $code .= extract_function_source($src, $fn)."\n";

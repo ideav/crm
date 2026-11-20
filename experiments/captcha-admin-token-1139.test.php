@@ -86,7 +86,7 @@ function extract_src($source, $start, $end = NULL){
 }
 $source = file_get_contents($indexPhp);
 $fns = array("Login_lock_left", "Login_locked_die", "incrementRetries", "Login_captcha_passed", "Login_captcha_die",
-             "Login_captcha_required", "Admin_token", "Admin_xsrf", "Is_local_server", "Secrets_are_default", "Secrets_guard");
+             "Login_captcha_required", "Admin_token", "Admin_xsrf", "Auth_conf", "Refresh_mode", "Login_json_fields", "Is_local_server", "Secrets_are_default", "Secrets_guard");
 if($case[0] === "D") $fns[] = "verifyCaptcha";
 foreach($fns as $fn){
     $src = extract_src($source, "function $fn(");

@@ -56,6 +56,20 @@ curl -s -H "X-Authorization: <token>" "https://ideav.ru/{db}/xsrf?JSON"
   на короткий токен ядра `m.…` (10 мин) через `POST /{db}/_mcp_exchange` со своим секретом
   (`Authorization: Bearer <INTEGRAM_MCP_EXCHANGE_SECRET>`). С `m.`-токеном ядро пускает только
   `metadata`/`object`/`edit_obj`/`report`/`xsrf` на чтение и `_m_*`/`_d_*` в пределах прав токена.
+- Режим refresh/access для API-клиентов (мобильное приложение, интеграции) включается на установку:
+  `AUTH_TOKENS=refresh` — `define` в `include/connection.php` или переменная `INTEGRAM_AUTH_TOKENS`
+  (по умолчанию `session` — всё как выше). Сроки: `ACCESS_TTL` (сек, 900), `REFRESH_TTL` (простой, сек,
+  30 дней), предел — `SESSION_LIFETIME`. Браузер в этом режиме остаётся на сессии `s.` в куке.
+  - JSON-ответ входа (`/auth?JSON`, `checkcode`, `jwt`) добавляет `access_token`, `refresh_token`,
+    `token_type: "Bearer"`, `expires_in`; `token` = access, `_xsrf` — от сессии устройства и при обновлении
+    не меняется.
+  - Access `a.<срок>.<номер строки>.<подпись>` шлётся как любой токен (`Authorization: Bearer`,
+    `X-Authorization`, `token=`). В базе его нет: подпись — на строке refresh `r.<срок>.<sha256 секрета>`.
+  - `POST /{db}/_refresh` с `refresh_token=` → новая пара; refresh одноразовый (ротация), прежний access
+    гаснет. Повтор уже использованного refresh закрывает сессию устройства, ответ `401 invalid_grant` —
+    клиент входит заново. Два обновления одним refresh одновременно: проходит одно.
+  - Выход: `POST /{db}/_logout` с `refresh_token=` или `/{db}/exit` с access — гасит эту сессию; смена и
+    сброс пароля — все. Ключ API, `?secret=` и Basic работают как прежде.
 - Пароль хранится `password_hash` (bcrypt) от HMAC-SHA256 пароля ключом `SALT.<база>`; прежний
   sha512 принимается и при входе перехешируется.
 
