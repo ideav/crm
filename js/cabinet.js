@@ -797,6 +797,9 @@ class CabinetController {
             const templateLabel = db.Template || 'default';
             const description = db.Description || '';
             const recordCount = db.Count || '0';
+            // #5206: счётчики биллинга базы в единицах тарифа (колонки отчёта my/report/313)
+            const aiUnits = db.AIUnits || '0';
+            const agentRuns = db.AgentRuns || '0';
             const planDate = db['Plan date'] ? this.formatDate(db['Plan date']) : '-';
             const planDateRaw = db['Plan date'] || '';
             const publicName = db.PublicName || '';
@@ -818,6 +821,8 @@ class CabinetController {
                     <div class="database-stats">
                         <span class="database-stat"><span>Шаблон:</span> <strong>${this.escapeHtml(templateLabel)}</strong></span>
                         <span class="database-stat"><span>Расход:</span> <strong>${recordCount}</strong></span>
+                        <span class="database-stat" title="Расход ИИ в единицах тарифа за текущий период"><span>ИИ-токены:</span> <strong>${this.escapeHtml(aiUnits)}</strong></span>
+                        <span class="database-stat" title="Запуски ИИ-агента за текущий период"><span>Запуски агента:</span> <strong>${this.escapeHtml(agentRuns)}</strong></span>
                         <span class="database-stat database-stat-right"><span>Оплачено до:</span> <strong class="${planDatePassed ? 'plan-date-expired' : ''}">${planDate}</strong></span>
                     </div>
                     <div class="database-edit-fields">
