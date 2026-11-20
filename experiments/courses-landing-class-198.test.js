@@ -1,6 +1,6 @@
 // ideav/courses#198: лендинг ставит .lms-main класс «ld» (снимает max-width); после перехода
 // «Все курсы в каталоге» / в карточку курса класс оставался, и страница шла во всю ширину до F5.
-// rules: none (defect courses#198)
+// rules: none (defect #5590)
 // Run with: node experiments/courses-landing-class-198.test.js
 const assert = require('assert'), fs = require('fs'), path = require('path'), vm = require('vm');
 const src = fs.readFileSync(path.join(__dirname, '..', 'download', 'courses', 'js', 'lms.js'), 'utf8');
