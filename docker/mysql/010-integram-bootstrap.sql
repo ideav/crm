@@ -7,8 +7,7 @@ CREATE TABLE IF NOT EXISTS my (
     PRIMARY KEY (id),
     KEY up_t (up, t),
     KEY t_up (t, up),
-    KEY t_val (t, val(191)),
-    KEY up_ord (up, ord)
+    KEY t_val (t, val(191))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS ru LIKE my;
