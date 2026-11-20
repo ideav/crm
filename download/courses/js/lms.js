@@ -21,6 +21,7 @@
     if (A.isGuest() && (h === '/me' || h === '/curator' || /^\/author(\/|$)/.test(h) && h !== '/author/help')) { location.replace('#/'); return; }
     if (!h || h === '/') { if (A.isGuest()) { root.innerHTML = ''; A.views.landing(root); return; } location.replace(entry()); return; }
     root.innerHTML = '';
+    root.classList.remove('ld'); // лендинг снимает max-width у .lms-main — иначе каталог и курс без полей до перезагрузки (courses#198)
     [].forEach.call(nav.querySelectorAll('a'), function (a) { a.classList.toggle('on', a.getAttribute('href') === '#' + h.split('/').slice(0, 2).join('/')); });
     if (h === '/catalog') A.views.catalog(root);
     else if ((m = /^\/course\/([^/]+)$/.exec(h))) A.views.course(root, decodeURIComponent(m[1]));
