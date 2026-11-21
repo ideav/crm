@@ -93,7 +93,7 @@
                 <div class="mig-row" style="margin-top:8px">
                     <button class="mig-btn mig-btn-danger" id="mig-rollback-btn" type="button" disabled><i class="pi pi-trash"></i> Удалить объекты последнего импорта</button>
                 </div>
-                <div class="mig-note">Удаляются все объекты и записи с ID ≥ ID первого созданного при импорте — записи, затем колонки, затем типы; несколько циклов с корректной обработкой ссылок (останов, если цикл ничего не удалил или циклов больше 100).</div>
+                <div class="mig-note">Удаляются все объекты и записи с ID ≥ ID первого созданного при импорте — записи, затем колонки, затем типы; несколько циклов с корректной обработкой ссылок (останов, если цикл ничего не удалил или циклов больше 100). Перед таблицей снимается её ref-тип (referenced), если он создан этим же импортом.</div>
             </div>
         </div>
 
@@ -158,6 +158,8 @@
         if(Array.isArray(r.json) && r.json[0] && r.json[0].error){ return r.json[0].error; }
         if(r.json && r.json.error){ return r.json.error; }
         if(!r.ok){ return 'HTTP ' + r.status; }
+        // issue #5602: при отказе сервер отвечает текстом при HTTP 200 — не-JSON успехом не считается
+        if(!r.json){ return 'не JSON: ' + String(r.text || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200); }
         return '';
     }
     function objId(r){ return r && r.json ? r.json.obj : null; }
@@ -734,6 +736,17 @@
         if(!confirm('Удалить ' + rec.created.length + ' объектов последнего импорта (ID ≥ ' + rec.firstId + ')?')){ return; }
         clearLog();
         el('mig-rollback-btn').disabled = true;
+        // issue #5602: перед таблицей снимаем её ref-тип (referenced из metadata),
+        // иначе проверка _d_del считает ref-тип экземпляром и отказывает.
+        var refOfTable = {};
+        try{
+            var meta = await getJson('metadata');
+            (Array.isArray(meta) ? meta : []).forEach(function(t){
+                if(t && t.referenced != null){ refOfTable[String(t.id)] = String(t.referenced); }
+            });
+        }catch(e){ log('Не удалось прочитать metadata — ref-типы перед таблицами сниматься не будут: ' + e.message, 'warn'); }
+        var tracked = {}, done = {};
+        rec.created.forEach(function(c){ tracked[String(c.id)] = true; });
         // order within a cycle: records first (desc id), then reqs, then types
         var kindRank = { record:0, req:1, type:2 };
         var remaining = rec.created.slice();
@@ -744,8 +757,18 @@
             var deletedThis = 0;
             var next = [];
             for(var i = 0; i < remaining.length; i++){
-                var res = await delOne(remaining[i]);
-                if(res.ok){ deletedThis++; totalDeleted++; }
+                var item = remaining[i];
+                if(done[item.id]){ deletedThis++; totalDeleted++; continue; } // уже снят как ref-тип другой таблицы
+                if(item.kind === 'type'){
+                    var ref = refOfTable[item.id];
+                    if(ref && tracked[ref] && !done[ref]){
+                        var rr = await delOne({ id: ref, kind: 'type' });
+                        if(rr.ok){ done[ref] = true; log('таблица ' + item.id + ': снят ref-тип ' + ref, 'dim'); }
+                        else { log('таблица ' + item.id + ': не удалось снять ref-тип ' + ref + ' — ' + rr.err, 'warn'); }
+                    }
+                }
+                var res = await delOne(item);
+                if(res.ok){ done[item.id] = true; deletedThis++; totalDeleted++; }
                 else { next.push(remaining[i]); }
             }
             log('цикл ' + cycle + ': удалено ' + deletedThis + ', осталось ' + next.length, deletedThis ? 'ok' : 'warn');
