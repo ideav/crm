@@ -2,7 +2,8 @@
 # Собирает /etc/caddy/sites.caddy из вхостов ispmanager (#5573, docs/custom-domain.md).
 # Для каждого <VirtualHost …:443>: имена ServerName/ServerAlias, сертификат = SSLCertificateFile
 # (+ SSLCertificateChainFile, если задан) и ключ — копируются в /etc/caddy/certs/.
-# Вхост только с :80 получает блок http://. Запуск: после правок в панели и по таймеру продления.
+# Вхост только с :80 получает блок http://. Порты за Caddy (8443/8080, apache-behind-caddy.sh) —
+# те же 443/80: сторож пересобирает список уже после переключения. Запуск: после правок в панели и по таймеру продления.
 set -eu
 VHOSTS=${VHOSTS:-/etc/apache2/vhosts}
 OUT=${OUT:-/etc/caddy/sites.caddy}
@@ -13,10 +14,10 @@ for f in "$VHOSTS"/*/*.conf; do
 	awk -v certs="$CERTS" '
 	function flush() {
 		if (names == "") return
-		if (port == "443" && crt != "" && key != "") {
+		if ((port == "443" || port == "8443") && crt != "" && key != "") {
 			pem = certs "/" first ".pem"; k = certs "/" first ".key"
 			printf "%s|%s|%s|%s|%s|%s\n", "tls", names, crt, chain, key, first
-		} else if (port == "80") {
+		} else if (port == "80" || port == "8080") {
 			printf "%s|%s\n", "http", names
 		}
 	}
@@ -61,6 +62,13 @@ grep '^http|' "$tmp.list" | while IFS='|' read -r _ names; do
 	printf '%s {\n\timport apache_http\n}\n\n' "$hn" >> "$tmp"
 done
 chown -R caddy:caddy "$CERTS" 2>/dev/null || true
+# Ни одного сайта — разбор вхостов сломался: прежний список не трогаем, иначе сторож снял бы все сайты.
+if ! grep -q '{$' "$tmp"; then
+	rm -f "$tmp" "$tmp.list"
+	echo "sites.sh: в $VHOSTS не найдено ни одного сайта, $OUT не изменён" >&2
+	exit 1
+fi
 mv "$tmp" "$OUT"
+chmod 644 "$OUT"   # mktemp создаёт 600, а Caddy работает от пользователя caddy
 rm -f "$tmp.list"
 echo "sites.caddy: $(grep -c '{$' "$OUT") blocks"
