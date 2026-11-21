@@ -77,6 +77,7 @@ $GLOBALS["z"] = "z";
 $GLOBALS["connection"] = null;
 $_SERVER["REMOTE_ADDR"] = "10.0.0.7";
 
+require_once __DIR__."/../include/ws_push.php";   # #5269: logChange отдаёт изменения в Ws_collect
 $source = file_get_contents(__DIR__."/../index.php");
 preg_match_all('/^define\("(LOG_[A-Z_]+)",\s*(\d+)\);/m', $source, $d, PREG_SET_ORDER);
 foreach($d as $def)

@@ -7,6 +7,125 @@
             this.loadData(false);
         }
 
+        // Живая таблица (issue #5269, docs/kb/realtime.md): подписка на свой тип через
+        // IntegramWS (js/ws-client.js) с записями на экране. Демон присылает готовые строки
+        // (права и маски этого пользователя) — они подставляются на месте, без запросов. Запись
+        // удалена или скрыта маской — строка убирается. Новые видимые записи — плашка «Добавлено
+        // N — показать», устаревшие данные (схема, массовое изменение, обрыв) — плашка «обновить».
+        // Пока ячейка в правке или новая строка не сохранена — изменения ждут. Отключение — live: false.
+        // Вызывается после каждой загрузки: append=false — данные свежие, плашка сбрасывается.
+        liveAttach(append = false) {
+            if (this.options && this.options.live === false) return;
+            if (this.getDataSourceType() !== 'table') return;
+            const ws = typeof window !== 'undefined' ? window.IntegramWS : null;
+            const typeId = Number(this.options.tableTypeId || this.objectTableId);
+            if (!ws || !ws.enabled() || !Number.isInteger(typeId) || typeId <= 0) return;
+            if (!this._live) {
+                this._liveQueue = [];
+                this._live = ws.subscribe(typeId, (msg) => this.onLiveEvents(msg));
+            }
+            if (!append) {
+                this._liveAdded = 0;
+                this._liveStale = '';
+                this.liveBannerShow();
+            }
+            this.liveReportShown();
+        }
+
+        liveReportShown() {
+            if (this._live && typeof this._live.shown === 'function') {
+                this._live.shown((this.rawObjectData || []).map((r) => Number(r.i)).filter((i) => i > 0));
+            }
+        }
+
+        onLiveEvents(msg) {
+            this._liveQueue.push(msg);
+            this.liveApply();
+        }
+
+        liveApply() {
+            if (this.currentEditingCell || this.pendingNewRow || this.isLoading) {
+                if (!this._liveTimer) {
+                    this._liveTimer = setTimeout(() => { this._liveTimer = null; this.liveApply(); }, 2000);   // LIVE_RETRY
+                }
+                return;
+            }
+            const queue = this._liveQueue.splice(0);
+            const parent = this.options.parentId ? String(this.options.parentId) : '';
+            let changed = false;
+            let removed = false;
+            for (const msg of queue) {
+                if (msg.stale && this._liveStale !== 'schema') this._liveStale = msg.stale;
+                const own = !!msg.by && typeof window !== 'undefined' && msg.by === window.user
+                    && typeof document !== 'undefined' && typeof document.hasFocus === 'function' && document.hasFocus();
+                if (!own) this._liveAdded += (msg.added || []).filter((u) => !parent || String(u) === parent).length;
+                const drop = new Set((msg.remove || []).map(Number));
+                for (const row of msg.rows || []) {
+                    if (this._liveStale === 'schema') break;
+                    const idx = this.rawObjectData.findIndex((r) => Number(r.i) === Number(row.i));
+                    if (idx < 0) continue;
+                    if (parent && String(row.u) !== parent) { drop.add(Number(row.i)); continue; }
+                    if (!Array.isArray(row.r) || row.r.length !== this.columns.length) { this._liveStale = 'schema'; break; }
+                    this.rawObjectData[idx] = row;
+                    this.data[idx] = row.r;
+                    changed = true;
+                }
+                if (drop.size) {
+                    for (let idx = this.rawObjectData.length - 1; idx >= 0; idx--) {
+                        if (!drop.has(Number(this.rawObjectData[idx].i))) continue;
+                        this.rawObjectData.splice(idx, 1);
+                        this.data.splice(idx, 1);
+                        this.loadedRecords = Math.max(0, (this.loadedRecords || 0) - 1);
+                        if (typeof this.totalRows === 'number') this.totalRows = Math.max(0, this.totalRows - 1);
+                        changed = removed = true;
+                    }
+                }
+            }
+            if (changed) {
+                if (this.groupingEnabled && this.groupingColumns && this.groupingColumns.length) this.processGroupedData();
+                const scroll = this.captureScrollState();
+                this.render();
+                this.restoreScrollState(scroll);
+            }
+            if (removed) this.liveReportShown();
+            this.liveBannerShow();
+        }
+
+        liveBannerText() {
+            if (this._liveStale === 'schema') return 'Структура таблицы изменилась — обновить';
+            if (this._liveStale) return 'Данные изменились — обновить';
+            if (this._liveAdded > 0) return `Добавлено ${ this._liveAdded } — показать`;
+            return '';
+        }
+
+        liveBannerClick() {
+            const schema = this._liveStale === 'schema';
+            this._liveAdded = 0;
+            this._liveStale = '';
+            this.liveBannerShow();
+            if (schema) this.refreshData();
+            else this.reload();
+        }
+
+        // Плашка — кнопкой над таблицей (перед контейнером: перерисовка таблицы её не стирает)
+        liveBannerShow() {
+            const text = this.liveBannerText();
+            if (!this.container || !this.container.parentNode || typeof document === 'undefined' || typeof document.createElement !== 'function') return;
+            if (!this._liveBannerEl) {
+                if (!text) return;
+                const el = document.createElement('button');
+                el.type = 'button';
+                el.className = 'integram-live-banner';
+                el.style.cssText = 'display:block;margin:4px 0;padding:4px 12px;border-radius:4px;border:1px solid #9ec5fe;'
+                    + 'background:#e7f1ff;color:#084298;cursor:pointer;font:inherit';
+                el.addEventListener('click', () => this.liveBannerClick());
+                this.container.parentNode.insertBefore(el, this.container);
+                this._liveBannerEl = el;
+            }
+            this._liveBannerEl.textContent = text;
+            this._liveBannerEl.style.display = text ? 'block' : 'none';
+        }
+
         saveColumnState() {
             // Skip saving if config was loaded from URL (issue #514)
             // User can still copy current config as a shareable URL

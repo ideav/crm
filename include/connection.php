@@ -45,6 +45,12 @@ define("TEMPLATES", integram_env('INTEGRAM_TEMPLATES', ':en:ru:fu:cm:'));
 # Модераторы шаблонов баз (#5364) — логины ЛК через двоеточие, например ':drynny:'. Кроме них одобряют
 # супер-админ сервера и владелец базы my. Реестр шаблонов — templates/custom/my/db_templates.
 define("TPL_MODERATORS", integram_env('INTEGRAM_TPL_MODERATORS', ''));
+# Web-socket (#5269, docs/kb/realtime.md): адрес приёма событий демона ws-server/ на этом сервере
+# (http://127.0.0.1:8790/push), общий с демоном секрет подписи и адрес для браузера (/ws или
+# wss://host/ws). Пустой адрес или секрет — события не отправляются.
+define("WS_PUSH_URL", integram_env('INTEGRAM_WS_PUSH_URL', ''));
+define("WS_SECRET", integram_env('INTEGRAM_WS_SECRET', ''));
+define("WS_PUBLIC_URL", integram_env('INTEGRAM_WS_PUBLIC_URL', ''));
 $masterPassword = integram_env('INTEGRAM_MASTER_PASSWORD', 'xxx');
 define("ADMINHASH", integram_env('INTEGRAM_ADMINHASH', sha1($_SERVER["SERVER_NAME"].$z.$masterPassword)));
 define("SALT", integram_env('INTEGRAM_SALT', 'yyy'));

@@ -33,6 +33,7 @@
 | Импорт батчем `import=1` | [import.md](import.md) | bki_file, DATA, plain_data, формат строк, завершающий `;`, чанки 8МБ, upsert |
 | Архив таблицы: BKI и JSON | [json-archive.md](json-archive.md) | json_export, integram-archive v2, метаданные+данные, types, reqs, target, одна запись на строку, алиасы колонок, gzip, сведение колонок, перенос между базами |
 | Журнал базы (JSON Lines) | [logs.md](logs.md) | _log.jsonl, _sql.jsonl, rid, uid, ~ai, ai_job, old/new, op, import, маскировка секретов, LOG_ROTATE_MB, ротация, чтение journal, cursor, more |
+| Web-socket: живые таблицы, уведомления, события для внешних систем | [realtime.md](realtime.md) | ws-server, /ws, ws_auth, _m_notify, Ws_notify, IntegramWS, subscribe, onNotify, live, liveAttach, rows, shown, feed, fp, masked, плашка «Добавлено N», маски подписчика, INTEGRAM_WS_PUSH_URL, INTEGRAM_WS_SECRET, INTEGRAM_WS_PUBLIC_URL, WS_CORE_URL, push, HMAC, 4401, nginx Upgrade |
 | Почта приложения (SMTP клиента) | [mail.md](mail.md) | _mail, Почта для отправки, пароль приложения, AES-GCM шифрование, грант на таблицу, лимит в час, вложение, rec+req, STARTTLS |
 | Иерархический OLTP (разрезы) | [hierarchical-oltp.md](hierarchical-oltp.md) | разрез, частотность групп, накопитель меры, агрегаты, up-уровни |
 
@@ -52,6 +53,7 @@
 | ссылка, перенесённая по `reqs[i].ref_id`, ведёт не туда | `ref` = таблица-цель, `ref_id` = строка-определение ссылки | [schema.md](schema.md) |
 | снятая **галка BOOLEAN** после перезагрузки снова стоит (🔒 возвращается) | API отдаёт «нет» как `-1`; «непусто = да» читает его как «да» | [crud.md](crud.md) |
 | **пустая страница у всех**, с `?debug` — голый `{_block_.&main.a}` | `{слово}` в шаблоне (даже в комментарии, напр. `templates/custom/{db}/…`) — точка вставки без значения гасит весь блок; писать `<база>` | [../WORKSPACE_DEVELOPMENT_GUIDE.md](../WORKSPACE_DEVELOPMENT_GUIDE.md) §1.1 |
+| web-socket: 403 при подключении со своего сайта; события не приходят | nginx не передаёт `Host`; разный `WS_SECRET` у ядра и демона (`/push` → 401) | [realtime.md](realtime.md) |
 | пустая страница **только у суперпользователя** `admin` (ADMINHASH), у остальных всё есть | каркас шаблона в блоках-отчётах по роли, у `user_id=0` нет записи пользователя — отчёты пусты; вид выбирать на клиенте (`AppView.getView`), разметку — в `<template>` | [roles.md](roles.md) |
 | фронту нужны строки отчёта, закрытого для роли маской (`report/…` → «нет доступа … по маске») | отчёты блоков шаблонизатор выполняет без проверки гранта: файл шаблона с блоками + `GET /<база>/<файл>?JSON` | [queries.md](queries.md) |
 | триггер кнопки с запросом ничего не пишет, в журнале ошибка связи «запрос …» | сервер не видит себя по `https://{Host}` — задать `BUTTON_TRIGGER_BASE_URL` | [button-columns.md](button-columns.md) |

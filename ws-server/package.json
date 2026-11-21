@@ -1,0 +1,14 @@
+{
+  "name": "integram-ws-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Web-socket Интеграма: события изменений таблиц и уведомления (issue #5269, docs/kb/realtime.md)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test ../experiments/ws-server-5269.test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
