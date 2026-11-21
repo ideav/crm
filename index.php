@@ -795,8 +795,7 @@ function verifyCaptcha($token) {
     ]);
     $result = @file_get_contents($url, false, $context);
     if ($result === false) return false;
-    $data = json_decode($result, true);
-    return isset($data['status']) && $data['status'] === 'ok';
+    return Cd_captcha_response_ok($result);  # #5607: сверка host — капча работает и на своих доменах баз
 }
 # Капча входа проверяется не больше раза за запрос: токен SmartCaptcha одноразовый.
 function Login_captcha_passed(){

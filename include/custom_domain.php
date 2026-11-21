@@ -198,6 +198,29 @@ function Cd_request_host(){
     }
     return $h;
 }
+# --- капча ------------------------------------------------------------------------------------
+# Ответ SmartCaptcha /validate → прошёл ли пользователь проверку. Ключ капчи работает на своих
+# доменах баз только с отключённой проверкой домена в Yandex Cloud; тогда поле host (сайт, где
+# пройдена капча) сверяет сервер: домен платформы, имя самого сервера или живой свой домен из
+# реестра. Пустой host Яндекс отдаёт при собственном сбое — такой ответ считается доверенным.
+function Cd_captcha_response_ok($raw){
+    $data = json_decode((string)$raw, true);
+    if(!is_array($data) || !isset($data["status"]) || $data["status"] !== "ok")
+        return false;
+    if(!isset($data["host"]) || (string)$data["host"] === "")
+        return true;
+    $host = Cd_normalize_host($data["host"]);
+    if($host === "")
+        return false;
+    if(Cd_is_reserved($host))
+        return true;
+    foreach(array("SERVER_NAME", "HTTP_HOST") as $k)
+        if(isset($_SERVER[$k]) && Cd_normalize_host($_SERVER[$k]) === $host)
+            return true;
+    $reg = Cd_registry_load();
+    return isset($reg[$host]) && Cd_entry_live($reg[$host]);
+}
+
 function Cd_page($code, $title, $text){
     http_response_code($code);
     header("Content-Type: text/html; charset=utf-8");
