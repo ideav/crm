@@ -46,7 +46,11 @@ const SRC_META = SERVICE_META.concat([
         { num: 2, id: '512', val: 'Платёж', orig: '530', type: '13', arr_id: '530',
           field_attrs: { required: false, multi: false, key: false, alias: null, default: '' } },
         { num: 3, id: '513', val: 'Сумма', orig: '540', type: '13',
-          field_attrs: { required: false, multi: false, key: false, alias: null, default: '' } }
+          field_attrs: { required: false, multi: false, key: false, alias: null, default: '' } },
+        // issue #5596: колонка-кнопка, действие (#5116) — в field_attrs.action
+        { num: 4, id: '514', val: 'Передать', orig: '560', type: '7',
+          field_attrs: { required: false, multi: false, key: false, alias: null, default: 'report/Q?FR_ДоговорID=[ID]',
+              action: { type: 'link', label: 'Передать', url: 'report/Q?FR_ДоговорID=[ID]', newTab: false } } }
     ] },
     { id: '520', up: '0', type: '3', val: 'Статус договора', unique: '1', referenced: '511' },
     { id: '530', up: '0', type: '13', val: 'Платёж', unique: '0', reqs: [
@@ -55,7 +59,7 @@ const SRC_META = SERVICE_META.concat([
     ] }
 ]);
 const SRC_RECORDS = {
-    '500': [{ i: '601', u: '1', r: ['Д-1', '521:Активен', '1', '1000'] }],
+    '500': [{ i: '601', u: '1', r: ['Д-1', '521:Активен', '1', '1000', 'report/Q?FR_ДоговорID=601'] }],
     '520': [{ i: '521', u: '1', r: ['Активен'] }, { i: '522', u: '1', r: ['Закрыт'] }],
     '530': [{ i: '701', u: '601', r: ['5', '01.11.2026'] }],
     '22': [{ i: '800', u: '1', r: ['Договоры по статусу', '2', '50'] }],
@@ -112,7 +116,11 @@ function makeTarget() {
             if (hit) return { obj: hit, warnings: 'Тип ' + body.val + ' уже существует!' };
             const nid = String(nextId++); terms[nid] = { t: String(body.t), val: body.val }; return { obj: nid };
         }
-        if (action === '_d_save') return { obj: id };
+        if (action === '_d_save') { // index.php: id типа — из адреса _d_save/{id}
+            if (!terms[id]) return [{ error: 'Тип не найден.' }];
+            terms[id].unique = body.unique ? '1' : '0'; return { obj: id };
+        }
+        if (action === '_d_action') { reqs[id].action = body.action ? JSON.parse(body.action) : null; return { obj: reqs[id].up }; }
         if (action === '_d_ref') {
             const hit = Object.keys(refDefs).find((k) => refDefs[k] === String(id));
             if (hit) return { obj: hit };
@@ -300,4 +308,20 @@ test('#5410: пакет прежнего формата (ref_target = строк
     const col = target.records[recordsOf(target, 28)[0]];
     assert.strictEqual(col.params['104'], '74');
     assert.strictEqual(col.params['84'], '13');
+});
+
+test('#5596: флаг «уникальный» таблицы переносится', async () => {
+    const { target } = await roundTrip();
+    assert.strictEqual(target.terms[termId(target, 'Статус договора')].unique, '1', 'справочник уникальный, как в источнике');
+    assert.notStrictEqual(target.terms[termId(target, 'Договор')].unique, '1', 'неуникальная таблица не помечена');
+});
+
+test('#5596: действие колонки-кнопки переносится', async () => {
+    const { target } = await roundTrip();
+    const contractT = termId(target, 'Договор');
+    const btn = Object.keys(target.reqs).find((r) => target.reqs[r].up === contractT && target.terms[target.reqs[r].t] && target.terms[target.reqs[r].t].val === 'Передать');
+    assert.ok(btn, 'колонка «Передать» создана');
+    assert.deepStrictEqual(target.reqs[btn].action, { type: 'link', label: 'Передать', url: 'report/Q?FR_ДоговорID=[ID]', newTab: false });
+    const plain = Object.keys(target.reqs).filter((r) => r !== btn && target.reqs[r].action !== undefined);
+    assert.deepStrictEqual(plain, [], 'у колонок без действия _d_action не зовётся');
 });

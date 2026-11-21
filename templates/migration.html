@@ -476,6 +476,12 @@
                 if(fa.key){ p.key = 1; }
                 if(withRequired){ p.set_null = 1; }
                 await post('_d_attrs/' + reqId, p);
+                // действие колонки-кнопки (#5116) пишется отдельным вызовом; _d_attrs его сохраняет (issue #5596)
+                if(fa.action && !withRequired){
+                    var ar = await post('_d_action/' + reqId, { action: JSON.stringify(fa.action) });
+                    var ae = firstError(ar);
+                    if(ae){ log('  колонка «' + c.name + '»: действие кнопки не перенесено — ' + ae, 'warn'); }
+                }
             }
 
             // create-or-reuse a global term (type). Returns { id, fresh }.
@@ -503,7 +509,10 @@
                 for(var ti = 0; ti < pkg.tables.length; ti++){
                     var t = pkg.tables[ti];
                     var tterm = await getTerm(t.base_code, t.name);
-                    if(t.unique){ await post('_d_save', { origId:tterm.id, val: tterm.renamed || t.name, t:t.base_code, unique:1 }); }
+                    if(t.unique){ // id типа — в адресе _d_save/<id> (issue #5596)
+                        var ue = firstError(await post('_d_save/' + tterm.id, { val: tterm.renamed || t.name, t:t.base_code, unique:1 }));
+                        if(ue){ log('  таблица «' + t.name + '»: флаг «уникальный» не установлен — ' + ue, 'warn'); }
+                    }
                     idMap[t.old_id] = tterm.id;
                     log('таблица «' + t.name + '» → id ' + tterm.id + (tterm.renamed ? ' (как «' + tterm.renamed + '»)' : (tterm.fresh ? '' : ' (переиспользована)')), 'ok');
                 }
