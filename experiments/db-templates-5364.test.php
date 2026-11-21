@@ -224,6 +224,13 @@ $r = Tpl_publish("1bad", "", "");
 expect(isset($r["error"]), "A2: имя не с буквы — отказ");
 $r = Tpl_publish("ru", "", "");
 expect(isset($r["error"]) && !is_dir(Tpl_dir()."/ru"), "A3: системное имя ru владельцу — отказ");
+# #5379: двухбуквенное имя не из TEMPLATES не занять никому, даже супер-админу
+$r = Tpl_publish("zz", "", "");
+expect(isset($r["error"]) && !is_dir(Tpl_dir()."/zz"), "A3a: двухбуквенное zz владельцу — отказ");
+use_db("src5364", "admin", 0);
+$r = Tpl_publish("zz", "", "");
+expect(isset($r["error"]) && !is_dir(Tpl_dir()."/zz"), "A3b: двухбуквенное zz вне TEMPLATES супер-админу — отказ");
+use_db("src5364", "src5364", 400);
 use_db("my", "my", 1);
 $r = Tpl_publish("cab", "", "");
 expect(isset($r["error"]), "A4: базу my шаблоном не сделать");

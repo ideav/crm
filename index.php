@@ -11927,9 +11927,14 @@ function Code_restore_apply($source){
 function Tpl_dir(){
 	return "templates/custom/my/db_templates";
 }
-# Имя шаблона: 2–15 латинских букв и цифр с буквы. Двухбуквенные — имена системных шаблонов (ru, cm).
+# Имя шаблона: 3–15 латинских букв и цифр с буквы (#5379). Короче — только системные шаблоны из
+# TEMPLATES (ru, cm): двухбуквенное имя вне списка обычный владелец занять не может, даже если
+# на сервере в INTEGRAM_TEMPLATES его нет (en на ideav.ru).
 function Tpl_id_ok($id){
-	return is_string($id) && preg_match('/^[a-z][a-z0-9]{1,14}$/', $id) && ($id !== "my");
+	if(!is_string($id) || ($id === "my"))
+		return FALSE;
+	return preg_match('/^[a-z][a-z0-9]{2,14}$/', $id)
+		|| (preg_match('/^[a-z][a-z0-9]$/', $id) && (strpos(TEMPLATES, ":$id:") !== FALSE));
 }
 function Tpl_registry(){
 	$p = Tpl_dir()."/registry.json";
@@ -12015,7 +12020,7 @@ function Tpl_publish($id, $title, $descr){
 	if($z === "my")
 		return array("error" => t9n("[RU]Базу Личного кабинета нельзя сделать шаблоном[EN]The private space DB cannot be a template"));
 	if(!Tpl_id_ok($id))
-		return array("error" => t9n("[RU]Имя шаблона — от 2 до 15 латинских букв и цифр, начиная с буквы[EN]Template name: 2 to 15 latin letters or digits, starting with a letter"));
+		return array("error" => t9n("[RU]Имя шаблона — от 3 до 15 латинских букв и цифр, начиная с буквы[EN]Template name: 3 to 15 latin letters or digits, starting with a letter"));
 	if((strpos(TEMPLATES, ":$id:") !== FALSE) && ((string)$GLOBALS["GLOBAL_VARS"]["user_id"] !== "0"))
 		return array("error" => t9n("[RU]Шаблон $id системный — его версию фиксирует администратор сервера[EN]$id is a system template: only the server administrator can publish it"));
 	$title = mb_substr(trim((string)$title), 0, 100);
