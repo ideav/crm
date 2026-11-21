@@ -7,6 +7,8 @@
 //   POST /push — пачка событий от ядра (include/ws_push.php), подпись X-Ws-Signature =
 //        HMAC-SHA256(тело, WS_SECRET).
 //   GET  /health — число подключений.
+//   Свой порт TLS (WS_TLS_PORT, WS_TLS_CERT, WS_TLS_KEY) — только /ws для браузеров мимо веб-сервера;
+//        /push и /health там закрыты.
 //
 // Сообщения клиента: {op:"sub",t[,shown:[id…]][,feed:true]}, {op:"shown",t,ids:[…]} — записи
 // на экране, {op:"unsub",t}, {op:"ping"}. Подписка на таблицу (тип) — только с правом чтения, его
@@ -16,6 +18,8 @@
 // Строки демон берёт у ядра листингом object/<t>/?JSON_OBJ&F_<t>=@IN(…) входом подписчика.
 
 const http = require('http');
+const https = require('https');
+const fs = require('fs');
 const crypto = require('crypto');
 const frames = require('./lib/frames');
 const { Hub } = require('./lib/hub');
@@ -55,9 +59,11 @@ function createWsServer(options) {
     const hub = new Hub({ fetchRows, maxFetch: o.maxFetch });
     const clients = new Set();
     const server = http.createServer(onRequest);
-    server.on('upgrade', (req, socket, head) => {
+    server.on('upgrade', upgrade);
+    let tlsServer = null;
+    function upgrade(req, socket, head) {
         onUpgrade(req, socket, head).catch((e) => { o.log('upgrade: ' + e.message); socket.destroy(); });
-    });
+    }
     let pingTimer = null;
     if (o.pingMs > 0) pingTimer = setInterval(pingAll, o.pingMs);
 
@@ -312,13 +318,24 @@ function createWsServer(options) {
         address() {
             return server.address();
         },
+        listenTls({ cert, key }, port, host) {
+            tlsServer = https.createServer({ cert, key }, (req, res) => { res.writeHead(404); res.end(); });
+            tlsServer.on('upgrade', upgrade);
+            tlsServer.on('tlsClientError', () => {});
+            return new Promise((resolve) => tlsServer.listen(port, host, resolve));
+        },
+        tlsAddress() {
+            return tlsServer && tlsServer.address();
+        },
         close() {
             if (pingTimer) clearInterval(pingTimer);
             for (const c of clients) {
                 if (c.timer) clearInterval(c.timer);
                 c.socket.destroy();
             }
-            return new Promise((resolve) => server.close(() => resolve()));
+            const done = [new Promise((resolve) => server.close(() => resolve()))];
+            if (tlsServer) done.push(new Promise((resolve) => tlsServer.close(() => resolve())));
+            return Promise.all(done);
         },
     };
 }
@@ -341,6 +358,12 @@ if (require.main === module) {
     const port = Number(env.WS_PORT || 8790);
     const host = env.WS_HOST || '127.0.0.1';
     ws.listen(port, host).then(() => console.log(`ws-server: ${host}:${port}, ядро ${env.WS_CORE_URL}`));
+    if (env.WS_TLS_PORT) {
+        // Сертификат читается при запуске; после продления — перезапуск службы (docs/kb/realtime.md).
+        const tlsOpts = { cert: fs.readFileSync(env.WS_TLS_CERT), key: fs.readFileSync(env.WS_TLS_KEY) };
+        const tlsHost = env.WS_TLS_HOST || '0.0.0.0';
+        ws.listenTls(tlsOpts, Number(env.WS_TLS_PORT), tlsHost).then(() => console.log(`ws-server: wss ${tlsHost}:${env.WS_TLS_PORT}`));
+    }
     const stop = () => ws.close().then(() => process.exit(0));
     process.on('SIGTERM', stop);
     process.on('SIGINT', stop);
