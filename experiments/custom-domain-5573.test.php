@@ -144,6 +144,25 @@ eq("H4 main host untouched", route(array("T_URI" => "/crm/table/1")), "URI=/crm/
 eq("H5 custom host clean path", route(array("T_URI" => "/table/1", "T_HOST" => "crm.co.ru")), "URI=/crm/table/1 DB=crm");
 eq("H6 unknown host 404 page", strpos(route(array("T_URI" => "/", "T_HOST" => "x.co.ru")), "Домен не подключён") !== false, true);
 eq("H7 expired host 402 page", strpos(route(array("T_URI" => "/", "T_HOST" => "old.co.ru")), "Домен не оплачен") !== false, true);
+
+# I: ответ SmartCaptcha /validate (#5607). У капчи отключена проверка домена (иначе ключ не работает
+# на своих доменах) — сервер сам сверяет поле host: платформа, свой хост сервера или живой свой домен.
+putenv("INTEGRAM_DOMAIN_REGISTRY=$reg");
+$_SERVER["SERVER_NAME"] = "ideav.ru";
+$_SERVER["HTTP_HOST"] = "ideav.ru";
+$ok = function($host){ return json_encode(array("status" => "ok", "message" => "", "host" => $host)); };
+eq("I1 main host", Cd_captcha_response_ok($ok("ideav.ru")), true);
+eq("I2 platform subdomain", Cd_captcha_response_ok($ok("agent.ideav.ru")), true);
+eq("I3 live custom domain", Cd_captcha_response_ok($ok("crm.co.ru")), true);
+eq("I4 custom domain with port", Cd_captcha_response_ok($ok("CRM.co.ru:8443")), true);
+eq("I5 foreign site rejected", Cd_captcha_response_ok($ok("evil.example.com")), false);
+eq("I6 expired custom domain rejected", Cd_captcha_response_ok($ok("old.co.ru")), false);
+eq("I7 empty host trusted (service failure, docs)", Cd_captcha_response_ok($ok("")), true);
+eq("I8 failed status", Cd_captcha_response_ok('{"status":"failed","message":""}'), false);
+eq("I9 garbage", Cd_captcha_response_ok("<html>"), false);
+$_SERVER["SERVER_NAME"] = $_SERVER["HTTP_HOST"] = "stand.example.org";
+eq("I10 own server name", Cd_captcha_response_ok($ok("stand.example.org")), true);
+putenv("INTEGRAM_DOMAIN_REGISTRY");
 @unlink($reg);
 
 echo $fail ? "$fail of $n FAILED\n" : "All $n passed\n";
