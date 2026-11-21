@@ -35,7 +35,7 @@ fi
 
 # Сайты: пересобрать sites.caddy и сравнить с текущим.
 old=$(cat /etc/caddy/sites.caddy 2>/dev/null || true)
-sh "$DIR/sites.sh" >/dev/null 2>&1
+sh "$DIR/sites.sh" >/dev/null 2>&1 || { logger -t apache-behind-caddy "sites.sh failed, sites.caddy kept"; echo "sites.sh failed" >&2; exit 1; }
 [ "$old" = "$(cat /etc/caddy/sites.caddy)" ] || changed=1
 
 if [ "$changed" = 0 ]; then
