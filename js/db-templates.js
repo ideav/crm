@@ -5,7 +5,8 @@
 (function (root) {
     'use strict';
 
-    var ID_RE = /^[a-z][a-z0-9]{1,14}$/;
+    // 3–15 символов с буквы; две буквы — кандидат в системное имя (ru, cm), его проверяет сервер (#5379)
+    var ID_RE = /^([a-z][a-z0-9]{2,14}|[a-z]{2})$/;
     var STATUS_TEXT = { pending: 'на модерации', approved: 'одобрена', rejected: 'отклонена', withdrawn: 'снята' };
 
     function idValid(id) {
@@ -198,7 +199,7 @@
         var show = function (r) { status.textContent = r.text; status.style.color = r.ok ? '#3c763d' : '#a94442'; };
         btn.addEventListener('click', function () {
             var v = id.value.trim().toLowerCase();
-            if (!idValid(v)) { show({ ok: false, text: 'Имя шаблона — от 2 до 15 латинских букв и цифр, начиная с буквы' }); return; }
+            if (!idValid(v)) { show({ ok: false, text: 'Имя шаблона — от 3 до 15 латинских букв и цифр, начиная с буквы' }); return; }
             btn.disabled = true;
             show({ ok: true, text: 'Снимаю данные и файлы базы…' });
             post(base + '/_tpl_publish?JSON', { _xsrf: opts.xsrf, id: v, title: title.value, descr: descr.value })
