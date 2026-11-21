@@ -9,6 +9,9 @@
 # сертификаты ispmanager из файлов, продление — ispmanager через HTTP-01 (запрос /.well-known
 # Caddy переводит на HTTPS и отдаёт Apache), после продления sites.sh + reload по таймеру.
 #
+# Web-socket (#5269, docs/kb/realtime.md): /ws ideav.ru и своих доменов — демону ws-server на
+# 127.0.0.1:8790. Caddy держит соединение сам, процесс Apache оно не занимает.
+#
 # Чужие домены клиентов — блок https:// в конце: сертификат Let's Encrypt выпускается при первом
 # заходе, если ядро ответит 200 на /my/_domain_ok?domain=<хост>.
 
@@ -21,12 +24,21 @@
 
 # В Apache по HTTPS с именем сайта; заголовки своего домена с клиента не принимаются.
 (apache) {
-	reverse_proxy https://127.0.0.1:8443 {
-		header_up -X-Integram-Domain
-		header_up -X-Integram-Edge
-		transport http {
-			tls_server_name {http.request.host}
-			tls_insecure_skip_verify
+	@ws {
+		host ideav.ru www.ideav.ru
+		path /ws
+	}
+	handle @ws {
+		reverse_proxy 127.0.0.1:8790
+	}
+	handle {
+		reverse_proxy https://127.0.0.1:8443 {
+			header_up -X-Integram-Domain
+			header_up -X-Integram-Edge
+			transport http {
+				tls_server_name {http.request.host}
+				tls_insecure_skip_verify
+			}
 		}
 	}
 }
@@ -56,14 +68,19 @@ https:// {
 	tls {
 		on_demand
 	}
-	rewrite / /_root
-	reverse_proxy https://127.0.0.1:8443 {
-		header_up Host ideav.ru
-		header_up X-Integram-Domain {host}
-		header_up X-Integram-Edge {$INTEGRAM_EDGE_SECRET}
-		transport http {
-			tls_server_name ideav.ru
-			tls_insecure_skip_verify
+	handle /ws {
+		reverse_proxy 127.0.0.1:8790
+	}
+	handle {
+		rewrite / /_root
+		reverse_proxy https://127.0.0.1:8443 {
+			header_up Host ideav.ru
+			header_up X-Integram-Domain {host}
+			header_up X-Integram-Edge {$INTEGRAM_EDGE_SECRET}
+			transport http {
+				tls_server_name ideav.ru
+				tls_insecure_skip_verify
+			}
 		}
 	}
 }

@@ -161,8 +161,11 @@ ws.onopen = () => ws.send(JSON.stringify({ op: 'sub', t: 500, feed: true }));
    }
    ```
 
-   Вариант без nginx — свой порт TLS у демона (так на ideav.ru: там Apache в режиме prefork, см.
-   «Грабли»). Браузер ходит на `wss://<сайт>:8443/ws`, на этом порту открыт только `/ws`. Ядро
+   На ideav.ru перед Apache стоит Caddy (`deploy/caddy/Caddyfile`, docs/custom-domain.md): `/ws` ideav.ru и
+   своих доменов баз он передаёт демону на `127.0.0.1:8790`, `INTEGRAM_WS_PUBLIC_URL=/ws`.
+
+   Вариант без nginx и Caddy — свой порт TLS у демона (когда перед сайтом только Apache в режиме
+   prefork, см. «Грабли»). Браузер ходит на `wss://<сайт>:8443/ws`, на этом порту открыт только `/ws`. Ядро
    по-прежнему шлёт события на `http://127.0.0.1:8790/push`. Сертификат сайта доступен только root —
    systemd передаёт его службе через `LoadCredential`, а path-юнит перезапускает службу после
    продления:
