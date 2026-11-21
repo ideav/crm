@@ -55,6 +55,10 @@ eq("B4 form action query", Cd_rewrite_html('<form action="/crm?x=1">', "crm"), '
 eq("B5 other db untouched", Cd_rewrite_html('<a href="/crmx/1">', "crm"), '<a href="/crmx/1">');
 eq("B6 static untouched", Cd_rewrite_html('<link href="/css/a.css">', "crm"), '<link href="/css/a.css">');
 eq("B7 text untouched", Cd_rewrite_html('see /crm/table/1', "crm"), 'see /crm/table/1');
+# ЛК (база my) на своём домене недоступен: ссылки на него ведут на основной хост (меню «Личный кабинет»).
+eq("B8 LK link to main host", Cd_rewrite_html('<a href="/my" target="my">', "crm", "ideav.ru"), '<a href="https://ideav.ru/my" target="my">');
+eq("B9 LK subpath and query", Cd_rewrite_html("<a href='/my/info?x=1'>", "crm", "ideav.ru"), "<a href='https://ideav.ru/my/info?x=1'>");
+eq("B10 not LK prefix", Cd_rewrite_html('<a href="/mylist">', "crm", "ideav.ru"), '<a href="/mylist">');
 
 # C: Location
 eq("C1 relative", Cd_rewrite_location("/crm/table/1", "crm", "crm.co.ru", "ideav.ru"), "/table/1");
