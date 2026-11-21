@@ -166,10 +166,14 @@ function Cd_route_path($uri, $db, $method="GET", $navigate=false){
     }
     return array("uri" => "/".$db.$path.$query);
 }
-# Ссылки в HTML-ответе: href/src/action="/<база>/…" → "/…".
-function Cd_rewrite_html($html, $db){
+# Ссылки в HTML-ответе: href/src/action="/<база>/…" → "/…"; "/my…" (ЛК, на своём домене недоступен)
+# → "https://<основной хост>/my…".
+function Cd_rewrite_html($html, $db, $mainHost=""){
     $d = preg_quote($db, "#");
-    return preg_replace('#((?:href|src|action|formaction)\s*=\s*["\'])/'.$d.'(?=[/"\'?\#])/?#i', '$1/', $html);
+    $html = preg_replace('#((?:href|src|action|formaction)\s*=\s*["\'])/'.$d.'(?=[/"\'?\#])/?#i', '$1/', $html);
+    if($mainHost !== "" && strtolower($db) !== "my")
+        $html = preg_replace('#((?:href|action|formaction)\s*=\s*["\'])(?=/my(?:[/"\'?\#]))#i', '$1https://'.$mainHost, $html);
+    return $html;
 }
 # Заголовок Location: /<база>/… и https://<основной хост>/<база>/… → чистый адрес своего домена.
 function Cd_rewrite_location($loc, $db, $host, $mainHost){
@@ -241,11 +245,11 @@ function Cd_route(){
             if(stripos($line, "Location:") === 0)
                 header("Location: ".Cd_rewrite_location(trim(substr($line, 9)), $db, $host, $main));
     });
-    ob_start(function($buf) use ($db){
+    ob_start(function($buf) use ($db, $main){
         foreach(headers_list() as $line)
             if(stripos($line, "Content-Type:") === 0 && stripos($line, "text/html") === false)
                 return $buf;
-        return Cd_rewrite_html($buf, $db);
+        return Cd_rewrite_html($buf, $db, $main);
     });
     return $GLOBALS["CUSTOM_DOMAIN"];
 }
