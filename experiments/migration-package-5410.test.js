@@ -18,7 +18,8 @@ const mainScript = scripts.find((s) => s.indexOf('doExport') > -1);
 const SERVICE_META = [
     { id: '22', up: '0', type: '3', val: 'Запрос', unique: '0', reqs: [
         { num: 1, id: '99', val: 'Колонки запроса', orig: '28', type: '16', arr_id: '28', field_attrs: { alias: null } },
-        { num: 2, id: '134', val: 'LIMIT', orig: '134', type: '3', field_attrs: { alias: null } }
+        { num: 2, id: '134', val: 'LIMIT', orig: '134', type: '3', field_attrs: { alias: null } },
+        { num: 3, id: '111', val: 'Сформировать', orig: '110', type: '3', field_attrs: { alias: null } }
     ] },
     { id: '28', up: '0', type: '16', val: 'Колонки запроса', unique: '0', reqs: [
         { num: 1, id: '100', val: 'Имя в отчете', orig: '100', type: '3' },
@@ -32,6 +33,10 @@ const SERVICE_META = [
         { num: 9, id: '84', val: 'Формат', orig: '29', type: '3', ref: '29', ref_id: '84' },
         { num: 10, id: '109', val: 'Сорт.', orig: '109', type: '13' },
         { num: 11, id: '132', val: 'Значение', orig: '132', type: '12' }
+    ] },
+    { id: '151', up: '0', type: '3', val: 'Меню', unique: '0', reqs: [
+        { num: 1, id: '153', val: 'Адрес', orig: '152', type: '3' },
+        { num: 2, id: '391', val: 'Иконка', orig: '390', type: '3' }
     ] }
 ];
 
@@ -62,10 +67,12 @@ const SRC_RECORDS = {
     '500': [{ i: '601', u: '1', r: ['Д-1', '521:Активен', '1', '1000', 'report/Q?FR_ДоговорID=601'] }],
     '520': [{ i: '521', u: '1', r: ['Активен'] }, { i: '522', u: '1', r: ['Закрыт'] }],
     '530': [{ i: '701', u: '601', r: ['5', '01.11.2026'] }],
-    '22': [{ i: '800', u: '1', r: ['Договоры по статусу', '2', '50'] }],
+    '22': [{ i: '800', u: '1', r: ['Договоры по статусу', '2', '50', 'report/800'] }],
+    // issue #5599: пункт меню ведёт на запись по id
+    '151': [{ i: '900', u: '145', r: ['Договор Д-1', 'dash/601', ''] }],
     '28': [
-        { i: '801', u: '800', r: ['510:Статус', 'Статус', '', 'Активен', '', '', '', '', '1', '', '', ''] },
-        { i: '802', u: '800', r: ['500:Договор', 'Кол-во', '', '', '', '74:COUNT', '', '', '', '13:NUMBER', '-1', ''] }
+        { i: '801', u: '800', r: ['510:Статус', 'Статус', '', 'Активен', '', '', '', '', '1', '', '', '522'] },
+        { i: '802', u: '800', r: ['500:Договор', 'Кол-во', '', '', '', '74:COUNT', '', '', '', '13:NUMBER', '-1', '601'] }
     ]
 };
 
@@ -201,14 +208,14 @@ function loadPage(dbName, apiGet, apiPost, checks) {
 
 async function roundTrip() {
     const src = loadPage('src', sourceGet, () => ({}), {
-        'mig-exp:data': true, 'mig-exp:queries': true, 'mig-exp:users': false, 'mig-exp:menus': false, 'mig-exp:files': false
+        'mig-exp:data': true, 'mig-exp:queries': true, 'mig-exp:users': false, 'mig-exp:menus': true, 'mig-exp:files': false
     });
     await src.el('mig-export-btn')._h.click();
     const json = src.el('mig-export-json').value;
     assert.ok(json, 'экспорт сформировал JSON');
     const target = makeTarget();
     const dst = loadPage('dst', (rel) => (rel.split('?')[0] === 'metadata' ? target.metadata() : []), target.handle, {
-        'mig-imp:tables': true, 'mig-imp:queries': true, 'mig-imp:menus': false, 'mig-imp:files': false, 'mig-imp:users': false
+        'mig-imp:tables': true, 'mig-imp:queries': true, 'mig-imp:menus': true, 'mig-imp:files': false, 'mig-imp:users': false
     });
     dst.el('mig-import-json').value = json;
     await dst.el('mig-import-btn')._h.click();
@@ -324,4 +331,26 @@ test('#5596: действие колонки-кнопки переносится
     assert.deepStrictEqual(target.reqs[btn].action, { type: 'link', label: 'Передать', url: 'report/Q?FR_ДоговорID=[ID]', newTab: false });
     const plain = Object.keys(target.reqs).filter((r) => r !== btn && target.reqs[r].action !== undefined);
     assert.deepStrictEqual(plain, [], 'у колонок без действия _d_action не зовётся');
+});
+
+test('#5599: «Присвоить» ссылочной колонки запроса — id записи в приёмнике', async () => {
+    const { target } = await roundTrip();
+    const closed = recordsOf(target, termId(target, 'Статус договора')).find((id) => target.records[id].val === 'Закрыт');
+    const cols = recordsOf(target, 28).map((id) => target.records[id]);
+    assert.strictEqual(cols.find((c) => c.params['100'] === 'Статус').params['132'], closed, 'SET = новая запись «Закрыт»');
+    assert.strictEqual(cols.find((c) => c.params['100'] === 'Кол-во').params['132'], '601', 'число у нессылочной колонки — как есть');
+});
+
+test('#5599: «Сформировать» запроса ведёт на сам новый запрос', async () => {
+    const { target } = await roundTrip();
+    const q = recordsOf(target, 22)[0];
+    assert.strictEqual(target.records[q].params['111'], 'report/' + q);
+});
+
+test('#5599: адрес пункта меню dash/<id> — на новую запись', async () => {
+    const { target } = await roundTrip();
+    const contract = recordsOf(target, termId(target, 'Договор'))[0];
+    const menu = recordsOf(target, 151).map((id) => target.records[id]);
+    assert.strictEqual(menu.length, 1);
+    assert.strictEqual(menu[0].params['153'], 'dash/' + contract);
 });

@@ -386,6 +386,23 @@
         return { oldIds:oldIds, text:text };
     }
 
+    // Адрес вида report/<id> или dash/<id>: id перенесённого объекта — новым (issue #5599).
+    // id в источнике уникальны по всей базе, поэтому число из idMap однозначно.
+    function remapLinks(v, idMap, serviceMax, warn){
+        return String(v).replace(/\b(report|dash)\/(\d+)\b/g, function(all, kind, id){
+            if(idMap[id]){ return kind + '/' + idMap[id]; }
+            if(parseInt(id, 10) >= serviceMax && warn){ warn(all); }
+            return all;
+        });
+    }
+    // «Присвоить» колонки запроса на ссылочный реквизит — id записей цели (issue #5599).
+    function remapIdList(v, idMap){
+        var s = String(v);
+        if(!/^\d+(,\d+)*$/.test(s)){ return s; }
+        var ids = s.split(',').map(function(o){ return idMap[o]; });
+        return ids.every(Boolean) ? ids.join(',') : s;
+    }
+
     function stripRefId(v){ var s = String(v || ''); return /^\d+:/.test(s) ? s.slice(s.indexOf(':') + 1) : s; }
 
     // Реквизиты записи запроса или колонки запроса: ссылка на перенесённую запись — новым id,
@@ -602,12 +619,20 @@
 
             // ---- QUERIES ----
             if(opt.queries && Array.isArray(pkg.queries)){
+                // реквизиты-ссылки пакета: у колонки запроса на такой реквизит «Присвоить» = id записи
+                var refReqs = {}, allTables = {};
+                (pkg.tables || []).forEach(function(t){ allTables[String(t.old_id)] = t; });
+                (pkg.tables || []).forEach(function(t){
+                    (t.columns || []).forEach(function(c){ if(columnKind(c, allTables).ref){ refReqs[String(c.old_req_id)] = true; } });
+                });
+                var newQueries = [];
                 for(var qi = 0; qi < pkg.queries.length; qi++){
                     var q = pkg.queries[qi];
                     var qp = { up:1, t22:q.name };
                     applyRecordFields(qp, q.fields, tgtReqs['22'], idMap);
                     var qr = await post('_m_new/22', qp);
                     var newQid = recId(qr); track(newQid, 'record');
+                    if(newQid){ idMap[q.old_id] = newQid; newQueries.push({ q:q, id:newQid }); }
                     log('запрос «' + q.name + '» → id ' + newQid, 'ok');
                     for(var qci = 0; qci < (q.columns || []).length; qci++){
                         var qc = q.columns[qci];
@@ -615,6 +640,7 @@
                         var cp = { up:newQid, t28:src, t100:qc.name };
                         if(qc.fields){
                             applyRecordFields(cp, qc.fields, tgtReqs['28'], idMap);
+                            if(cp.t132 != null && refReqs[String(qc.source_old_id)]){ cp.t132 = remapIdList(cp.t132, idMap); }
                         } else { // пакет прежнего формата: функция и формат там записаны как «id:значение»
                             if(qc.formula){ cp.t101 = qc.formula; }
                             if(qc.func){ cp.t104 = stripRefId(qc.func); }
@@ -624,6 +650,17 @@
                         var qcr = await post('_m_new/28', cp);
                         track(recId(qcr), 'record');
                     }
+                }
+                // адреса report/<id> в реквизитах запросов («Сформировать», URL) — после создания всех
+                // запросов: запрос ссылается на себя и на идущие позже (issue #5599)
+                for(var nq = 0; nq < newQueries.length; nq++){
+                    var fx = {}, qf = newQueries[nq].q.fields || {}, changed = false;
+                    Object.keys(qf).forEach(function(reqId){
+                        if(tgtReqs['22'] && Object.keys(tgtReqs['22']).length && !tgtReqs['22'][reqId]){ return; }
+                        var nv = remapLinks(qf[reqId].value, idMap, serviceMax, function(l){ log('  запрос «' + newQueries[nq].q.name + '»: адрес ' + l + ' — объекта нет в пакете, оставлен как есть', 'warn'); });
+                        if(nv !== String(qf[reqId].value)){ fx['t' + reqId] = nv; changed = true; }
+                    });
+                    if(changed){ await post('_m_set/' + newQueries[nq].id, fx); }
                 }
             }
 
@@ -647,7 +684,7 @@
             if(opt.menus && Array.isArray(pkg.menus)){
                 for(var mi = 0; mi < pkg.menus.length; mi++){
                     var m = pkg.menus[mi];
-                    var mp = { up: m.up || 145, t151:m.name, t153:m.href };
+                    var mp = { up: m.up || 145, t151:m.name, t153:remapLinks(m.href, idMap, serviceMax, function(l){ log('  меню «' + m.name + '»: адрес ' + l + ' — объекта нет в пакете, оставлен как есть', 'warn'); }) };
                     if(m.icon){ mp.t391 = m.icon; }
                     var mr = await post('_m_new/151', mp);
                     track(recId(mr), 'record');
