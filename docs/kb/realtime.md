@@ -161,14 +161,48 @@ ws.onopen = () => ws.send(JSON.stringify({ op: 'sub', t: 500, feed: true }));
    }
    ```
 
+   Вариант без nginx — свой порт TLS у демона (так на ideav.ru: там Apache в режиме prefork, см.
+   «Грабли»). Браузер ходит на `wss://<сайт>:8443/ws`, на этом порту открыт только `/ws`. Ядро
+   по-прежнему шлёт события на `http://127.0.0.1:8790/push`. Сертификат сайта доступен только root —
+   systemd передаёт его службе через `LoadCredential`, а path-юнит перезапускает службу после
+   продления:
+
+   ```ini
+   # /etc/systemd/system/integram-ws.service, секция [Service]
+   LoadCredential=cert:/var/www/httpd-cert/www-root/ideav.ru_le2.crtca
+   LoadCredential=key:/var/www/httpd-cert/www-root/ideav.ru_le2.key
+   Environment=WS_TLS_PORT=8443 WS_TLS_CERT=%d/cert WS_TLS_KEY=%d/key
+   Environment=WS_ALLOWED_ORIGINS=https://ideav.ru,https://www.ideav.ru
+
+   # /etc/systemd/system/integram-ws-cert.path
+   [Path]
+   PathChanged=/var/www/httpd-cert/www-root/ideav.ru_le2.crtca
+   Unit=integram-ws-cert.service
+   [Install]
+   WantedBy=multi-user.target
+
+   # /etc/systemd/system/integram-ws-cert.service
+   [Service]
+   Type=oneshot
+   ExecStart=/usr/bin/systemctl restart integram-ws.service
+   ```
+
+   `WS_ALLOWED_ORIGINS` обязателен: `Host` на своём порту — `ideav.ru:8443`, он не равен `Origin`
+   страницы.
+
 3. Ядру — `INTEGRAM_WS_PUSH_URL`, `INTEGRAM_WS_SECRET`, `INTEGRAM_WS_PUBLIC_URL=/ws`
-   (окружение php-fpm или `include/connection.php` сервера).
+   (окружение php-fpm или `include/connection.php` сервера). Для своего порта
+   `INTEGRAM_WS_PUBLIC_URL=wss://<сайт>:8443/ws`.
 
 Проверка: `curl -s 127.0.0.1:8790/health`, затем открыть таблицу в двух браузерах и изменить
 запись в одном.
 
 ## Грабли
 
+- Симптом: при сотне открытых вкладок сайт перестаёт отвечать. Причина: Apache в режиме
+  `mpm_prefork` держит на каждое web-socket-соединение через `mod_proxy_wstunnel` отдельный процесс
+  (предел `MaxRequestWorkers` 150). Фикс: свой порт TLS у демона мимо Apache или nginx перед
+  демоном (#5269).
 - Симптом: плашка «Добавлено N» считает и записи, которые не проходят фильтр таблицы. Причина:
   фильтры и сортировку экрана знает только браузер, демон проверяет видимость по правам и
   маскам. Фикс: плашка ведёт на перечитывание с фильтрами (#5269).

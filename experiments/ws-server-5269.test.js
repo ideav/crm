@@ -14,6 +14,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('http');
 const net = require('net');
+const tls = require('tls');
 const crypto = require('crypto');
 const path = require('path');
 
@@ -216,9 +217,9 @@ function startCore() {
 }
 
 // Клиент web-socket на голом сокете: рукопожатие, затем JSON-сообщения
-function wsConnect(port, pathQuery, headers) {
+function wsConnect(port, pathQuery, headers, connect = (p) => net.connect(p, '127.0.0.1')) {
     return new Promise((resolve, reject) => {
-        const sock = net.connect(port, '127.0.0.1');
+        const sock = connect(port);
         const key = crypto.randomBytes(16).toString('base64');
         const lines = [`GET ${pathQuery} HTTP/1.1`, `Host: 127.0.0.1:${port}`, 'Upgrade: websocket', 'Connection: Upgrade',
             `Sec-WebSocket-Key: ${key}`, 'Sec-WebSocket-Version: 13'];
@@ -337,4 +338,40 @@ test('повторная проверка входа: токен отозван 
     core.srv.removeAllListeners('request');
     core.srv.on('request', (req, res) => { res.writeHead(401); res.end('{}'); });
     assert.deepEqual(await bob.next(3000), { op: '_closed', code: 4401 });
+});
+
+// Самоподписанный сертификат только для теста (CN=127.0.0.1).
+const TEST_CERT = "-----BEGIN CERTIFICATE-----\r\nMIIBfzCCASWgAwIBAgIUehVZk9Eq5kYDzG+o9gU9SwiORaEwCgYIKoZIzj0EAwIw\r\nFDESMBAGA1UEAwwJMTI3LjAuMC4xMCAXDTI2MTEyMTEwMDg1NloYDzIxMjYxMDI4\r\nMTAwODU2WjAUMRIwEAYDVQQDDAkxMjcuMC4wLjEwWTATBgcqhkjOPQIBBggqhkjO\r\nPQMBBwNCAAQq9jF3U1ayYwS09PXei2IJzQV6aU/Fhpxm7iBmTC6P/i9OvP+hHdgZ\r\nVgllhDuZvM75aoE2QFBnmY14JFh5ms3qo1MwUTAdBgNVHQ4EFgQULQi6Pp+RQ8TB\r\nqpDqFk3TQTnuCT8wHwYDVR0jBBgwFoAULQi6Pp+RQ8TBqpDqFk3TQTnuCT8wDwYD\r\nVR0TAQH/BAUwAwEB/zAKBggqhkjOPQQDAgNIADBFAiA4/3PU8sAhrcCO58502+Ck\r\n8nJ06mbIl4aIf/pySwMbTwIhAP7c9zM9BmnS+QeoqOF1js5CdQle3vUTsiU6DzId\r\nXdr3\r\n-----END CERTIFICATE-----\r\n";
+const TEST_KEY = "-----BEGIN PRIVATE KEY-----\r\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgPiRMXMXGhOtYOc9R\r\nsVrgBu+VhESjl59z0dIpbvNeC3ihRANCAAQq9jF3U1ayYwS09PXei2IJzQV6aU/F\r\nhpxm7iBmTC6P/i9OvP+hHdgZVgllhDuZvM75aoE2QFBnmY14JFh5ms3q\r\n-----END PRIVATE KEY-----\r\n";
+
+test('свой порт wss: браузер подключается по TLS мимо веб-сервера, /push снаружи закрыт', async (t) => {
+    const core = await startCore();
+    const ws = createWsServer({ coreUrl: core.url, secret: SECRET, allowedOrigins: ['https://ideav.ru'], reauthMs: 0, pingMs: 0 });
+    t.after(async () => { await ws.close(); core.srv.close(); });
+    await ws.listen(0, '127.0.0.1');
+    await ws.listenTls({ cert: TEST_CERT, key: TEST_KEY }, 0, '127.0.0.1');
+    const tport = ws.tlsAddress().port;
+
+    const viaTls = (p) => tls.connect({ port: p, host: '127.0.0.1', rejectUnauthorized: false });
+    const ann = await wsConnect(tport, '/ws?db=demo', { Cookie: 'idb_demo=good', Origin: 'https://ideav.ru' }, viaTls);
+    assert.equal(ann.status, 101, 'wss на своём порту');
+    assert.deepEqual(await ann.next(), { op: 'hello', db: 'demo', user: 'ann' });
+    ann.send({ op: 'sub', t: 500, shown: [11] });
+    assert.deepEqual(await ann.next(), { op: 'sub', t: 500, ok: true });
+
+    // события ядро шлёт на внутренний порт — подписчик TLS-порта их получает
+    await push(ws.address().port, { db: 'demo', by: 'bob', events: [{ k: 'change', op: 'update', id: 11, up: 1, t: 500, types: [500], chain: [[11, 500]] }] });
+    const m = await ann.next();
+    assert.equal(m.op, 'rows');
+    assert.deepEqual(m.rows.map((r) => r.i), [11]);
+
+    // на TLS-порту только web-socket: ни /push, ни /health
+    const get = (pathname, method) => new Promise((res) => {
+        const r = require('https').request({ host: '127.0.0.1', port: tport, path: pathname, method, rejectUnauthorized: false }, (x) => { x.resume(); res(x.statusCode); });
+        r.on('error', () => res(0));
+        r.end(method === 'POST' ? '{}' : undefined);
+    });
+    assert.equal(await get('/push', 'POST'), 404);
+    assert.equal(await get('/health', 'GET'), 404);
+    ann.close();
 });
