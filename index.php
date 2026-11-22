@@ -12631,6 +12631,10 @@ function handleAiAgentCallback($db){
     $plan = isset($data["plan"]) ? aiAgentPlanPublic($data["plan"]) : null;
     if($plan)
         $result["plan"] = $plan;
+    # #5637: остаток включённого объёма / лимита вопросов — необязательно (старый агент поля не шлёт).
+    $quota = aiAgentQuotaClean(isset($data["quota"]) ? $data["quota"] : null);
+    if($quota)
+        $result["quota"] = $quota;
     aiAgentJobUpdate($store, $jobId, array(
         "status" => "done",
         "result" => $result,
@@ -12807,18 +12811,47 @@ function billingAiUnitsUsed($connection, $db){
     $row = mysqli_fetch_assoc($res);
     return is_array($row) ? (int)$row["ord"] : 0;
 }
-# Признак запроса агенту «ai_included»: включённый в оплату объём базы ещё не исчерпан, расход не
-# ограничивается пользовательским лимитом агента. Любая ошибка — FALSE (агент применит лимит).
+# Остаток включённого в оплату объёма базы, ед. (#5637): int >= 0 (0 — исчерпан). Нет включённого
+# объёма или расход неизвестен (ошибка чтения) — FALSE: агент применит лимит, ai_included_left не шлём.
 function aiAgentIncluded($connection, $db){
     try {
         $included = aiAgentIncludedUnits($db);
         if($included <= 0)
             return FALSE;
         $used = billingAiUnitsUsed($connection, $db);
-        return $used !== NULL && $used < $included;
+        return $used === NULL ? FALSE : max(0, $included - $used);
     } catch(Throwable $e) {   # сбой учёта не ломает чат
         return FALSE;
     }
+}
+# quota из callback агента (#5637): included_left / rate_limit / rate_left — int >= 0 или null,
+# rate_reset — строка ISO-8601 до 40 символов или null. Всё прочее — null; нет валидных полей — null.
+function aiAgentQuotaClean($q){
+    if(!is_array($q))
+        return null;
+    $out = array();
+    foreach(array("included_left", "rate_limit", "rate_left") as $k)
+        $out[$k] = (isset($q[$k]) && is_int($q[$k]) && $q[$k] >= 0) ? $q[$k] : null;
+    $out["rate_reset"] = (isset($q["rate_reset"]) && is_string($q["rate_reset"]) && strlen($q["rate_reset"]) <= 40
+        && preg_match('/^\d{4}-\d{2}-\d{2}T[0-9:.]+(Z|[+-]\d{2}:?\d{2})?$/', $q["rate_reset"]))
+        ? $q["rate_reset"] : null;
+    foreach($out as $v)
+        if($v !== null)
+            return $out;
+    return null;
+}
+# Включённый объём ИИ по базам пользователя (#5637, для ЛК): только базы, у которых up = user.
+# {база: ед.}; гость / нечисловой id — пусто.
+function aiIncludedUnitsMap($connection, $userId){
+    $userId = (is_int($userId) || (is_string($userId) && ctype_digit($userId))) ? (int)$userId : 0;
+    if($userId <= 0 || empty($connection))
+        return array();
+    $res = @mysqli_query($connection, "SELECT db.val FROM my db WHERE db.up=$userId AND db.t=".DATABASE);
+    $out = array();
+    if($res)
+        while($row = mysqli_fetch_assoc($res))
+            $out[(string)$row["val"]] = aiAgentIncludedUnits($row["val"]);
+    return $out;
 }
 function fetchAiAgentPaymentReport($db){
     # Issue #3404: срок действия оплаты берётся напрямую из базы ($connection)
@@ -13121,8 +13154,13 @@ function callIntegramAgent($db, $message, $attachments, $payment, $jobId="", $ca
             $request[$k] = $v;
     # #5633: объём ИИ, включённый в оплату базы, не исчерпан — агент не режет запросы лимитом на пользователя.
     global $connection;
-    if(aiAgentIncluded($connection, $db))
-        $request["ai_included"] = true;
+    # #5637: ai_included_left — остаток, ед.; только если объём есть и расход известен.
+    $left = aiAgentIncluded($connection, $db);
+    if($left !== FALSE && $left !== NULL){
+        $request["ai_included_left"] = (int)$left;
+        if($left > 0)
+            $request["ai_included"] = true;
+    }
     # Async-режим (вариант B1): сообщаем агенту, куда вернуть результат. Для
     # синхронного агента поля безвредны — он их игнорирует и отвечает content сразу.
     if($jobId !== "" && $callbackUrl !== ""){
@@ -13303,7 +13341,9 @@ function aiAgentJobPublic($job){
         "result" => $result,
         "error" => isset($job["error"]) ? $job["error"] : null,
         # python2node#849: последняя строка хода работы — пока задача не завершена.
-        "progress" => (($status === "processing" || $status === "queued") && !empty($job["progress"])) ? (string)$job["progress"] : null
+        "progress" => (($status === "processing" || $status === "queued") && !empty($job["progress"])) ? (string)$job["progress"] : null,
+        # #5637: остаток включённого объёма / лимита вопросов (только у готовой задачи, у старого агента — null)
+        "quota" => (is_array($result) && isset($result["quota"]) && is_array($result["quota"])) ? $result["quota"] : null
     );
 }
 function aiAgentJobsEncode($jobs){
@@ -17266,6 +17306,14 @@ if(Validate_Token())
             Insert($id, 1, 283, $template, "Insert new DB template");
             Insert($id, 1, 276, $_POST["descr"], "Insert new DB notes");
 			api_dump(json_encode(array("status"=>"Ok","id"=>$id)), "_new_db.json");
+			break;
+
+		# #5637: включённый объём ИИ по базам текущего пользователя (ЛК): GET /my/_ai_included?JSON
+		case "_ai_included":
+			if($z !== "my")
+				my_die(t9n("[RU]Доступно в Личном кабинете[EN]Available in your private space"));
+			api_dump(json_encode(array("included" => (object)aiIncludedUnitsMap($connection, $GLOBALS["GLOBAL_VARS"]["user_id"]))
+				, JSON_UNESCAPED_UNICODE), "_ai_included.json");
 			break;
 
 		# #5573: свой домен базы — состояние, привязка, проверка DNS, отвязка, оплата с баланса

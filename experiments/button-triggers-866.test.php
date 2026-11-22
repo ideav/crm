@@ -296,7 +296,7 @@ foreach(array("aiLogUser", "InBatchOp", "my_die", "OpFail", "BtCorePort", "BtWar
         "BtAsUser", "BtCoreWrite", "BtLoopbackBase", "BtJobsStore", "BtPromptGate", "BtJobPending", "BtPromptSubmit", "BtCallbackApply", "BtActionRequest",
         "BtHookBefore", "handleAiAgentCallback", "aiAgentCurrentUser", "aiAgentJobIsOf",
         "aiAgentJobsFile", "aiAgentJobId", "aiAgentJobNew", "aiAgentJobsAppend", "aiAgentJobsFind", "aiAgentJobsLatest", "aiAgentJobsPrune",
-        "aiAgentJobsApplyChanges", "aiAgentJobsReplace", "aiAgentJobPublic", "aiAgentJobsEncode", "aiAgentJobsDecode", "aiAgentJobsLoadRaw",
+        "aiAgentJobsApplyChanges", "aiAgentJobsReplace", "aiAgentJobPublic", "aiAgentQuotaClean", "aiAgentJobsEncode", "aiAgentJobsDecode", "aiAgentJobsLoadRaw",
         "aiAgentJobsMutate", "aiAgentJobCreate", "aiAgentJobUpdate", "aiAgentJobGet", "aiAgentProgressClean", "aiAgentBlocksClean", "aiAgentPlanPublic") as $fn)
     eval(extract_function_source($source, $fn));
 

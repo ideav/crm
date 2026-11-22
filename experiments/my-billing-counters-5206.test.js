@@ -34,7 +34,7 @@ class El {
     closest() { return null; }
 }
 
-function render(dbs) {
+function render(dbs, included) {
     const els = {};
     const byId = id => (els[id] || (els[id] = new El('div', id)));
     const doc = {
@@ -56,6 +56,7 @@ function render(dbs) {
     const c = new ctx.CabinetController();
     c.apiConfig = { host: 'app.test' };
     c.databases = dbs;
+    c.aiIncluded = included || null;
     c.populateDatabases();
     return byId('databases-list').children.map(card => card.innerHTML);
 }
@@ -83,17 +84,24 @@ test('#5206: значение счётчика экранируется', () => 
     assert.ok(!card.includes('<b>x</b>'));
 });
 
-// p2n#850: цена единицы ИИ-токенов — чуть ниже рынка (polza.ai 377,64 ₽ и routerai.ru 427 ₽ за 1M входных
-// Claude Opus 5.5 на 22.11.2026): 1 ед. = 1000 условных токенов = 0,36 ₽ (360 ₽ за 1M).
-test('p2n#850: стоимость ИИ в рублях рядом со счётчиком', () => {
-    const [many, none, junk] = render([
+// #5637: вместо рублей — «использовано N из M ед.»; M — включённый объём базы с сервера (loadAiIncluded).
+// Нет включённого объёма (M = 0) — «N ед.» и подсказка про лимит 3 вопроса в час.
+test('#5637: ИИ — использовано N из M ед., M = 0 — подсказка про лимит', () => {
+    const dbs = [
         { DB: 'alpha', DBID: '101', AIUnits: '1234', AgentRuns: '17' },
         { DB: 'beta', DBID: '102', AIUnits: '', AgentRuns: '' },
-        { DB: 'gamma', DBID: '103', AIUnits: '<b>x</b>', AgentRuns: '' }
-    ]);
-    assert.strictEqual(stat(many, 'Стоимость ИИ'), '444,24 ₽', '1234 × 0,36');
-    assert.strictEqual(stat(none, 'Стоимость ИИ'), '0,00 ₽');
-    assert.strictEqual(stat(junk, 'Стоимость ИИ'), null, 'не число — без рублей');
+        { DB: 'gamma', DBID: '103', AIUnits: '<b>x</b>', AgentRuns: '' },
+        { DB: 'delta', DBID: '104', AIUnits: '5', AgentRuns: '' }
+    ];
+    const [a, b, g, d] = render(dbs, { alpha: 1652, beta: 0, gamma: 3472 });
+    assert.strictEqual(stat(a, 'ИИ'), 'использовано 1234 из 1652 ед.');
+    assert.strictEqual(stat(b, 'ИИ'), '0 ед.');
+    assert.ok(b.includes('title="Включённого объёма нет — действует лимит 3 вопроса в час"'));
+    assert.strictEqual(stat(g, 'ИИ'), 'использовано 0 из 3472 ед.', 'не число — 0');
+    assert.ok(!g.includes('<b>x</b>'));
+    assert.strictEqual(stat(d, 'ИИ'), '5 ед.', 'нет данных сервера по базе — только расход');
+    assert.ok(!d.includes('Включённого объёма нет'), 'без данных подсказка про лимит не показывается');
+    assert.strictEqual(stat(a, 'Стоимость ИИ'), null, 'рублей в карточке больше нет');
 });
 
 // #5633: цена единицы — одна на систему; серверное значение (window.AI_UNIT_PRICE_RUB из
