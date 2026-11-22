@@ -1,6 +1,5 @@
 // DOM-XSS в гриде и дашборде — issue p2n#1137 (D3: «…»/showFullValue, D4: заголовки форм,
 // имена из метаданных, style-колонка, путь файла, dash.js).
-// rules: none (defect p2n#1137)
 //
 // Длинное значение ячейки (>127 символов) открывается в модалке по ссылке «…». Значение не
 // должно попадать в код обработчика: браузер декодирует сущности атрибута до разбора JS, и
@@ -153,10 +152,10 @@ function domStub(sink) {
     const md = { id: '1', val: 'Таблица' + TAG_PAYLOAD, reqs: [{ id: '2', val: 'Поле' + TAG_PAYLOAD, type: '3', attrs: '' }] };
     let err = null;
     try { t.renderEditFormModal(md, { obj: { val: 'Запись' + TAG_PAYLOAD, id: 5 }, reqs: {} }, false, '1'); } catch (e) { err = e; }
-    const html = sink.join('\n');
-    assert(html.includes('<h3>'), 'форма записи: заголовок отрисован', err && err.message);
-    assert(!html.includes('<img'), 'форма записи: главное значение, имя таблицы и поля не становятся разметкой');
-    assert(html.includes('Запись&lt;img'), 'форма записи: главное значение видно текстом');
+    const rendered = sink.join('\n');
+    assert(rendered.includes('<h3>'), 'форма записи: заголовок отрисован', err && err.message);
+    assert(!rendered.includes('<img'), 'форма записи: главное значение, имя таблицы и поля не становятся разметкой');
+    assert(rendered.includes('Запись&lt;img'), 'форма записи: главное значение видно текстом');
     global.document = savedDoc;
     if (savedNav) Object.defineProperty(globalThis, 'navigator', savedNav); else delete globalThis.navigator;
 }
