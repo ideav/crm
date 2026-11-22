@@ -12,6 +12,7 @@ function expect($cond, $name){
 }
 function t9n($v){ return preg_match('/^\[RU\](.*?)\[EN\]/s',$v,$m) ? $m[1] : $v; }
 function aiConfigValue($names){ return in_array("INTEGRAM_AGENT_ENDPOINT", $names) ? "https://agent.example/agent" : ""; }
+function aiAgentIncluded($connection, $db){ return FALSE; }   # #5633: объём ИИ в оплате — вне этого теста
 function validateAiProviderEndpoint($e){}
 function aiChatPostJson($endpoint, $request, $headers, $timeout=60){
     $GLOBALS["__capture"] = $request;

@@ -27,6 +27,7 @@ function aiAgentError($message, $code=400, $extra=array()){
 function t9n($v){ return preg_match('/^\[RU\](.*?)\[EN\]/s',$v,$m) ? $m[1] : $v; }
 function check(){}
 function checkAiAgentPayment($db){ return array("ok"=>true,"status"=>"active","paidUntil"=>time()+1000,"payUrl"=>"https://pay"); }
+function aiAgentIncluded($connection, $db){ return FALSE; }   # #5633: объём ИИ в оплате — вне этого теста
 function validateAiProviderEndpoint($e){}
 
 # Конфиг: endpoint задан => callIntegramAgent идёт по HTTP-пути; callback-URL из base.

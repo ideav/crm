@@ -46,7 +46,7 @@ function extract_function_source($source, $name){
     throw new Exception("Function body is not closed: ".$name);
 }
 $source = file_get_contents(__DIR__."/../index.php");
-foreach(array("checkAiAgentPayment", "evaluateAiAgentPayment") as $fn)
+foreach(array("checkAiAgentPayment", "aiAgentPaymentRaw", "evaluateAiAgentPayment") as $fn)
     eval(extract_function_source($source, $fn));
 
 $db = "e2e5117test".getmypid();

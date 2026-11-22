@@ -765,6 +765,8 @@ define("ALL_OBJECTS", "*** All objects ***");
 define("FILES", "*** Files ***");
 
 $GLOBALS["GLOBAL_VARS"]["version"] = VERSION;
+# #5633: цена единицы ИИ, ₽ — одна на систему: отчёт 5431 (месячное списание) и ЛК берут {_global_.ai_unit_price}.
+$GLOBALS["GLOBAL_VARS"]["ai_unit_price"] = billingAiUnitPrice();
 $GLOBALS["GLOBAL_VARS"]["newapi"] = [];
 
 # ################# FUNCTIONS #################
@@ -12299,6 +12301,7 @@ function aiChatHttpStatusText($code){
         403 => "Forbidden",
         404 => "Not Found",
         405 => "Method Not Allowed",
+        429 => "Too Many Requests",
         502 => "Bad Gateway",
         503 => "Service Unavailable"
     );
@@ -12754,10 +12757,15 @@ function checkAiAgentPayment($db){
     if(aiConfigValue(array("AI_AGENT_PAYMENT_REQUIRED")) !== "1")
         return array("ok" => true, "status" => "free", "message" => "", "payUrl" => "",
             "amount" => 0, "paidAt" => 0, "paidUntil" => 0);
+    $safeDb = preg_replace('/[^a-z0-9_]/i', '', (string)$db);
+    return evaluateAiAgentPayment(aiAgentPaymentRaw($safeDb), $safeDb);
+}
+# Сырой ответ проверки оплаты c2ai: кеш на AI_AGENT_PAYMENT_CACHE_TTL (1 час), иначе запрос. Один путь
+# и для решения о доступе, и для объёма ИИ, включённого в оплату (#5633).
+function aiAgentPaymentRaw($safeDb){
     $ttl = (int)aiConfigValue(array("AI_AGENT_PAYMENT_CACHE_TTL"));
     if($ttl <= 0)
         $ttl = 3600; # кеш на 1 час
-    $safeDb = preg_replace('/[^a-z0-9_]/i', '', (string)$db);
     $cacheFile = sys_get_temp_dir()."/ai_agent_pay_".$safeDb.".json";
     $raw = false;
     if($safeDb !== "" && is_readable($cacheFile) && (time() - filemtime($cacheFile) < $ttl)){
@@ -12773,7 +12781,44 @@ function checkAiAgentPayment($db){
                 @file_put_contents($cacheFile, $raw);
         }
     }
-    return evaluateAiAgentPayment($raw, $safeDb);
+    return $raw;
+}
+# ИИ, включённый в оплату базы (#5633): 10% суммы оплаты c2ai (5950 / 12500 ₽) в единицах по цене
+# billingAiUnitPrice(). Нет действительной оплаты — 0. Не зависит от AI_AGENT_PAYMENT_REQUIRED
+# и на решение о доступе не влияет.
+function aiAgentIncludedUnits($db){
+    $safeDb = preg_replace('/[^a-z0-9_]/i', '', (string)$db);
+    $pay = evaluateAiAgentPayment(aiAgentPaymentRaw($safeDb), $safeDb);
+    if($pay["status"] !== "active" || $pay["amount"] <= 0)
+        return 0;
+    return (int)floor(round(0.10 * $pay["amount"] / (float)billingAiUnitPrice(), 6));
+}
+# Расход ИИ базы в единицах — ord строки-счётчика BILLING_AI_TOKENS_TYPE записи базы в my
+# (та же выборка, что в billingCounterAdd, только чтение). Нет строки — 0; ошибка — NULL.
+function billingAiUnitsUsed($connection, $db){
+    $type = (int)aiConfigValue(array("BILLING_AI_TOKENS_TYPE"));
+    if($type <= 0 || empty($connection))
+        return NULL;
+    $db = mysqli_real_escape_string($connection, (string)$db);
+    $res = @mysqli_query($connection, "SELECT c.ord FROM my c JOIN my db ON c.up=db.id"
+        ." WHERE db.t=".DATABASE." AND db.val='$db' AND c.t=$type LIMIT 1");
+    if(!$res)
+        return NULL;
+    $row = mysqli_fetch_assoc($res);
+    return is_array($row) ? (int)$row["ord"] : 0;
+}
+# Признак запроса агенту «ai_included»: включённый в оплату объём базы ещё не исчерпан, расход не
+# ограничивается пользовательским лимитом агента. Любая ошибка — FALSE (агент применит лимит).
+function aiAgentIncluded($connection, $db){
+    try {
+        $included = aiAgentIncludedUnits($db);
+        if($included <= 0)
+            return FALSE;
+        $used = billingAiUnitsUsed($connection, $db);
+        return $used !== NULL && $used < $included;
+    } catch(Throwable $e) {   # сбой учёта не ломает чат
+        return FALSE;
+    }
 }
 function fetchAiAgentPaymentReport($db){
     # Issue #3404: срок действия оплаты берётся напрямую из базы ($connection)
@@ -13074,6 +13119,10 @@ function callIntegramAgent($db, $message, $attachments, $payment, $jobId="", $ca
     if(is_array($extra))
         foreach($extra as $k => $v)
             $request[$k] = $v;
+    # #5633: объём ИИ, включённый в оплату базы, не исчерпан — агент не режет запросы лимитом на пользователя.
+    global $connection;
+    if(aiAgentIncluded($connection, $db))
+        $request["ai_included"] = true;
     # Async-режим (вариант B1): сообщаем агенту, куда вернуть результат. Для
     # синхронного агента поля безвредны — он их игнорирует и отвечает content сразу.
     if($jobId !== "" && $callbackUrl !== ""){
@@ -13767,8 +13816,19 @@ function aiChatPostJson($endpoint, $request, $headers, $timeout=60){
     if($errno)
         throw new Exception(t9n("[RU]Ошибка подключения к ИИ-сервису[EN]AI service connection error").": ".$error, 502);
     if($httpCode >= 400)
-        throw new Exception(aiProviderErrorMessage($httpCode, $raw, $endpoint), 502);
+        throw aiChatHttpError($httpCode, $raw, $endpoint);
     return $raw;
+}
+# Исключение для ответа ИИ-сервиса с кодом >= 400. 429 — лимит агента («Лимит: 3 запроса в час.
+# Обновится в ЧЧ:ММ»): текст из поля error тела уходит в чат как есть, код 429; остальное — 502.
+function aiChatHttpError($httpCode, $raw, $endpoint = ""){
+    if((int)$httpCode === 429){
+        $text = extractAiProviderError($raw);
+        if($text === "")
+            $text = t9n("[RU]Лимит запросов к ИИ-агенту исчерпан. Повторите позже.[EN]AI agent request limit reached. Try again later.");
+        return new Exception($text, 429);
+    }
+    return new Exception(aiProviderErrorMessage($httpCode, $raw, $endpoint), 502);
 }
 # <ai-provider-error-4627>
 # Отказ внешнего ИИ-сервиса пользователь видит в чате как «чат не работает» и по тексту
@@ -14384,6 +14444,15 @@ function updateBilling(){
 # (активность, updateBilling) не меняется. Пересчёт в единицы:
 #   ai_tokens  = ceil(tokens / BILLING_AI_TOKENS_PER_UNIT)  (по умолчанию 1000 токенов = 1 ед.)
 #   agent_runs = runs * BILLING_AGENT_RUN_UNITS             (по умолчанию 1 запуск = 1 ед.)
+# Цена одной единицы ИИ-токенов для клиента, ₽ (#5633). BILLING_AI_UNIT_PRICE, по умолчанию 0.36
+# (1 ед. = 1000 условных токенов, p2n#850). Строка с точкой (для SQL и JS); запятая допустима;
+# не число, ноль и минус — умолчание.
+function billingAiUnitPrice(){
+    $v = str_replace(",", ".", aiConfigValue(array("BILLING_AI_UNIT_PRICE")));
+    if(!preg_match('/^[0-9]+([.][0-9]+)?$/', $v) || (float)$v <= 0)
+        return "0.36";
+    return $v;
+}
 function billingUnits($tokens, $runs){
     $perUnit = (int)aiConfigValue(array("BILLING_AI_TOKENS_PER_UNIT"));
     if($perUnit <= 0)
