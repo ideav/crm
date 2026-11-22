@@ -78,7 +78,9 @@ assert(assetVersions(sample, '/js/нет-такого.js').length === 0, 'чуж
 // Сторож целиком. → null, если git или база недоступны; иначе { assets, problems }.
 function runGuard(root, base) {
     // Пустой дифф — это ПУСТО, а не «git недоступен»: null отдаёт только сбой команды.
-    var changed = base ? gitQuiet(root, ['diff', '--name-only', base + '...HEAD']) : null;
+    // Только ИЗМЕНЁННЫЕ файлы (--diff-filter=M): у добавленного файла в браузере нет старой копии
+    // в кэше, версионировать нечего (#5621 — в репо легли вендорные библиотеки без версии).
+    var changed = base ? gitQuiet(root, ['diff', '--diff-filter=M', '--name-only', base + '...HEAD']) : null;
     if (changed === null) return null;
     var assets = changed.split('\n').filter(function (f) { return /^(js|css)\/.+\.(js|css)$/.test(f); });
     var problems = [];
@@ -136,6 +138,22 @@ function runGuard(root, base) {
         commit('version bumped');
         r = runGuard(tmp, 'guard-base');
         assert(r !== null && r.problems.length === 0, 'самопроверка: версия поднята → сторож молчит',
+            r === null ? 'сторож пропущен' : r.problems.join('; '));
+
+        put('templates/my/vendor.html', '<script src="/js/vendor1.0.min.js"></script>\n');
+        commit('vendor page');
+        g(['branch', '-f', 'guard-base']);
+        put('js/vendor1.0.min.js', 'var lib = 1;\n');
+        commit('vendor file added');
+        r = runGuard(tmp, 'guard-base');
+        assert(r !== null && r.problems.length === 0,
+            'самопроверка: добавленный файл без версии в шаблоне → сторож молчит (#5621)',
+            r === null ? 'сторож пропущен' : r.problems.join('; '));
+        put('js/vendor1.0.min.js', 'var lib = 2;\n');
+        commit('vendor file changed');
+        r = runGuard(tmp, 'guard-base');
+        assert(r !== null && r.problems.length === 0,
+            'самопроверка: файл, которого нет в базе, считается добавленным и после второй правки',
             r === null ? 'сторож пропущен' : r.problems.join('; '));
     } finally {
         try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (e) {}

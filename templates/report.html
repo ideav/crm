@@ -7,7 +7,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Pragma" content="no-cache">
 <title>{VAL}</title>
-<link rel="stylesheet" href="/css/bootstrap.3.3.7.min.css">
+<link rel="stylesheet" href="/css/bootstrap4.5.2.min.css">
 <link rel="stylesheet" href="/css/styles.css">
 <link rel="stylesheet" href="/assets/vendor/primeicons/primeicons.css">
 <script>
@@ -138,11 +138,11 @@ function delete_cookie(name)
 }
 function toggle_compact() {
 	if(get_cookie("compact") == "compact") {
-		byId('report_table').classList.remove('table-condensed');
+		byId('report_table').classList.remove('table-sm');
 		delete_cookie("compact");
 	}
 	else {
-		byId('report_table').classList.add('table-condensed');
+		byId('report_table').classList.add('table-sm');
 		set_cookie("compact", "compact" );
 	}
 }
@@ -150,7 +150,7 @@ function adjust(id) {
 	byId(id).size=byId(id).value.length + 1;
 }
 if(get_cookie("compact") == "compact")
-	byId('report_table').classList.add('table-condensed');
+	byId('report_table').classList.add('table-sm');
 // Issue #2755: size the scroll wrapper so it becomes the scroll context for the
 // sticky header row. Mirrors the updateContainerHeight() pattern used by
 // .integram-table-container (issue #2083).
