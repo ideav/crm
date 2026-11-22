@@ -89,6 +89,7 @@
         stopRequested: false,
         loadToken: 0,
         keyword: '',        // ключевое слово фильтра по «Наименованию» RFP (issue #3523)
+        failedIds: {},      // id строк, на которых в этом прогоне упал отчёт (#5617, Д8)
         seenIds: {},        // id строк, уже взятых в работу в этом прогоне — защита от зацикливания
         // issue #3522: статистика и время выполнения авто-прогона
         outcomes: {},       // { recordId: 'matched'|'noMatch'|'error' } — итог по строке для статистики
@@ -508,7 +509,9 @@
     // без клиентского сканирования таблицы. issue #3523: если задано ключевое слово —
     // дополнительно ограничиваем выборку строками, чьё «Наименование» его содержит
     // (F_{rfpNameId}=%слово% — LIKE-«содержит», как column-фильтр у object-эндпоинта).
-    function buildScanUrl(limit) {
+    // offset — сколько строк начала выборки пропустить: строки, на которых в этом прогоне
+    // упал отчёт, остаются необработанными и стоят в начале выборки (#5617, Д8).
+    function buildScanUrl(limit, offset) {
         var params = new URLSearchParams();
         params.set('JSON_OBJ', '');
         if (state.fields.our && state.fields.our.id) {
@@ -517,7 +520,7 @@
         if (state.keyword && state.fields.rfpName && state.fields.rfpName.id) {
             params.set('F_' + state.fields.rfpName.id, '%' + state.keyword + '%');
         }
-        params.set('LIMIT', '0,' + limit);
+        params.set('LIMIT', Math.max(0, offset || 0) + ',' + limit);
         return '/' + encodePathSegment(state.db) + '/object/' +
             encodePathSegment(state.rfpTable) + '/?' + params.toString();
     }
@@ -958,6 +961,7 @@
     function setControls(mode) {
         // mode: 'idle' | 'running' | 'loading'
         setDisabled('xcom-mass-reload', mode !== 'idle');
+        setDisabled('xcom-mass-reset', mode !== 'idle');
         setDisabled('xcom-mass-keyword', mode !== 'idle');
         setHidden('xcom-mass-start', mode === 'running');
         setDisabled('xcom-mass-start', mode !== 'idle' || !state.records.length);
@@ -999,17 +1003,29 @@
                     picked.our.source,
                     state.matchConfig.attribute_weights
                 );
-            } else {
-                // нет совпадений (picked.our пуст) или ошибка отчёта (picked === null) —
-                // пишем заглушку «Наш артикул», иначе строка зависнет в пустом состоянии
-                // и будет попадать в каждую следующую пачку.
-                record.our = placeholderOur(picked ? 'нет совпадений' : '');
+            } else if (picked) {
+                // нет совпадений — заглушка «Наш артикул» выводит строку из выборки
+                // необработанных; вернуть такие строки в подбор — resetNoMatch.
+                record.our = placeholderOur('нет совпадений');
                 record.candidates = [];
                 record.accuracy = 0;
+            } else {
+                // ошибка отчёта — строку не помечаем: она остаётся в подборе, а следующая
+                // пачка прогона пропускает её сдвигом выборки (#5617, Д8).
+                record.our = null;
+                record.candidates = [];
+                record.accuracy = null;
+                state.failedIds[record.id] = true;
+                record.status = 'error';
+                updateRecordRow(record);
+                updateProgress();
+                recordOutcome(record);
+                return;
             }
+            delete state.failedIds[record.id];
 
             return writeBack(record).then(function() {
-                record.status = (picked === null) ? 'error' : 'done';
+                record.status = 'done';
                 updateRecordRow(record);
                 updateProgress();
                 recordOutcome(record);
@@ -1108,6 +1124,7 @@
         state.running = true;
         state.stopRequested = false;
         state.seenIds = {};
+        state.failedIds = {};
         state.outcomes = {};
         state.startTime = Date.now();
         state.endTime = 0;
@@ -1147,8 +1164,13 @@
                 state.records.forEach(function(r) { state.seenIds[r.id] = true; });
                 var batchStart = Date.now();
                 var batchStartCount = Object.keys(state.outcomes).length;
+                var batch = state.records.slice();
                 return processCurrentBatch().then(function() {
                     if (state.stopRequested) return;
+                    if (isEmptyBatch(batch)) {
+                        state.emptyRunWarning = emptyRunMessage(batch.length);
+                        return;
+                    }
                     // замер скорости пачки и авто-регулировка числа потоков (issue #3527)
                     if (state.autoConcurrency) {
                         var elapsed = Date.now() - batchStart;
@@ -1163,6 +1185,7 @@
             });
         }
 
+        state.emptyRunWarning = '';
         return iterate().then(function() {
             state.running = false;
             state.endTime = Date.now();
@@ -1170,7 +1193,70 @@
             renderStats();
             setControls('idle');
             updateProgress();
-            if (!state.records.length) renderList();
+            if (state.emptyRunWarning) renderMessage(state.emptyRunWarning, 'error');
+            else if (!state.records.length) renderList();
+        });
+    }
+
+    // Пачка, в которой ни одна строка не получила кандидата, — признак сломанной настройки
+    // (токенизация не прошла, отчёт подбора не отдаёт SKU), а не данных: прогон
+    // останавливается, чтобы не пометить «нет совпадений» всю таблицу (#5617, Д8).
+    var EMPTY_BATCH_MIN = 5;
+    function isEmptyBatch(batch) {
+        var done = batch.filter(function(record) { return record.status === 'done'; });
+        if (done.length < Math.min(EMPTY_BATCH_MIN, batch.length) || !done.length) return false;
+        return done.every(function(record) { return record.our && record.our.placeholder; });
+    }
+
+    function emptyRunMessage(count) {
+        return 'Прогон остановлен: ни у одной из ' + count + ' строк пачки нет кандидатов. ' +
+            'Проверьте, что токенизация RFP и SKU выполнена и отчёт подбора возвращает SKU, ' +
+            'затем нажмите «Вернуть строки без совпадений» и запустите прогон снова.';
+    }
+
+    // Вернуть в подбор строки с заглушкой «нет совпадений»: очистить «Наш артикул»,
+    // «Кандидаты» и «Точность подбора» (#5617, Д8). Пустое значение _m_set = очистка поля.
+    function buildPlaceholderScanUrl(limit) {
+        var params = new URLSearchParams();
+        params.set('JSON_OBJ', '');
+        params.set('F_' + state.fields.our.id, state.placeholderOurId);
+        params.set('LIMIT', '0,' + limit);
+        return '/' + encodePathSegment(state.db) + '/object/' +
+            encodePathSegment(state.rfpTable) + '/?' + params.toString();
+    }
+
+    function resetNoMatch() {
+        if (state.running || !state.fields.our || !state.fields.our.id) return Promise.resolve(0);
+        var clear = {};
+        clear[state.fields.our.id] = '';
+        if (state.fields.candidates && state.fields.candidates.id) clear[state.fields.candidates.id] = '';
+        if (state.fields.accuracy && state.fields.accuracy.id) clear[state.fields.accuracy.id] = '';
+        var total = 0;
+        var seen = {};
+        setControls('loading');
+        renderMessage('Возвращаю строки без совпадений в подбор…', 'loading');
+        function round() {
+            return fetchJson(buildPlaceholderScanUrl(state.batchSize)).then(function(json) {
+                var rows = normalizeRows(json).filter(function(row) {
+                    return trimValue(row.values[state.fields.our.index]) === String(state.placeholderOurId) && !seen[row.id];
+                });
+                if (!rows.length) return total;
+                return Promise.all(rows.map(function(row) {
+                    seen[row.id] = true;
+                    return postSetMany(row.id, clear);
+                })).then(function() {
+                    total += rows.length;
+                    return round();
+                });
+            });
+        }
+        return round().then(function(count) {
+            setControls('idle');
+            return loadBatch().then(function() { return count; });
+        }).catch(function(error) {
+            renderMessage(error && error.message ? error.message : 'Не удалось вернуть строки в подбор.', 'error');
+            setControls('idle');
+            return total;
         });
     }
 
@@ -1196,7 +1282,8 @@
     function fetchBatch() {
         var token = ++state.loadToken;
         state.records = [];
-        return fetchJson(buildScanUrl(state.batchSize)).then(function(json) {
+        var offset = state.running ? Object.keys(state.failedIds || {}).length : 0;
+        return fetchJson(buildScanUrl(state.batchSize, offset)).then(function(json) {
             if (token !== state.loadToken) return -1;
             var rows = normalizeRows(json);
             var nameField = state.fields.rfpName;
@@ -1364,6 +1451,11 @@
             if (state.running) return;
             loadBatch();
         });
+        var reset = document.getElementById('xcom-mass-reset');
+        if (reset) reset.addEventListener('click', function() {
+            if (state.running) return;
+            resetNoMatch();
+        });
         // Ключевое слово фильтра по «Наименованию» RFP (issue #3523): применяется по Enter/blur/
         // очистке (события change/search у input[type=search]); пустое слово = без фильтра.
         if (keyword) {
@@ -1482,6 +1574,10 @@
         buildMatchUrl: buildMatchUrl,
         buildScanUrl: buildScanUrl,
         tuneConcurrency: tuneConcurrency,
+        loadBatch: loadBatch,
+        runAuto: runAuto,
+        resetNoMatch: resetNoMatch,
+        isEmptyBatch: isEmptyBatch,
         _state: state,
         init: init
     };

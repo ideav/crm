@@ -2,7 +2,7 @@
     'use strict';
 
     var ROLES = [
-        { id: 'name', label: 'Наименование', hint: 'Текст для токенизации', aliases: ['наименование', 'название', 'товар', 'продукт', 'позиция', 'description', 'name', 'title'] },
+        { id: 'name', label: 'Наименование', hint: 'Текст для токенизации', aliases: ['наименование', 'номенклатура', 'название', 'товар', 'продукт', 'позиция', 'description', 'name', 'title'] },
         { id: 'article', label: 'Артикул', hint: 'Код или артикул позиции', aliases: ['артикул', 'код товара', 'sku', 'vendor code', 'article', 'part number'] },
         { id: 'brand', label: 'Бренд', hint: 'Производитель или торговая марка', aliases: ['бренд', 'марка', 'производитель', 'brand', 'vendor', 'manufacturer'] },
         { id: 'model', label: 'Модель', hint: 'Модель, серия или исполнение', aliases: ['модель', 'серия', 'model', 'series'] },
@@ -102,12 +102,26 @@
         return result;
     }
 
-    function matrixToDataset(matrix) {
-        var rows = Array.isArray(matrix) ? matrix : [];
-        var headerIndex = -1;
-        for (var i = 0; i < rows.length; i++) {
-            if (nonEmpty(rows[i]).length) { headerIndex = i; break; }
+    // Строка заголовка: первая строка, где заполнено не меньше половины колонок самой широкой
+    // строки (минимум две), — шапка-название над таблицей пропускается (#5617, Д1).
+    // headerRowOverride — номер строки листа с единицы, выбранный партнёром вручную.
+    function detectHeaderIndex(rows) {
+        var scan = rows.slice(0, 30).map(function(row) { return nonEmpty(row).length; });
+        var widest = Math.max.apply(null, scan.concat([0]));
+        var need = widest >= 2 ? Math.max(2, Math.ceil(widest / 2)) : 1;
+        for (var i = 0; i < scan.length; i++) {
+            if (scan[i] >= need) return i;
         }
+        for (var j = 0; j < rows.length; j++) {
+            if (nonEmpty(rows[j]).length) return j;
+        }
+        return -1;
+    }
+
+    function matrixToDataset(matrix, headerRowOverride) {
+        var rows = Array.isArray(matrix) ? matrix : [];
+        var override = parseInt(headerRowOverride, 10);
+        var headerIndex = override >= 1 && override <= rows.length ? override - 1 : detectHeaderIndex(rows);
         if (headerIndex < 0) return { headers: [], rows: [], headerRow: 0, totalRows: 0 };
         var seen = {};
         var headers = (rows[headerIndex] || []).map(function(value, index) {
@@ -126,10 +140,10 @@
         return { headers: headers, rows: objects, headerRow: headerIndex + 1, totalRows: objects.length };
     }
 
-    function sheetToDataset(workbook, sheetName, xlsx) {
+    function sheetToDataset(workbook, sheetName, xlsx, headerRowOverride) {
         if (!workbook || !workbook.Sheets || !workbook.Sheets[sheetName]) return matrixToDataset([]);
         var matrix = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: '', raw: false });
-        return matrixToDataset(matrix);
+        return matrixToDataset(matrix, headerRowOverride);
     }
 
     function buildRules(mappings) {
@@ -183,10 +197,13 @@
         return role ? role.label : '';
     }
 
+    // Поле таблицы по имени. Подчинённая таблица (arr_id без ref) колонкой файла не загружается —
+    // экран загрузки ставит на её место пропуск, и значение теряется (#5617, Д4).
     function fieldId(table, name) {
         if (normalizeHeader(table && (table.val || table.name)) === normalizeHeader(name)) return String(table.id);
         var req = (table && table.reqs || []).filter(function(item) {
-            return normalizeHeader(item && (item.val || item.name)) === normalizeHeader(name);
+            return normalizeHeader(item && (item.val || item.name)) === normalizeHeader(name) &&
+                !(item.arr_id && !item.ref && !item.ref_id);
         })[0];
         return req ? String(req.id) : '';
     }
@@ -200,9 +217,12 @@
             var target = targetFieldName(side, role.id);
             var targetId = role.id === 'name' ? String(table.id) : fieldId(table, target);
             var sourceIndex = dataset.headers.indexOf(header);
-            if (!targetId) throw new Error('В таблице «' + (table.val || table.name) + '» нет поля «' + target + '».');
+            if (!targetId) throw new Error('В таблице «' + (table.val || table.name) + '» нет поля «' + target + '», которое можно загрузить из колонки файла.');
             if (sourceIndex >= 0) importMap[targetId] = sourceIndex;
         });
+        // Колонки правее последней размеченной не читаются: иначе экран загрузки раскладывает
+        // в них оставшиеся поля таблицы (#3810), и «Кол-во» ложится в «Наименование» (#5617, Д3).
+        var lastColumn = Object.keys(importMap).reduce(function(max, key) { return Math.max(max, importMap[key]); }, -1);
         return {
             type: String(table.id),
             name: String(table.val || table.name || side.toUpperCase()),
@@ -213,7 +233,7 @@
             importMap: importMap,
             formulas: {},
             createParent: 0,
-            xlsx: { sheet: sheetName || '', r0: Math.max(0, Number(dataset.headerRow || 1) - 1), c0: 0, r1: null, c1: null }
+            xlsx: { sheet: sheetName || '', r0: Math.max(0, Number(dataset.headerRow || 1) - 1), c0: 0, r1: null, c1: lastColumn >= 0 ? lastColumn : null }
         };
     }
 
@@ -285,12 +305,19 @@
             ' колонок. Заголовок в строке ' + dataset.headerRow + '.';
     }
 
-    function refreshDataset(side) {
+    // headerRow — номер строки заголовка, введённый партнёром; без него строка ищется сама,
+    // и найденный номер показывается в поле, чтобы его можно было поправить (#5617, Д1).
+    function refreshDataset(side, headerRow) {
         var select = document.getElementById('xcom-wizard-' + side + '-sheet');
+        var headerInput = document.getElementById('xcom-wizard-' + side + '-header-row');
         var book = state.books[side];
         if (!book || !select || !select.value) return;
         state.sheets[side] = select.value;
-        state.datasets[side] = sheetToDataset(book, select.value, window.XLSX);
+        state.datasets[side] = sheetToDataset(book, select.value, window.XLSX, headerRow);
+        if (headerInput) {
+            headerInput.disabled = false;
+            headerInput.value = state.datasets[side].headerRow || '';
+        }
         state.mappings[side] = suggestMapping(state.datasets[side].headers, state.datasets[side].rows);
         renderFileSummary(side);
         updateActions();
@@ -642,7 +669,9 @@
             var file = document.getElementById('xcom-wizard-' + side + '-file');
             var sheet = document.getElementById('xcom-wizard-' + side + '-sheet');
             file.addEventListener('change', function() { parseFile(side, file.files && file.files[0]); });
+            var headerRow = document.getElementById('xcom-wizard-' + side + '-header-row');
             sheet.addEventListener('change', function() { refreshDataset(side); });
+            if (headerRow) headerRow.addEventListener('change', function() { refreshDataset(side, headerRow.value); });
         });
         document.getElementById('xcom-wizard-back').addEventListener('click', function() {
             if (state.step > 1) { state.step -= 1; setStatus(''); renderStep(); }
