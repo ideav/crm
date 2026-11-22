@@ -12816,7 +12816,7 @@ function aiAgentIncluded($connection, $db){
             return FALSE;
         $used = billingAiUnitsUsed($connection, $db);
         return $used !== NULL && $used < $included;
-    } catch(Exception $e) {
+    } catch(Throwable $e) {   # сбой учёта не ломает чат
         return FALSE;
     }
 }
