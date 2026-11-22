@@ -24,6 +24,18 @@
 
 # В Apache по HTTPS с именем сайта; заголовки своего домена с клиента не принимаются.
 (apache) {
+	# Защитные заголовки ideav.ru на всех путях (python2node#1142): .htaccess вебрута (backlogram#893)
+	# до /my/ и ядра не доходит. «?» — только если Apache их не прислал; HSTS — всегда год,
+	# без includeSubDomains (поддомены сервера бывают только на HTTP).
+	@ideav host ideav.ru www.ideav.ru
+	header @ideav {
+		defer
+		Strict-Transport-Security "max-age=31536000"
+		?X-Frame-Options SAMEORIGIN
+		?X-Content-Type-Options nosniff
+		?Referrer-Policy strict-origin-when-cross-origin
+		?Content-Security-Policy "frame-ancestors 'self' https://webvisor.com https://*.webvisor.com https://metrika.yandex.ru https://*.metrika.yandex.ru"
+	}
 	@ws {
 		host ideav.ru www.ideav.ru
 		path /ws
