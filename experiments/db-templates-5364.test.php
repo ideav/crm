@@ -8,8 +8,9 @@
 # на каждую базу), запросы различаются по метке в Exec_sql. Проверяется:
 #   A) публиковать может только владелец базы (или супер-админ), не из my, с допустимым именем;
 #      системное имя (из TEMPLATES) — только супер-админ; имя чужого шаблона занять нельзя;
-#   B) снимок: в дампе нет пользователей, их реквизитов, секретов записей (пароль, токен, xsrf,
-#      Secret) и ссылок на пользователей; реквизиты этих типов в схеме и прочие данные — есть;
+#   B) снимок: пользователи, их роли и ссылки на них есть; секретов записей (пароль, токен, xsrf,
+#      Secret, активность, попытки входа) и того, что под ними, нет (#5617); реквизиты этих типов
+#      в схеме и прочие данные — есть;
 #      в архиве файлов — шаблоны и download базы; в backups исходной базы ничего не остаётся;
 #   C) модерация: версия на модерации в ЛК не видна и не разворачивается; одобряет модератор в my,
 #      владелец свою версию одобрить не может; список ЛК — одобренные без истории версий;
@@ -97,12 +98,11 @@ function Exec_sql($sql, $msg, $log=TRUE, $fatal=TRUE){
             $res = array();
             foreach($T as $id => $r) if($id > $m[1] && count($res) < $m[2]) $res[] = $r;
             return new FkRes($res);
-        case "Template: users and secrets":  # пользователи (up=1) и секреты под записями (родитель не тип)
+        case "Template: secrets":  # секреты под записями (родитель не тип)
             $res = array();
             foreach($T as $r){
                 $p = isset($T[(int)$r["up"]]) ? $T[(int)$r["up"]] : NULL;
-                if(($r["t"] === "18" && $r["up"] === "1")
-                    || (in_array($r["t"], array("20", "125", "40", "130", "124", "301"), TRUE) && $p && $p["up"] !== "0"))
+                if(in_array($r["t"], array("20", "125", "40", "130", "124", "301"), TRUE) && $p && $p["up"] !== "0")
                     $res[] = array($r["id"]);
             }
             return new FkRes($res);
@@ -121,6 +121,11 @@ function Exec_sql($sql, $msg, $log=TRUE, $fatal=TRUE){
             foreach(sql_tuples(substr($sql, strpos($sql, "VALUES") + 6)) as $v)  # (id, t, up, ord, val)
                 $T[(int)$v[0]] = row($v[0], $v[2], $v[3], $v[1], $v[4]);
             ksort($T);
+            return TRUE;
+        case "Template: rename the user named as the new DB":
+            preg_match("/val='([^']*)'/", $sql, $m);
+            foreach($T as $id => $r)
+                if($r["t"] === "18" && $r["up"] === "1" && $r["val"] === $m[1]) $T[$id]["val"] = $m[1]."_tpl";
             return TRUE;
         case "Template: drop the incomplete table":
             unset($GLOBALS["DBS"][$z]);
@@ -201,14 +206,14 @@ $src = array(
     row(300, 0, 1, 3, "Коннектор"), row(301, 300, 1, 130, ""),
     row(400, 1, 1, 18, "src5364"), row(401, 400, 1, 20, "hash"), row(402, 400, 1, 125, "tok-owner"),
     row(403, 400, 1, 40, "xsrf"), row(404, 402, 1, 3, "под токеном"),
-    row(410, 1, 1, 18, "operator"), row(411, 410, 1, 125, "tok-operator"),
+    row(410, 1, 1, 18, "operator"), row(411, 410, 1, 125, "tok-operator"), row(412, 410, 2, 164, "115"),  # роль
     row(500, 1, 1, 300, "1С"), row(501, 500, 1, 130, "secret-key"),
     row(600, 1, 1, 700, "Заказ 1"), row(601, 600, 1, 410, ""),                 # ссылка на пользователя
     row(602, 600, 2, 3, "текст с 'кавычкой'\nи переводом строки"),
     row(700, 0, 1, 3, "Заказ"),
 );
 db_load("src5364", $src);
-$kept = array(1, 18, 20, 125, 130, 200, 201, 300, 301, 500, 600, 602, 700);
+$kept = array(1, 18, 20, 125, 130, 200, 201, 300, 301, 400, 410, 412, 500, 600, 601, 602, 700);
 use_db("src5364", "src5364", 400);
 file_put_contents("templates/custom/src5364/main.html", "главная");
 file_put_contents("download/src5364/app.js", "console.log(1);");
@@ -242,7 +247,7 @@ $r = Tpl_publish("Shop", "Магазин", "Каталог и заказы");
 expect(isset($r["result"]) && $r["id"] === "shop" && $r["ver"] === 1 && $r["status"] === "pending",
     "B1: владелец фиксирует версию 1, она на модерации", json_encode($r, JSON_UNESCAPED_UNICODE));
 $snap = snapshot_rows("shop", 1);
-expect(array_keys($snap) === $kept, "B2: в снимке нет пользователей, секретов записей и ссылок на пользователей; схема и данные есть",
+expect(array_keys($snap) === $kept, "B2: в снимке пользователи, их роли и ссылки на них есть, секретов записей нет; схема и данные есть",
     implode(",", array_keys($snap)));
 expect(isset($snap[602]) && $snap[602]["val"] === "текст с 'кавычкой'\nи переводом строки", "B3: значения в снимке целы");
 expect(zip_names(Tpl_dir()."/shop/1/code.zip") === array("download/app.js", "download/files/doc.pdf", "templates/main.html"),
@@ -286,6 +291,11 @@ $err = Tpl_deploy("shop", Tpl_current("shop"));
 expect($err === "" && isset($GLOBALS["DBS"]["new5364"]) && array_keys($GLOBALS["DBS"]["new5364"]) === $kept,
     "D1: новая база — ровно строки снимка", $err);
 expect($GLOBALS["DBS"]["new5364"][602]["val"] === "текст с 'кавычкой'\nи переводом строки", "D2: значения в новой базе целы");
+# #5617: пользователь шаблона с логином, равным имени новой базы, не сталкивается с её владельцем
+use_db("operator", "joe", 55);
+$err = Tpl_deploy("shop", Tpl_current("shop"));
+expect($err === "" && $GLOBALS["DBS"]["operator"][410]["val"] === "operator_tpl" && $GLOBALS["DBS"]["operator"][400]["val"] === "src5364",
+    "D2a: пользователь шаблона с логином-именем новой базы переименован, остальные — как в шаблоне", $err);
 expect(@file_get_contents("templates/custom/new5364/main.html") === "главная" && @file_get_contents("download/new5364/files/doc.pdf") === "PDF"
     && @file_get_contents("download/new5364/app.js") === "console.log(1);", "D3: файлы шаблона разложены по папкам новой базы");
 $GLOBALS["DBS"]["src5364"][603] = row(603, 600, 3, 3, "правка после фиксации");
