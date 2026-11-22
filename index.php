@@ -291,6 +291,9 @@ if((isset($com[2]) ? $com[2] : "") === "ai"
 
 $locale = isset($_COOKIE[$z."_locale"]) ? $_COOKIE[$z."_locale"] : (isset($_COOKIE["my_locale"]) ? $_COOKIE["my_locale"] : "RU");
 include "include/connection.php";
+# #5269/#5615: до диспетчера запросов — logChange() зовёт Ws_collect() уже в /my/register (newUser).
+# После connection.php: там могут стоять define WS_* раньше умолчаний модуля.
+require_once __DIR__ . "/include/ws_push.php";
 Secrets_guard($z);  # #1139: дефолтные секреты на сервере — отказ, а не воспроизводимый мастер-токен
 # Check the DB existence
 # #4539: проверочный запрос НЕ ставится под добивание (Sql_running/KILL QUERY). Он короткий по
@@ -726,7 +729,6 @@ require_once __DIR__ . "/include/import_reconcile.php";
 require_once __DIR__ . "/include/schema_json.php";	# #5242: схема одним JSON, поля по именам
 require_once __DIR__ . "/include/mail.php";	# #5494: отправка писем через SMTP ящика клиента
 require_once __DIR__ . "/include/ext_views.php";	# #5373: read-only вьюхи для внешнего SQL-клиента
-require_once __DIR__ . "/include/ws_push.php";	# #5269: события изменений для демона web-socket
 # Default LIMIT parameter for queries with no filter
 define("DEFAULT_LIMIT", isset($_COOKIE["default_limit"])&&(int)$_COOKIE["default_limit"]>4&&(int)$_COOKIE["default_limit"]<1001?(int)$_COOKIE["default_limit"]:20);
 define("UPLOAD_DIR", "download/$z/");  # Uploaded files folder
