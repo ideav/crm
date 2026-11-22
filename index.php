@@ -329,27 +329,7 @@ if(!$billing && ($z !== "auth.asp")){
 if((isset($com[2]) ? $com[2] : "") === "billing" && (isset($com[3]) ? $com[3] : "") === "add")
     handleBillingAdd($z);
 																									
-# The trace cookie to be deleted upon the session close
-if(isset($_GET["TRACE_IT"]) || isset($_COOKIE["TRACE_IT"])){
-	$GLOBALS["TRACE"] = "****".preg_replace('/([?&](secret|token|c|s|code|reset)=)[^&]*/i', '$1***', $_SERVER["REQUEST_URI"])."<br/>\n";
-    if(isset($_GET["TRACE_IT"]))
-	    setcookie("TRACE_IT", 1, time() + 3600*3, "/$z"); // 3 hours
-	$logPath = "templates/custom/$z/logs";
-	if(!is_dir($logPath))
-		mkdir($logPath);
-	$logFile = "$logPath/trace".date("YmdHis").".log";
-    $file = fopen($logFile, "a");
-    fwrite($file, $GLOBALS["TRACE"]."\n");
-    $headers =  getallheaders();
-    $hdr = "";
-    $sensitiveHeaders = ['authorization', 'x-authorization', 'cookie', 'set-cookie'];
-    foreach($headers as $key=>$val){
-        $masked = in_array(strtolower($key), $sensitiveHeaders) ? '***' : $val;
-        $hdr .= $key . ': ' . $masked . '<br>';
-    }
-    wlog(" headers: $hdr", "log");
-    fclose($file);
-}
+# TRACE_IT включается после Validate_Token() и только администратору — Trace_start()
 $row = mysqli_fetch_assoc($billing);
 if(isset($row["val"]) && ((int)$row["val"] < 0.01))
 	trace("Billing: read only");
@@ -3271,7 +3251,46 @@ function IsOccupied($id)
 	    return true;
 	return false;
 }
-function my_die($msg, $code=""){
+# python2node#1138: текст сообщения для HTML-ответа. Экранирует всё, кроме переносов и
+# жирного (<br>, <b>), которыми ядро размечает свои предупреждения; готовые сущности
+# (&laquo;) не удваивает. Значение из запроса уходит в страницу только через эту функцию.
+function Safe_msg_html($msg){
+	$s = htmlspecialchars((string)$msg, ENT_QUOTES | ENT_SUBSTITUTE, "UTF-8", false);
+	return preg_replace(array('#&lt;br\s*/?&gt;#i', '#&lt;(/?)b&gt;#i'), array('<br/>', '<$1b>'), $s);
+}
+# JSON-ответ без Content-Type браузер покажет как HTML (python2node#1138). Тип не меняем —
+# клиенты с jQuery начали бы получать объект вместо строки, — а убираем из ответа разметку:
+# вне строк JSON символов < > нет, а в строках < > разбираются в то же значение.
+function Json_die($json){
+	die(str_replace(array("<", ">"), array("\\u003c", "\\u003e"), $json));
+}
+# TRACE_IT (python2node#1138): трассировка видна только администратору базы и включается
+# после проверки токена — в ней SQL и гранты.
+function Trace_allowed($z){
+	$u = isset($GLOBALS["GLOBAL_VARS"]["user"]) ? $GLOBALS["GLOBAL_VARS"]["user"] : "";
+	return ($u === "admin") || ($u !== "" && $u === $z);
+}
+function Trace_start($z){
+	global $logFile;
+	$GLOBALS["TRACE"] = "****".htmlspecialchars(preg_replace('/([?&](secret|token|c|s|code|reset)=)[^&]*/i', '$1***', $_SERVER["REQUEST_URI"]), ENT_QUOTES)."<br/>\n";
+	if(isset($_GET["TRACE_IT"]))
+		setcookie("TRACE_IT", 1, time() + 3600*3, "/$z"); // 3 hours
+	$logPath = "templates/custom/$z/logs";
+	if(!is_dir($logPath))
+		@mkdir($logPath, 0777, true);
+	$logFile = "$logPath/trace".date("YmdHis").".log";
+	$file = @fopen($logFile, "a");
+	if(!$file)
+		return;
+	fwrite($file, $GLOBALS["TRACE"]."\n");
+	fclose($file);
+	$hdr = "";
+	$sensitiveHeaders = ['authorization', 'x-authorization', 'cookie', 'set-cookie'];
+	foreach(getallheaders() as $key=>$val)
+		$hdr .= $key . ': ' . (in_array(strtolower($key), $sensitiveHeaders) ? '***' : $val) . '<br>';
+	wlog(" headers: $hdr", "log");
+}
+function my_die($msg, $code="", $raw=FALSE){	# $raw — $msg уже готовый HTML без данных запроса
 	if(isset($GLOBALS["REPORT_TX"]))  # #5261: изменения запроса с InTransaction не остаются наполовину
 		Report_tx_rollback();
 	if(InBatchOp())	# Пакетная запись: ошибка относится к одной операции, а не ко всему запросу
@@ -3287,9 +3306,9 @@ function my_die($msg, $code=""){
 	else
 		header("HTTP/1.0 400 Bad Request");
 	if(isApi())
-	    api_dump(json_encode([["error" => $msg]], JSON_UNESCAPED_UNICODE));
+	    api_dump(json_encode([["error" => $msg]], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP));
 	else
-    	die($msg);
+    	die($raw ? $msg : Safe_msg_html($msg));
 	#die($msg.BACK_LINK);
 }
 # Check grants to the object
@@ -7488,7 +7507,7 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                 $GLOBALS["GLOBAL_VARS"]["api"]["types"] = $GLOBALS["basics"];			    
     			if(Check_Types_Grant() == "WRITE")
                     $GLOBALS["GLOBAL_VARS"]["api"]["editable"] = 1;			    
-                die(json_encode($GLOBALS["GLOBAL_VARS"]["api"], JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE));
+                Json_die(json_encode($GLOBALS["GLOBAL_VARS"]["api"], JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE));
 			}
 			break;
 
@@ -16591,6 +16610,8 @@ $GLOBALS["GLOBAL_VARS"]["ws"] = defined("WS_PUBLIC_URL") ? htmlspecialchars(WS_P
 Api_always_json_mark($a);
 if(Validate_Token())
 {
+	if((isset($_GET["TRACE_IT"]) || isset($_COOKIE["TRACE_IT"])) && Trace_allowed($z))
+		Trace_start($z);
 #print_r($GLOBALS); die();
 	# #1043: короткий токен MCP (m.*) действует только в пределах своих прав
 	if(isset($GLOBALS["TOKEN_SCOPE"]) && !Token_scope_allows($GLOBALS["TOKEN_SCOPE"], $a, $_SERVER["REQUEST_METHOD"])){
@@ -17259,7 +17280,7 @@ if(Validate_Token())
 						my_die(t9n("[RU]Этот реквизит используется в <a href=\"/$z/object/".REPORT."/?F_".REP_COLS
     							."=$id\">отчетах</a> или <a href=\"/$z/object/".ROLE."/?F_116=$id\">ролях</a>!"
 							."[EN]The requisite is used in <a href=\"/$z/object/".REPORT."/?F_".REP_COLS
-	       						."=$id\">reports</a> or <a href=\"/$z/object/".ROLE."/?F_116=$id\">roles</a>!"));
+	       						."=$id\">reports</a> or <a href=\"/$z/object/".ROLE."/?F_116=$id\">roles</a>!"), "", TRUE);
 					Delete($id);
 					Exec_sql("UPDATE $z SET ord=ord-1 WHERE up=$myup AND ord>$myord", "Move up other Reqs");
 					$id = $obj = $myup;
@@ -17963,7 +17984,7 @@ if(Validate_Token())
     		$user = $GLOBALS["GLOBAL_VARS"]["user"];
     		$f_u = isset($_REQUEST["F_U"]) ? (int)$_REQUEST["F_U"] : "1"; # Filter for associated (linked) objects
     		if(isset($_GET["warning"]))
-    			$GLOBALS["warning"] = $_REQUEST["warning"];
+    			$GLOBALS["warning"] = Safe_msg_html($_GET["warning"]);	# python2node#1138
     
     		if($a == "report"){
     			unset($blocks); # We might get some stuff there already
@@ -17994,13 +18015,13 @@ if(Validate_Token())
 			updateBilling();
 			if(isApi())
 			    if(isset($_REQUEST["JSON_DATA"]))
-    				die("[".implode(",", $GLOBALS["GLOBAL_VARS"]["newapi"])."]");
+    				Json_die("[".implode(",", $GLOBALS["GLOBAL_VARS"]["newapi"])."]");
 			    elseif(isset($_REQUEST["JSON_OBJ"]))
     				api_dump(json_encode(isset($_REQUEST["NAMED"]) && ($a === "object")	# #5242: записи с ключами-именами полей
     						? Named_rows($id, $GLOBALS["GLOBAL_VARS"]["newapi"], $GLOBALS["GLOBAL_VARS"]["api"])
     						: $GLOBALS["GLOBAL_VARS"]["newapi"], JSON_UNESCAPED_UNICODE), "object_$id.json");
 				else
-    				die(json_encode($GLOBALS["GLOBAL_VARS"]["api"], JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE));
+    				Json_die(json_encode($GLOBALS["GLOBAL_VARS"]["api"], JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE));
         	if(($z == $GLOBALS["GLOBAL_VARS"]["user"]) || ($GLOBALS["GLOBAL_VARS"]["user"] == "admin"))
         		echo str_replace("<!--Elapsed-->"
         		                , "<font  size=\"-1\"><a href=\"/$z/dir_admin\">[$user]</a> $scount / $stime / $time ($tzone)</font>", $html);
@@ -18016,9 +18037,10 @@ else
 #print_r($GLOBALS); die();
 
 if(isset($_REQUEST["message"]))
-	die("<h3>".$_REQUEST["message"]."</h3>");
+	die("<h3>".Safe_msg_html($_REQUEST["message"])."</h3>");	# python2node#1138
 if($next_act == "nul")
-	die('{"id":"'.$id.'", "obj":"'.$obj.'", "a":"'.$a.'", "args":"'.$arg.'"}');
+	Json_die(json_encode(array("id" => (string)$id, "obj" => (string)$obj, "a" => (string)$a, "args" => (string)$arg)
+		, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
 elseif($next_act == "")
     $next_act = $a;
 else
