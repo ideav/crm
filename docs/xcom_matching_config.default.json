@@ -3,6 +3,7 @@
   "category": "",
   "preset": "",
   "tma_weight": 0.5,
+  "min_accuracy": 5,
   "attribute_weights": [],
   "required_attributes": [],
   "column_mapping": {

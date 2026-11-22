@@ -71,6 +71,10 @@
             : [];
         if (!attrs.length) attrs.push({ rfp_key: '', sku_key: '' });
         var result = { tma_weight: weight, required_attributes: attrs };
+        // порог (#5625) — только если задан: форма показывает дефолт 5, но в конфиг его не дописывает
+        if (typeof cfg.min_accuracy === 'number' && isFinite(cfg.min_accuracy)) {
+            result.min_accuracy = Math.max(0, Math.min(100, cfg.min_accuracy));
+        }
         if (Object.prototype.hasOwnProperty.call(cfg, 'category')) result.category = trimValue(cfg.category);
         if (Object.prototype.hasOwnProperty.call(cfg, 'preset')) result.preset = trimValue(cfg.preset);
         if (Object.prototype.hasOwnProperty.call(cfg, 'attribute_weights')) {
@@ -104,6 +108,9 @@
             tma_weight: Math.max(0, Math.min(1, Number(form.tma_weight))),
             required_attributes: attrs
         };
+        if (Object.prototype.hasOwnProperty.call(form, 'min_accuracy')) {
+            config.min_accuracy = Math.max(0, Math.min(100, Number(form.min_accuracy) || 0));
+        }
         if (Object.prototype.hasOwnProperty.call(form, 'category')) config.category = trimValue(form.category);
         if (Object.prototype.hasOwnProperty.call(form, 'preset')) config.preset = trimValue(form.preset);
         if (Object.prototype.hasOwnProperty.call(form, 'attribute_weights')) {
@@ -179,6 +186,8 @@
         renderPresetOptions(form.preset || '');
         var weight = document.getElementById('xcom-settings-tma-weight');
         if (weight) weight.value = String(form.tma_weight);
+        var minAccuracy = document.getElementById('xcom-settings-min-accuracy');
+        if (minAccuracy) minAccuracy.value = String(form.min_accuracy == null ? 5 : form.min_accuracy);
         var list = document.getElementById('xcom-settings-attrs-list');
         if (list) {
             list.innerHTML = '';
@@ -202,6 +211,7 @@
 
     function collectForm() {
         var weight = document.getElementById('xcom-settings-tma-weight');
+        var minAccuracy = document.getElementById('xcom-settings-min-accuracy');
         var rows = (document.querySelectorAll('#xcom-settings-attrs-list .xcom-settings-attr') || []);
         var attrs = [];
         Array.prototype.forEach.call(rows, function(row) {
@@ -226,6 +236,7 @@
             category: category ? category.value : '',
             preset: preset ? preset.value : '',
             tma_weight: weight ? weight.value : 0.5,
+            min_accuracy: minAccuracy ? minAccuracy.value : 5,
             required_attributes: attrs,
             attribute_weights: weighted,
             llm: {
