@@ -69,6 +69,9 @@ function assert(condition, message) {
     if (!condition) throw new Error(message);
 }
 
+${extractFunctionMaybe('dashEscapeHtml')}
+${extractFunctionMaybe('dashEscapeText')}
+${extractFunctionMaybe('dashH')}
 ${extractFunction('dashNormalizeNumberText')}
 ${extractFunction('dashFormatNumberText')}
 ${extractFunction('dashGetFloat')}

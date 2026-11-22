@@ -233,6 +233,26 @@
                               .replace(/'/g, '&#039;');
         }
 
+        /**
+         * Ссылка «…» для длинного значения ячейки (p2n#1137). Значение (уже безопасный HTML:
+         * экранированный текст, возможно со ссылками linkify) едет в data-full с экранированием
+         * атрибута, а не в код onclick: браузер декодирует сущности атрибута до разбора JS,
+         * и апостроф из данных закрывал бы строковый литерал.
+         */
+        renderShowFullValueLink(fullHtml) {
+            const instanceName = this.options.instanceName;
+            return `<a href="#" class="show-full-value" data-full="${ this.escapeHtml(fullHtml) }" onclick="window.${ instanceName }.showFullValue(event, this.dataset.full); return false;">...</a>`;
+        }
+
+        /**
+         * Текст из данных/метаданных для вставки в HTML (p2n#1137): сущности, которые сервер
+         * мог прислать уже закодированными, декодируются, затем всё экранируется заново —
+         * вид одинаков для закодированного и сырого значения, разметка из данных не исполняется.
+         */
+        escapeText(text) {
+            return this.escapeHtml(this.decodeHtmlEntities(text));
+        }
+
         decodeHtmlEntities(text) {
             if (text === null || text === undefined) return '';
             const str = String(text);

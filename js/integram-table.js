@@ -894,7 +894,7 @@ class IntegramTable{
             }
 
             if (!append) {
-                this.container.innerHTML = `<div class="alert alert-danger">Ошибка загрузки данных: ${ message }</div>`;
+                this.container.innerHTML = `<div class="alert alert-danger">Ошибка загрузки данных: ${ this.escapeHtml(message) }</div>`;
             } else {
                 this.showToast(`Ошибка загрузки данных: ${ message }`, 'error');
             }
@@ -2090,7 +2090,7 @@ class IntegramTable{
                                         })() : '';
                                         return `
                                             <th data-column-id="${ col.id }" draggable="true" title="${ col.id }"${ widthStyle }>
-                                                <span class="column-header-content" data-column-id="${ col.id }" title="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ sortIndicator }${ col.name }</span>
+                                                <span class="column-header-content" data-column-id="${ col.id }" title="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ sortIndicator }${ this.escapeText(col.name) }</span>
                                                 ${ refIconHtml }
                                                 ${ addButtonHtml }
                                                 <div class="column-resize-handle" data-column-id="${ col.id }"></div>
@@ -2217,7 +2217,7 @@ class IntegramTable{
                                 <input type="text"
                                        class="filter-input-with-icon filter-ref-text-input"
                                        data-column-id="${ column.id }"
-                                       value="${ displayValue }"
+                                       value="${ this.escapeHtml(displayValue) }"
                                        placeholder="${ placeholder }"
                                        autocomplete="off">
                             </div>
@@ -2356,7 +2356,7 @@ class IntegramTable{
                         <input type="text"
                                class="filter-input-with-icon"
                                data-column-id="${ column.id }"
-                               value="${ displayValue }"
+                               value="${ this.escapeHtml(displayValue) }"
                                placeholder="${ placeholder }"
                                autocomplete="off">
                     </div>
@@ -2594,7 +2594,7 @@ class IntegramTable{
                 if (styleColIndex !== -1 && this.data[rowIndex]) {
                     const styleValue = this.data[rowIndex][styleColIndex];
                     if (styleValue) {
-                        customStyle = ` style="${ styleValue }"`;
+                        customStyle = ` style="${ this.escapeHtml(styleValue) }"`;
                     }
                 }
             }
@@ -2683,7 +2683,7 @@ class IntegramTable{
                         // Display as a download link if value is a path
                         const apiBase = this.getApiBase();
                         const fileName = value.split('/').pop() || value;
-                        displayValue = `<a href="${ apiBase }/file/${ value }" target="_blank" class="file-link" title="Скачать файл">${ this.escapeHtml(fileName) }</a>`;
+                        displayValue = `<a href="${ apiBase }/file/${ this.escapeHtml(value) }" target="_blank" class="file-link" title="Скачать файл">${ this.escapeHtml(fileName) }</a>`;
                         return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }"${ dataTypeAttrs }${ customStyle }>${ displayValue }</td>`;
                     }
                     break;
@@ -2757,13 +2757,7 @@ class IntegramTable{
                     if (this.settings.truncateLongValues && escapedValue.length > 127) {
                         const truncatedEscaped = escapedValue.substring(0, 127);
                         const fullLinkified = this.linkifyText(escapedValue);
-                        const fullValueEscaped = fullLinkified
-                            .replace(/\\/g, '\\\\')
-                            .replace(/\n/g, '\\n')
-                            .replace(/\r/g, '\\r')
-                            .replace(/'/g, '\\\'');
-                        const instanceName = this.options.instanceName;
-                        escapedValue = `${ this.linkifyText(truncatedEscaped) }<a href="#" class="show-full-value" onclick="window.${ instanceName }.showFullValue(event, '${ fullValueEscaped }'); return false;">...</a>`;
+                        escapedValue = `${ this.linkifyText(truncatedEscaped) }${ this.renderShowFullValueLink(fullLinkified) }`;
                     } else {
                         escapedValue = this.linkifyText(escapedValue);
                     }
@@ -2774,13 +2768,7 @@ class IntegramTable{
             if (this.settings.truncateLongValues && escapedValue.length > 127 && format !== 'SHORT' && format !== 'CHARS' && format !== 'MEMO') {
                 const truncated = escapedValue.substring(0, 127);
                 // Properly escape all JavaScript special characters for use in onclick string literal
-                const fullValueEscaped = escapedValue
-                    .replace(/\\/g, '\\\\')   // Escape backslashes first
-                    .replace(/\n/g, '\\n')    // Escape newlines
-                    .replace(/\r/g, '\\r')    // Escape carriage returns
-                    .replace(/'/g, '\\\'');   // Escape single quotes
-                const instanceName = this.options.instanceName;
-                escapedValue = `${ truncated }<a href="#" class="show-full-value" onclick="window.${ instanceName }.showFullValue(event, '${ fullValueEscaped }'); return false;">...</a>`;
+                escapedValue = `${ truncated }${ this.renderShowFullValueLink(escapedValue) }`;
             }
 
             // Track typeId computed in the edit icon block for use in editableAttrs
@@ -3318,7 +3306,7 @@ class IntegramTable{
                         })() : '';
                         rows[depth].push(`
                             <th data-column-id="${ col.id }" draggable="true" title="${ col.id }"${ widthStyle }${ rowspan > 1 ? ` rowspan="${ rowspan }"` : '' } class="${ groupingClass }">
-                                <span class="column-header-content" data-column-id="${ col.id }" title="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ groupingBadge }${ sortIndicator }${ displayName }</span>
+                                <span class="column-header-content" data-column-id="${ col.id }" title="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ groupingBadge }${ sortIndicator }${ this.escapeText(displayName) }</span>
                                 ${ refIconHtml }
                                 ${ addButtonHtml }
                                 <div class="column-resize-handle" data-column-id="${ col.id }"></div>
@@ -3328,7 +3316,7 @@ class IntegramTable{
                         // Display prefix with dots replaced by spaces (issue #1565)
                         const displayPrefix = node.prefix.replace(/\./g, ' ');
                         rows[depth].push(`
-                            <th class="smart-header-group" colspan="${ node.span }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ displayPrefix }</th>
+                            <th class="smart-header-group" colspan="${ node.span }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ this.escapeText(displayPrefix) }</th>
                         `);
                         visit(node.children, depth + 1);
                     }
@@ -3383,7 +3371,7 @@ class IntegramTable{
 
                 return `
                     <th data-column-id="${ col.id }" draggable="true" title="${ col.id }"${ widthStyle } class="${ groupingClass }">
-                        <span class="column-header-content" data-column-id="${ col.id }" title="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ groupingBadge }${ sortIndicator }${ col.name }</span>
+                        <span class="column-header-content" data-column-id="${ col.id }" title="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ groupingBadge }${ sortIndicator }${ this.escapeText(col.name) }</span>
                         ${ refIconHtml }
                         ${ addButtonHtml }
                         <div class="column-resize-handle" data-column-id="${ col.id }"></div>
@@ -3618,7 +3606,7 @@ class IntegramTable{
             previewModal._overlayElement = previewOverlay;
 
             // Build table HTML with editable cells
-            const theadCols = colHeaders.map(h => `<th>${h}</th>`).join('');
+            const theadCols = colHeaders.map(h => `<th>${this.escapeText(h)}</th>`).join('');
             const tbodyRows = parsedRows.map((row, rowIdx) => {
                 const cells = orderedColIds.map((colId, colIdx) => {
                     const val = row[colIdx] !== undefined ? row[colIdx] : '';
@@ -6324,7 +6312,7 @@ class IntegramTable{
             const mainLabelTarget = (mainFieldType === 'DATE' || mainFieldType === 'DATETIME') ? 'field-main-ref-create-picker' : 'field-main-ref-create';
             let attributesHtml = `
                 <div class="form-group">
-                    <label for="${mainLabelTarget}">${typeName} <span class="required">*</span></label>
+                    <label for="${mainLabelTarget}">${ this.escapeText(typeName) } <span class="required">*</span></label>
                     ${ mainFieldHtml }
                 </div>
             `;
@@ -6339,7 +6327,7 @@ class IntegramTable{
                 // For reference fields, the visible/interactive element is the search input (id="field-ref-${req.id}-search"),
                 // not the hidden input (id="field-ref-${req.id}"), so the label must point to the search input (issue #889)
                 const labelTarget = req.ref_id ? `field-ref-${req.id}-search` : `field-ref-${req.id}`;
-                attributesHtml += `<label for="${labelTarget}">${fieldName}${isRequired ? ' <span class="required">*</span>' : ''}</label>`;
+                attributesHtml += `<label for="${labelTarget}">${ this.escapeText(fieldName) }${isRequired ? ' <span class="required">*</span>' : ''}</label>`;
 
                 // Check if this is a reference field
                 if (req.ref_id) {
@@ -6384,7 +6372,7 @@ class IntegramTable{
 
             let formHtml = `
                 <div class="edit-form-header">
-                    <h3>${title}</h3>
+                    <h3>${ this.escapeText(title) }</h3>
                     <button class="edit-form-close" data-close-modal-ref="true"><i class="pi pi-times"></i></button>
                 </div>
                 <div class="edit-form-body">
@@ -6983,13 +6971,7 @@ class IntegramTable{
             // Apply truncation if enabled
             if (this.settings.truncateLongValues && escapedValue.length > 127) {
                 const truncated = escapedValue.substring(0, 127);
-                const fullValueEscaped = escapedValue
-                    .replace(/\\/g, '\\\\')
-                    .replace(/\n/g, '\\n')
-                    .replace(/\r/g, '\\r')
-                    .replace(/'/g, '\\\'');
-                const instanceName = this.options.instanceName;
-                escapedValue = `${ truncated }<a href="#" class="show-full-value" onclick="window.${ instanceName }.showFullValue(event, '${ fullValueEscaped }'); return false;">...</a>`;
+                escapedValue = `${ truncated }${ this.renderShowFullValueLink(escapedValue) }`;
             }
 
             // Update data attribute with full value for editing
@@ -10140,7 +10122,7 @@ class IntegramTable{
             const links = backRefs.map(ref => {
                 const href = `/${dbName}/table/${ref.tableId}?FR_${ref.fieldId}=@${recordId}`;
                 const label = `${ref.tableName}.${ref.fieldName}`;
-                return `<a href="${href}" class="reference-link" style="color: #9ca3af;" title="${label}">${label}</a>`;
+                return `<a href="${href}" class="reference-link" style="color: #9ca3af;" title="${this.escapeText(label)}">${this.escapeText(label)}</a>`;
             }).join(', ');
 
             return `<td class="references-column-cell">${links}</td>`;
@@ -10248,7 +10230,7 @@ class IntegramTable{
                                            data-column-id="${ col.id }"
                                            ${ isSelected ? 'checked' : '' }>
                                     <span class="grouping-order-badge" style="${ isSelected ? '' : 'display: none;' }">${ order }</span>
-                                    ${ col.name }
+                                    ${ this.escapeText(col.name) }
                                 </label>
                             </div>
                         `;
@@ -11185,10 +11167,10 @@ class IntegramTable{
                 const displayValue = resolvedLabel ? `${filterTypeSymbol} ${resolvedLabel}` : filterTypeSymbol;
 
                 return `
-                    <span class="hidden-filter-badge" data-col-id="${hf.colId}">
-                        <span class="hidden-filter-badge-name">${hf.colName}</span>
-                        <span class="hidden-filter-badge-value">${displayValue}</span>
-                        <span class="hidden-filter-badge-remove" onclick="window.${instanceName}.removeUrlFilter('${hf.colId}')" title="Удалить фильтр"><i class="pi pi-times"></i></span>
+                    <span class="hidden-filter-badge" data-col-id="${this.escapeHtml(hf.colId)}">
+                        <span class="hidden-filter-badge-name">${this.escapeText(hf.colName)}</span>
+                        <span class="hidden-filter-badge-value">${this.escapeText(displayValue)}</span>
+                        <span class="hidden-filter-badge-remove" onclick="window.${instanceName}.removeUrlFilter(${this.escapeHtml(JSON.stringify(String(hf.colId)))})" title="Удалить фильтр"><i class="pi pi-times"></i></span>
                     </span>
                 `;
             }).join('');
@@ -12765,7 +12747,7 @@ class IntegramTable{
                     const attrs = this.parseAttrs(req.attrs);
                     const fieldName = attrs.alias || req.val;
                     const arrCount = recordReqs[req.id] ? recordReqs[req.id].arr || 0 : 0;
-                    tabsHtml += `<div class="edit-form-tab" data-tab="sub-${ req.id }" data-arr-id="${ req.arr_id }" data-req-id="${ req.id }">${ fieldName } (${ arrCount })</div>`;
+                    tabsHtml += `<div class="edit-form-tab" data-tab="sub-${ req.id }" data-arr-id="${ req.arr_id }" data-req-id="${ req.id }">${ this.escapeText(fieldName) } (${ arrCount })</div>`;
                 });
 
                 tabsHtml += `</div>`;
@@ -12789,7 +12771,7 @@ class IntegramTable{
             let formHtml = `
                 <div class="edit-form-header">
                     <div class="edit-form-header-title-row">
-                        <h3>${ title }</h3>
+                        <h3>${ this.escapeText(title) }</h3>
                         ${ recordIdHtml }
                     </div>
                     <button class="edit-form-close" data-close-modal="true"><i class="pi pi-times"></i></button>
@@ -13072,7 +13054,7 @@ class IntegramTable{
 
             html += `
                 <div class="form-group${ mainFieldReadOnly ? ' form-field-readonly' : '' }">
-                    <label for="field-main">${ typeName } <span class="required">*</span></label>
+                    <label for="field-main">${ this.escapeText(typeName) } <span class="required">*</span></label>
                     ${ mainFieldHtml }
                 </div>
             `;
@@ -13139,9 +13121,9 @@ class IntegramTable{
                 html += `<div class="form-group${ isReqReadOnly ? ' form-field-readonly' : '' }">`;
                 // Password reset buttons in label for field id=20 (issue #1471)
                 if (String(req.id) === '20' && baseFormat === 'PWD') {
-                    html += `<label for="field-${ req.id }">${ fieldName }${ isRequired ? ' <span class="required">*</span>' : '' }&nbsp;<a class="pwd-reset-btn" data-field-id="${ req.id }" title="Задать пароль и скопировать его в буфер" style="cursor:pointer"><svg width="20" height="20" viewBox="0 1 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6.42858 9.28572V6.42858C6.42858 5.48137 6.80486 4.57297 7.47463 3.90319C8.1444 3.23342 9.05281 2.85715 10 2.85715C10.9472 2.85715 11.8556 3.23342 12.5254 3.90319C13.1952 4.57297 13.5714 5.48137 13.5714 6.42858V9.28572M5.00001 9.28572H15C15.789 9.28572 16.4286 9.92531 16.4286 10.7143V15.7143C16.4286 16.5033 15.789 17.1429 15 17.1429H5.00001C4.21103 17.1429 3.57144 16.5033 3.57144 15.7143V10.7143C3.57144 9.92531 4.21103 9.28572 5.00001 9.28572Z" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"></path></svg></a>&nbsp;<a class="pwd-reset-mail-btn" data-field-id="${ req.id }" title="Задать пароль и скопировать в буфер приглашение пользователю" style="cursor:pointer"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M17.1429 5.71434C17.1429 4.92862 16.5 4.28577 15.7143 4.28577H4.28571C3.5 4.28577 2.85714 4.92862 2.85714 5.71434M17.1429 5.71434V14.2858C17.1429 15.0715 16.5 15.7143 15.7143 15.7143H4.28571C3.5 15.7143 2.85714 15.0715 2.85714 14.2858V5.71434M17.1429 5.71434L10 10.7143L2.85714 5.71434" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/></svg></a><span class="pwd-reset-copied" id="field-${ req.id }-copied" style="display:none">Ok</span></label>`;
+                    html += `<label for="field-${ req.id }">${ this.escapeText(fieldName) }${ isRequired ? ' <span class="required">*</span>' : '' }&nbsp;<a class="pwd-reset-btn" data-field-id="${ req.id }" title="Задать пароль и скопировать его в буфер" style="cursor:pointer"><svg width="20" height="20" viewBox="0 1 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6.42858 9.28572V6.42858C6.42858 5.48137 6.80486 4.57297 7.47463 3.90319C8.1444 3.23342 9.05281 2.85715 10 2.85715C10.9472 2.85715 11.8556 3.23342 12.5254 3.90319C13.1952 4.57297 13.5714 5.48137 13.5714 6.42858V9.28572M5.00001 9.28572H15C15.789 9.28572 16.4286 9.92531 16.4286 10.7143V15.7143C16.4286 16.5033 15.789 17.1429 15 17.1429H5.00001C4.21103 17.1429 3.57144 16.5033 3.57144 15.7143V10.7143C3.57144 9.92531 4.21103 9.28572 5.00001 9.28572Z" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"></path></svg></a>&nbsp;<a class="pwd-reset-mail-btn" data-field-id="${ req.id }" title="Задать пароль и скопировать в буфер приглашение пользователю" style="cursor:pointer"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M17.1429 5.71434C17.1429 4.92862 16.5 4.28577 15.7143 4.28577H4.28571C3.5 4.28577 2.85714 4.92862 2.85714 5.71434M17.1429 5.71434V14.2858C17.1429 15.0715 16.5 15.7143 15.7143 15.7143H4.28571C3.5 15.7143 2.85714 15.0715 2.85714 14.2858V5.71434M17.1429 5.71434L10 10.7143L2.85714 5.71434" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/></svg></a><span class="pwd-reset-copied" id="field-${ req.id }-copied" style="display:none">Ok</span></label>`;
                 } else {
-                    html += `<label for="field-${ req.id }">${ fieldName }${ isRequired ? ' <span class="required">*</span>' : '' }</label>`;
+                    html += `<label for="field-${ req.id }">${ this.escapeText(fieldName) }${ isRequired ? ' <span class="required">*</span>' : '' }</label>`;
                 }
 
                 // "Link to any record" field — single-select with dynamic table (issue #1800)
@@ -13443,7 +13425,7 @@ class IntegramTable{
 
             } catch (error) {
                 console.error('Error loading subordinate table:', error);
-                container.innerHTML = `<div class="subordinate-table-error">Ошибка загрузки: ${ error.message }</div>`;
+                container.innerHTML = `<div class="subordinate-table-error">Ошибка загрузки: ${ this.escapeHtml(error.message) }</div>`;
             }
         }
 
@@ -13697,7 +13679,7 @@ class IntegramTable{
                 modal.dataset.modalDepth = modalDepth;
 
                 const typeName = this.getMetadataName(metadata);
-                const headerTitle = parentRecordValue ? `${ this.escapeHtml(parentRecordValue) } / ${ typeName }` : typeName;
+                const headerTitle = parentRecordValue ? `${ this.escapeHtml(parentRecordValue) } / ${ this.escapeText(typeName) }` : this.escapeText(typeName);
 
                 modal.innerHTML = `
                     <div class="edit-form-header">
@@ -13867,7 +13849,7 @@ class IntegramTable{
                     const sortPriority = sortInfo ? sortState.indexOf(sortInfo) + 1 : '';
                     const priorityBadge = sortState.length > 1 && sortPriority ? `<span class="subordinate-sort-priority">${ sortPriority }</span>` : '';
 
-                    html += `<th class="subordinate-sortable-header" data-col-index="${ colIdx }">${ col.name }${ sortIndicator }${ priorityBadge }</th>`;
+                    html += `<th class="subordinate-sortable-header" data-col-index="${ colIdx }">${ this.escapeText(col.name) }${ sortIndicator }${ priorityBadge }</th>`;
                 });
 
                 html += `</tr></thead><tbody>`;
@@ -14783,13 +14765,13 @@ class IntegramTable{
 
             let formHtml = `
                 <div class="edit-form-header">
-                    <h3>${ title }</h3>
+                    <h3>${ this.escapeText(title) }</h3>
                     <button class="edit-form-close subordinate-close-btn"><i class="pi pi-times"></i></button>
                 </div>
                 <div class="edit-form-body">
                     <form id="subordinate-edit-form" class="edit-form" onsubmit="return false;" autocomplete="off">
                         <div class="form-group">
-                            <label for="sub-field-main">${ typeName } <span class="required">*</span></label>
+                            <label for="sub-field-main">${ this.escapeText(typeName) } <span class="required">*</span></label>
                             ${ mainFieldHtml }
                         </div>
             `;
@@ -14802,7 +14784,7 @@ class IntegramTable{
                 const isMulti = attrs.multi;
 
                 formHtml += `<div class="form-group">`;
-                formHtml += `<label for="sub-field-${ req.id }">${ fieldName }${ isRequired ? ' <span class="required">*</span>' : '' }</label>`;
+                formHtml += `<label for="sub-field-${ req.id }">${ this.escapeText(fieldName) }${ isRequired ? ' <span class="required">*</span>' : '' }</label>`;
 
                 // Multi-select reference field (issue #1772)
                 if (req.ref_id && isMulti) {
@@ -16358,7 +16340,7 @@ class IntegramTable{
 
             let attributesHtml = `
                 <div class="form-group">
-                    <label for="field-main-form-ref-create">${typeName} <span class="required">*</span></label>
+                    <label for="field-main-form-ref-create">${ this.escapeText(typeName) } <span class="required">*</span></label>
                     ${ mainFieldHtml }
                 </div>
             `;
@@ -16369,7 +16351,7 @@ class IntegramTable{
                 const isRequired = attrs.required;
 
                 attributesHtml += `<div class="form-group">`;
-                attributesHtml += `<label for="field-form-ref-${req.id}">${fieldName}${isRequired ? ' <span class="required">*</span>' : ''}</label>`;
+                attributesHtml += `<label for="field-form-ref-${req.id}">${ this.escapeText(fieldName) }${isRequired ? ' <span class="required">*</span>' : ''}</label>`;
 
                 // Check if this is a reference field
                 if (req.ref_id) {
@@ -16408,7 +16390,7 @@ class IntegramTable{
 
             let formHtml = `
                 <div class="edit-form-header">
-                    <h3>${title}</h3>
+                    <h3>${ this.escapeText(title) }</h3>
                     <button class="edit-form-close" data-close-form-ref-modal="true"><i class="pi pi-times"></i></button>
                 </div>
                 <div class="edit-form-body">
@@ -16643,7 +16625,7 @@ class IntegramTable{
                                    class="form-field-visibility-checkbox"
                                    data-field-id="${ fieldId }"
                                    ${ isChecked ? 'checked' : '' }>
-                            <span>${ fieldName }</span>
+                            <span>${ this.escapeText(fieldName) }</span>
                         </label>
                     </div>
                 `;
@@ -17845,6 +17827,26 @@ class IntegramTable{
                               .replace(/>/g, '&gt;')
                               .replace(/"/g, '&quot;')
                               .replace(/'/g, '&#039;');
+        }
+
+        /**
+         * Ссылка «…» для длинного значения ячейки (p2n#1137). Значение (уже безопасный HTML:
+         * экранированный текст, возможно со ссылками linkify) едет в data-full с экранированием
+         * атрибута, а не в код onclick: браузер декодирует сущности атрибута до разбора JS,
+         * и апостроф из данных закрывал бы строковый литерал.
+         */
+        renderShowFullValueLink(fullHtml) {
+            const instanceName = this.options.instanceName;
+            return `<a href="#" class="show-full-value" data-full="${ this.escapeHtml(fullHtml) }" onclick="window.${ instanceName }.showFullValue(event, this.dataset.full); return false;">...</a>`;
+        }
+
+        /**
+         * Текст из данных/метаданных для вставки в HTML (p2n#1137): сущности, которые сервер
+         * мог прислать уже закодированными, декодируются, затем всё экранируется заново —
+         * вид одинаков для закодированного и сырого значения, разметка из данных не исполняется.
+         */
+        escapeText(text) {
+            return this.escapeHtml(this.decodeHtmlEntities(text));
         }
 
         decodeHtmlEntities(text) {
@@ -19069,9 +19071,8 @@ class IntegramTable{
                         case 'HTML':
                         case 'BUTTON':
                             // Strip HTML tags for export
-                            const tmp = document.createElement('div');
-                            tmp.innerHTML = String(value);
-                            value = tmp.textContent || tmp.innerText || '';
+                            // p2n#1137: инертный документ DOMParser — innerHTML живого div исполнил бы <img onerror>
+                            value = new DOMParser().parseFromString(String(value), 'text/html').body.textContent || '';
                             break;
                         default:
                             value = String(value);
@@ -19132,9 +19133,8 @@ class IntegramTable{
                         case 'HTML':
                         case 'BUTTON':
                             // Strip HTML tags for export
-                            const tmp = document.createElement('div');
-                            tmp.innerHTML = String(value);
-                            value = tmp.textContent || tmp.innerText || '';
+                            // p2n#1137: инертный документ DOMParser — innerHTML живого div исполнил бы <img onerror>
+                            value = new DOMParser().parseFromString(String(value), 'text/html').body.textContent || '';
                             break;
                         default:
                             value = String(value);
@@ -19819,6 +19819,15 @@ class IntegramCreateFormHelper {
             .replace(/'/g, '&#039;');
     }
 
+    /**
+     * Текст из данных/метаданных для вставки в HTML (p2n#1137): сущности, которые сервер
+     * мог прислать уже закодированными, декодируются, затем всё экранируется заново —
+     * вид одинаков для закодированного и сырого значения, разметка из данных не исполняется.
+     */
+    escapeText(text) {
+        return this.escapeHtml(this.decodeHtmlEntities(text));
+    }
+
     decodeHtmlEntities(text) {
         if (text === null || text === undefined) return '';
         const str = String(text);
@@ -20098,7 +20107,7 @@ class IntegramCreateFormHelper {
         let formHtml = `
             <div class="edit-form-header">
                 <div class="edit-form-header-titles">
-                    <h3>${title}</h3>
+                    <h3>${ this.escapeText(title) }</h3>
                     ${parentSubtitleHtml}
                 </div>
                 <button class="edit-form-close" data-close-modal="true"><i class="pi pi-times"></i></button>
@@ -20249,7 +20258,7 @@ class IntegramCreateFormHelper {
 
         html += `
             <div class="form-group">
-                <label for="field-main">${typeName} <span class="required">*</span></label>
+                <label for="field-main">${ this.escapeText(typeName) } <span class="required">*</span></label>
                 ${ mainFieldHtml }
             </div>
         `;
@@ -20266,7 +20275,7 @@ class IntegramCreateFormHelper {
             const isMulti = attrs.multi; // Issue #1136
 
             html += `<div class="form-group">`;
-            html += `<label for="field-${req.id}">${fieldName}${isRequired ? ' <span class="required">*</span>' : ''}</label>`;
+            html += `<label for="field-${req.id}">${ this.escapeText(fieldName) }${isRequired ? ' <span class="required">*</span>' : ''}</label>`;
 
             // Multi-select reference field (issue #1136)
             if (req.ref_id && isMulti) {
@@ -21128,7 +21137,7 @@ class IntegramCreateFormHelper {
                 const attrs = this.parseAttrs(req.attrs);
                 const fieldName = attrs.alias || req.val;
                 const arrCount = recordReqs[req.id] ? recordReqs[req.id].arr || 0 : 0;
-                tabsHtml += `<div class="edit-form-tab" data-tab="sub-${req.id}" data-arr-id="${req.arr_id}" data-req-id="${req.id}">${fieldName} (${arrCount})</div>`;
+                tabsHtml += `<div class="edit-form-tab" data-tab="sub-${req.id}" data-arr-id="${req.arr_id}" data-req-id="${req.id}">${ this.escapeText(fieldName) } (${arrCount})</div>`;
             });
 
             tabsHtml += `</div>`;
@@ -21140,7 +21149,7 @@ class IntegramCreateFormHelper {
         let formHtml = `
             <div class="edit-form-header">
                 <div class="edit-form-header-title-row">
-                    <h3>${title}</h3>
+                    <h3>${ this.escapeText(title) }</h3>
                     ${recordIdHtml}
                 </div>
                 <button class="edit-form-close" data-close-modal="true"><i class="pi pi-times"></i></button>
@@ -21340,7 +21349,7 @@ class IntegramCreateFormHelper {
 
         } catch (error) {
             console.error('Error loading subordinate table:', error);
-            container.innerHTML = `<div class="subordinate-table-error">Ошибка загрузки: ${error.message}</div>`;
+            container.innerHTML = `<div class="subordinate-table-error">Ошибка загрузки: ${this.escapeHtml(error.message)}</div>`;
         }
     }
 

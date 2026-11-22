@@ -612,10 +612,10 @@
                 const displayValue = resolvedLabel ? `${filterTypeSymbol} ${resolvedLabel}` : filterTypeSymbol;
 
                 return `
-                    <span class="hidden-filter-badge" data-col-id="${hf.colId}">
-                        <span class="hidden-filter-badge-name">${hf.colName}</span>
-                        <span class="hidden-filter-badge-value">${displayValue}</span>
-                        <span class="hidden-filter-badge-remove" onclick="window.${instanceName}.removeUrlFilter('${hf.colId}')" title="Удалить фильтр"><i class="pi pi-times"></i></span>
+                    <span class="hidden-filter-badge" data-col-id="${this.escapeHtml(hf.colId)}">
+                        <span class="hidden-filter-badge-name">${this.escapeText(hf.colName)}</span>
+                        <span class="hidden-filter-badge-value">${this.escapeText(displayValue)}</span>
+                        <span class="hidden-filter-badge-remove" onclick="window.${instanceName}.removeUrlFilter(${this.escapeHtml(JSON.stringify(String(hf.colId)))})" title="Удалить фильтр"><i class="pi pi-times"></i></span>
                     </span>
                 `;
             }).join('');

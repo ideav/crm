@@ -26,6 +26,15 @@ class IntegramCreateFormHelper {
             .replace(/'/g, '&#039;');
     }
 
+    /**
+     * Текст из данных/метаданных для вставки в HTML (p2n#1137): сущности, которые сервер
+     * мог прислать уже закодированными, декодируются, затем всё экранируется заново —
+     * вид одинаков для закодированного и сырого значения, разметка из данных не исполняется.
+     */
+    escapeText(text) {
+        return this.escapeHtml(this.decodeHtmlEntities(text));
+    }
+
     decodeHtmlEntities(text) {
         if (text === null || text === undefined) return '';
         const str = String(text);
@@ -305,7 +314,7 @@ class IntegramCreateFormHelper {
         let formHtml = `
             <div class="edit-form-header">
                 <div class="edit-form-header-titles">
-                    <h3>${title}</h3>
+                    <h3>${ this.escapeText(title) }</h3>
                     ${parentSubtitleHtml}
                 </div>
                 <button class="edit-form-close" data-close-modal="true"><i class="pi pi-times"></i></button>
@@ -456,7 +465,7 @@ class IntegramCreateFormHelper {
 
         html += `
             <div class="form-group">
-                <label for="field-main">${typeName} <span class="required">*</span></label>
+                <label for="field-main">${ this.escapeText(typeName) } <span class="required">*</span></label>
                 ${ mainFieldHtml }
             </div>
         `;
@@ -473,7 +482,7 @@ class IntegramCreateFormHelper {
             const isMulti = attrs.multi; // Issue #1136
 
             html += `<div class="form-group">`;
-            html += `<label for="field-${req.id}">${fieldName}${isRequired ? ' <span class="required">*</span>' : ''}</label>`;
+            html += `<label for="field-${req.id}">${ this.escapeText(fieldName) }${isRequired ? ' <span class="required">*</span>' : ''}</label>`;
 
             // Multi-select reference field (issue #1136)
             if (req.ref_id && isMulti) {
@@ -1335,7 +1344,7 @@ class IntegramCreateFormHelper {
                 const attrs = this.parseAttrs(req.attrs);
                 const fieldName = attrs.alias || req.val;
                 const arrCount = recordReqs[req.id] ? recordReqs[req.id].arr || 0 : 0;
-                tabsHtml += `<div class="edit-form-tab" data-tab="sub-${req.id}" data-arr-id="${req.arr_id}" data-req-id="${req.id}">${fieldName} (${arrCount})</div>`;
+                tabsHtml += `<div class="edit-form-tab" data-tab="sub-${req.id}" data-arr-id="${req.arr_id}" data-req-id="${req.id}">${ this.escapeText(fieldName) } (${arrCount})</div>`;
             });
 
             tabsHtml += `</div>`;
@@ -1347,7 +1356,7 @@ class IntegramCreateFormHelper {
         let formHtml = `
             <div class="edit-form-header">
                 <div class="edit-form-header-title-row">
-                    <h3>${title}</h3>
+                    <h3>${ this.escapeText(title) }</h3>
                     ${recordIdHtml}
                 </div>
                 <button class="edit-form-close" data-close-modal="true"><i class="pi pi-times"></i></button>
@@ -1547,7 +1556,7 @@ class IntegramCreateFormHelper {
 
         } catch (error) {
             console.error('Error loading subordinate table:', error);
-            container.innerHTML = `<div class="subordinate-table-error">Ошибка загрузки: ${error.message}</div>`;
+            container.innerHTML = `<div class="subordinate-table-error">Ошибка загрузки: ${this.escapeHtml(error.message)}</div>`;
         }
     }
 

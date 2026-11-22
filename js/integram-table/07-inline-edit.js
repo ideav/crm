@@ -2308,7 +2308,7 @@
             const mainLabelTarget = (mainFieldType === 'DATE' || mainFieldType === 'DATETIME') ? 'field-main-ref-create-picker' : 'field-main-ref-create';
             let attributesHtml = `
                 <div class="form-group">
-                    <label for="${mainLabelTarget}">${typeName} <span class="required">*</span></label>
+                    <label for="${mainLabelTarget}">${ this.escapeText(typeName) } <span class="required">*</span></label>
                     ${ mainFieldHtml }
                 </div>
             `;
@@ -2323,7 +2323,7 @@
                 // For reference fields, the visible/interactive element is the search input (id="field-ref-${req.id}-search"),
                 // not the hidden input (id="field-ref-${req.id}"), so the label must point to the search input (issue #889)
                 const labelTarget = req.ref_id ? `field-ref-${req.id}-search` : `field-ref-${req.id}`;
-                attributesHtml += `<label for="${labelTarget}">${fieldName}${isRequired ? ' <span class="required">*</span>' : ''}</label>`;
+                attributesHtml += `<label for="${labelTarget}">${ this.escapeText(fieldName) }${isRequired ? ' <span class="required">*</span>' : ''}</label>`;
 
                 // Check if this is a reference field
                 if (req.ref_id) {
@@ -2368,7 +2368,7 @@
 
             let formHtml = `
                 <div class="edit-form-header">
-                    <h3>${title}</h3>
+                    <h3>${ this.escapeText(title) }</h3>
                     <button class="edit-form-close" data-close-modal-ref="true"><i class="pi pi-times"></i></button>
                 </div>
                 <div class="edit-form-body">
@@ -2967,13 +2967,7 @@
             // Apply truncation if enabled
             if (this.settings.truncateLongValues && escapedValue.length > 127) {
                 const truncated = escapedValue.substring(0, 127);
-                const fullValueEscaped = escapedValue
-                    .replace(/\\/g, '\\\\')
-                    .replace(/\n/g, '\\n')
-                    .replace(/\r/g, '\\r')
-                    .replace(/'/g, '\\\'');
-                const instanceName = this.options.instanceName;
-                escapedValue = `${ truncated }<a href="#" class="show-full-value" onclick="window.${ instanceName }.showFullValue(event, '${ fullValueEscaped }'); return false;">...</a>`;
+                escapedValue = `${ truncated }${ this.renderShowFullValueLink(escapedValue) }`;
             }
 
             // Update data attribute with full value for editing

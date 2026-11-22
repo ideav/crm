@@ -761,9 +761,8 @@
                         case 'HTML':
                         case 'BUTTON':
                             // Strip HTML tags for export
-                            const tmp = document.createElement('div');
-                            tmp.innerHTML = String(value);
-                            value = tmp.textContent || tmp.innerText || '';
+                            // p2n#1137: инертный документ DOMParser — innerHTML живого div исполнил бы <img onerror>
+                            value = new DOMParser().parseFromString(String(value), 'text/html').body.textContent || '';
                             break;
                         default:
                             value = String(value);
@@ -824,9 +823,8 @@
                         case 'HTML':
                         case 'BUTTON':
                             // Strip HTML tags for export
-                            const tmp = document.createElement('div');
-                            tmp.innerHTML = String(value);
-                            value = tmp.textContent || tmp.innerText || '';
+                            // p2n#1137: инертный документ DOMParser — innerHTML живого div исполнил бы <img onerror>
+                            value = new DOMParser().parseFromString(String(value), 'text/html').body.textContent || '';
                             break;
                         default:
                             value = String(value);

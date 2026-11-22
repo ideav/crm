@@ -27,7 +27,7 @@
                                            data-column-id="${ col.id }"
                                            ${ isSelected ? 'checked' : '' }>
                                     <span class="grouping-order-badge" style="${ isSelected ? '' : 'display: none;' }">${ order }</span>
-                                    ${ col.name }
+                                    ${ this.escapeText(col.name) }
                                 </label>
                             </div>
                         `;

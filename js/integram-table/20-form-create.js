@@ -76,13 +76,13 @@
 
             let formHtml = `
                 <div class="edit-form-header">
-                    <h3>${ title }</h3>
+                    <h3>${ this.escapeText(title) }</h3>
                     <button class="edit-form-close subordinate-close-btn"><i class="pi pi-times"></i></button>
                 </div>
                 <div class="edit-form-body">
                     <form id="subordinate-edit-form" class="edit-form" onsubmit="return false;" autocomplete="off">
                         <div class="form-group">
-                            <label for="sub-field-main">${ typeName } <span class="required">*</span></label>
+                            <label for="sub-field-main">${ this.escapeText(typeName) } <span class="required">*</span></label>
                             ${ mainFieldHtml }
                         </div>
             `;
@@ -95,7 +95,7 @@
                 const isMulti = attrs.multi;
 
                 formHtml += `<div class="form-group">`;
-                formHtml += `<label for="sub-field-${ req.id }">${ fieldName }${ isRequired ? ' <span class="required">*</span>' : '' }</label>`;
+                formHtml += `<label for="sub-field-${ req.id }">${ this.escapeText(fieldName) }${ isRequired ? ' <span class="required">*</span>' : '' }</label>`;
 
                 // Multi-select reference field (issue #1772)
                 if (req.ref_id && isMulti) {
@@ -1651,7 +1651,7 @@
 
             let attributesHtml = `
                 <div class="form-group">
-                    <label for="field-main-form-ref-create">${typeName} <span class="required">*</span></label>
+                    <label for="field-main-form-ref-create">${ this.escapeText(typeName) } <span class="required">*</span></label>
                     ${ mainFieldHtml }
                 </div>
             `;
@@ -1662,7 +1662,7 @@
                 const isRequired = attrs.required;
 
                 attributesHtml += `<div class="form-group">`;
-                attributesHtml += `<label for="field-form-ref-${req.id}">${fieldName}${isRequired ? ' <span class="required">*</span>' : ''}</label>`;
+                attributesHtml += `<label for="field-form-ref-${req.id}">${ this.escapeText(fieldName) }${isRequired ? ' <span class="required">*</span>' : ''}</label>`;
 
                 // Check if this is a reference field
                 if (req.ref_id) {
@@ -1701,7 +1701,7 @@
 
             let formHtml = `
                 <div class="edit-form-header">
-                    <h3>${title}</h3>
+                    <h3>${ this.escapeText(title) }</h3>
                     <button class="edit-form-close" data-close-form-ref-modal="true"><i class="pi pi-times"></i></button>
                 </div>
                 <div class="edit-form-body">
