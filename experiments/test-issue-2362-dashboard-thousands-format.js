@@ -28,6 +28,8 @@ const code = `
 var document = {};
 function dashFilterReportRowsForPanel(rows) { return rows || []; }
 
+${extractFunction('dashEscapeText')}
+${extractFunction('dashH')}
 ${extractFunction('dashAttr')}
 ${extractFunction('dashEscapeHtml')}
 ${extractFunction('dashNormalizeNumberText')}

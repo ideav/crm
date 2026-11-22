@@ -39,6 +39,9 @@ function assertNear(actual, expected, message) {
     }
 }
 
+${extractFunctionMaybe('dashEscapeHtml')}
+${extractFunctionMaybe('dashEscapeText')}
+${extractFunctionMaybe('dashH')}
 ${extractFunctionMaybe('dashNormalizeNumberText')}
 ${extractFunction('dashRoundNumberText')}
 ${extractFunction('dashCellRawAttr')}

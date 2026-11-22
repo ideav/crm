@@ -179,7 +179,7 @@
                                         })() : '';
                                         return `
                                             <th data-column-id="${ col.id }" draggable="true" title="${ col.id }"${ widthStyle }>
-                                                <span class="column-header-content" data-column-id="${ col.id }" title="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ sortIndicator }${ col.name }</span>
+                                                <span class="column-header-content" data-column-id="${ col.id }" title="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ sortIndicator }${ this.escapeText(col.name) }</span>
                                                 ${ refIconHtml }
                                                 ${ addButtonHtml }
                                                 <div class="column-resize-handle" data-column-id="${ col.id }"></div>
@@ -306,7 +306,7 @@
                                 <input type="text"
                                        class="filter-input-with-icon filter-ref-text-input"
                                        data-column-id="${ column.id }"
-                                       value="${ displayValue }"
+                                       value="${ this.escapeHtml(displayValue) }"
                                        placeholder="${ placeholder }"
                                        autocomplete="off">
                             </div>
@@ -445,7 +445,7 @@
                         <input type="text"
                                class="filter-input-with-icon"
                                data-column-id="${ column.id }"
-                               value="${ displayValue }"
+                               value="${ this.escapeHtml(displayValue) }"
                                placeholder="${ placeholder }"
                                autocomplete="off">
                     </div>

@@ -94,7 +94,7 @@
                     const attrs = this.parseAttrs(req.attrs);
                     const fieldName = attrs.alias || req.val;
                     const arrCount = recordReqs[req.id] ? recordReqs[req.id].arr || 0 : 0;
-                    tabsHtml += `<div class="edit-form-tab" data-tab="sub-${ req.id }" data-arr-id="${ req.arr_id }" data-req-id="${ req.id }">${ fieldName } (${ arrCount })</div>`;
+                    tabsHtml += `<div class="edit-form-tab" data-tab="sub-${ req.id }" data-arr-id="${ req.arr_id }" data-req-id="${ req.id }">${ this.escapeText(fieldName) } (${ arrCount })</div>`;
                 });
 
                 tabsHtml += `</div>`;
@@ -118,7 +118,7 @@
             let formHtml = `
                 <div class="edit-form-header">
                     <div class="edit-form-header-title-row">
-                        <h3>${ title }</h3>
+                        <h3>${ this.escapeText(title) }</h3>
                         ${ recordIdHtml }
                     </div>
                     <button class="edit-form-close" data-close-modal="true"><i class="pi pi-times"></i></button>
@@ -401,7 +401,7 @@
 
             html += `
                 <div class="form-group${ mainFieldReadOnly ? ' form-field-readonly' : '' }">
-                    <label for="field-main">${ typeName } <span class="required">*</span></label>
+                    <label for="field-main">${ this.escapeText(typeName) } <span class="required">*</span></label>
                     ${ mainFieldHtml }
                 </div>
             `;
@@ -468,9 +468,9 @@
                 html += `<div class="form-group${ isReqReadOnly ? ' form-field-readonly' : '' }">`;
                 // Password reset buttons in label for field id=20 (issue #1471)
                 if (String(req.id) === '20' && baseFormat === 'PWD') {
-                    html += `<label for="field-${ req.id }">${ fieldName }${ isRequired ? ' <span class="required">*</span>' : '' }&nbsp;<a class="pwd-reset-btn" data-field-id="${ req.id }" title="Задать пароль и скопировать его в буфер" style="cursor:pointer"><svg width="20" height="20" viewBox="0 1 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6.42858 9.28572V6.42858C6.42858 5.48137 6.80486 4.57297 7.47463 3.90319C8.1444 3.23342 9.05281 2.85715 10 2.85715C10.9472 2.85715 11.8556 3.23342 12.5254 3.90319C13.1952 4.57297 13.5714 5.48137 13.5714 6.42858V9.28572M5.00001 9.28572H15C15.789 9.28572 16.4286 9.92531 16.4286 10.7143V15.7143C16.4286 16.5033 15.789 17.1429 15 17.1429H5.00001C4.21103 17.1429 3.57144 16.5033 3.57144 15.7143V10.7143C3.57144 9.92531 4.21103 9.28572 5.00001 9.28572Z" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"></path></svg></a>&nbsp;<a class="pwd-reset-mail-btn" data-field-id="${ req.id }" title="Задать пароль и скопировать в буфер приглашение пользователю" style="cursor:pointer"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M17.1429 5.71434C17.1429 4.92862 16.5 4.28577 15.7143 4.28577H4.28571C3.5 4.28577 2.85714 4.92862 2.85714 5.71434M17.1429 5.71434V14.2858C17.1429 15.0715 16.5 15.7143 15.7143 15.7143H4.28571C3.5 15.7143 2.85714 15.0715 2.85714 14.2858V5.71434M17.1429 5.71434L10 10.7143L2.85714 5.71434" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/></svg></a><span class="pwd-reset-copied" id="field-${ req.id }-copied" style="display:none">Ok</span></label>`;
+                    html += `<label for="field-${ req.id }">${ this.escapeText(fieldName) }${ isRequired ? ' <span class="required">*</span>' : '' }&nbsp;<a class="pwd-reset-btn" data-field-id="${ req.id }" title="Задать пароль и скопировать его в буфер" style="cursor:pointer"><svg width="20" height="20" viewBox="0 1 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M6.42858 9.28572V6.42858C6.42858 5.48137 6.80486 4.57297 7.47463 3.90319C8.1444 3.23342 9.05281 2.85715 10 2.85715C10.9472 2.85715 11.8556 3.23342 12.5254 3.90319C13.1952 4.57297 13.5714 5.48137 13.5714 6.42858V9.28572M5.00001 9.28572H15C15.789 9.28572 16.4286 9.92531 16.4286 10.7143V15.7143C16.4286 16.5033 15.789 17.1429 15 17.1429H5.00001C4.21103 17.1429 3.57144 16.5033 3.57144 15.7143V10.7143C3.57144 9.92531 4.21103 9.28572 5.00001 9.28572Z" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"></path></svg></a>&nbsp;<a class="pwd-reset-mail-btn" data-field-id="${ req.id }" title="Задать пароль и скопировать в буфер приглашение пользователю" style="cursor:pointer"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M17.1429 5.71434C17.1429 4.92862 16.5 4.28577 15.7143 4.28577H4.28571C3.5 4.28577 2.85714 4.92862 2.85714 5.71434M17.1429 5.71434V14.2858C17.1429 15.0715 16.5 15.7143 15.7143 15.7143H4.28571C3.5 15.7143 2.85714 15.0715 2.85714 14.2858V5.71434M17.1429 5.71434L10 10.7143L2.85714 5.71434" stroke="#1A1A1A" stroke-linecap="round" stroke-linejoin="round"/></svg></a><span class="pwd-reset-copied" id="field-${ req.id }-copied" style="display:none">Ok</span></label>`;
                 } else {
-                    html += `<label for="field-${ req.id }">${ fieldName }${ isRequired ? ' <span class="required">*</span>' : '' }</label>`;
+                    html += `<label for="field-${ req.id }">${ this.escapeText(fieldName) }${ isRequired ? ' <span class="required">*</span>' : '' }</label>`;
                 }
 
                 // "Link to any record" field — single-select with dynamic table (issue #1800)
@@ -772,7 +772,7 @@
 
             } catch (error) {
                 console.error('Error loading subordinate table:', error);
-                container.innerHTML = `<div class="subordinate-table-error">Ошибка загрузки: ${ error.message }</div>`;
+                container.innerHTML = `<div class="subordinate-table-error">Ошибка загрузки: ${ this.escapeHtml(error.message) }</div>`;
             }
         }
 
@@ -1026,7 +1026,7 @@
                 modal.dataset.modalDepth = modalDepth;
 
                 const typeName = this.getMetadataName(metadata);
-                const headerTitle = parentRecordValue ? `${ this.escapeHtml(parentRecordValue) } / ${ typeName }` : typeName;
+                const headerTitle = parentRecordValue ? `${ this.escapeHtml(parentRecordValue) } / ${ this.escapeText(typeName) }` : this.escapeText(typeName);
 
                 modal.innerHTML = `
                     <div class="edit-form-header">
@@ -1196,7 +1196,7 @@
                     const sortPriority = sortInfo ? sortState.indexOf(sortInfo) + 1 : '';
                     const priorityBadge = sortState.length > 1 && sortPriority ? `<span class="subordinate-sort-priority">${ sortPriority }</span>` : '';
 
-                    html += `<th class="subordinate-sortable-header" data-col-index="${ colIdx }">${ col.name }${ sortIndicator }${ priorityBadge }</th>`;
+                    html += `<th class="subordinate-sortable-header" data-col-index="${ colIdx }">${ this.escapeText(col.name) }${ sortIndicator }${ priorityBadge }</th>`;
                 });
 
                 html += `</tr></thead><tbody>`;

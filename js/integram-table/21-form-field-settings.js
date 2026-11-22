@@ -48,7 +48,7 @@
                                    class="form-field-visibility-checkbox"
                                    data-field-id="${ fieldId }"
                                    ${ isChecked ? 'checked' : '' }>
-                            <span>${ fieldName }</span>
+                            <span>${ this.escapeText(fieldName) }</span>
                         </label>
                     </div>
                 `;

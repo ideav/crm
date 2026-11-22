@@ -71,6 +71,9 @@ vm.runInContext(`
 let dashModelData = {};
 let dashPanelFilters = {};
 
+${extractFunction('dashEscapeHtml')}
+${extractFunction('dashEscapeText')}
+${extractFunction('dashH')}
 ${extractFunction('dashNormalizeNumberText')}
 ${extractFunction('dashGetFloat')}
 ${extractFunction('dashPanelDateValue')}
@@ -125,6 +128,9 @@ let dashFormulas = {};
 let dashModelData = {};
 let dashPanelFilters = {};
 
+${extractFunction('dashEscapeHtml')}
+${extractFunction('dashEscapeText')}
+${extractFunction('dashH')}
 ${extractFunction('dashNormalizeNumberText')}
 ${extractFunction('dashGetFloat')}
 ${extractFunction('dashNormalizeVal')}

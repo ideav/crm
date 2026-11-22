@@ -85,6 +85,9 @@ function Chart(canvas, config) {
     canvas._chartInstance = { destroy: function() {} };
 }
 
+${extractFunction('dashEscapeHtml')}
+${extractFunction('dashEscapeText')}
+${extractFunction('dashH')}
 ${extractFunction('dashAttr')}
 ${extractFunctionIfExists('dashNormalizeAreaMode')}
 ${extractFunctionIfExists('dashBuildAreaModeHtml')}

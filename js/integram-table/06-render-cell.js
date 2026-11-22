@@ -75,7 +75,7 @@
                 if (styleColIndex !== -1 && this.data[rowIndex]) {
                     const styleValue = this.data[rowIndex][styleColIndex];
                     if (styleValue) {
-                        customStyle = ` style="${ styleValue }"`;
+                        customStyle = ` style="${ this.escapeHtml(styleValue) }"`;
                     }
                 }
             }
@@ -164,7 +164,7 @@
                         // Display as a download link if value is a path
                         const apiBase = this.getApiBase();
                         const fileName = value.split('/').pop() || value;
-                        displayValue = `<a href="${ apiBase }/file/${ value }" target="_blank" class="file-link" title="Скачать файл">${ this.escapeHtml(fileName) }</a>`;
+                        displayValue = `<a href="${ apiBase }/file/${ this.escapeHtml(value) }" target="_blank" class="file-link" title="Скачать файл">${ this.escapeHtml(fileName) }</a>`;
                         return `<td class="${ cellClass }" data-row="${ rowIndex }" data-col="${ colIndex }" data-source-type="${ this.getDataSourceType() }"${ dataTypeAttrs }${ customStyle }>${ displayValue }</td>`;
                     }
                     break;
@@ -238,13 +238,7 @@
                     if (this.settings.truncateLongValues && escapedValue.length > 127) {
                         const truncatedEscaped = escapedValue.substring(0, 127);
                         const fullLinkified = this.linkifyText(escapedValue);
-                        const fullValueEscaped = fullLinkified
-                            .replace(/\\/g, '\\\\')
-                            .replace(/\n/g, '\\n')
-                            .replace(/\r/g, '\\r')
-                            .replace(/'/g, '\\\'');
-                        const instanceName = this.options.instanceName;
-                        escapedValue = `${ this.linkifyText(truncatedEscaped) }<a href="#" class="show-full-value" onclick="window.${ instanceName }.showFullValue(event, '${ fullValueEscaped }'); return false;">...</a>`;
+                        escapedValue = `${ this.linkifyText(truncatedEscaped) }${ this.renderShowFullValueLink(fullLinkified) }`;
                     } else {
                         escapedValue = this.linkifyText(escapedValue);
                     }
@@ -255,13 +249,7 @@
             if (this.settings.truncateLongValues && escapedValue.length > 127 && format !== 'SHORT' && format !== 'CHARS' && format !== 'MEMO') {
                 const truncated = escapedValue.substring(0, 127);
                 // Properly escape all JavaScript special characters for use in onclick string literal
-                const fullValueEscaped = escapedValue
-                    .replace(/\\/g, '\\\\')   // Escape backslashes first
-                    .replace(/\n/g, '\\n')    // Escape newlines
-                    .replace(/\r/g, '\\r')    // Escape carriage returns
-                    .replace(/'/g, '\\\'');   // Escape single quotes
-                const instanceName = this.options.instanceName;
-                escapedValue = `${ truncated }<a href="#" class="show-full-value" onclick="window.${ instanceName }.showFullValue(event, '${ fullValueEscaped }'); return false;">...</a>`;
+                escapedValue = `${ truncated }${ this.renderShowFullValueLink(escapedValue) }`;
             }
 
             // Track typeId computed in the edit icon block for use in editableAttrs
@@ -799,7 +787,7 @@
                         })() : '';
                         rows[depth].push(`
                             <th data-column-id="${ col.id }" draggable="true" title="${ col.id }"${ widthStyle }${ rowspan > 1 ? ` rowspan="${ rowspan }"` : '' } class="${ groupingClass }">
-                                <span class="column-header-content" data-column-id="${ col.id }" title="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ groupingBadge }${ sortIndicator }${ displayName }</span>
+                                <span class="column-header-content" data-column-id="${ col.id }" title="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ groupingBadge }${ sortIndicator }${ this.escapeText(displayName) }</span>
                                 ${ refIconHtml }
                                 ${ addButtonHtml }
                                 <div class="column-resize-handle" data-column-id="${ col.id }"></div>
@@ -809,7 +797,7 @@
                         // Display prefix with dots replaced by spaces (issue #1565)
                         const displayPrefix = node.prefix.replace(/\./g, ' ');
                         rows[depth].push(`
-                            <th class="smart-header-group" colspan="${ node.span }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ displayPrefix }</th>
+                            <th class="smart-header-group" colspan="${ node.span }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ this.escapeText(displayPrefix) }</th>
                         `);
                         visit(node.children, depth + 1);
                     }
@@ -864,7 +852,7 @@
 
                 return `
                     <th data-column-id="${ col.id }" draggable="true" title="${ col.id }"${ widthStyle } class="${ groupingClass }">
-                        <span class="column-header-content" data-column-id="${ col.id }" title="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ groupingBadge }${ sortIndicator }${ col.name }</span>
+                        <span class="column-header-content" data-column-id="${ col.id }" title="${ col.id }" style="${ this.settings.wrapHeaders ? 'white-space: normal;' : '' }">${ groupingBadge }${ sortIndicator }${ this.escapeText(col.name) }</span>
                         ${ refIconHtml }
                         ${ addButtonHtml }
                         <div class="column-resize-handle" data-column-id="${ col.id }"></div>
@@ -1099,7 +1087,7 @@
             previewModal._overlayElement = previewOverlay;
 
             // Build table HTML with editable cells
-            const theadCols = colHeaders.map(h => `<th>${h}</th>`).join('');
+            const theadCols = colHeaders.map(h => `<th>${this.escapeText(h)}</th>`).join('');
             const tbodyRows = parsedRows.map((row, rowIdx) => {
                 const cells = orderedColIds.map((colId, colIdx) => {
                     const val = row[colIdx] !== undefined ? row[colIdx] : '';

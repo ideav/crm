@@ -114,6 +114,25 @@ function dashAttr(v) {
         .replace(/</g, '&lt;');
 }
 
+// Текст из данных для вставки в HTML (p2n#1137): сущности, которые сервер мог прислать уже
+// закодированными (&comma;, &quot;), декодируются в инертной textarea, затем всё экранируется заново.
+function dashEscapeText(v) {
+    var str = String(v === null || v === undefined ? '' : v);
+    if (str.indexOf('&') !== -1 && typeof document !== 'undefined' && document.createElement) {
+        var ta = document.createElement('textarea');
+        ta.innerHTML = str;
+        if (typeof ta.value === 'string') str = ta.value;
+    }
+    return dashEscapeHtml(str);
+}
+
+// Подстановка данных в шаблон через .replace (p2n#1137): значение экранируется, а функция-заменитель
+// не даёт трактовать `$&`, `$'` и т.п. из данных как шаблоны замены String.prototype.replace.
+function dashH(v) {
+    var s = dashEscapeText(v);
+    return function() { return s; };
+}
+
 function dashCellValueFormat(rowId) {
     var item = dashItems && dashItems[rowId];
     return String((item && item.format) || '').toUpperCase();
@@ -329,7 +348,7 @@ function dashCellRawAttr(raw) {
 
 function dashSetCellNumber(el, val) {
     var attr = dashCellRawAttr(val);
-    el.innerHTML = dashFormatNumberText(val);
+    el.innerHTML = dashEscapeText(dashFormatNumberText(val));
     if (attr) el.setAttribute('data-raw', String(val).trim());
     else if (el.removeAttribute) el.removeAttribute('data-raw');
 }
@@ -1897,7 +1916,7 @@ function dashGetRepVals() {
                     if (restrictToReportGroup && !dashSameGroupName(group, parsed.report)) return;
                     val = dashResolveReportCellValue(filteredReportRows, date, range, parsed, group, groups);
                     if (val !== undefined) {
-                        el.innerHTML = dashFormatNumberText(val);
+                        el.innerHTML = dashEscapeText(dashFormatNumberText(val));
                         el.setAttribute('ready', '1');
                     }
                 });
@@ -1926,7 +1945,7 @@ function dashDrawPeriods() {
                         if (rgCols.length > 0) {
                             // Period header with colspan spanning all column groups
                             panel.querySelector('.f-head').insertAdjacentHTML('beforeend',
-                                '<th colspan="' + rgCols.length + '" range="' + fr + '-' + to + '">' + p[i].r[0] + '</th>');
+                                '<th colspan="' + rgCols.length + '" range="' + fr + '-' + to + '">' + dashEscapeText(p[i].r[0]) + '</th>');
                             // Ensure sub-header row exists (first time only per panel)
                             var thead = panel.querySelector('thead');
                             var subhead = thead.querySelector('.f-subhead');
@@ -1939,7 +1958,7 @@ function dashDrawPeriods() {
                             // Add one th per column group under this period
                             rgCols.forEach(function(colName) {
                                 subhead.insertAdjacentHTML('beforeend',
-                                    '<th range="' + fr + '-' + to + '" data-rg-col="' + colName + '">' + colName + '</th>');
+                                    '<th range="' + fr + '-' + to + '" data-rg-col="' + dashAttr(colName) + '">' + dashEscapeText(colName) + '</th>');
                             });
                             // Add cells: for each item row, one cell per column group
                             panel.querySelectorAll('.f-item').forEach(function(row) {
@@ -1994,7 +2013,7 @@ function dashDrawPeriods() {
                                     var rowFormula = dashFormulas[row.id];
                                     var cellReady = hasValue || rowFormula === '[]' || !rowFormula ? '1' : '0';
                                     row.insertAdjacentHTML('beforeend',
-                                        cellTpl.replace(':val:', dashFormatNumberText(v || ''))
+                                        cellTpl.replace(':val:', dashH(dashFormatNumberText(v || '')))
                                             .replace(':ready:', cellReady)
                                             .replace(':title:', cellReady === '1' ? dashAttr(vDetails) : '')
                                             .replace(':classes:', 'f-rg-cell')
@@ -2009,7 +2028,7 @@ function dashDrawPeriods() {
                         } else {
                             // No RGcolumns — original single-column behaviour
                             panel.querySelector('.f-head').insertAdjacentHTML('beforeend',
-                                headTpl.replace(':head:', p[i].r[0]).replace(':from:', fr).replace(':to:', to));
+                                headTpl.replace(':head:', dashH(p[i].r[0])).replace(':from:', fr).replace(':to:', to));
                             panel.querySelectorAll('.f-item').forEach(function(row) {
                                 var s = dashCellSrc(row.id, 'rg');
                                 var itemName = dashRowLookupName(row);
@@ -2039,7 +2058,7 @@ function dashDrawPeriods() {
                                     + ' data-rg-col="' + dashAttr(periodLabel) + '"'
                                     + dashCellFormatAttribute(row.id);
                                 row.insertAdjacentHTML('beforeend',
-                                    cellTpl.replace(':val:', dashFormatNumberText(v || ''))
+                                    cellTpl.replace(':val:', dashH(dashFormatNumberText(v || '')))
                                         .replace(':ready:', v || dashFormulas[row.id] === '[]' || !dashFormulas[row.id] ? '1' : '0')
                                         .replace(':title:', v || dashFormulas[row.id] === '[]' || !dashFormulas[row.id] ? dashAttr(vDetails) : '')
                                         .replace(':classes:', 'f-rg-cell')
@@ -2056,7 +2075,7 @@ function dashDrawPeriods() {
                 case 'value':
                     var groupName = dashModelData[panelId].rgs[rg].head || '';
                     panel.querySelector('.f-head').insertAdjacentHTML('beforeend',
-                        headTpl.replace(':head:', groupName || 'Значение')
+                        headTpl.replace(':head:', dashH(groupName || 'Значение'))
                                .replace(':from:-:to:', '-'));
                     panel.querySelectorAll('.f-item').forEach(function(row) {
                         var s = dashCellSrc(row.id, 'value')
@@ -2074,11 +2093,11 @@ function dashDrawPeriods() {
                             + (rowLabel ? ' data-dash-label="' + dashAttr(rowLabel) + '"' : '')
                             + dashCellFormatAttribute(row.id);
                         row.insertAdjacentHTML('beforeend',
-                            cellTpl.replace(':val:', dashFormatNumberText(v || ''))
+                            cellTpl.replace(':val:', dashH(dashFormatNumberText(v || '')))
                                 .replace(':classes:', 'f-values')
                                 .replace(':from:', '-').replace(':to:', '-')
                                 .replace(':ready:', v || dashFormulas[row.id] === '[]' || !dashFormulas[row.id] ? '1' : '0')
-                                .replace(':title:', dashFormulas[row.id] || '')
+                                .replace(':title:', dashH(dashFormulas[row.id] || ''))
                                 .replace(':src:', s.src)
                                 .replace(':item-id:', row.id)
                                 .replace(':extra:', cellExtra + dashCellRawAttr(v)));
@@ -2086,7 +2105,7 @@ function dashDrawPeriods() {
                     break;
                 case 'formulas':
                     panel.querySelector('.f-head').insertAdjacentHTML('beforeend',
-                        headTpl.replace(':head:', dashModelData[panelId].rgs[rg].head || '')
+                        headTpl.replace(':head:', dashH(dashModelData[panelId].rgs[rg].head || ''))
                                .replace(':from:-:to:', '-'));
                     panel.querySelectorAll('.f-item').forEach(function(row) {
                         var rgf = dashModelData[panelId].rgs[rg].rgFormulas || ''
@@ -2097,7 +2116,7 @@ function dashDrawPeriods() {
                                 .replace(':classes:', 'f-rg-formula-cell')
                                 .replace(':from:', '-').replace(':to:', '-')
                                 .replace(':ready:', '0')
-                                .replace(':title:', rgf)
+                                .replace(':title:', dashH(rgf))
                                 .replace(':src:', 'rgformula')
                                 .replace(':item-id:', row.id)
                                 .replace(':extra:', cellExtra));
@@ -2105,11 +2124,11 @@ function dashDrawPeriods() {
                     break;
                 case 'mu':
                     panel.querySelector('.f-head').insertAdjacentHTML('beforeend',
-                        headTpl.replace(':head:', dashModelData[panelId].rgs[rg].head || 'Ед.изм.')
+                        headTpl.replace(':head:', dashH(dashModelData[panelId].rgs[rg].head || 'Ед.изм.'))
                                .replace(':from:-:to:', '-'));
                     panel.querySelectorAll('.f-item').forEach(function(row) {
                         row.insertAdjacentHTML('beforeend',
-                            cellTpl.replace(':val:', dashItems[row.id] ? dashItems[row.id].mu || '' : '')
+                            cellTpl.replace(':val:', dashH(dashItems[row.id] ? dashItems[row.id].mu || '' : ''))
                                 .replace(':classes:', 'f-mus')
                                 .replace(':from:', '-').replace(':to:', '-')
                                 .replace(':ready:', '1')
@@ -2121,7 +2140,7 @@ function dashDrawPeriods() {
                     break;
                 case 'line':
                     panel.querySelector('.f-head').insertAdjacentHTML('beforeend',
-                        headTpl.replace(':head:', dashModelData[panelId].rgs[rg].head || 'Сумма')
+                        headTpl.replace(':head:', dashH(dashModelData[panelId].rgs[rg].head || 'Сумма'))
                                .replace(':from:-:to:', '-'));
                     panel.querySelectorAll('.f-item').forEach(function(row) {
                         row.insertAdjacentHTML('beforeend',
@@ -2143,7 +2162,7 @@ function dashDrawPeriods() {
                             for (j in dashPeriodData[rep][i]) {
                                 if (col = dashPeriodData[rep][i][j]) {
                                     panel.querySelector('.f-head').insertAdjacentHTML('beforeend',
-                                        headTpl.replace(':head:', col).replace(':from:-:to:', i));
+                                        headTpl.replace(':head:', dashH(col)).replace(':from:-:to:', i));
                                     panel.querySelectorAll('.f-item').forEach(function(row) {
                                         var ready = 0, src = 'report', extra = '', vDetails = '';
                                         var item = dashItems[row.id] || {};
@@ -2171,7 +2190,7 @@ function dashDrawPeriods() {
                                         extra += ' data-rg-col="' + dashAttr(col) + '"';
                                         extra += dashCellFormatAttribute(row.id);
                                         row.insertAdjacentHTML('beforeend',
-                                            cellTpl.replace(':val:', dashFormatNumberText(dashNormalizeVal(row.id, v || '')))
+                                            cellTpl.replace(':val:', dashH(dashFormatNumberText(dashNormalizeVal(row.id, v || ''))))
                                                 .replace(':ready:', ready)
                                                 .replace(':title:', ready === 1 ? dashAttr(vDetails) : '')
                                                 .replace(':classes:', 'f-col-cell')
@@ -2655,9 +2674,9 @@ function dashGetModel(json) {
         // Add sheet tab
         if (!document.getElementById(json[i].sheetID)) {
             model.querySelector('.sheet-tabs').insertAdjacentHTML('beforeend',
-                sheetTabTpl.replace(/:id:/g, json[i].sheetID).replace(':name:', json[i].sheet));
+                sheetTabTpl.replace(/:id:/g, dashH(json[i].sheetID)).replace(':name:', dashH(json[i].sheet)));
             model.querySelector('.sheets').insertAdjacentHTML('beforeend',
-                sheetTpl.replace(/:id:/g, json[i].sheetID));
+                sheetTpl.replace(/:id:/g, dashH(json[i].sheetID)));
             var sheetEl = document.getElementById('ds' + json[i].sheetID);
             dashSetSheetTileModeDefault(sheetEl, json[i]);
             dashInitFilterBar(sheetEl);
@@ -2674,10 +2693,10 @@ function dashGetModel(json) {
             try { if (panelSettingsStr) panelSettings = JSON.parse(panelSettingsStr); } catch(e) {}
             document.getElementById('ds' + json[i].sheetID).insertAdjacentHTML('beforeend',
                 panelTpl.replace(/:id:/g, panelKey)
-                    .replace(':head:', json[i].itemsHead || json[i].panel)
-                    .replace(':period:', json[i].period)
-                    .replace(':name:', json[i].panel)
-                    .replace(':panelid:', json[i].panelID));
+                    .replace(':head:', dashH(json[i].itemsHead || json[i].panel))
+                    .replace(':period:', dashH(json[i].period))
+                    .replace(':name:', dashH(json[i].panel))
+                    .replace(':panelid:', dashH(json[i].panelID)));
             dashModelData[panelKey] = {
                 items: {},
                 rgs: {},
@@ -2714,7 +2733,7 @@ function dashGetModel(json) {
                 itemTpl.replace(/:id:/g, json[i].itemID)
                     .replace(':panel-id:', json[i].panelID)
                     .replace(':pl:', Math.max(0, (json[i].level || 1) - 1))
-                    .replace(/:name:/g, json[i].item));
+                    .replace(/:name:/g, dashH(json[i].item)));
         }
         if (json[i].itemID && !isDuplicateRow) {
             lastVisibleItemByPanel[panelKey] = {
@@ -5270,7 +5289,7 @@ function dashBuildFieldMapHtml(vizType, fieldMap, panelEl) {
 
     var optionsHtml = '<option value="">(не задано)</option>';
     allFields.forEach(function(f) {
-        optionsHtml += '<option value="' + dashAttr(f) + '">' + f + '</option>';
+        optionsHtml += '<option value="' + dashAttr(f) + '">' + dashEscapeText(f) + '</option>';
     });
 
     function sel(name, label, val) {

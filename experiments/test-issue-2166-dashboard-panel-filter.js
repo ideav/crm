@@ -45,6 +45,9 @@ function newApi(method, url, callback, vars, index) {
 function dashDrawPeriods() {}
 function dashFilterReportRowsForPanel(rows) { return rows || []; }
 
+${extractFunctionMaybe('dashEscapeHtml')}
+${extractFunctionMaybe('dashEscapeText')}
+${extractFunctionMaybe('dashH')}
 ${extractFunctionMaybe('dashNormalizePanelFilter')}
 ${extractFunctionMaybe('dashReportKey')}
 ${extractFunctionMaybe('dashReportUrl')}
