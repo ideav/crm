@@ -10916,8 +10916,7 @@ function GetObjectReqs($typ, $id)
 function Calc_Order($up, $t)
 {
 	global $z;
-									  
-			  
+	OrdLock($up);	# #5262: до вставки с этим ord другой запрос под тем же родителем ждёт
 	$data_set = Exec_sql("SELECT COALESCE(MAX(ord)+1, 1) FROM $z WHERE t=$t AND up=$up", "Get the Ord for new Array Object");
 	if($row = mysqli_fetch_array($data_set))
 		return $row[0];
@@ -10997,6 +10996,7 @@ function Get_Current_Values($id, $typ)
 function Get_Ord($parent, $typ=0)
 {
 	global $z;
+	OrdLock($parent);	# #5262
 	$result = Exec_sql("SELECT max(ord) ord FROM $z WHERE up=$parent". ($typ==0 ? "" : " AND t=$typ"), "Get Ord");
 	$row = mysqli_fetch_array($result);
 	return $row["ord"] + 1;
@@ -11004,6 +11004,7 @@ function Get_Ord($parent, $typ=0)
 function GetRefOrd($parent, $typ)
 {
 	global $z;
+	OrdLock($parent);	# #5262
 	$result = Exec_sql("SELECT max(ord) ord FROM $z WHERE up=$parent AND val='$typ'", "Get Ref Ord");
 	$row = mysqli_fetch_array($result);
 	return $row["ord"] + 1;
@@ -14269,6 +14270,31 @@ function UniqueKeyUnlock(){
 		Exec_sql("SELECT RELEASE_LOCK('$name')", "Unlock unique key");
 	$GLOBALS["UNIQUE_LOCKS"] = array();
 }
+# Issue #5262: порядок среди равных (ord) считается отдельным запросом SELECT MAX(ord)+1, а записывается
+# позже — INSERT или UPDATE. Два параллельных запроса под одним родителем читали один и тот же MAX и
+# получали одинаковый ord; пересортировка (_m_up, _m_ord) читала ord до чужой вставки и писала по
+# устаревшему. Транзакция этого не лечит: обычный SELECT в InnoDB читает снимок и ничего не блокирует.
+# Поэтому вычисление ord и пересортировка берут именованную блокировку на «база + родитель» и держат
+# её до конца запроса — так же и в том же реестре, что UniqueKeyLock (снимает UniqueKeyUnlock в
+# BtRunDeferred или закрытие соединения). Повторный вызов под тем же родителем блокировку не берёт.
+function OrdLock($up){
+	$up = (int)$up;
+	if($up <= 0)
+		return;
+	$name = "ord_".md5($GLOBALS["z"]."|".$up);
+	if(isset($GLOBALS["UNIQUE_LOCKS"][$name]))
+		return;
+	$row = mysqli_fetch_array(Exec_sql("SELECT GET_LOCK('$name', ".UNIQUE_LOCK_WAIT.")", "Lock peers order"));
+	if(!$row || (string)$row[0] !== "1")
+		my_die(t9n("[RU]Порядок записей сейчас меняет другой запрос, повторите позже[EN]The order of records is being changed by another request, try again later"), "409 Conflict");
+	$GLOBALS["UNIQUE_LOCKS"][$name] = TRUE;
+}
+# Блокировка порядка среди равных записи $id (по её родителю) — до чтения её ord
+function OrdLockOf($id){
+	$row = mysqli_fetch_array(Exec_sql("SELECT up FROM ".$GLOBALS["z"]." WHERE id=".(int)$id, "Get parent to lock order"));
+	if($row)
+		OrdLock($row["up"]);
+}
 function FindUniqueRecordDuplicateFromRequest($typ, $skipId, $up, $val, $request, $includeVal=true){
 	UniqueKeyLock($typ, $up, $val, $includeVal);
 	$keyReqs = UniqueKeyReqs($typ);
@@ -16541,6 +16567,7 @@ if(Validate_Token())
 		case "_m_up":
 			Check_Grant($id);
 			Check_Rec_masks($id);
+			OrdLockOf($id);	# #5262: ord соседей читаем под блокировкой родителя
 			$result = Exec_sql("SELECT obj.t, obj.up, obj.ord, max(peers.ord) new_ord
 								FROM $z obj LEFT JOIN $z peers ON peers.up=obj.up AND peers.t=obj.t AND peers.ord<obj.ord
 								WHERE obj.id=$id", "Get new Order and other Reqs");
@@ -16566,6 +16593,7 @@ if(Validate_Token())
 			Check_Grant($id);
 			Check_Rec_masks($id);
         	$newOrd = (int)$_REQUEST["order"];
+			OrdLockOf($id);	# #5262
 			$result = Exec_sql("SELECT obj.ord, obj.up FROM $z obj, $z par WHERE obj.id=$id AND par.id=obj.up AND par.up!=0", "Check the obj");
 			if($row = mysqli_fetch_array($result)){
 			    if("$newOrd" !== $row["ord"]){
@@ -16650,6 +16678,13 @@ if(Validate_Token())
 			Check_Rec_masks($id);
 			if($up > 1)
 				Check_Rec_masks($up);
+			# #5262: новый ord у нового родителя (MAX+1) и сдвиг соседей у старого — под блокировками обоих
+			# родителей; берём в порядке возрастания id, чтобы встречные переносы не ждали друг друга по кругу
+			$moveRow = mysqli_fetch_array(Exec_sql("SELECT up FROM $z WHERE id=$id", "Get parent to lock order"));
+			$moveUps = array((int)$up, $moveRow ? (int)$moveRow["up"] : 0);
+			sort($moveUps);
+			foreach($moveUps as $moveUp)
+				OrdLock($moveUp);
 			# Get the Object
 			$result = Exec_sql("SELECT a.up, a.t, up.t ut, a.ord, target.t tt, COALESCE(MAX(reqs.ord)+1,1) new_ord
 									FROM $z a, $z up, $z target, $z reqs
@@ -17020,6 +17055,7 @@ if(Validate_Token())
 			break;
 
 		case "_d_up":
+			OrdLockOf($id);	# #5262
 			$result = Exec_sql("SELECT obj.up, obj.ord, max(peers.ord) new_ord
 								FROM $z obj LEFT JOIN $z peers ON peers.up=obj.up AND peers.ord<obj.ord WHERE obj.id=$id"
 							, "Get new Order");
@@ -17040,6 +17076,7 @@ if(Validate_Token())
 	        if(!is_numeric($_REQUEST["order"]) || ((int)$_REQUEST["order"] < 1))
         		die("Invalid order");
         	$newOrd = (int)$_REQUEST["order"];
+			OrdLockOf($id);	# #5262
 			$result = Exec_sql("SELECT req.ord, req.up FROM $z req, $z par WHERE req.id=$id AND par.id=req.up AND par.up=0", "Check the req");
 			if($row = mysqli_fetch_array($result)){
 			    if("$newOrd" !== $row["ord"]){
