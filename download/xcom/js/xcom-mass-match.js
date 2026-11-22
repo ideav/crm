@@ -36,6 +36,7 @@
     var DEFAULT_SKU_ID_KEY = 'SKUID';
     var DEFAULT_SKU_LABEL_KEY = 'Наименование SKU';
     var DEFAULT_SKU_ARTICLE_KEY = 'Артикул';      // артикул SKU — показываем в таблице вместо ID (issue #3532)
+    var DEFAULT_SKU_CODE_KEY = 'Код SKU';         // главное значение записи SKU (код из 1С) — если артикула нет (issue #5624)
     var DEFAULT_TOKENS_KEY = 'токены';            // совпавшие токены (числитель точности)
     var DEFAULT_TMA_KEY = 'ТММ';                  // флаг точного совпадения артикула
 
@@ -47,6 +48,8 @@
     //   «Настройка сопоставления» базы — её правит партнёр в РМ настроек, сеет инсталлятор.
     // Формат — snake_case JSON, один и тот же в дефолт-файле репо, в data-атрибуте и в таблице:
     //   tma_weight         число 0..1 — доля вклада точного совпадения артикула в точность;
+    //   min_accuracy       число 0..100 — ниже этой «Точности подбора» строка получает «нет совпадений»,
+    //                      найденные SKU остаются в «Кандидатах» на ручной выбор (issue #5625); 0 — без отсечки;
     //   required_attributes список {rfp_key, sku_key} — ключи КОЛОНОК отчёта mass_match;
     //                      обе стороны заданы и различаются → кандидат отбрасывается ДО скоринга.
     // Отчёты остаются категорийно-нейтральными: специфика гейтится здесь, в JS-слое поверх
@@ -58,6 +61,7 @@
         category: '',
         preset: '',
         tma_weight: 0.5,          // прежняя константа TMA_WEIGHT — теперь дефолт конфига
+        min_accuracy: 5,          // случайные совпадения позиций не из каталога — 2–3 (#5625)
         attribute_weights: [],    // мягкие бонусы совпавшим атрибутам категории
         required_attributes: [], // по умолчанию гейта нет — поведение до #4817 сохранено
         column_mapping: { rfp: {}, sku: {} },
@@ -78,6 +82,7 @@
         skuIdKey: DEFAULT_SKU_ID_KEY,
         skuLabelKey: DEFAULT_SKU_LABEL_KEY,
         skuArticleKey: DEFAULT_SKU_ARTICLE_KEY,
+        skuCodeKey: DEFAULT_SKU_CODE_KEY,
         tokensKey: DEFAULT_TOKENS_KEY,
         tmaKey: DEFAULT_TMA_KEY,
         matchConfig: mergeMatchingConfig(MATCH_CONFIG_DEFAULTS, null),
@@ -197,7 +202,7 @@
         }
         var errors = [];
         var known = {
-            schema_version: true, category: true, preset: true, tma_weight: true,
+            schema_version: true, category: true, preset: true, tma_weight: true, min_accuracy: true,
             attribute_weights: true, required_attributes: true, column_mapping: true,
             llm: true, decision_log: true
         };
@@ -208,6 +213,12 @@
             var w = config.tma_weight;
             if (typeof w !== 'number' || !isFinite(w) || w < 0 || w > 1) {
                 errors.push('tma_weight должен быть числом 0..1 (доля вклада точного совпадения артикула)');
+            }
+        }
+        if (Object.prototype.hasOwnProperty.call(config, 'min_accuracy')) {
+            var min = config.min_accuracy;
+            if (typeof min !== 'number' || !isFinite(min) || min < 0 || min > 100) {
+                errors.push('min_accuracy должен быть числом 0..100 (порог «Точности подбора» для автоподбора)');
             }
         }
         if (Object.prototype.hasOwnProperty.call(config, 'schema_version') &&
@@ -611,11 +622,15 @@
         var articleKey = detectKey(first, state.skuArticleKey, function(key) {
             return /артикул/i.test(key);
         });
+        var codeKey = detectKey(first, state.skuCodeKey, function(key) {
+            return /^код(\s|$)/i.test(key);
+        });
 
         function toItem(row) {
             var id = idKey ? trimValue(row[idKey]) : '';
             var label = labelKey ? trimValue(row[labelKey]) : '';
             var article = articleKey ? trimValue(row[articleKey]) : '';
+            var code = codeKey ? trimValue(row[codeKey]) : '';
             if (!id) {
                 var parsed = parseRefValue(label);
                 if (parsed.refId) { id = parsed.refId; label = parsed.label; }
@@ -623,6 +638,7 @@
             return {
                 id: id,
                 label: label || id,
+                code: code,         // код SKU — вместо id, если артикула нет (issue #5624)
                 article: article,   // показываем в таблице вместо ID (issue #3532); потерян при merge #3536, восстановлен в #3537
                 tokens: state.tokensKey && row[state.tokensKey] != null ? trimValue(row[state.tokensKey]) : '',
                 tma: state.tmaKey && row[state.tmaKey] != null ? trimValue(row[state.tmaKey]) : '',
@@ -761,7 +777,7 @@
     // Ячейка SKU: показываем артикул, ID кладём в title для трассировки (issue #3532).
     // В строку RFP теперь тоже записывается артикул (см. writeBack, issue #3547).
     function skuCell(item) {
-        var text = item.article || item.id;
+        var text = skuStoredValue(item);
         return '<span title="ID ' + escapeHtml(item.id) + '">' + escapeHtml(text) + '</span>';
     }
 
@@ -1022,6 +1038,15 @@
                 recordOutcome(record);
                 return;
             }
+            // Ниже порога точности найденное — не подбор, а догадка: строка получает «нет
+            // совпадений», найденные SKU уходят в «Кандидаты» на ручной выбор (#5625).
+            var minAccuracy = Number(state.matchConfig && state.matchConfig.min_accuracy) || 0;
+            if (picked.our && !picked.fromDecisionLog && record.accuracy < minAccuracy) {
+                record.candidates = [record.our].concat(record.candidates);
+                if (state.maxCandidates > 0) record.candidates = record.candidates.slice(0, state.maxCandidates);
+                record.our = placeholderOur('нет совпадений');
+                record.message = 'Точность ' + record.accuracy + '% ниже порога ' + minAccuracy + '% — выберите из кандидатов.';
+            }
             delete state.failedIds[record.id];
 
             return writeBack(record).then(function() {
@@ -1040,12 +1065,13 @@
         });
     }
 
-    // Значение SKU для записи в строку RFP: артикул, фоллбэк на ID, если артикул пуст (issue #3547).
-    // Тот же выбор, что и в отображении (skuCell: item.article || item.id) — храним то, что видно.
+    // Значение SKU для записи в строку RFP: артикул, если пуст — код SKU (главное значение записи,
+    // issue #5624), если отчёт кода не отдаёт — ID (issue #3547).
+    // Тот же выбор, что и в отображении (skuCell) — храним то, что видно.
     // У заглушки «нет совпадений» артикула нет, поэтому пишется её id ('0') — маркер обработанной строки.
     function skuStoredValue(item) {
         if (!item) return '';
-        return trimValue(item.article) || trimValue(item.id);
+        return trimValue(item.article) || trimValue(item.code) || trimValue(item.id);
     }
 
     // Собрать значения для _m_set по строке RFP: «Наш артикул», «Кандидаты», «Точность подбора».
@@ -1515,6 +1541,7 @@
         state.skuIdKey = str('data-sku-id-field', DEFAULT_SKU_ID_KEY);
         state.skuLabelKey = str('data-sku-field', DEFAULT_SKU_LABEL_KEY);
         state.skuArticleKey = str('data-sku-article-field', DEFAULT_SKU_ARTICLE_KEY);
+        state.skuCodeKey = str('data-sku-code-field', DEFAULT_SKU_CODE_KEY);
         state.tokensKey = str('data-tokens-field', DEFAULT_TOKENS_KEY);
         state.tmaKey = str('data-tma-field', DEFAULT_TMA_KEY);
         state.names = {

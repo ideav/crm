@@ -120,6 +120,12 @@
       {
         "source": "SKU",
         "field": "$id",
+        "name": "Код SKU",
+        "function": "MAX"
+      },
+      {
+        "source": "SKU",
+        "field": "$id",
         "name": "SKUID",
         "function": "abn_ID"
       }

@@ -72,6 +72,7 @@ function serve(db) {
             const cmd = parts[1], id = parts[2];
             if (cmd === 'xsrf') return send({ _xsrf: 'x' });
             if (cmd === 'metadata') return send(db.meta);
+            if (cmd === '_ref_reqs') return send({ 85: 'abn_ID', 86: 'MAX', 87: 'COUNT' });
             if (cmd === 'object') {
                 const fu = u.searchParams.get('F_U');
                 let list = db.objects[id] || [];
@@ -87,12 +88,22 @@ function serve(db) {
                 for (const k of Object.keys(db.objects)) db.objects[k] = db.objects[k].filter(x => String(x.i) !== id);
                 return send({ id: '28', obj: Number(id) });
             }
-            if (cmd === '_m_set') { const row = all.find(x => String(x.i) === id); row.r[3] = form.get('t102'); return send({ id, obj: id }); }
+            if (cmd === '_m_set') {
+                const row = all.find(x => String(x.i) === id);
+                if (form.has('t102')) row.r[3] = form.get('t102');
+                if (form.has('t104')) row.r[4] = form.get('t104');
+                return send({ id, obj: id });
+            }
             if (cmd === '_d_del_req') { for (const t of db.meta) t.reqs = t.reqs.filter(r => r.id !== id); return send({ id }); }
             if (cmd === '_d_ref') return send({ id, obj: '7534216' });
             if (cmd === '_d_req') {
                 db.meta.find(t => t.id === id).reqs.push({ id: String(db.nextId++), val: 'Бренд', type: '3', ref: '2032775', ref_id: '7534216' });
                 return send({ id: 'new', obj: id });
+            }
+            if (cmd === '_m_new' && id === '28') {
+                const i = db.nextId++;
+                db.objects[28].push({ i, u: Number(form.get('up')), r: [form.get('t28') + ':SKU', form.get('t100'), '', '', ''] });
+                return send({ id: '28', obj: i });
             }
             if (cmd === '_m_new') {
                 db.objects[151].push({ i: db.nextId++, u: Number(u.searchParams.get('up')), r: [form.get('t151'), form.get('t153')] });
@@ -125,7 +136,10 @@ function run(port, extra) {
 
         await run(port, ['--apply']);
         const cols = db.objects[28].map(c => c.r[1]);
-        assert.deepStrictEqual(cols.sort(), ['RFP', 'RFPID', 'Наименование', 'Наименование SKU'].sort(), 'Д7: колонки по бренду удалены');
+        assert.deepStrictEqual(cols.sort(), ['RFP', 'RFPID', 'Код SKU', 'Код SKU', 'Наименование', 'Наименование SKU'].sort(), 'Д7: колонки по бренду удалены, #5624: «Код SKU» добавлен');
+        const codeCols = db.objects[28].filter(c => c.r[1] === 'Код SKU');
+        assert.deepStrictEqual(codeCols.map(c => [c.u, c.r[0], c.r[4]]).sort(), [[6333912, '1953593:SKU', '86'], [2535910, '1953593:SKU', '86']].sort(),
+            '#5624: «Код SKU» в mass_match и «Сопоставлении» — главное значение SKU с функцией MAX');
         assert.strictEqual(db.objects[28].find(c => c.r[1] === 'RFPID').r[3], '', 'Д7: вшитый RFPID снят');
         assert.strictEqual(db.objects[28].find(c => c.r[1] === 'RFP').r[3], '', 'вшитый фильтр «Сопоставления» снят');
         const sku = db.meta.find(t => t.val === 'SKU').reqs, rfp = db.meta.find(t => t.val === 'RFP').reqs;

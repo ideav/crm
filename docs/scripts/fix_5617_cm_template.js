@@ -14,6 +14,8 @@
 //       на справочник «Бренд», подчинённые таблицы «Бренд» у SKU и RFP снимаются.
 //   дубли полей RFP/SKU с тем же именем и другим типом (MEMO-«Наименование», «Кандидаты»,
 //       «Точность подбора»): снимаются, если на них нет колонок отчётов и в них нет значений.
+//   #5624 отчёты mass_match и «Сопоставление»: колонка «Код SKU» (MAX главного значения SKU) —
+//       массовый подбор пишет её в «Наш артикул», когда у SKU нет артикула.
 //   Д9  меню: у admin — «Первичная настройка» и «Настройки сопоставления», у «Партнёра» —
 //       «Загрузка», «Токенизация SKU», «Токенизация RFP».
 'use strict';
@@ -91,6 +93,19 @@ async function main() {
             }
         }
     }
+    // --- #5624: колонка «Код SKU» -------------------------------------------------------
+    for (const reportName of ['mass_match', 'Сопоставление']) {
+        const q = reportByName(reportName);
+        if (!q || columns.some(c => c.report === q.r[0] && norm(c.name) === norm('Код SKU'))) continue;
+        step(`${reportName}: колонка «Код SKU» (MAX главного значения SKU)`, 'нет', 'есть', async () => {
+            const created = await post('_m_new/28?JSON=1', { up: q.id, t28: String(SKU.id), t100: 'Код SKU' });
+            const fn = await get(`_ref_reqs/104?JSON&LIMIT=80&q=MAX`);
+            const fnId = Object.keys(fn || {}).find(k => norm(fn[k]) === 'max');
+            if (!fnId) throw new Error('в справочнике функций отчёта нет MAX');
+            return post(`_m_set/${created.obj || created.id}?JSON=1`, { t104: fnId });
+        });
+    }
+
     // колонки, оставшиеся на полях после удаления выше
     for (const c of columns) if (!plan.some(p => p.what.includes(`(${c.label})`))) usedReqs.add(c.source);
 

@@ -32,6 +32,12 @@
                        min="0" max="1" step="0.05" value="0.5" autocomplete="off">
             </label>
 
+            <label class="xcom-settings-weight" title="Ниже этой «Точности подбора» массовый подбор не ставит «Наш артикул»: строка получает «нет совпадений», найденные SKU остаются в «Кандидатах». 0 — без порога">
+                <span>Минимальная точность автоподбора, %</span>
+                <input id="xcom-settings-min-accuracy" class="xcom-settings-input" type="number"
+                       min="0" max="100" step="1" value="5" autocomplete="off">
+            </label>
+
             <fieldset class="xcom-settings-attrs">
                 <legend>Обязательные атрибуты</legend>
                 <p class="xcom-settings-note">Кандидат отбрасывается, если ОБЕ стороны заданы и различаются. Ключи — имена колонок отчёта mass_match (например «Бренд RFP» и «Бренд SKU»).</p>
@@ -67,5 +73,5 @@
 </div>
 
 <script src="/download/{_global_.z}/js/xcom-presets.js?{_global_.version}.1" defer></script>
-<script src="/download/{_global_.z}/js/xcom-mass-match.js?{_global_.version}.2" defer></script>
-<script src="/download/{_global_.z}/js/xcom-settings.js?{_global_.version}.1" defer></script>
+<script src="/download/{_global_.z}/js/xcom-mass-match.js?{_global_.version}.3" defer></script>
+<script src="/download/{_global_.z}/js/xcom-settings.js?{_global_.version}.2" defer></script>
