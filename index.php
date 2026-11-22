@@ -11981,14 +11981,15 @@ function Tpl_current($id, $reg = NULL){
 				$cur = (int)$v["ver"];
 	return $cur;
 }
-# id строк базы, которые не едут в шаблон: пользователи, реквизиты-секреты записей (пароль, токен,
-# xsrf, Secret, активность, попытки входа) и всё, что под ними или ссылается на них. Реквизиты тех же
-# типов в схеме (строки под типом, up — тип) остаются: без них схема пользователя неполна.
+# id строк базы, которые не едут в шаблон: реквизиты-секреты записей (пароль, токен, xsrf, Secret,
+# активность, попытки входа) и всё, что под ними или ссылается на них. Пользователи с ролями едут:
+# шаблон готовится сразу с ними, а войти под ними можно только после того, как владелец новой базы
+# задаст пароль (#5617). Реквизиты тех же типов в схеме (строки под типом, up — тип) остаются.
 function Tpl_secret_ids(){
 	global $z;
 	$skip = $front = array();
-	$data_set = Exec_sql("SELECT c.id FROM $z c JOIN $z p ON p.id=c.up WHERE (c.t=".USER." AND c.up=1)"
-		." OR (c.t IN (".PASSWORD.",".TOKEN.",".XSRF.",".SECRET.",".ACTIVITY.",".RETRIES.") AND p.up!=0)", "Template: users and secrets");
+	$data_set = Exec_sql("SELECT c.id FROM $z c JOIN $z p ON p.id=c.up"
+		." WHERE c.t IN (".PASSWORD.",".TOKEN.",".XSRF.",".SECRET.",".ACTIVITY.",".RETRIES.") AND p.up!=0", "Template: secrets");
 	while($row = mysqli_fetch_array($data_set))
 		$front[(int)$row[0]] = 1;
 	while(count($front)){
@@ -12187,6 +12188,9 @@ function Tpl_deploy($id, $ver){
 		}
 		$chunk = "";
 	}
+	# Логин владельца новой базы — её имя (newDb); одноимённый пользователь шаблона получает суффикс,
+	# иначе в базе два пользователя с одним логином (#5617).
+	Exec_sql("UPDATE $z SET val=CONCAT(val,'_tpl') WHERE up=1 AND t=".USER." AND val='$z'", "Template: rename the user named as the new DB");
 	@mkdir("templates/custom/$z", 0777, TRUE);
 	@mkdir("download/$z", 0777, TRUE);
 	if(count($names)){
