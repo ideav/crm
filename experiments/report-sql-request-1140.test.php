@@ -110,6 +110,9 @@ check(Report_request_subst("a.val LIKE \"%_request_.q%\"") === "a.val LIKE \"%a\
 check(Report_request_subst("a.id=_request_.n") === "a.id='1 OR 1=1'", "без кавычек, не число — строкой в кавычках");
 check(Report_request_subst("a.id=_request_.k") === "a.id=42", "без кавычек, число — как есть");
 check(Report_request_subst("a.id>_request_.f") === "a.id>-1.5", "дробное отрицательное — как есть");
+$_REQUEST["ids"] = "1, 2,3"; $_REQUEST["ids2"] = "1,2) OR (1";
+check(Report_request_subst("a.id IN(_request_.ids)") === "a.id IN(1, 2,3)", "список чисел для IN — как есть");
+check(Report_request_subst("a.id IN(_request_.ids2)") === "a.id IN('1,2) OR (1')", "список с хвостом — строкой");
 check(Report_request_subst("a.id=_request_.arr") === "a.id=''", "массив — пустая строка");
 check(Report_request_subst("a.val='_request_.s' AND a.id=_request_.k") === "a.val='x\\\\' AND a.id=42", "обратная косая не съедает кавычку");
 check(Report_request_subst("a.val='_request_.none'") === "a.val='_request_.none'", "незаданный параметр остаётся текстом (как раньше)");
