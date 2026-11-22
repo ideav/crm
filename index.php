@@ -4476,48 +4476,176 @@ function refAnchors($id, $par)
 	return count($via) ? $via : FALSE;
 }
 # </ref-anchors-5058>
+# Экранирование значения для SQL-строки в кавычках: с соединением — с учётом его кодировки.
+function Sql_escape($v)
+{
+	global $connection;
+	return ($connection instanceof mysqli) ? mysqli_real_escape_string($connection, (string)$v) : addslashes((string)$v);
+}
+# Выражение из адреса вызова запроса (WHERE=, формула колонки в SELECT=) — только из
+# белого списка токенов: литералы в кавычках, числа, колонки псевдоним.val|id|up|t|ord,
+# псевдонимы с цифрой (a12, v3_4), операторы сравнения и арифметики, слова условий
+# (AND, OR, NOT, IS, NULL, LIKE, IN, BETWEEN, CASE…), функции из списка ниже, [ВСТРОЕННОЕ]
+# и :id: колонки. Всё прочее (подзапрос, @переменная, `имя`, 0x…, комментарий, «;»,
+# функция вне списка) и несбалансированные скобки или кавычки — отказ.
+# Строка возвращается как есть: содержимое литералов в кавычках инертно.
+function Report_sql_expr($expr, $what)
+{
+	static $funcs = array("ABS"=>1, "ROUND"=>1, "FLOOR"=>1, "CEIL"=>1, "CEILING"=>1, "TRUNCATE"=>1, "MOD"=>1, "SIGN"=>1
+		, "POW"=>1, "POWER"=>1, "SQRT"=>1, "GREATEST"=>1, "LEAST"=>1, "COALESCE"=>1, "IFNULL"=>1, "NULLIF"=>1, "IF"=>1
+		, "ISNULL"=>1, "CONCAT"=>1, "CONCAT_WS"=>1, "LENGTH"=>1, "CHAR_LENGTH"=>1, "LOWER"=>1, "UPPER"=>1, "LCASE"=>1
+		, "UCASE"=>1, "TRIM"=>1, "LTRIM"=>1, "RTRIM"=>1, "SUBSTRING"=>1, "SUBSTR"=>1, "SUBSTRING_INDEX"=>1, "LEFT"=>1
+		, "RIGHT"=>1, "REPLACE"=>1, "LOCATE"=>1, "INSTR"=>1, "LPAD"=>1, "RPAD"=>1, "REVERSE"=>1, "FORMAT"=>1, "CAST"=>1
+		, "DATE"=>1, "TIME"=>1, "DATE_FORMAT"=>1, "STR_TO_DATE"=>1, "YEAR"=>1, "MONTH"=>1, "DAY"=>1, "DAYOFMONTH"=>1
+		, "DAYOFWEEK"=>1, "WEEKDAY"=>1, "WEEK"=>1, "HOUR"=>1, "MINUTE"=>1, "SECOND"=>1, "NOW"=>1, "CURDATE"=>1
+		, "CURTIME"=>1, "CURRENT_DATE"=>1, "DATEDIFF"=>1, "DATE_ADD"=>1, "DATE_SUB"=>1, "ADDDATE"=>1, "SUBDATE"=>1
+		, "TIMESTAMPDIFF"=>1, "TIMESTAMPADD"=>1, "FROM_UNIXTIME"=>1, "UNIX_TIMESTAMP"=>1, "LAST_DAY"=>1, "FIND_IN_SET"=>1
+		, "FIELD"=>1, "SUM"=>1, "AVG"=>1, "COUNT"=>1, "MIN"=>1, "MAX"=>1, "GROUP_CONCAT"=>1, "JSON_ARRAYAGG"=>1);
+	static $words = array("AND"=>1, "OR"=>1, "NOT"=>1, "XOR"=>1, "IS"=>1, "NULL"=>1, "TRUE"=>1, "FALSE"=>1, "LIKE"=>1
+		, "IN"=>1, "BETWEEN"=>1, "CASE"=>1, "WHEN"=>1, "THEN"=>1, "ELSE"=>1, "END"=>1, "AS"=>1, "DIV"=>1, "MOD"=>1
+		, "REGEXP"=>1, "RLIKE"=>1, "DISTINCT"=>1, "SEPARATOR"=>1, "INTERVAL"=>1, "ESCAPE"=>1, "BINARY"=>1, "SECOND"=>1
+		, "MINUTE"=>1, "HOUR"=>1, "DAY"=>1, "WEEK"=>1, "MONTH"=>1, "QUARTER"=>1, "YEAR"=>1, "DOUBLE"=>1, "CHAR"=>1
+		, "SIGNED"=>1, "UNSIGNED"=>1, "DECIMAL"=>1, "DATE"=>1, "DATETIME"=>1, "TIME"=>1, "INTEGER"=>1);
+	static $cols = array("VAL"=>1, "ID"=>1, "UP"=>1, "T"=>1, "ORD"=>1);
+	$len = strlen($expr);
+	$depth = 0;
+	$bad = NULL;
+	for($i = 0; ($i < $len) && !isset($bad); )
+	{
+		$c = $expr[$i];
+		if(ctype_space($c))
+			$i++;
+		elseif(($c === "'") || ($c === '"'))
+		{
+			for($j = $i + 1; $j < $len; $j++)
+				if($expr[$j] === "\\")
+					$j++;
+				elseif($expr[$j] === $c)
+				{
+					if(($j + 1 < $len) && ($expr[$j + 1] === $c))
+						$j++;
+					else
+						break;
+				}
+			if($j >= $len)
+				$bad = substr($expr, $i, 20);
+			$i = $j + 1;
+		}
+		elseif(preg_match("/\G(--|\/\*|\*\/)/", $expr, $m, 0, $i))
+			$bad = $m[0];
+		elseif(preg_match("/\G(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?(?![A-Za-z0-9_])/", $expr, $m, 0, $i)
+				|| preg_match("/\G(?:\[[A-Za-z0-9_]+\]|:\d+:|<=>|<=|>=|<>|!=|[=<>+\-*\/%,])/", $expr, $m, 0, $i))
+			$i += strlen($m[0]);
+		elseif($c === "(")
+		{
+			$depth++;
+			$i++;
+		}
+		elseif($c === ")")
+		{
+			if(--$depth < 0)
+				$bad = ")";
+			$i++;
+		}
+		elseif(preg_match("/\G([A-Za-z_][A-Za-z0-9_]*)(?:\.([A-Za-z_][A-Za-z0-9_]*))?(\s*\()?/", $expr, $m, 0, $i))
+		{
+			$name = strtoupper($m[1]);
+			if(isset($m[3]) && strlen($m[3]))	# Вызов функции или слово перед скобкой: IN (, NOT (
+				$ok = !isset($m[2]) || !strlen($m[2]) ? isset($funcs[$name]) || isset($words[$name]) : FALSE;
+			elseif(isset($m[2]) && strlen($m[2]))	# Колонка псевдоним.поле
+				$ok = isset($cols[strtoupper($m[2])]) && preg_match("/^[A-Za-z]+[0-9]*(_[0-9]+)*$/", $m[1]);
+			else	# Слово условия или псевдоним колонки с цифрой
+				$ok = isset($words[$name]) || preg_match("/^[A-Za-z]+[0-9]+(_[0-9]+)*$/", $m[1]);
+			if($ok)
+				$i += strlen($m[0]) - (isset($m[3]) ? strlen($m[3]) : 0);
+			else
+				$bad = $m[0];
+		}
+		else
+			$bad = $c;
+	}
+	if(!isset($bad) && ($depth !== 0))
+		$bad = "(";
+	if(isset($bad))
+		die_info(t9n("[RU]Недопустимое выражение $what в адресе запроса: допустимы сравнения колонок с литералами и функции из списка, без подзапросов и комментариев. Найдено: "
+		        ."[EN]Invalid $what expression in the request: only column comparisons with literals and whitelisted functions are allowed, no subqueries or comments. Found: ").$bad);
+	return $expr;
+}
 # Условие WHERE из адреса вызова запроса. Оно встаёт в скобки «AND (...)», поэтому
-# может только сузить выборку, а не снять ограничители запроса через OR. Отказ, если
-# строка закрывает лишнюю скобку, не закрывает свои скобки или кавычки, или содержит
-# вне кавычек «;» или комментарий (--, #, /*). Ведущий AND снимается.
+# может только сузить выборку, а не снять ограничители запроса через OR; само условие —
+# белый список Report_sql_expr. Ведущий AND снимается.
 function Report_request_where($where)
 {
 	$where = trim($where);
 	if(strtoupper(substr($where, 0, 4)) == "AND " || strtoupper(substr($where, 0, 4)) == "AND(")
 		$where = trim(substr($where, 3));
-	$depth = 0;
-	$quote = "";
-	$len = strlen($where);
-	for($i = 0; $i < $len; $i++)
+	return Report_sql_expr($where, "WHERE");
+}
+# Функция колонки из SELECT=<колонка>:<функция> — имя из белого списка Report_sql_expr,
+# RECURSIVE или ABN_*; приводится к верхнему регистру.
+function Report_request_func($f)
+{
+	$f = strtoupper(trim((string)$f));
+	if(($f === "") || ($f === "RECURSIVE") || preg_match("/^ABN_[A-Z]+$/", $f))
+		return $f;
+	if(!preg_match("/^[A-Z_][A-Z0-9_]*$/", $f))
+		die_info(t9n("[RU]Недопустимая функция колонки в SELECT: [EN]Invalid column function in SELECT: ").substr($f, 0, 40));
+	Report_sql_expr("$f(0)", "SELECT");
+	return $f;
+}
+# Подстановка _request_.X в SQL-фрагменты запроса — только данными: внутри кавычек
+# шаблона значение экранируется, вне кавычек число или список чисел через запятую
+# (для IN(_request_.ids)) идёт как есть, остальное — строкой
+# в кавычках. Не строка (массив) — пустая строка. Незаданный параметр остаётся текстом.
+# Принимает строку или массив фрагментов (ключи сохраняются).
+function Report_request_subst($sql)
+{
+	if(is_array($sql))
 	{
-		$c = $where[$i];
-		if($quote !== "")
+		foreach($sql as $k => $v)
+			$sql[$k] = Report_request_subst($v);
+		return $sql;
+	}
+	if(strpos($sql, "_request_.") === FALSE)
+		return $sql;
+	$len = strlen($sql);
+	$out = "";
+	$quote = "";
+	for($i = 0; $i < $len; )
+	{
+		$c = $sql[$i];
+		if(($c === "_") && preg_match("/\G_request_\.([0-9a-zA-Z\_]+)/", $sql, $m, 0, $i))
 		{
-			if($c === "\\")
-				$i++;
-			elseif($c === $quote)
-				$quote = "";
+			if(isset($_REQUEST[$m[1]]))
+			{
+				$v = is_scalar($_REQUEST[$m[1]]) ? (string)$_REQUEST[$m[1]] : "";
+				if($quote !== "")
+					$out .= Sql_escape($v);
+				else
+					$out .= preg_match("/^-?[0-9]+(\.[0-9]+)?(\s*,\s*-?[0-9]+(\.[0-9]+)?)*$/", $v) ? $v : "'".Sql_escape($v)."'";
+			}
+			else
+				$out .= $m[0];
+			$i += strlen($m[0]);
 			continue;
 		}
-		if(($c === "'") || ($c === '"') || ($c === "`"))
+		if($quote !== "")
+		{
+			if(($c === "\\") && ($i + 1 < $len))
+			{
+				$out .= $c.$sql[$i + 1];
+				$i += 2;
+				continue;
+			}
+			if($c === $quote)
+				$quote = "";
+		}
+		elseif(($c === "'") || ($c === '"'))
 			$quote = $c;
-		elseif($c === "(")
-			$depth++;
-		elseif($c === ")")
-		{
-			if(--$depth < 0)
-				break;
-		}
-		elseif(($c === ";") || ($c === "#") || (substr($where, $i, 2) === "--") || (substr($where, $i, 2) === "/*"))
-		{
-			$depth = -1;
-			break;
-		}
+		$out .= $c;
+		$i++;
 	}
-	if(($depth !== 0) || ($quote !== ""))
-		die_info(t9n("[RU]Недопустимое условие WHERE: незакрытые скобки или кавычки, «;» или комментарий"
-		        ."[EN]Invalid WHERE condition: unbalanced brackets or quotes, «;» or a comment"));
-	return $where;
+	return $out;
 }
 
 function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FALSE) # $exe means we must retrieve data at last, not just prep the sql
@@ -4645,8 +4773,8 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
                 $f = explode(":", str_replace("\:","%3a",$v));
                 if(!isset($GLOBALS["STORED_REPS"][$id]["columns_flip"][$f[0]])){
     				$i++;
-    				if(strlen($f[0]))
-                        $f[0] = str_replace("%2c",",",str_replace("%3a",":",$f[0]));
+    				if(strlen($f[0]))  # Формула колонки из адреса — только белый список (p2n#1140)
+                        $f[0] = Report_sql_expr(str_replace("%2c",",",str_replace("%3a",":",$f[0])), "SELECT");
                     else
                         $f[0] = "''";
     				$GLOBALS["STORED_REPS"][$id]["types"][$i] = "";
@@ -4781,7 +4909,7 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
                 foreach($select as $k => $v){
                     $f = explode(":", str_replace("\:","%3a",$v));
                     if(isset($GLOBALS["STORED_REPS"][$id]["columns_flip"][$f[0]]))
-                        $new_funcs[$GLOBALS["STORED_REPS"][$id]["columns_flip"][$f[0]]] = strtoupper($f[1]);
+                        $new_funcs[$GLOBALS["STORED_REPS"][$id]["columns_flip"][$f[0]]] = Report_request_func(isset($f[1]) ? $f[1] : "");
                 }
                 if(count($new_funcs) > 0)
 					$GLOBALS["STORED_REPS"][$id][REP_COL_FUNC] = $new_funcs;
@@ -5555,10 +5683,7 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 			foreach($builtins[0] as $builtin)
 				if(BuiltIn($builtin) !== $builtin)
 					$field = str_replace($builtin, BuiltIn($builtin), $field);
-			preg_match_all("/_request_\.([0-9a-zA-Z\_]+)/ims", $field, $builtins);
-			foreach($builtins[1] as $k => $_req)
-				if(isset($_REQUEST[$_req]) && ($_req != ""))
-					$field = str_replace($builtins[0][$k], addslashes($_REQUEST[$_req]), $field);
+			$field = Report_request_subst($field);
 			preg_match_all("/_global_\.([0-9a-zA-Z\_]+)/ims", $field, $builtins);
 			foreach($builtins[1] as $k => $_req)
 				if(isset($GLOBALS["GLOBAL_VARS"][$_req]))
@@ -5568,10 +5693,7 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 			foreach($builtins[0] as $builtin)
 				if(BuiltIn($builtin) != $builtin)
 					$filter = str_replace($builtin, BuiltIn($builtin), $filter);
-			preg_match_all("/_request_\.([0-9a-zA-Z\_]+)/ims", $filter, $builtins);
-			foreach($builtins[1] as $k => $_req)
-				if(isset($_REQUEST[$_req]))
-					$filter = str_replace($builtins[0][$k], addslashes($_REQUEST[$_req]), $filter);
+			$filter = Report_request_subst($filter);
 			preg_match_all("/_global_\.([0-9a-zA-Z\_]+)/ims", $filter, $builtins);
 			foreach($builtins[1] as $k => $_req)
 				if(isset($GLOBALS["GLOBAL_VARS"][$_req]))
@@ -5602,10 +5724,7 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 			foreach($builtins[0] as $builtin)
 				if(BuiltIn($builtin) !== $builtin)
 					$fieldsAll = str_replace($builtin, BuiltIn($builtin), $fieldsAll);
-			preg_match_all("/_request_\.([0-9a-zA-Z\_]+)/ims", implode(" ", $fieldsAll), $builtins);
-			foreach($builtins[1] as $k => $_req)
-				if(isset($_REQUEST[$_req]))
-					$fieldsAll = str_replace($builtins[0][$k], addslashes($_REQUEST[$_req]), $fieldsAll);
+			$fieldsAll = Report_request_subst($fieldsAll);
 			preg_match_all("/_global_\.([0-9a-zA-Z\_]+)/ims", implode(" ", $fieldsAll), $builtins);
 			foreach($builtins[1] as $k => $_req)
 				if(isset($GLOBALS["GLOBAL_VARS"][$_req]))
@@ -5615,10 +5734,7 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 			foreach($builtins[0] as $builtin)
 				if(BuiltIn($builtin) != $builtin)
 					$joinedOn = str_replace($builtin, BuiltIn($builtin), $joinedOn);
-			preg_match_all("/_request_\.([0-9a-zA-Z\_]+)/ims", implode(" ", $joinedOn), $builtins);
-			foreach($builtins[1] as $k => $_req)
-				if(isset($_REQUEST[$_req]))
-					$joinedOn = str_replace($builtins[0][$k], addslashes($_REQUEST[$_req]), $joinedOn);
+			$joinedOn = Report_request_subst($joinedOn);
 			preg_match_all("/_global_\.([0-9a-zA-Z\_]+)/ims", implode(" ", $joinedOn), $builtins);
 			foreach($builtins[1] as $k => $_req)
 				if(isset($GLOBALS["GLOBAL_VARS"][$_req]))
@@ -5632,11 +5748,7 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 				if(BuiltIn($builtin) != $builtin)
 				    foreach($joined as $k => $v)
     					$joined[$k] = str_replace($builtin, BuiltIn($builtin), $joined[$k]);
-			preg_match_all("/_request_\.([0-9a-zA-Z\_]+)/ims", $tmp, $builtins);
-			foreach($builtins[1] as $k => $_req)
-				if(isset($_REQUEST[$_req]))
-				    foreach($joined as $kk => $v)
-    					$joined[$kk] = str_replace($builtins[0][$k], addslashes($_REQUEST[$_req]), $joined[$kk]);
+			$joined = Report_request_subst($joined);
 			preg_match_all("/_global_\.([0-9a-zA-Z\_]+)/ims", $tmp, $builtins);
 			foreach($builtins[1] as $k => $_req)
 				if(isset($GLOBALS["GLOBAL_VARS"][$_req]))
@@ -5647,10 +5759,7 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 			foreach($builtins[0] as $builtin)
 				if(BuiltIn($builtin) != $builtin)
 					$masterFilter = str_replace($builtin, BuiltIn($builtin), $masterFilter);
-			preg_match_all("/_request_\.([0-9a-zA-Z\_]+)/ims", $masterFilter, $builtins);
-			foreach($builtins[1] as $k => $_req)
-				if(isset($_REQUEST[$_req]))
-					$masterFilter = str_replace($builtins[0][$k], addslashes($_REQUEST[$_req]), $masterFilter);
+			$masterFilter = Report_request_subst($masterFilter);
 			preg_match_all("/_global_\.([0-9a-zA-Z\_]+)/ims", $masterFilter, $builtins);
 			foreach($builtins[1] as $k => $_req)
 				if(isset($GLOBALS["GLOBAL_VARS"][$_req]))
@@ -5658,10 +5767,7 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 			
 			if(isset($order))
 			{
-    			preg_match_all("/_request_\.([0-9a-zA-Z\_]+)/ims", $order, $builtins);
-    			foreach($builtins[1] as $k => $_req)
-    				if(isset($_REQUEST[$_req]))
-    					$order = str_replace($builtins[0][$k], addslashes($_REQUEST[$_req]), $order);
+    			$order = Report_request_subst($order);
     			preg_match_all("/_global_\.([0-9a-zA-Z\_]+)/ims", $order, $builtins);
     			foreach($builtins[1] as $k => $_req)
     				if(isset($GLOBALS["GLOBAL_VARS"][$_req]))
@@ -5677,10 +5783,7 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 			}
 			if(isset($group))
 			{
-    			preg_match_all("/_request_\.([0-9a-zA-Z\_]+)/ims", $group, $builtins);
-    			foreach($builtins[1] as $k => $_req)
-    				if(isset($_REQUEST[$_req]))
-    					$group = str_replace($builtins[0][$k], addslashes($_REQUEST[$_req]), $group);
+    			$group = Report_request_subst($group);
     			preg_match_all("/_global_\.([0-9a-zA-Z\_]+)/ims", $group, $builtins);
     			foreach($builtins[1] as $k => $_req)
     				if(isset($GLOBALS["GLOBAL_VARS"][$_req]))
@@ -5689,10 +5792,7 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
     			foreach($builtins[0] as $builtin)
     				if(BuiltIn($builtin) != $builtin)
     					$group = str_replace($builtin, BuiltIn($builtin), $group);
-    			preg_match_all("/_request_\.([0-9a-zA-Z\_]+)/ims", implode(",", $groupBy), $builtins);
-    			foreach($builtins[1] as $k => $_req)
-    				if(isset($_REQUEST[$_req]))
-    					$groupBy = str_replace($builtins[0][$k], addslashes($_REQUEST[$_req]), $groupBy);
+    			$groupBy = Report_request_subst($groupBy);
     			preg_match_all("/_global_\.([0-9a-zA-Z\_]+)/ims", implode(",", $groupBy), $builtins);
     			foreach($builtins[1] as $k => $_req)
     				if(isset($GLOBALS["GLOBAL_VARS"][$_req]))
@@ -5704,10 +5804,7 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 			}
 			if(isset($having))
 			{
-    			preg_match_all("/_request_\.([0-9a-zA-Z\_]+)/ims", $group, $builtins);
-    			foreach($builtins[1] as $k => $_req)
-    				if(isset($_REQUEST[$_req]))
-    					$group = str_replace($builtins[0][$k], addslashes($_REQUEST[$_req]), $group);
+    			$group = Report_request_subst($group);
     			preg_match_all("/_global_\.([0-9a-zA-Z\_]+)/ims", $group, $builtins);
     			foreach($builtins[1] as $k => $_req)
     				if(isset($GLOBALS["GLOBAL_VARS"][$_req]))
@@ -5716,10 +5813,7 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
     			foreach($builtins[0] as $builtin)
     				if(BuiltIn($builtin) != $builtin)
     					$group = str_replace($builtin, BuiltIn($builtin), $group);
-    			preg_match_all("/_request_\.([0-9a-zA-Z\_]+)/ims", implode(",", $groupBy), $builtins);
-    			foreach($builtins[1] as $k => $_req)
-    				if(isset($_REQUEST[$_req]))
-    					$groupBy = str_replace($builtins[0][$k], addslashes($_REQUEST[$_req]), $groupBy);
+    			$groupBy = Report_request_subst($groupBy);
     			preg_match_all("/_global_\.([0-9a-zA-Z\_]+)/ims", implode(",", $groupBy), $builtins);
     			foreach($builtins[1] as $k => $_req)
     				if(isset($GLOBALS["GLOBAL_VARS"][$_req]))
@@ -5731,7 +5825,7 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 			}
 #			print_r($builtins);die($field);
 # Check if we got an SQL-injection in the Formula or Set field of a report
-			if(preg_match("/(\b(from|select|table)\b)/i", $field.$filter, $match))
+			if(preg_match("/(\b(from|select|table)\b|\/\*!)/i", $field.$filter, $match))  # /*!…*/ — версионный комментарий MySQL прячет слова от \b
 				die_info(t9n("[RU]Недопустимое значение вычисляемого поля: нельзя использовать служебные слова SQL. Найдено: ".
 				        "[EN]No SQL clause allowed in calculatable fields. Found: ").$match[0]);
 # Check if we got a fields set specified in the SELECT parameter
