@@ -82,3 +82,16 @@ test('#5206: значение счётчика экранируется', () => 
     const [card] = render([{ DB: 'alpha', DBID: '101', AIUnits: '<b>x</b>', AgentRuns: '1' }]);
     assert.ok(!card.includes('<b>x</b>'));
 });
+
+// p2n#850: цена единицы ИИ-токенов — чуть ниже рынка (polza.ai 377,64 ₽ и routerai.ru 427 ₽ за 1M входных
+// Claude Opus 5.5 на 22.11.2026): 1 ед. = 1000 условных токенов = 0,36 ₽ (360 ₽ за 1M).
+test('p2n#850: стоимость ИИ в рублях рядом со счётчиком', () => {
+    const [many, none, junk] = render([
+        { DB: 'alpha', DBID: '101', AIUnits: '1234', AgentRuns: '17' },
+        { DB: 'beta', DBID: '102', AIUnits: '', AgentRuns: '' },
+        { DB: 'gamma', DBID: '103', AIUnits: '<b>x</b>', AgentRuns: '' }
+    ]);
+    assert.strictEqual(stat(many, 'Стоимость ИИ'), '444,24 ₽', '1234 × 0,36');
+    assert.strictEqual(stat(none, 'Стоимость ИИ'), '0,00 ₽');
+    assert.strictEqual(stat(junk, 'Стоимость ИИ'), null, 'не число — без рублей');
+});

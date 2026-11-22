@@ -2,6 +2,18 @@
 // Cabinet Page Controller
 // ============================================================
 
+// Цена единицы ИИ-токенов (p2n#850): 1 ед. = 1000 условных токенов = входные токены Claude Opus 5.5
+// по прайсу API на $0,004. Чуть ниже рынка: polza.ai 377,64 ₽ и routerai.ru 427 ₽ за 1M на 22.11.2026,
+// у нас 360 ₽ за 1M.
+const AI_UNIT_PRICE_RUB = 0.36;
+
+// Стоимость единиц ИИ в рублях: «444,24 ₽»; не число — пусто (стату не показываем)
+function cabinetAiCost(units) {
+    const n = Number(String(units).trim() || 0);
+    if (!Number.isFinite(n) || n < 0) return '';
+    return (n * AI_UNIT_PRICE_RUB).toFixed(2).replace('.', ',') + ' ₽';
+}
+
 // Имя базы: от 3 до 15 латинских символов и цифр, начиная с буквы
 const DB_NAME_RE = /^[a-zA-Z][a-zA-Z0-9]{2,14}$/;
 
@@ -800,6 +812,7 @@ class CabinetController {
             // #5206: счётчики биллинга базы в единицах тарифа (колонки отчёта my/report/313)
             const aiUnits = db.AIUnits || '0';
             const agentRuns = db.AgentRuns || '0';
+            const aiCost = cabinetAiCost(aiUnits);
             const planDate = db['Plan date'] ? this.formatDate(db['Plan date']) : '-';
             const planDateRaw = db['Plan date'] || '';
             const publicName = db.PublicName || '';
@@ -822,6 +835,7 @@ class CabinetController {
                         <span class="database-stat"><span>Шаблон:</span> <strong>${this.escapeHtml(templateLabel)}</strong></span>
                         <span class="database-stat"><span>Расход:</span> <strong>${recordCount}</strong></span>
                         <span class="database-stat" title="Расход ИИ в единицах тарифа за текущий период"><span>ИИ-токены:</span> <strong>${this.escapeHtml(aiUnits)}</strong></span>
+                        ${aiCost ? `<span class="database-stat" title="ИИ-токены × ${String(AI_UNIT_PRICE_RUB).replace('.', ',')} ₽ за единицу"><span>Стоимость ИИ:</span> <strong>${this.escapeHtml(aiCost)}</strong></span>` : ''}
                         <span class="database-stat" title="Запуски ИИ-агента за текущий период"><span>Запуски агента:</span> <strong>${this.escapeHtml(agentRuns)}</strong></span>
                         <span class="database-stat database-stat-right"><span>Оплачено до:</span> <strong class="${planDatePassed ? 'plan-date-expired' : ''}">${planDate}</strong></span>
                     </div>
