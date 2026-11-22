@@ -1,4 +1,4 @@
-<link rel="stylesheet" href="/download/{_global_.z}/css/xcom-wizard.css?{_global_.version}.1">
+<link rel="stylesheet" href="/download/{_global_.z}/css/xcom-wizard.css?{_global_.version}.2">
 <link rel="stylesheet" href="/css/integram-table.css?{_global_.version}.2">
 
 <div id="xcom-wizard-app" class="xcom-wizard" data-db="{_global_.z}">
@@ -35,6 +35,8 @@
                     <input id="xcom-wizard-rfp-file" type="file" accept=".xlsx,.xls,.csv">
                     <label class="xcom-wizard-sheet" for="xcom-wizard-rfp-sheet">Лист</label>
                     <select id="xcom-wizard-rfp-sheet" disabled></select>
+                    <label class="xcom-wizard-sheet" for="xcom-wizard-rfp-header-row">Строка заголовка</label>
+                    <input id="xcom-wizard-rfp-header-row" type="number" min="1" step="1" disabled>
                     <div id="xcom-wizard-rfp-summary" class="xcom-wizard-file-summary">Файл не выбран</div>
                 </article>
                 <article class="xcom-wizard-file" data-file-side="sku">
@@ -42,6 +44,8 @@
                     <input id="xcom-wizard-sku-file" type="file" accept=".xlsx,.xls,.csv">
                     <label class="xcom-wizard-sheet" for="xcom-wizard-sku-sheet">Лист</label>
                     <select id="xcom-wizard-sku-sheet" disabled></select>
+                    <label class="xcom-wizard-sheet" for="xcom-wizard-sku-header-row">Строка заголовка</label>
+                    <input id="xcom-wizard-sku-header-row" type="number" min="1" step="1" disabled>
                     <div id="xcom-wizard-sku-summary" class="xcom-wizard-file-summary">Файл не выбран</div>
                 </article>
             </div>
@@ -110,4 +114,4 @@
 <script src="/js/xlsx0.18.5.full.min.js?{_global_.version}" defer></script>
 <script src="/js/integram-table.js?{_global_.version}.5" defer></script>
 <script src="/download/{_global_.z}/js/xcom-presets.js?{_global_.version}.1" defer></script>
-<script src="/download/{_global_.z}/js/xcom-wizard.js?{_global_.version}.1" defer></script>
+<script src="/download/{_global_.z}/js/xcom-wizard.js?{_global_.version}.2" defer></script>

@@ -194,6 +194,7 @@
 }
 
 .xcom-wizard-file select,
+.xcom-wizard-file input[type="number"],
 .xcom-wizard-mapping select,
 .xcom-wizard-rule-top input,
 .xcom-wizard-rule-top select,

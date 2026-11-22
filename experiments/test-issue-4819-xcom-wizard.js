@@ -50,10 +50,12 @@ const table = {
         { id: '1013', val: 'Бренд' }, { id: '1014', val: 'Модель' }
     ]
 };
-const upload = plain(api.buildUploadSetting('rfp', { headers, headerRow: 2 }, mapping, table, 'Лист 1'));
+// #5617: главное значение — колонка ключа записи, наименование — поле «Наименование».
+const keyed = Object.assign({}, mapping, { code: 'Код товара', article: '' });
+const upload = plain(api.buildUploadSetting('rfp', { headers, headerRow: 2 }, keyed, table, 'Лист 1'));
 assert.strictEqual(upload.type, '101');
-assert.strictEqual(upload.importMap['101'], 0, 'main value maps to product name column');
-assert.strictEqual(upload.importMap['1012'], 1, 'supplier article maps to its source column');
+assert.strictEqual(upload.importMap['101'], 1, 'main value maps to the record key column');
+assert.strictEqual(upload.importMap['1011'], 0, 'product name maps to the Наименование field');
 assert.strictEqual(upload.xlsx.sheet, 'Лист 1');
 assert.strictEqual(upload.xlsx.r0, 1);
 const mappingRows = plain(api.buildMappingRows({
@@ -62,7 +64,7 @@ const mappingRows = plain(api.buildMappingRows({
     sheets: { rfp: 'RFP', sku: 'SKU' },
     datasets: { rfp: { totalRows: 2 }, sku: { totalRows: 3 } }
 }));
-assert.strictEqual(mappingRows.length, 12);
+assert.strictEqual(mappingRows.length, 14);
 assert(mappingRows.some(row => row.side === 'RFP' && row.role === 'Бренд' && row.required === '1'));
 assert.strictEqual(api.validateStep(1, { datasets: { rfp: dataset, sku: null } }), 'Выберите и разберите оба файла.');
 assert.strictEqual(api.validateStep(2, { mappings: { rfp: { name: 'A' }, sku: {} } }), 'Укажите колонку «Наименование» для RFP и SKU.');

@@ -2,8 +2,12 @@
     'use strict';
 
     var ROLES = [
-        { id: 'name', label: 'Наименование', hint: 'Текст для токенизации', aliases: ['наименование', 'название', 'товар', 'продукт', 'позиция', 'description', 'name', 'title'] },
+        { id: 'name', label: 'Наименование', hint: 'Текст для токенизации', aliases: ['наименование', 'номенклатура', 'название', 'товар', 'продукт', 'позиция', 'description', 'name', 'title'] },
         { id: 'article', label: 'Артикул', hint: 'Код или артикул позиции', aliases: ['артикул', 'код товара', 'sku', 'vendor code', 'article', 'part number'] },
+        // Ключ записи — главное значение SKU/RFP (#5617, Д5/Д6). Наименование в ключ не идёт:
+        // одинаковые названия разных брендов схлопывались, а отчёты токенизации читают поле
+        // «Наименование». Роль стоит после артикула, чтобы «Код товара» оставался артикулом.
+        { id: 'code', label: 'Код / № строки', hint: 'Ключ записи: заполнен в каждой строке и не повторяется', aliases: ['код', 'код 1с', '№ п/п', 'п/п', 'номер строки', 'номер', 'штрихкод'] },
         { id: 'brand', label: 'Бренд', hint: 'Производитель или торговая марка', aliases: ['бренд', 'марка', 'производитель', 'brand', 'vendor', 'manufacturer'] },
         { id: 'model', label: 'Модель', hint: 'Модель, серия или исполнение', aliases: ['модель', 'серия', 'model', 'series'] },
         { id: 'type', label: 'Тип', hint: 'Тип или вид товара', aliases: ['тип', 'вид', 'категория', 'type', 'category', 'kind'] },
@@ -102,12 +106,26 @@
         return result;
     }
 
-    function matrixToDataset(matrix) {
-        var rows = Array.isArray(matrix) ? matrix : [];
-        var headerIndex = -1;
-        for (var i = 0; i < rows.length; i++) {
-            if (nonEmpty(rows[i]).length) { headerIndex = i; break; }
+    // Строка заголовка: первая строка, где заполнено не меньше половины колонок самой широкой
+    // строки (минимум две), — шапка-название над таблицей пропускается (#5617, Д1).
+    // headerRowOverride — номер строки листа с единицы, выбранный партнёром вручную.
+    function detectHeaderIndex(rows) {
+        var scan = rows.slice(0, 30).map(function(row) { return nonEmpty(row).length; });
+        var widest = Math.max.apply(null, scan.concat([0]));
+        var need = widest >= 2 ? Math.max(2, Math.ceil(widest / 2)) : 1;
+        for (var i = 0; i < scan.length; i++) {
+            if (scan[i] >= need) return i;
         }
+        for (var j = 0; j < rows.length; j++) {
+            if (nonEmpty(rows[j]).length) return j;
+        }
+        return -1;
+    }
+
+    function matrixToDataset(matrix, headerRowOverride) {
+        var rows = Array.isArray(matrix) ? matrix : [];
+        var override = parseInt(headerRowOverride, 10);
+        var headerIndex = override >= 1 && override <= rows.length ? override - 1 : detectHeaderIndex(rows);
         if (headerIndex < 0) return { headers: [], rows: [], headerRow: 0, totalRows: 0 };
         var seen = {};
         var headers = (rows[headerIndex] || []).map(function(value, index) {
@@ -126,15 +144,15 @@
         return { headers: headers, rows: objects, headerRow: headerIndex + 1, totalRows: objects.length };
     }
 
-    function sheetToDataset(workbook, sheetName, xlsx) {
+    function sheetToDataset(workbook, sheetName, xlsx, headerRowOverride) {
         if (!workbook || !workbook.Sheets || !workbook.Sheets[sheetName]) return matrixToDataset([]);
         var matrix = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName], { header: 1, defval: '', raw: false });
-        return matrixToDataset(matrix);
+        return matrixToDataset(matrix, headerRowOverride);
     }
 
     function buildRules(mappings) {
         return ROLES.filter(function(role) {
-            return role.id !== 'name' && role.id !== 'article' &&
+            return role.id !== 'name' && role.id !== 'article' && role.id !== 'code' &&
                 mappings.rfp[role.id] && mappings.sku[role.id];
         }).map(function(role) {
             return {
@@ -177,32 +195,42 @@
     }
 
     function targetFieldName(side, roleId) {
+        if (roleId === 'code') return side === 'rfp' ? 'RFP' : 'SKU';
         if (roleId === 'name') return 'Наименование';
         if (roleId === 'article') return side === 'rfp' ? 'Артикул поставщика' : 'Артикул';
         var role = ROLES.filter(function(item) { return item.id === roleId; })[0];
         return role ? role.label : '';
     }
 
+    // Поле таблицы по имени. Подчинённая таблица (arr_id без ref) колонкой файла не загружается —
+    // экран загрузки ставит на её место пропуск, и значение теряется (#5617, Д4).
     function fieldId(table, name) {
         if (normalizeHeader(table && (table.val || table.name)) === normalizeHeader(name)) return String(table.id);
         var req = (table && table.reqs || []).filter(function(item) {
-            return normalizeHeader(item && (item.val || item.name)) === normalizeHeader(name);
+            return normalizeHeader(item && (item.val || item.name)) === normalizeHeader(name) &&
+                !(item.arr_id && !item.ref && !item.ref_id);
         })[0];
         return req ? String(req.id) : '';
     }
 
     function buildUploadSetting(side, dataset, mapping, table, sheetName) {
         if (!dataset || !table) throw new Error('Не хватает структуры файла или таблицы ' + side.toUpperCase() + '.');
+        if (!(mapping && mapping.code)) {
+            throw new Error('Для «' + (table.val || table.name) + '» не выбрана колонка ключа записи («Код / № строки»).');
+        }
         var importMap = {};
         ROLES.forEach(function(role) {
             var header = mapping && mapping[role.id];
             if (!header) return;
             var target = targetFieldName(side, role.id);
-            var targetId = role.id === 'name' ? String(table.id) : fieldId(table, target);
+            var targetId = role.id === 'code' ? String(table.id) : fieldId(table, target);
             var sourceIndex = dataset.headers.indexOf(header);
-            if (!targetId) throw new Error('В таблице «' + (table.val || table.name) + '» нет поля «' + target + '».');
+            if (!targetId) throw new Error('В таблице «' + (table.val || table.name) + '» нет поля «' + target + '», которое можно загрузить из колонки файла.');
             if (sourceIndex >= 0) importMap[targetId] = sourceIndex;
         });
+        // Колонки правее последней размеченной не читаются: иначе экран загрузки раскладывает
+        // в них оставшиеся поля таблицы (#3810), и «Кол-во» ложится в «Наименование» (#5617, Д3).
+        var lastColumn = Object.keys(importMap).reduce(function(max, key) { return Math.max(max, importMap[key]); }, -1);
         return {
             type: String(table.id),
             name: String(table.val || table.name || side.toUpperCase()),
@@ -213,7 +241,7 @@
             importMap: importMap,
             formulas: {},
             createParent: 0,
-            xlsx: { sheet: sheetName || '', r0: Math.max(0, Number(dataset.headerRow || 1) - 1), c0: 0, r1: null, c1: null }
+            xlsx: { sheet: sheetName || '', r0: Math.max(0, Number(dataset.headerRow || 1) - 1), c0: 0, r1: null, c1: lastColumn >= 0 ? lastColumn : null }
         };
     }
 
@@ -240,6 +268,33 @@
         return result;
     }
 
+    // Ключ записи (#5617, Д5/Д6): строки с пустым главным значением экран загрузки пропускает
+    // (#3389), а одинаковые ключи SKU схлопываются в одну запись — обе потери молчаливые,
+    // поэтому мастер проверяет колонку ключа на данных файла до сохранения настроек.
+    function keyColumnProblem(side, mapping, dataset) {
+        var title = side.toUpperCase();
+        var header = mapping && mapping.code;
+        if (!header) {
+            return 'Укажите для ' + title + ' колонку ключа записи («Код / № строки»): код позиции, номер строки или артикул, ' +
+                'заполненный в каждой строке. Если такой колонки нет, добавьте в файл нумерацию строк.';
+        }
+        var roles = Object.keys(mapping).filter(function(key) { return mapping[key] === header; });
+        if (roles.length > 1) return 'В ' + title + ' колонка «' + header + '» выбрана для нескольких ролей: одна колонка — одна роль.';
+        var rows = dataset && Array.isArray(dataset.rows) ? dataset.rows : [];
+        var empty = 0, seen = {}, repeats = 0;
+        rows.forEach(function(row) {
+            var value = trimValue(row && row[header]).toLowerCase();
+            if (!value) { empty += 1; return; }
+            if (seen[value]) repeats += 1;
+            seen[value] = true;
+        });
+        if (empty) return 'В ' + title + ' ключ записи «' + header + '» пуст в ' + empty + ' строк(ах): такие строки не загрузятся.';
+        if (side === 'sku' && repeats) {
+            return 'В SKU ключ записи «' + header + '» повторяется в ' + repeats + ' строк(ах): позиции с одинаковым ключом сольются в одну.';
+        }
+        return '';
+    }
+
     function validateStep(step, current) {
         var context = current || state;
         if (step === 1) {
@@ -248,6 +303,11 @@
         }
         if (step === 2) {
             if (!context.mappings.rfp.name || !context.mappings.sku.name) return 'Укажите колонку «Наименование» для RFP и SKU.';
+            var sides = ['rfp', 'sku'];
+            for (var s = 0; s < sides.length; s++) {
+                var keyError = keyColumnProblem(sides[s], context.mappings[sides[s]], context.datasets && context.datasets[sides[s]]);
+                if (keyError) return keyError;
+            }
         }
         if (step === 4) {
             var confirmed = document.getElementById && document.getElementById('xcom-wizard-confirm');
@@ -285,12 +345,19 @@
             ' колонок. Заголовок в строке ' + dataset.headerRow + '.';
     }
 
-    function refreshDataset(side) {
+    // headerRow — номер строки заголовка, введённый партнёром; без него строка ищется сама,
+    // и найденный номер показывается в поле, чтобы его можно было поправить (#5617, Д1).
+    function refreshDataset(side, headerRow) {
         var select = document.getElementById('xcom-wizard-' + side + '-sheet');
+        var headerInput = document.getElementById('xcom-wizard-' + side + '-header-row');
         var book = state.books[side];
         if (!book || !select || !select.value) return;
         state.sheets[side] = select.value;
-        state.datasets[side] = sheetToDataset(book, select.value, window.XLSX);
+        state.datasets[side] = sheetToDataset(book, select.value, window.XLSX, headerRow);
+        if (headerInput) {
+            headerInput.disabled = false;
+            headerInput.value = state.datasets[side].headerRow || '';
+        }
         state.mappings[side] = suggestMapping(state.datasets[side].headers, state.datasets[side].rows);
         renderFileSummary(side);
         updateActions();
@@ -622,7 +689,7 @@
                 }));
             });
         }).then(function() {
-            setStatus('Профиль и две настройки загрузки сохранены. Можно переходить к первому массовому прогону.', 'success');
+            setStatus('Профиль и две настройки загрузки сохранены. Дальше: «Загрузка» — загрузите оба файла по настройкам «Сопоставление RFP/SKU», затем «Токенизация SKU» и «Токенизация RFP», затем «Массовый подбор».', 'success');
             document.getElementById('xcom-wizard-action-hint').textContent = 'Настройка завершена за ' + formatDuration(Date.now() - state.startedAt) + '.';
             var mapping = document.getElementById('xcom-wizard-saved-mapping');
             if (mapping) mapping.hidden = false;
@@ -642,7 +709,9 @@
             var file = document.getElementById('xcom-wizard-' + side + '-file');
             var sheet = document.getElementById('xcom-wizard-' + side + '-sheet');
             file.addEventListener('change', function() { parseFile(side, file.files && file.files[0]); });
+            var headerRow = document.getElementById('xcom-wizard-' + side + '-header-row');
             sheet.addEventListener('change', function() { refreshDataset(side); });
+            if (headerRow) headerRow.addEventListener('change', function() { refreshDataset(side, headerRow.value); });
         });
         document.getElementById('xcom-wizard-back').addEventListener('click', function() {
             if (state.step > 1) { state.step -= 1; setStatus(''); renderStep(); }
