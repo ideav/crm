@@ -53,18 +53,6 @@
         "name": "RFP"
       },
       {
-        "source": "RFP",
-        "field": "Бренд",
-        "name": "Бренд RFP",
-        "hidden": true
-      },
-      {
-        "source": "SKU",
-        "field": "Бренд",
-        "name": "Бренд SKU",
-        "hidden": true
-      },
-      {
         "source": "Токен",
         "field": "$id",
         "name": "Токенов",

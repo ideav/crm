@@ -4,6 +4,10 @@
     var ROLES = [
         { id: 'name', label: 'Наименование', hint: 'Текст для токенизации', aliases: ['наименование', 'номенклатура', 'название', 'товар', 'продукт', 'позиция', 'description', 'name', 'title'] },
         { id: 'article', label: 'Артикул', hint: 'Код или артикул позиции', aliases: ['артикул', 'код товара', 'sku', 'vendor code', 'article', 'part number'] },
+        // Ключ записи — главное значение SKU/RFP (#5617, Д5/Д6). Наименование в ключ не идёт:
+        // одинаковые названия разных брендов схлопывались, а отчёты токенизации читают поле
+        // «Наименование». Роль стоит после артикула, чтобы «Код товара» оставался артикулом.
+        { id: 'code', label: 'Код / № строки', hint: 'Ключ записи: заполнен в каждой строке и не повторяется', aliases: ['код', 'код 1с', '№ п/п', 'п/п', 'номер строки', 'номер', 'штрихкод'] },
         { id: 'brand', label: 'Бренд', hint: 'Производитель или торговая марка', aliases: ['бренд', 'марка', 'производитель', 'brand', 'vendor', 'manufacturer'] },
         { id: 'model', label: 'Модель', hint: 'Модель, серия или исполнение', aliases: ['модель', 'серия', 'model', 'series'] },
         { id: 'type', label: 'Тип', hint: 'Тип или вид товара', aliases: ['тип', 'вид', 'категория', 'type', 'category', 'kind'] },
@@ -148,7 +152,7 @@
 
     function buildRules(mappings) {
         return ROLES.filter(function(role) {
-            return role.id !== 'name' && role.id !== 'article' &&
+            return role.id !== 'name' && role.id !== 'article' && role.id !== 'code' &&
                 mappings.rfp[role.id] && mappings.sku[role.id];
         }).map(function(role) {
             return {
@@ -191,6 +195,7 @@
     }
 
     function targetFieldName(side, roleId) {
+        if (roleId === 'code') return side === 'rfp' ? 'RFP' : 'SKU';
         if (roleId === 'name') return 'Наименование';
         if (roleId === 'article') return side === 'rfp' ? 'Артикул поставщика' : 'Артикул';
         var role = ROLES.filter(function(item) { return item.id === roleId; })[0];
@@ -210,12 +215,15 @@
 
     function buildUploadSetting(side, dataset, mapping, table, sheetName) {
         if (!dataset || !table) throw new Error('Не хватает структуры файла или таблицы ' + side.toUpperCase() + '.');
+        if (!(mapping && mapping.code)) {
+            throw new Error('Для «' + (table.val || table.name) + '» не выбрана колонка ключа записи («Код / № строки»).');
+        }
         var importMap = {};
         ROLES.forEach(function(role) {
             var header = mapping && mapping[role.id];
             if (!header) return;
             var target = targetFieldName(side, role.id);
-            var targetId = role.id === 'name' ? String(table.id) : fieldId(table, target);
+            var targetId = role.id === 'code' ? String(table.id) : fieldId(table, target);
             var sourceIndex = dataset.headers.indexOf(header);
             if (!targetId) throw new Error('В таблице «' + (table.val || table.name) + '» нет поля «' + target + '», которое можно загрузить из колонки файла.');
             if (sourceIndex >= 0) importMap[targetId] = sourceIndex;
@@ -260,6 +268,33 @@
         return result;
     }
 
+    // Ключ записи (#5617, Д5/Д6): строки с пустым главным значением экран загрузки пропускает
+    // (#3389), а одинаковые ключи SKU схлопываются в одну запись — обе потери молчаливые,
+    // поэтому мастер проверяет колонку ключа на данных файла до сохранения настроек.
+    function keyColumnProblem(side, mapping, dataset) {
+        var title = side.toUpperCase();
+        var header = mapping && mapping.code;
+        if (!header) {
+            return 'Укажите для ' + title + ' колонку ключа записи («Код / № строки»): код позиции, номер строки или артикул, ' +
+                'заполненный в каждой строке. Если такой колонки нет, добавьте в файл нумерацию строк.';
+        }
+        var roles = Object.keys(mapping).filter(function(key) { return mapping[key] === header; });
+        if (roles.length > 1) return 'В ' + title + ' колонка «' + header + '» выбрана для нескольких ролей: одна колонка — одна роль.';
+        var rows = dataset && Array.isArray(dataset.rows) ? dataset.rows : [];
+        var empty = 0, seen = {}, repeats = 0;
+        rows.forEach(function(row) {
+            var value = trimValue(row && row[header]).toLowerCase();
+            if (!value) { empty += 1; return; }
+            if (seen[value]) repeats += 1;
+            seen[value] = true;
+        });
+        if (empty) return 'В ' + title + ' ключ записи «' + header + '» пуст в ' + empty + ' строк(ах): такие строки не загрузятся.';
+        if (side === 'sku' && repeats) {
+            return 'В SKU ключ записи «' + header + '» повторяется в ' + repeats + ' строк(ах): позиции с одинаковым ключом сольются в одну.';
+        }
+        return '';
+    }
+
     function validateStep(step, current) {
         var context = current || state;
         if (step === 1) {
@@ -268,6 +303,11 @@
         }
         if (step === 2) {
             if (!context.mappings.rfp.name || !context.mappings.sku.name) return 'Укажите колонку «Наименование» для RFP и SKU.';
+            var sides = ['rfp', 'sku'];
+            for (var s = 0; s < sides.length; s++) {
+                var keyError = keyColumnProblem(sides[s], context.mappings[sides[s]], context.datasets && context.datasets[sides[s]]);
+                if (keyError) return keyError;
+            }
         }
         if (step === 4) {
             var confirmed = document.getElementById && document.getElementById('xcom-wizard-confirm');
@@ -649,7 +689,7 @@
                 }));
             });
         }).then(function() {
-            setStatus('Профиль и две настройки загрузки сохранены. Можно переходить к первому массовому прогону.', 'success');
+            setStatus('Профиль и две настройки загрузки сохранены. Дальше: «Загрузка» — загрузите оба файла по настройкам «Сопоставление RFP/SKU», затем «Токенизация SKU» и «Токенизация RFP», затем «Массовый подбор».', 'success');
             document.getElementById('xcom-wizard-action-hint').textContent = 'Настройка завершена за ' + formatDuration(Date.now() - state.startedAt) + '.';
             var mapping = document.getElementById('xcom-wizard-saved-mapping');
             if (mapping) mapping.hidden = false;
