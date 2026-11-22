@@ -31,6 +31,13 @@ if($fn === null){
     exit(1);
 }
 eval($fn);
+# Само условие проверяет белый список Report_sql_expr (p2n#1140).
+$fn = extract_function_source($source, "Report_sql_expr");
+if($fn === null){
+    fwrite(STDERR, "FAIL: в index.php нет Report_sql_expr()\n\nFAILED: 1 check(s) failed\n");
+    exit(1);
+}
+eval($fn);
 
 $failures = 0;
 function check($cond, $label){
