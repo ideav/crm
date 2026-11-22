@@ -56,8 +56,8 @@ check('итог запроса', () => {
 });
 
 check('имя шаблона', () => {
-    for (const ok of ['cm', 'shop', 'a1', 'abcdefghijklmno']) assert.ok(T.idValid(ok), ok);
-    for (const bad of ['c', '1ab', 'Shop', 'my', 'abcdefghijklmnop', 'a-b', '', undefined]) assert.ok(!T.idValid(bad), String(bad));
+    for (const ok of ['cm', 'en', 'shop', 'a12', 'abcdefghijklmno']) assert.ok(T.idValid(ok), ok);
+    for (const bad of ['c', 'a1', '1ab', 'Shop', 'my', 'abcdefghijklmnop', 'a-b', '', undefined]) assert.ok(!T.idValid(bad), String(bad));
 });
 
 if (failures) { console.log(failures + ' FAIL'); process.exitCode = 1; } else console.log('OK');
