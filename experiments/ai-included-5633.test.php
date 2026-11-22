@@ -61,12 +61,12 @@ putenv("BILLING_AI_UNIT_PRICE");
 
 pay(5950);
 used(100);
-expect(\inc5633\aiAgentIncluded($c, "incdb") === true, "расход 100 < 1652: ai_included");
+expect(\inc5633\aiAgentIncluded($c, "incdb") === 1552, "расход 100 < 1652: осталось 1552");
 expect(strpos(end($GLOBALS["__q"]), "c.t=239405") !== false && stripos(end($GLOBALS["__q"]), "SELECT") === 0, "читает счётчик SELECT-ом по типу");
 used(1652);
-expect(\inc5633\aiAgentIncluded($c, "incdb") === false, "расход = объёму: не включено");
+expect(\inc5633\aiAgentIncluded($c, "incdb") === 0, "расход = объёму: остаток 0");
 used(null);
-expect(\inc5633\aiAgentIncluded($c, "incdb") === true, "строки счётчика нет — расход 0");
+expect(\inc5633\aiAgentIncluded($c, "incdb") === 1652, "строки счётчика нет — расход 0");
 $GLOBALS["__res"] = false;
 expect(\inc5633\aiAgentIncluded($c, "incdb") === false, "ошибка SQL — не включено");
 used(5);

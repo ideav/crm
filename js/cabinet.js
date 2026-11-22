@@ -363,6 +363,26 @@ class CabinetController {
         });
     }
 
+    // #5637: включённый в оплату объём ИИ по базам текущего пользователя (сервер сам отбирает его базы).
+    // Ошибка не мешает ЛК: без объёма карточка показывает только расход.
+    async loadAiIncluded() {
+        this.aiIncluded = null;
+        try {
+            const resp = await fetch('https://' + this.apiConfig.host + '/my/_ai_included?JSON', { method: 'GET', credentials: 'include' });
+            if (!resp.ok) return;
+            const data = await resp.json();
+            if (data && data.included && typeof data.included === 'object') {
+                this.aiIncluded = {};
+                Object.keys(data.included).forEach(k => {
+                    const n = Number(data.included[k]);
+                    if (Number.isFinite(n) && n >= 0) this.aiIncluded[k.toLowerCase()] = Math.floor(n);
+                });
+            }
+        } catch (e) {
+            console.warn('[cabinet] ai included not loaded:', e);
+        }
+    }
+
     async loadUserData() {
         const loadingState = document.getElementById('loading-state');
         if (loadingState) loadingState.style.display = '';
@@ -389,6 +409,7 @@ class CabinetController {
                 this.userData = data[0]; // First record contains user info
                 this.me = this.userData.User || null;
                 this.databases = data;
+                await this.loadAiIncluded();
                 this.populateUserData();
             } else {
                 console.warn('[cabinet] No user data received');
@@ -817,7 +838,12 @@ class CabinetController {
             // #5206: счётчики биллинга базы в единицах тарифа (колонки отчёта my/report/313)
             const aiUnits = db.AIUnits || '0';
             const agentRuns = db.AgentRuns || '0';
-            const aiCost = cabinetAiCost(aiUnits);
+            // #5637: «использовано N из M ед.»; M — включённый объём базы с сервера (нет данных — только N)
+            const aiN = Number(String(aiUnits).trim() || 0);
+            const aiNText = Number.isFinite(aiN) && aiN >= 0 ? String(Math.floor(aiN)) : '0';
+            const aiM = this.aiIncluded ? this.aiIncluded[String(db.DB || '').toLowerCase()] : undefined;
+            const aiUsageText = aiM > 0 ? `использовано ${aiNText} из ${aiM} ед.` : `${aiNText} ед.`;
+            const aiUsageTitle = aiM === 0 ? 'Включённого объёма нет — действует лимит 3 вопроса в час' : 'Расход ИИ за текущий период и включённый в оплату объём';
             const planDate = db['Plan date'] ? this.formatDate(db['Plan date']) : '-';
             const planDateRaw = db['Plan date'] || '';
             const publicName = db.PublicName || '';
@@ -840,7 +866,7 @@ class CabinetController {
                         <span class="database-stat"><span>Шаблон:</span> <strong>${this.escapeHtml(templateLabel)}</strong></span>
                         <span class="database-stat"><span>Расход:</span> <strong>${recordCount}</strong></span>
                         <span class="database-stat" title="Расход ИИ в единицах тарифа за текущий период"><span>ИИ-токены:</span> <strong>${this.escapeHtml(aiUnits)}</strong></span>
-                        ${aiCost ? `<span class="database-stat" title="ИИ-токены × ${String(AI_UNIT_PRICE_RUB).replace('.', ',')} ₽ за единицу"><span>Стоимость ИИ:</span> <strong>${this.escapeHtml(aiCost)}</strong></span>` : ''}
+                        <span class="database-stat" title="${this.escapeHtml(aiUsageTitle)}"><span>ИИ:</span> <strong>${this.escapeHtml(aiUsageText)}</strong></span>
                         <span class="database-stat" title="Запуски ИИ-агента за текущий период"><span>Запуски агента:</span> <strong>${this.escapeHtml(agentRuns)}</strong></span>
                         <span class="database-stat database-stat-right"><span>Оплачено до:</span> <strong class="${planDatePassed ? 'plan-date-expired' : ''}">${planDate}</strong></span>
                     </div>

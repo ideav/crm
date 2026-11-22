@@ -70,7 +70,7 @@ $fns = array(
     "handleAiAgentCallback","aiAgentCallbackUrl","collectAiAgentAttachments","aiAgentBlocksClean","aiAgentProgressClean",
     "aiAgentJobsFile","aiAgentJobId","aiAgentJobNew","aiAgentJobsAppend","aiAgentJobsFind",
     "aiAgentJobsLatest","aiAgentJobsPrune","aiAgentJobsApplyChanges","aiAgentJobsReplace",
-    "aiAgentJobPublic","aiAgentJobsEncode","aiAgentJobsDecode","aiAgentJobsLoadRaw",
+    "aiAgentJobPublic","aiAgentQuotaClean","aiAgentJobsEncode","aiAgentJobsDecode","aiAgentJobsLoadRaw",
     "aiAgentJobsMutate","aiAgentJobCreate","aiAgentJobUpdate","aiAgentJobGet","aiAgentJobLatest"
 );
 foreach($fns as $fn) eval(extract_function_source($source, $fn));

@@ -941,6 +941,7 @@
             var content = this.getAssistantContent(job.result) || 'ИИ-агент не вернул ответ.';
             var wrap = this.replaceThinking(content, null, this.getAssistantBlocks(job.result));
             if (job.result && job.result.plan) this.renderPlan(wrap, job.result.plan);
+            this.renderQuota(wrap, job.quota || (job.result && job.result.quota));
             if (job.id) this.rendered[job.id] = this.answered[job.id] = true;
         },
 
@@ -1317,6 +1318,7 @@
                 var wrap = this.addMessage('assistant', this.getAssistantContent(job.result) || 'ИИ-агент не вернул ответ.',
                     null, this.getAssistantBlocks(job.result));
                 if (job.result && job.result.plan) this.renderPlan(wrap, job.result.plan);
+                this.renderQuota(wrap, job.quota || (job.result && job.result.quota));
                 return;
             }
             if (job.status === 'error') {
@@ -1351,6 +1353,32 @@
             if (typeof data.error === 'string') return data.error;
             if (data.error && data.error.message) return data.error.message;
             return '';
+        },
+
+        // #5637: остаток включённого объёма / лимита вопросов из quota ответа агента (старый агент — без неё).
+        quotaText: function (q) {
+            if (!q || typeof q !== 'object') return '';
+            var isNum = function (v) { return typeof v === 'number' && isFinite(v) && v >= 0; };
+            if (isNum(q.included_left)) return 'ИИ: включено ещё ' + Math.floor(q.included_left) + ' ед.';
+            if (isNum(q.rate_left) && isNum(q.rate_limit)) {
+                var text = 'Осталось ' + Math.floor(q.rate_left) + ' из ' + Math.floor(q.rate_limit) + ' вопросов';
+                var d = typeof q.rate_reset === 'string' ? new Date(q.rate_reset) : null;
+                if (d && !isNaN(d.getTime())) {
+                    var pad = function (n) { return (n < 10 ? '0' : '') + n; };
+                    text += ', обновится в ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+                }
+                return text;
+            }
+            return '';
+        },
+
+        renderQuota: function (wrap, q) {
+            var text = this.quotaText(q);
+            if (!wrap || !text) return;
+            var line = document.createElement('div');
+            line.className = 'ai-agent-quota text-muted';
+            line.textContent = text;
+            wrap.appendChild(line);
         },
 
         addMessage: function (role, text, payUrl, blocks) {

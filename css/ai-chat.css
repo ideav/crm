@@ -867,3 +867,10 @@ body.ai-agent-resizing iframe {
     border-radius: 4px;
     cursor: pointer;
 }
+
+/* #5637: строка остатка ИИ под ответом агента */
+.ai-agent-quota {
+    margin-top: 0.4rem;
+    font-size: 0.75rem;
+    color: var(--text-muted, #6c757d);
+}
