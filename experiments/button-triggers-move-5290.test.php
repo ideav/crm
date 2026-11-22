@@ -88,6 +88,8 @@ function Exec_sql($sql, $desc){
             return true;
         case "Move peers up":
             return true;
+        case "Get parent to lock order":    # #5262: перенос блокирует порядок у обоих родителей
+            return new Rows(isset($DB[$id]) ? array(array("up" => $DB[$id][2])) : array());
     }
     throw new Exception("unexpected SQL: $desc");
 }
@@ -97,6 +99,7 @@ function BtLog($m){ $GLOBALS["LOG"][] = $m; }
 function BtViewValue($base, $val){ return (string)$val; }
 function Check_Grant($id, $t=0){}
 function Check_Rec_masks($id){}
+function OrdLock($up){}    # #5262: блокировка порядка среди равных — предмет experiments/ord-race-5262.test.php
 function Grant_1level($t){ return "WRITE"; }
 function t9n($v){ return preg_match('/^\[RU\](.*?)\[EN\]/s', $v, $m) ? $m[1] : $v; }
 
