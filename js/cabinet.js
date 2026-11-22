@@ -5,7 +5,12 @@
 // Цена единицы ИИ-токенов (p2n#850): 1 ед. = 1000 условных токенов = входные токены Claude Opus 5.5
 // по прайсу API на $0,004. Чуть ниже рынка: polza.ai 377,64 ₽ и routerai.ru 427 ₽ за 1M на 22.11.2026,
 // у нас 360 ₽ за 1M.
-const AI_UNIT_PRICE_RUB = 0.36;
+// Запасное значение: настоящая цена — BILLING_AI_UNIT_PRICE на сервере (#5633), шаблон отдаёт её
+// в window.AI_UNIT_PRICE_RUB; то же число списывает месячный отчёт 5431 ({_global_.ai_unit_price}).
+const AI_UNIT_PRICE_RUB = (() => {
+    const n = parseFloat(String((typeof window !== 'undefined' && window.AI_UNIT_PRICE_RUB) || '').replace(',', '.'));
+    return Number.isFinite(n) && n > 0 ? n : 0.36;
+})();
 
 // Стоимость единиц ИИ в рублях: «444,24 ₽»; не число — пусто (стату не показываем)
 function cabinetAiCost(units) {

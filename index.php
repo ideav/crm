@@ -765,6 +765,8 @@ define("ALL_OBJECTS", "*** All objects ***");
 define("FILES", "*** Files ***");
 
 $GLOBALS["GLOBAL_VARS"]["version"] = VERSION;
+# #5633: цена единицы ИИ, ₽ — одна на систему: отчёт 5431 (месячное списание) и ЛК берут {_global_.ai_unit_price}.
+$GLOBALS["GLOBAL_VARS"]["ai_unit_price"] = billingAiUnitPrice();
 $GLOBALS["GLOBAL_VARS"]["newapi"] = [];
 
 # ################# FUNCTIONS #################
@@ -14384,6 +14386,15 @@ function updateBilling(){
 # (активность, updateBilling) не меняется. Пересчёт в единицы:
 #   ai_tokens  = ceil(tokens / BILLING_AI_TOKENS_PER_UNIT)  (по умолчанию 1000 токенов = 1 ед.)
 #   agent_runs = runs * BILLING_AGENT_RUN_UNITS             (по умолчанию 1 запуск = 1 ед.)
+# Цена одной единицы ИИ-токенов для клиента, ₽ (#5633). BILLING_AI_UNIT_PRICE, по умолчанию 0.36
+# (1 ед. = 1000 условных токенов, p2n#850). Строка с точкой (для SQL и JS); запятая допустима;
+# не число, ноль и минус — умолчание.
+function billingAiUnitPrice(){
+    $v = str_replace(",", ".", aiConfigValue(array("BILLING_AI_UNIT_PRICE")));
+    if(!preg_match('/^[0-9]+([.][0-9]+)?$/', $v) || (float)$v <= 0)
+        return "0.36";
+    return $v;
+}
 function billingUnits($tokens, $runs){
     $perUnit = (int)aiConfigValue(array("BILLING_AI_TOKENS_PER_UNIT"));
     if($perUnit <= 0)

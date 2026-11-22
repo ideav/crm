@@ -95,3 +95,18 @@ test('p2n#850: стоимость ИИ в рублях рядом со счёт�
     assert.strictEqual(stat(none, 'Стоимость ИИ'), '0,00 ₽');
     assert.strictEqual(stat(junk, 'Стоимость ИИ'), null, 'не число — без рублей');
 });
+
+// #5633: цена единицы — одна на систему; серверное значение (window.AI_UNIT_PRICE_RUB из
+// {_global_.ai_unit_price} в шаблоне) важнее запасной константы в cabinet.js.
+test('#5633: цена ИИ берётся из серверного значения, мусор — запасная 0,36', () => {
+    const run = price => {
+        const src = fs.readFileSync('js/cabinet.js', 'utf8');
+        const ctx = { window: { AI_UNIT_PRICE_RUB: price }, document: { addEventListener() {} }, console };
+        vm.createContext(ctx);
+        vm.runInContext(src.split('\n// Имя базы')[0] + '\nthis.cost = cabinetAiCost;', ctx);
+        return ctx.cost('1000');
+    };
+    assert.strictEqual(run('0.5'), '500,00 ₽');
+    assert.strictEqual(run('{_global_.ai_unit_price}'), '360,00 ₽', 'шаблон не подставлен — запасная');
+    assert.strictEqual(run(undefined), '360,00 ₽');
+});
