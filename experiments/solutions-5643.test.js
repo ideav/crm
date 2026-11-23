@@ -1,5 +1,5 @@
 // Мерка к issue #5643: портал «Решения» (download/solutions/app.js, templates/solutions/catalog.html).
-// rules: none (new workspace)
+// rules: none (defect #5643)
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
