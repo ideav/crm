@@ -44,7 +44,7 @@
 
     <template id="my-head-cabinet">
         <link rel="stylesheet" href="/css/cabinet.css">
-        <link rel="stylesheet" href="/css/my-cabinet.css?{_global_.version}.4">
+        <link rel="stylesheet" href="/css/my-cabinet.css?{_global_.version}.5">
     </template>
 
     <script>MyMode.put('head')</script>
@@ -385,7 +385,7 @@
                 </div>
                 <div class="tariff-section">
                     <div class="tariff-info">
-                        <div class="mc-kpis mc-kpis-2">
+                        <div class="mc-kpis mc-kpis-3">
                             <div class="mc-kpi mc-kpi-static">
                                 <span class="mc-kpi-label">Ваш тариф</span>
                                 <strong class="mc-kpi-value" id="current-plan">—</strong>
@@ -394,6 +394,10 @@
                                 <span class="mc-kpi-label">Следующее списание</span>
                                 <strong class="mc-kpi-value" id="next-charge-date">—</strong>
                             </div>
+                            <button type="button" class="mc-kpi" data-mc-go="balance">
+                                <span class="mc-kpi-label">Баланс, руб.</span>
+                                <strong class="mc-kpi-value" id="tariff-balance">—</strong>
+                            </button>
                         </div>
                         <div class="usage-info mc-card">
                             <p>Использовано <strong id="usage-units">0</strong> ед. ресурсов — <strong id="usage-percent">0.00%</strong> от лимита плана в <strong id="usage-limit">—</strong> ед.</p>
@@ -621,7 +625,7 @@
     <script src="/js/db-templates.js?v=5379"></script>
     <script src="/js/partner-cabinet.js?{_global_.version}.2"></script>
     <script>window.AI_UNIT_PRICE_RUB = '{_global_.ai_unit_price}';</script>
-    <script src="/js/cabinet.js?{_global_.version}.7"></script>
+    <script src="/js/cabinet.js?{_global_.version}.8"></script>
     <script src="/js/my-cabinet.js"></script>
 </template>
 
