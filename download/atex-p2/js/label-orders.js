@@ -399,8 +399,27 @@
         return (list.length ? list : [ITS_ROLES_DEFAULT]).join(', ');
     }
 
+    // Параметры фильтра грида IntegramTable (#5666) — те же, что грид шлёт в отчёт: FR_/TO_ по
+    // активным фильтрам (applyFilter грида) и параметры страницы. Без активных фильтров — ''.
+    function gridFilterQuery(grid) {
+        if (!grid || typeof URLSearchParams !== 'function') return '';
+        var params = new URLSearchParams();
+        var filters = grid.filters || {};
+        Object.keys(filters).forEach(function(colId) {
+            var f = filters[colId] || {};
+            if (!(f.value || f.type === '%' || f.type === '!%')) return;
+            var column = (grid.columns || []).filter(function(c) { return c.id === colId; })[0];
+            if (column && typeof grid.applyFilter === 'function') grid.applyFilter(params, column, f);
+        });
+        if (typeof grid.appendPageUrlParams === 'function') grid.appendPageUrlParams(params);
+        var out = new URLSearchParams();
+        params.forEach(function(v, k) { if (/^(FR|TO)_/.test(k)) out.append(k, v); });
+        return out.toString();
+    }
+
     var core = {
         REPORT: REPORT,
+        gridFilterQuery: gridFilterQuery,
         SETTINGS: SETTINGS,
         kvRecords: kvRecords,
         bool: bool,
@@ -832,12 +851,34 @@
         }).then(function() { self.busy = false; self.picking = false; if (self.selectedId) self.renderCard(); });
     };
 
+    // Id позиций, видимых по фильтру таблицы (#5666): отчёт с параметрами фильтра грида.
+    // null — фильтра нет, подбор идёт по всем позициям.
+    AtexLabelOrders.prototype.filteredIds = function() {
+        var q = gridFilterQuery(this.grid);
+        if (!q) return Promise.resolve(null);
+        return this.getJson('report/' + REPORT + '?JSON_KV&LIMIT=0,10000&' + q).then(function(json) {
+            var ids = {};
+            (Array.isArray(json) ? json : []).forEach(function(r) { if (r && r[POSITION_ID_COLUMN]) ids[String(r[POSITION_ID_COLUMN])] = true; });
+            return ids;
+        });
+    };
+
     AtexLabelOrders.prototype.pickAll = function() {
         var self = this;
-        var todo = this.rows.map(function(p) { return { p: p, plan: self.planOf(p) }; })
+        return this.filteredIds().then(function(ids) { return self.pickRows(ids); }, function(err) {
+            console.error('[label-orders] ❌ фильтр', err);
+            self.message('Позиции по фильтру таблицы не прочитаны, подбор не записан: ' + err.message, 'error');
+        });
+    };
+
+    AtexLabelOrders.prototype.pickRows = function(ids) {
+        var self = this;
+        var scope = ids ? ' по фильтру таблицы' : '';
+        var todo = this.rows.filter(function(p) { return !ids || ids[p.id]; })
+            .map(function(p) { return { p: p, plan: self.planOf(p) }; })
             .filter(function(x) { return writeDiffers(x.p, x.plan.write); });
-        if (!todo.length) { this.message('Подбор во всех позициях совпадает с расчётом — записывать нечего.', 'ok'); return Promise.resolve(); }
-        return this.confirm('Записать подбор ножа, мин. партию и признак ИТС в ' + todo.length + ' позиций? Ручной выбор ножа сохраняется.').then(function(yes) {
+        if (!todo.length) { this.message('Подбор в позициях' + scope + ' совпадает с расчётом — записывать нечего.', 'ok'); return Promise.resolve(); }
+        return this.confirm('Записать подбор ножа, мин. партию и признак ИТС в ' + todo.length + ' позиций' + scope + '? Ручной выбор ножа сохраняется.').then(function(yes) {
             if (!yes) return;
             self.busy = true;
             var errors = [];
