@@ -95,6 +95,10 @@
       if (v.solution) f['Решение'] = Number(v.solution);
       if (String(v.comment || '').trim()) f['Комментарий'] = String(v.comment).trim().slice(0, 3000);
       return f;
+    },
+    // подпись в шапке движка (.navbar-workspace), backlogram#997: страница решения и заявка по решению — «коробка», остальное — каталог
+    workspaceTitle: function (r) {
+      return r && (r.view === 'solution' || (r.view === 'apply' && r.id)) ? 'Ваша персональная коробка' : 'Копируем любые решения и делаем их под вас';
     }
   };
 
@@ -226,6 +230,8 @@
   function route() {
     var r = Core.parseHash(location.hash);
     document.title = 'Решения на Интеграме';
+    var ws = document.querySelector('.navbar-workspace');
+    if (ws) ws.textContent = Core.workspaceTitle(r);
     if (state.error) { app.innerHTML = '<p class="sl-err">' + esc(state.error) + '</p>'; return; }
     if (r.view === 'solution') viewSolution(r.id);
     else if (r.view === 'apply') viewApply(r.id);
