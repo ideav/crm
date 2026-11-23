@@ -525,11 +525,13 @@
 .atex-sl-cm-caption {
     display: flex;
     justify-content: space-between;
+    align-items: baseline;
     font-size: 12px;
     color: var(--sl-muted);
     margin-bottom: 6px;
 }
-.atex-sl-cm-caption-used { font-weight: 600; }
+/* #5676: «Занято» и ширины легенды — кеглем номенклатуры в шапке (.atex-sl-spec, 20px). */
+.atex-sl-cm-caption-used { font-size: 20px; font-weight: 600; color: var(--text-primary, #1f2933); }
 .atex-sl-cm-bar {
     display: flex;
     width: 100%;
@@ -607,7 +609,7 @@
     font-size: 15px;
     color: var(--text-primary, #1f2933);
 }
-.atex-sl-cm-legend-width { font-weight: 700; font-variant-numeric: tabular-nums; }
+.atex-sl-cm-legend-width { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .atex-sl-cm-legend-purpose { font-size: 13px; color: var(--sl-muted); }
 .atex-sl-cm-swatch {
     width: 16px;
