@@ -1,5 +1,5 @@
 // WFM (демо-копия, ideav/crm#5646): чистые функции расчёта проверок ТК, норм и отпусков.
-// rules: none (новая функциональность, не atex)
+// rules: none (defect #5646)
 const test = require('node:test');
 const assert = require('node:assert');
 const C = require('../download/wfm/js/wfm-core.js');
