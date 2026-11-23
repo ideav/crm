@@ -1,5 +1,5 @@
 // Мерка к ideav/backlogram#999: бейджи .sl-tag на странице решения — ссылки в каталог с фильтром.
-// rules: none
+// rules: none (defect #5656)
 const assert = require('assert');
 const path = require('path');
 const C = require(path.join(__dirname, '..', 'download', 'solutions', 'app.js'));
