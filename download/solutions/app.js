@@ -218,6 +218,34 @@
     if (f.q) { var n = qi.value.length; qi.focus(); qi.setSelectionRange(n, n); }
   }
 
+  // картинка и схема решения открываются во весь экран поверх страницы (backlogram#999); закрыть — клик или Esc
+  function zoomable(imgs) {
+    Array.prototype.forEach.call(imgs, function (img) {
+      img.classList.add('sl-zoomable');
+      img.setAttribute('tabindex', '0');
+      img.setAttribute('role', 'button');
+      img.title = 'Открыть крупно';
+      img.onclick = function () { zoomOpen(img); };
+      img.onkeydown = function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); zoomOpen(img); } };
+    });
+  }
+  function zoomOpen(img) {
+    var box = document.createElement('div');
+    box.className = 'sl-zoom';
+    box.setAttribute('role', 'dialog');
+    box.setAttribute('aria-label', img.alt || 'Изображение');
+    var big = document.createElement('img');
+    big.src = img.currentSrc || img.src;
+    big.alt = img.alt || '';
+    box.appendChild(big);
+    var prev = document.body.style.overflow;
+    function close() { box.remove(); document.body.style.overflow = prev; document.removeEventListener('keydown', onKey); img.focus(); }
+    function onKey(e) { if (e.key === 'Escape') close(); }
+    box.onclick = close;
+    document.addEventListener('keydown', onKey);
+    document.body.style.overflow = 'hidden';
+    document.body.appendChild(box);
+  }
   function viewSolution(s) {
     if (!s) { app.innerHTML = '<p>Такого решения нет в каталоге. <a href="' + CATALOG + '">Вернуться к каталогу</a></p>'; return; }
     var demo = s.demo && !s.demoSoon ? '<a class="sl-btn" href="' + esc(s.demo) + '" target="_blank" rel="noopener">Попробовать демо</a>'
@@ -235,6 +263,7 @@
     if (s.steps.length) h += '<h2 class="sl-h2">Как переезжаем</h2><ol class="sl-steps">' + s.steps.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ol>';
     h += Core.schemeFigure(s.scheme, s.title);
     app.innerHTML = h;
+    zoomable(app.querySelectorAll('.sl-hero img, .sl-scheme img'));
     document.title = s.title + ' — Решения Интеграм';
   }
 
