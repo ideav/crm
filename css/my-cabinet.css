@@ -399,6 +399,72 @@ button.mc-kpi:hover { border-color: var(--mc-accent); transform: translateY(-1px
     gap: 1rem;
 }
 .mc-content .database-card { margin: 0; }
+/* #5645: карточка базы по блокам — шапка, показатели плитками, «Настройки», низ с сохранением и действиями */
+.mc-content .database-info { display: flex; flex-direction: column; height: 100%; }
+.mc-content .database-stats {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: .5rem;
+    margin-top: .9rem;
+}
+.mc-content .database-stat {
+    display: flex;
+    flex-direction: column;
+    gap: .15rem;
+    min-width: 0;
+    padding: .5rem .7rem;
+    background: var(--mc-surface-2);
+    border: 1px solid var(--mc-border);
+    border-radius: var(--mc-radius-sm);
+    font-size: .75rem;
+    color: var(--mc-muted);
+}
+.mc-content .database-stat strong { font-size: .95rem; font-weight: 650; color: var(--mc-text); overflow-wrap: anywhere; }
+.mc-content .database-stat-expired { border-color: var(--mc-danger); }
+.mc-content .database-card-new .database-stat { background: var(--mc-surface); }
+.mc-content .database-settings {
+    display: flex;
+    flex-direction: column;
+    gap: .75rem;
+    margin: 1.1rem 0;
+    padding-top: 1rem;
+    border-top: 1px solid var(--mc-border);
+}
+.mc-content .database-section-title {
+    font-size: .75rem;
+    font-weight: 650;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: var(--mc-muted);
+}
+.mc-content .database-settings-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: .75rem 1.5rem; }
+.mc-content .database-settings-row .database-field-group { flex: 0 0 11rem; }
+.mc-content .database-settings-row .database-field-input-short { max-width: none; }
+.mc-content .database-checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: .45rem;
+    min-height: 2.1rem;
+    font-size: .875rem;
+    color: var(--mc-text);
+    cursor: pointer;
+}
+.mc-content .database-card-footer {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: .5rem;
+    margin-top: auto;
+    padding-top: 1rem;
+    border-top: 1px solid var(--mc-border);
+}
+.mc-content .database-card-footer .database-save-row { min-height: 0; }
+.mc-content .database-card-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-left: auto; }
+@media (max-width: 600px) {
+    .mc-content .database-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .mc-content .database-card-actions { margin-left: 0; }
+}
 .mc-content .database-name-link { font-size: 1.1rem; font-weight: 700; color: var(--mc-text); }
 .mc-content .database-name-link:hover { color: var(--mc-accent); }
 .mc-content .databases-controls { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
@@ -488,8 +554,7 @@ button.mc-kpi:hover { border-color: var(--mc-accent); transform: translateY(-1px
 @media (max-width: 640px) { .partner-frow { grid-template-columns: 1fr 50px; } .partner-ev { grid-template-columns: 1fr; } }
 
 /* #5573: свой домен базы (карточка базы в ЛК) */
-.database-domain { margin-top: 0.75rem; }
-.database-domain-body { margin-top: 0.5rem; padding: 0.75rem; border: 1px solid var(--border-color, #e0e0e0); border-radius: 8px; }
+.database-domain-body { margin-top: 0.75rem; padding: 0.75rem; border: 1px solid var(--border-color, #e0e0e0); border-radius: 8px; }
 .database-domain-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-top: 0.5rem; }
 .database-domain-input { flex: 1 1 14rem; min-width: 0; }
 .database-domain-note { margin: 0.25rem 0; font-size: 0.9rem; color: var(--text-secondary, #555); overflow-wrap: anywhere; }
