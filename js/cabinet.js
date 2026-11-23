@@ -863,14 +863,14 @@ class CabinetController {
                         ${createdDate ? `<span class="database-created-date">Создана: ${this.escapeHtml(createdDate)}</span>` : ''}
                     </div>
                     <div class="database-stats">
-                        <span class="database-stat"><span>Шаблон:</span> <strong>${this.escapeHtml(templateLabel)}</strong></span>
-                        <span class="database-stat"><span>Расход:</span> <strong>${recordCount}</strong></span>
-                        <span class="database-stat" title="Расход ИИ в единицах тарифа за текущий период"><span>ИИ-токены:</span> <strong>${this.escapeHtml(aiUnits)}</strong></span>
-                        <span class="database-stat" title="${this.escapeHtml(aiUsageTitle)}"><span>ИИ:</span> <strong>${this.escapeHtml(aiUsageText)}</strong></span>
-                        <span class="database-stat" title="Запуски ИИ-агента за текущий период"><span>Запуски агента:</span> <strong>${this.escapeHtml(agentRuns)}</strong></span>
-                        <span class="database-stat database-stat-right"><span>Оплачено до:</span> <strong class="${planDatePassed ? 'plan-date-expired' : ''}">${planDate}</strong></span>
+                        <div class="database-stat"><span>Шаблон:</span> <strong>${this.escapeHtml(templateLabel)}</strong></div>
+                        <div class="database-stat"><span>Расход:</span> <strong>${recordCount}</strong></div>
+                        <div class="database-stat ${planDatePassed ? 'database-stat-expired' : ''}"><span>Оплачено до:</span> <strong class="${planDatePassed ? 'plan-date-expired' : ''}">${planDate}</strong></div>
+                        <div class="database-stat database-stat-wide" title="${this.escapeHtml(aiUsageTitle)}"><span>ИИ:</span> <strong>${this.escapeHtml(aiUsageText)}</strong></div>
+                        <div class="database-stat" title="Запуски ИИ-агента за текущий период"><span>Запуски агента:</span> <strong>${this.escapeHtml(agentRuns)}</strong></div>
                     </div>
-                    <div class="database-edit-fields">
+                    <div class="database-settings">
+                        <div class="database-section-title">Настройки</div>
                         <div class="database-field-group">
                             <label class="database-field-label">Описание</label>
                             <textarea class="database-field-input database-description-input" rows="2" data-field="t276">${this.escapeHtml(description)}</textarea>
@@ -879,26 +879,28 @@ class CabinetController {
                             <label class="database-field-label">Публичное имя</label>
                             <input type="text" class="database-field-input database-public-name-input" maxlength="127" pattern="[A-Za-zА-Яа-яЁё0-9\\s.,!?;:—…«»'&quot;\\-]+" data-field="t305" data-dbname="${this.escapeHtml(db.DB)}" value="${this.escapeHtml(publicName)}">
                         </div>
-                        <div class="database-field-group database-field-group-row database-inline-row">
-                            <label class="database-field-label database-inline-label">
+                        <div class="database-settings-row">
+                            <div class="database-field-group">
+                                <label class="database-field-label">Время жизни токена, минут</label>
+                                <input type="number" class="database-field-input database-field-input-short" min="0" step="1" data-field="t369" value="${this.escapeHtml(tokenLifetime)}" autocomplete="off">
+                            </div>
+                            <label class="database-checkbox-label">
                                 <input type="checkbox" class="database-checkbox" data-field="t367"${registrationOpen ? ' checked' : ''}>
                                 Регистрация открыта
                             </label>
-                            <label class="database-field-label database-inline-label">
-                                Время жизни токена, минут
-                                <input type="number" class="database-field-input database-field-input-short" min="0" step="1" data-field="t369" value="${this.escapeHtml(tokenLifetime)}" autocomplete="off">
-                            </label>
                         </div>
+                    </div>
+                    <div class="database-card-footer">
                         <div class="database-save-row">
                             <button type="button" class="btn-primary btn-small database-save-btn" style="display:none">Сохранить</button>
                             <span class="database-save-status"></span>
+                        </div>
+                        <div class="database-card-actions">
+                            <button type="button" class="btn-secondary btn-small database-domain-toggle" title="Открывать базу по своему адресу, например crm.company.ru">Свой домен</button>
                             <button type="button" class="btn-secondary btn-small database-restore-admin-btn" title="Если вы смогли удалить администратора или сменили ему роль, восстановите её здесь">Восстановить админа</button>
                         </div>
-                        <div class="database-domain">
-                            <button type="button" class="btn-secondary btn-small database-domain-toggle" title="Открывать базу по своему адресу, например crm.company.ru">Свой домен</button>
-                            <div class="database-domain-body" hidden></div>
-                        </div>
                     </div>
+                    <div class="database-domain-body" hidden></div>
                 </div>
             `;
 

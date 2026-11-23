@@ -72,9 +72,10 @@ test('#5206: счётчики ИИ-токенов и запусков агент
         { DB: 'alpha', DBID: '101', Count: '9', AIUnits: '1234', AgentRuns: '17' },
         { DB: 'beta', DBID: '102', Count: '0', AIUnits: '', AgentRuns: '' }
     ]);
-    assert.strictEqual(stat(withCounters, 'ИИ-токены'), '1234');
+    // #5645: отдельной плитки «ИИ-токены» нет — те же единицы показывает «ИИ» (#5637).
+    assert.strictEqual(stat(withCounters, 'ИИ'), '1234 ед.');
     assert.strictEqual(stat(withCounters, 'Запуски агента'), '17');
-    assert.strictEqual(stat(without, 'ИИ-токены'), '0', 'нет счётчика — 0');
+    assert.strictEqual(stat(without, 'ИИ'), '0 ед.', 'нет счётчика — 0');
     assert.strictEqual(stat(without, 'Запуски агента'), '0');
     assert.strictEqual(stat(withCounters, 'Расход'), '9', 'прежняя стата на месте');
 });
