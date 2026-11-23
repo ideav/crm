@@ -921,7 +921,7 @@
                             var cur = currentParams(tgtMeta['28'], 28, x.r);
                             cur['28'] = stripRefTail(cur['28']);
                             var nm = String(cur['100'] || '');
-                            if(!oldCols[nm]){ oldCols[nm] = { id:String(x.i), cur:cur }; }
+                            if(!oldCols[nm]){ oldCols[nm] = { id:String(x.i), cur:cur, ord:parseInt(x.o, 10) || 0 }; }
                         });
                     } else {
                         var qr = await post('_m_new/22', qp);
@@ -956,8 +956,9 @@
                                 track(recId(rcr), 'record');
                                 var dr = firstError(await post('_m_del/' + oc.id, {}));
                                 if(dr){ log('  запрос «' + q.name + '»: прежняя колонка «' + qc.name + '» не удалена — ' + dr, 'warn'); continue; }
-                                restore.push({ kind:'recreate', type:'28', up:String(newQid), id:oc.id, cur:oc.cur });
-                                log('  запрос «' + q.name + '»: колонка «' + qc.name + '» пересоздана на новый источник (встала в конец списка колонок)', 'dim');
+                                restore.push({ kind:'recreate', type:'28', up:String(newQid), id:oc.id, cur:oc.cur, ord:oc.ord });
+                                if(oc.ord){ await post('_m_ord/' + recId(rcr), { order:oc.ord }); } // на место прежней колонки
+                                log('  запрос «' + q.name + '»: колонка «' + qc.name + '» пересоздана на новый источник', 'dim');
                                 continue;
                             }
                             var cset = Object.assign({}, cp); delete cset.up; delete cset.t28;
@@ -1169,6 +1170,9 @@
                     Object.keys(it.cur || {}).forEach(function(k){ if(it.cur[k] !== ''){ rp['t' + k] = it.cur[k]; } });
                     var rres = await post('_m_new/' + it.type, rp);
                     okR = !firstError(rres) && !!recId(rres);
+                    if(okR && it.ord){ await post('_m_ord/' + recId(rres), { order:it.ord }); }
+                    // прежний id свободен (запись удалена при обновлении) — возвращаем его: на колонку могли ссылаться по id
+                    if(okR && it.id && String(recId(rres)) !== String(it.id)){ var ider = firstError(await post('_m_id/' + recId(rres), { new_id:it.id })); if(ider){ log('колонка ' + it.id + ' восстановлена под id ' + recId(rres) + ' — ' + ider, 'warn'); } }
                 }
                 else if(it.kind === 'file'){ okR = it.existed ? await uploadFile(it.root, it.dir ? '/' + it.dir : '', it.name, it.content) : await deleteFile(it.root, it.dir, it.name); }
                 if(!okR){ failed.push(it); log('не удалось вернуть ' + (it.kind === 'file' ? 'файл ' + it.root + '/' + (it.dir ? it.dir + '/' : '') + it.name : it.kind + ' ' + it.id), 'warn'); }

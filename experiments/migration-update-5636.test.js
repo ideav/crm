@@ -62,7 +62,13 @@ function makeCore(name, firstId) {
     core.term = (val, base = 3) => { const id = nid(); terms[id] = { t: String(base), val, unique: '0' }; return id; };
     core.col = (table, t, fa = {}) => { const id = nid(); reqs[id] = { up: String(table), t: String(t), fa: Object.assign({ required: false, multi: false, key: false, alias: null, default: '' }, fa) }; return id; };
     core.ref = (target) => { const hit = Object.keys(refDefs).find((k) => refDefs[k] === String(target)); if (hit) return hit; const id = nid(); refDefs[id] = String(target); return id; };
-    core.rec = (type, up, val, params = {}) => { const id = nid(); records[id] = { type: String(type), up: String(up), val, params: Object.assign({}, params) }; return id; };
+    core.rec = (type, up, val, params = {}) => {
+        const id = nid();
+        const ord = 1 + Math.max(0, ...Object.values(records).filter((r) => r.type === String(type) && r.up === String(up)).map((r) => r.ord || 0));
+        records[id] = { type: String(type), up: String(up), val, params: Object.assign({}, params), ord };
+        return id;
+    };
+    core.ordered = (type, up) => core.of(type, up).sort((a, b) => records[a].ord - records[b].ord);
     core.of = (type, up) => Object.keys(records).filter((id) => records[id].type === String(type) && (up == null || records[id].up === String(up)));
     core.termsNamed = (val) => Object.keys(terms).filter((id) => terms[id].val === val);
     core.colsOf = (table) => Object.keys(reqs).filter((r) => reqs[r].up === String(table));
@@ -96,7 +102,7 @@ function makeCore(name, firstId) {
         let main = rec.val;
         if (rec.type === '28' && reqs[main]) main = main + ':' + core.label(main);
         if (rec.type === '116') main = main + ':' + (terms[main] ? terms[main].val : reqs[main] ? core.label(main) : records[main] ? records[main].val : main);
-        return { i: Number(id), u: Number(rec.up), r: [main].concat(((m && m.reqs) || []).map((q) => cell(q, rec, id))) };
+        return { i: Number(id), u: Number(rec.up), o: rec.ord, r: [main].concat(((m && m.reqs) || []).map((q) => cell(q, rec, id))) };
     }
     function refTargetOf(type, reqId) {
         const s = svcMeta(type);
@@ -135,7 +141,7 @@ function apiGet(core, rel) {
     let ids = core.of(m[1]);
     if (params.has('F_U')) { const fu = params.get('F_U'); ids = fu === '0' ? ids : ids.filter((id) => core.records[id].up === fu); }
     else ids = ids.filter((id) => core.records[id].up === '1');
-    return { json: ids.sort((a, b) => a - b).map(core.row) };
+    return { json: ids.sort((a, b) => (core.records[a].up === core.records[b].up ? core.records[a].ord - core.records[b].ord : a - b)).map(core.row) };
 }
 
 async function apiPost(core, rel, body) {
@@ -177,6 +183,17 @@ async function apiPost(core, rel, body) {
         delete terms[id]; delete refDefs[id]; return { json: { obj: id } };
     }
     if (action === '_m_del') { delete records[id]; return { json: { id } }; }
+    if (action === '_m_ord') { // index.php case "_m_ord": запись встаёт на место order, соседи сдвигаются
+        const r = records[id], n = Math.min(Number(b.order), Math.max(...core.of(r.type, r.up).map((x) => records[x].ord)));
+        core.of(r.type, r.up).forEach((x) => { const o = records[x].ord; if (x !== id && o >= Math.min(r.ord, n) && o <= Math.max(r.ord, n)) records[x].ord += Math.sign(r.ord - n); });
+        r.ord = n; return { json: { id: r.up, obj: r.up } };
+    }
+    if (action === '_m_id') { // index.php case "_m_id": записи даётся заданный свободный id
+        if (records[b.new_id] || terms[b.new_id]) return { raw: 'Новый id занят' };
+        records[b.new_id] = records[id]; delete records[id];
+        Object.values(records).forEach((r) => { if (r.up === String(id)) r.up = String(b.new_id); });
+        return { json: { id: b.new_id, obj: b.new_id } };
+    }
     if (action === '_m_new' || action === '_m_set') {
         if (action === '_m_set' && !records[id]) return { json: [{ error: 'нет записи ' + id }] };
         if (action === '_m_new' && terms[id]) terms[id].isTable = true;
@@ -274,6 +291,7 @@ function etalonV1() {
     x.q = a.rec(22, 1, 'Отметки по линии', { 134: '50' });
     x.qc = a.rec(28, x.q, x.lineCol, { 100: 'Линия' });
     x.qc2 = a.rec(28, x.q, x.valCol, { 100: 'Кол-во', 104: '74' });
+    x.qc3 = a.rec(28, x.q, x.parCol, { 100: 'Параметр' });
     x.guest = a.rec(42, 1, 'Гость', { 135: 'Доступ без входа' });
     a.rec(116, x.guest, x.mark, { 136: '54', 49: '@0' });
     a.rec(116, x.guest, x.lineCol, { 136: '54', 49: '@IN(' + x.L1 + ',' + x.L2 + ')' });
@@ -349,6 +367,8 @@ async function liveClientThenV2() {
     const before = { mark, records: c.of(mark).slice().sort(), cols: c.colsOf(mark).length };
     c.files['download||checklist.js'] = fileOf(c, 'download||checklist.js') + '// починка клиента своим ИИ-чатом\n';
     before.js = c.files['download||checklist.js'];
+    const cq = c.of(22).find((id) => c.records[id].val === 'Отметки по линии');
+    before.cntCol = c.of(28, cq).find((id) => c.records[id].params['100'] === 'Кол-во');
     before.html = c.files['templates||checklist.html'];
     // v2 эталона: новая обязательная колонка, новый справочник с записями, фильтр запроса, ещё право и пункт меню
     const a = x.a;
@@ -383,7 +403,8 @@ test('#5636 п.3: обновление меняет схему клиента н
     const qs = c.of(22).filter((id) => c.records[id].val === 'Отметки по линии');
     assert.strictEqual(qs.length, 1, 'запрос не задвоен');
     const qcols = c.of(28, qs[0]).map((id) => c.records[id]);
-    assert.strictEqual(qcols.length, 2, 'колонки запроса не задвоены');
+    assert.strictEqual(qcols.length, 3, 'колонки запроса не задвоены');
+    assert.deepStrictEqual(c.ordered(28, qs[0]).map((id) => c.records[id].params['100']), ['Линия', 'Кол-во', 'Параметр'], 'пересозданная колонка — на прежнем месте');
     assert.strictEqual(qcols.find((q) => q.params['100'] === 'Линия').params['102'], 'Л1', 'фильтр колонки запроса обновлён');
     const cnt = qcols.find((q) => q.params['100'] === 'Кол-во');
     assert.strictEqual(cnt.val, shift, 'источник колонки запроса — новая колонка клиента');
@@ -409,7 +430,9 @@ test('#5636 п.3: откат обновления возвращает схем�
     assert.deepStrictEqual(c.of(before.mark).slice().sort(), before.records, 'записи клиента на месте');
     const q = c.of(22).find((id) => c.records[id].val === 'Отметки по линии');
     const qcols = c.of(28, q).map((id) => c.records[id]);
-    assert.strictEqual(qcols.length, 2, 'в запросе снова две колонки');
+    assert.strictEqual(qcols.length, 3, 'в запросе снова три колонки');
+    assert.deepStrictEqual(c.ordered(28, q).map((id) => c.records[id].params['100']), ['Линия', 'Кол-во', 'Параметр'], 'порядок колонок — прежний');
+    assert.ok(c.records[before.cntCol] && c.records[before.cntCol].params['100'] === 'Кол-во', 'у колонки «Кол-во» прежний id');
     assert.strictEqual(qcols.find((x) => x.params['100'] === 'Линия').params['102'] || '', '', 'фильтр запроса — как до обновления');
     const cntCol = qcols.find((x) => x.params['100'] === 'Кол-во');
     assert.strictEqual(c.label(cntCol.val), 'Значение', 'источник колонки запроса — прежний');
