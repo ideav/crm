@@ -4648,6 +4648,95 @@ function Report_request_subst($sql)
 	return $out;
 }
 
+# _global_.X в формулах/фильтрах/JOIN/ORDER/GROUP запроса. action и id приходят из пути адреса
+# как есть, user — имя пользователя, поэтому значение — данные: внутри кавычек шаблона
+# экранируется, вне кавычек число или слово [0-9A-Za-z_] идёт как есть, прочее — строкой в кавычках.
+function Report_global_subst($sql)
+{
+	if(is_array($sql))
+	{
+		foreach($sql as $k => $v)
+			$sql[$k] = Report_global_subst($v);
+		return $sql;
+	}
+	if(stripos($sql, "_global_.") === FALSE)
+		return $sql;
+	$len = strlen($sql);
+	$out = "";
+	$quote = "";
+	for($i = 0; $i < $len; )
+	{
+		$c = $sql[$i];
+		if(($c === "_") && preg_match("/\G_global_\.([0-9a-zA-Z\_]+)/i", $sql, $m, 0, $i))
+		{
+			if(isset($GLOBALS["GLOBAL_VARS"][$m[1]]) && is_scalar($GLOBALS["GLOBAL_VARS"][$m[1]]))
+			{
+				$v = (string)$GLOBALS["GLOBAL_VARS"][$m[1]];
+				if($quote !== "")
+					$out .= Sql_escape($v);
+				else
+					$out .= preg_match("/^(-?[0-9]+(\.[0-9]+)?(\s*,\s*-?[0-9]+(\.[0-9]+)?)*|[0-9A-Za-z_]*)$/", $v) ? $v : "'".Sql_escape($v)."'";
+			}
+			else
+				$out .= $m[0];
+			$i += strlen($m[0]);
+			continue;
+		}
+		if($quote !== "")
+		{
+			if(($c === "\\") && ($i + 1 < $len))
+			{
+				$out .= $c.$sql[$i + 1];
+				$i += 2;
+				continue;
+			}
+			if($c === $quote)
+				$quote = "";
+		}
+		elseif(($c === "'") || ($c === '"'))
+			$quote = $c;
+		$out .= $c;
+		$i++;
+	}
+	return $out;
+}
+
+# Текст запроса без содержимого строковых литералов: проверка служебных слов SQL не должна
+# срабатывать на значения в кавычках. Если в тексте есть комментарий (#, --, /*) или литерал
+# не закрыт, границы литералов для MySQL могут быть другими — тогда текст возвращается целиком.
+function Report_sql_outside_literals($sql)
+{
+	$len = strlen($sql);
+	$out = "";
+	$quote = "";
+	for($i = 0; $i < $len; $i++)
+	{
+		$c = $sql[$i];
+		if($quote !== "")
+		{
+			if($c === "\\")
+				$i++;
+			elseif($c === $quote)
+			{
+				if(($i + 1 < $len) && ($sql[$i + 1] === $quote))
+					$i++;
+				else
+				{
+					$quote = "";
+					$out .= $c;
+				}
+			}
+			continue;
+		}
+		if(($c === "'") || ($c === '"'))
+			$quote = $c;
+		elseif(($c === "#") || ((($c === "-") || ($c === "/")) && ($i + 1 < $len) && ($sql[$i + 1] === ($c === "-" ? "-" : "*"))))
+			return $sql;
+		$out .= $c;
+	}
+	return $quote === "" ? $out : $sql;
+}
+
 function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FALSE) # $exe means we must retrieve data at last, not just prep the sql
 {
 	global $blocks, $obj, $z, $args;
@@ -5684,20 +5773,14 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 				if(BuiltIn($builtin) !== $builtin)
 					$field = str_replace($builtin, BuiltIn($builtin), $field);
 			$field = Report_request_subst($field);
-			preg_match_all("/_global_\.([0-9a-zA-Z\_]+)/ims", $field, $builtins);
-			foreach($builtins[1] as $k => $_req)
-				if(isset($GLOBALS["GLOBAL_VARS"][$_req]))
-					$field = str_replace($builtins[0][$k], $GLOBALS["GLOBAL_VARS"][$_req], $field);
+			$field = Report_global_subst($field);
             
 			preg_match_all("/(\[[0-9a-zA-Z\_]+\])/ims", $filter, $builtins);
 			foreach($builtins[0] as $builtin)
 				if(BuiltIn($builtin) != $builtin)
 					$filter = str_replace($builtin, BuiltIn($builtin), $filter);
 			$filter = Report_request_subst($filter);
-			preg_match_all("/_global_\.([0-9a-zA-Z\_]+)/ims", $filter, $builtins);
-			foreach($builtins[1] as $k => $_req)
-				if(isset($GLOBALS["GLOBAL_VARS"][$_req]))
-					$filter = str_replace($builtins[0][$k], $GLOBALS["GLOBAL_VARS"][$_req], $filter);
+			$filter = Report_global_subst($filter);
 			preg_match_all("/_parent_\.([0-9a-zA-Z\_]+)/ims", $filter, $builtins);
 			foreach($builtins[1] as $k => $_req){
 				$parent = $blocks[$cur_block]["PARENT"];
@@ -5725,20 +5808,14 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 				if(BuiltIn($builtin) !== $builtin)
 					$fieldsAll = str_replace($builtin, BuiltIn($builtin), $fieldsAll);
 			$fieldsAll = Report_request_subst($fieldsAll);
-			preg_match_all("/_global_\.([0-9a-zA-Z\_]+)/ims", implode(" ", $fieldsAll), $builtins);
-			foreach($builtins[1] as $k => $_req)
-				if(isset($GLOBALS["GLOBAL_VARS"][$_req]))
-					$fieldsAll = str_replace($builtins[0][$k], $GLOBALS["GLOBAL_VARS"][$_req], $fieldsAll);
+			$fieldsAll = Report_global_subst($fieldsAll);
             
 			preg_match_all("/(\[[0-9a-zA-Z\_]+\])/ims", implode(" ", $joinedOn), $builtins);
 			foreach($builtins[0] as $builtin)
 				if(BuiltIn($builtin) != $builtin)
 					$joinedOn = str_replace($builtin, BuiltIn($builtin), $joinedOn);
 			$joinedOn = Report_request_subst($joinedOn);
-			preg_match_all("/_global_\.([0-9a-zA-Z\_]+)/ims", implode(" ", $joinedOn), $builtins);
-			foreach($builtins[1] as $k => $_req)
-				if(isset($GLOBALS["GLOBAL_VARS"][$_req]))
-					$joinedOn = str_replace($builtins[0][$k], $GLOBALS["GLOBAL_VARS"][$_req], $joinedOn);
+			$joinedOn = Report_global_subst($joinedOn);
             
             $tmp = "";
             foreach($joined as $k => $v)
@@ -5749,29 +5826,19 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 				    foreach($joined as $k => $v)
     					$joined[$k] = str_replace($builtin, BuiltIn($builtin), $joined[$k]);
 			$joined = Report_request_subst($joined);
-			preg_match_all("/_global_\.([0-9a-zA-Z\_]+)/ims", $tmp, $builtins);
-			foreach($builtins[1] as $k => $_req)
-				if(isset($GLOBALS["GLOBAL_VARS"][$_req]))
-				    foreach($joined as $kk => $v)
-    					$joined[$kk] = str_replace($builtins[0][$k], $GLOBALS["GLOBAL_VARS"][$_req], $joined[$kk]);
+			$joined = Report_global_subst($joined);
 
 			preg_match_all("/(\[[0-9a-zA-Z\_]+\])/ims", $masterFilter, $builtins);
 			foreach($builtins[0] as $builtin)
 				if(BuiltIn($builtin) != $builtin)
 					$masterFilter = str_replace($builtin, BuiltIn($builtin), $masterFilter);
 			$masterFilter = Report_request_subst($masterFilter);
-			preg_match_all("/_global_\.([0-9a-zA-Z\_]+)/ims", $masterFilter, $builtins);
-			foreach($builtins[1] as $k => $_req)
-				if(isset($GLOBALS["GLOBAL_VARS"][$_req]))
-					$masterFilter = str_replace($builtins[0][$k], $GLOBALS["GLOBAL_VARS"][$_req], $masterFilter);
+			$masterFilter = Report_global_subst($masterFilter);
 			
 			if(isset($order))
 			{
     			$order = Report_request_subst($order);
-    			preg_match_all("/_global_\.([0-9a-zA-Z\_]+)/ims", $order, $builtins);
-    			foreach($builtins[1] as $k => $_req)
-    				if(isset($GLOBALS["GLOBAL_VARS"][$_req]))
-    					$order = str_replace($builtins[0][$k], $GLOBALS["GLOBAL_VARS"][$_req], $order);
+    			$order = Report_global_subst($order);
     			preg_match_all("/(\[[0-9a-zA-Z\_]+\])/ims", $order, $builtins);
     			foreach($builtins[0] as $builtin)
     				if(BuiltIn($builtin) != $builtin)
@@ -5784,19 +5851,13 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 			if(isset($group))
 			{
     			$group = Report_request_subst($group);
-    			preg_match_all("/_global_\.([0-9a-zA-Z\_]+)/ims", $group, $builtins);
-    			foreach($builtins[1] as $k => $_req)
-    				if(isset($GLOBALS["GLOBAL_VARS"][$_req]))
-    					$group = str_replace($builtins[0][$k], $GLOBALS["GLOBAL_VARS"][$_req], $group);
+    			$group = Report_global_subst($group);
     			preg_match_all("/(\[[0-9a-zA-Z\_]+\])/ims", $group, $builtins);
     			foreach($builtins[0] as $builtin)
     				if(BuiltIn($builtin) != $builtin)
     					$group = str_replace($builtin, BuiltIn($builtin), $group);
     			$groupBy = Report_request_subst($groupBy);
-    			preg_match_all("/_global_\.([0-9a-zA-Z\_]+)/ims", implode(",", $groupBy), $builtins);
-    			foreach($builtins[1] as $k => $_req)
-    				if(isset($GLOBALS["GLOBAL_VARS"][$_req]))
-    					$groupBy = str_replace($builtins[0][$k], $GLOBALS["GLOBAL_VARS"][$_req], $groupBy);
+    			$groupBy = Report_global_subst($groupBy);
     			preg_match_all("/(\[[0-9a-zA-Z\_]+\])/ims", implode(",", $groupBy), $builtins);
     			foreach($builtins[0] as $builtin)
     				if(BuiltIn($builtin) != $builtin)
@@ -5805,19 +5866,13 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 			if(isset($having))
 			{
     			$group = Report_request_subst($group);
-    			preg_match_all("/_global_\.([0-9a-zA-Z\_]+)/ims", $group, $builtins);
-    			foreach($builtins[1] as $k => $_req)
-    				if(isset($GLOBALS["GLOBAL_VARS"][$_req]))
-    					$group = str_replace($builtins[0][$k], $GLOBALS["GLOBAL_VARS"][$_req], $group);
+    			$group = Report_global_subst($group);
     			preg_match_all("/(\[[0-9a-zA-Z\_]+\])/ims", $group, $builtins);
     			foreach($builtins[0] as $builtin)
     				if(BuiltIn($builtin) != $builtin)
     					$group = str_replace($builtin, BuiltIn($builtin), $group);
     			$groupBy = Report_request_subst($groupBy);
-    			preg_match_all("/_global_\.([0-9a-zA-Z\_]+)/ims", implode(",", $groupBy), $builtins);
-    			foreach($builtins[1] as $k => $_req)
-    				if(isset($GLOBALS["GLOBAL_VARS"][$_req]))
-    					$groupBy = str_replace($builtins[0][$k], $GLOBALS["GLOBAL_VARS"][$_req], $groupBy);
+    			$groupBy = Report_global_subst($groupBy);
     			preg_match_all("/(\[[0-9a-zA-Z\_]+\])/ims", implode(",", $groupBy), $builtins);
     			foreach($builtins[0] as $builtin)
     				if(BuiltIn($builtin) != $builtin)
@@ -5825,7 +5880,7 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
 			}
 #			print_r($builtins);die($field);
 # Check if we got an SQL-injection in the Formula or Set field of a report
-			if(preg_match("/(\b(from|select|table)\b|\/\*!)/i", $field.$filter, $match))  # /*!…*/ — версионный комментарий MySQL прячет слова от \b
+			if(preg_match("/(\b(from|select|table)\b|\/\*!)/i", Report_sql_outside_literals($field.$filter), $match))  # /*!…*/ — версионный комментарий MySQL прячет слова от \b
 				die_info(t9n("[RU]Недопустимое значение вычисляемого поля: нельзя использовать служебные слова SQL. Найдено: ".
 				        "[EN]No SQL clause allowed in calculatable fields. Found: ").$match[0]);
 # Check if we got a fields set specified in the SELECT parameter
