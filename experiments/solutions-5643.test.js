@@ -57,6 +57,19 @@ assert.strictEqual(C.buildRequest({ name: ' ', contact: 'a@b.ru' }), null);
 assert.deepStrictEqual(C.buildRequest({ name: 'И', contact: 'k', company: '', solution: '561', comment: '' }), { 'Заявка': 'И', 'Контакт': 'k', 'Решение': 561 });
 assert.strictEqual(C.buildRequest({ name: 'И', contact: 'k', comment: 'x'.repeat(5000) })['Комментарий'].length, 3000);
 
+// картинки: имя файла — только буквы, цифры, дефис; подпись «Автор | Сервис | URL»
+assert.strictEqual(C.safeImg('s977-a1b2c3d4'), 's977-a1b2c3d4');
+assert.strictEqual(C.safeImg('../x'), '');
+assert.strictEqual(C.safeImg('a" onerror="x'), '');
+assert.strictEqual(C.imgUrl('s1-ab12cd34', 's'), '/download/solutions/img/s1-ab12cd34-s.webp');
+assert.strictEqual(C.imgUrl('s1-ab12cd34', 'l'), '/download/solutions/img/s1-ab12cd34-l.webp');
+assert.deepStrictEqual(C.parseCredit('Иван Иванов | Unsplash | https://unsplash.com/photos/abc'), { author: 'Иван Иванов', service: 'Unsplash', url: 'https://unsplash.com/photos/abc' });
+assert.deepStrictEqual(C.parseCredit('Автор | Pexels | javascript:1'), { author: 'Автор', service: 'Pexels', url: '' });
+assert.strictEqual(C.parseCredit(''), null);
+const withImg = C.normalize(row(9, { 'Картинка': 's9-aabbccdd', 'Источник изображения': 'А | Unsplash | https://unsplash.com/photos/x' }));
+assert.strictEqual(withImg.img, 's9-aabbccdd'); assert.strictEqual(withImg.credit.author, 'А');
+assert.strictEqual(C.normalize(row(10, {})).img, ''); assert.strictEqual(C.normalize(row(10, {})).credit, null);
+
 // шаблон: нет фигурных скобок (точки вставки шаблонизатора), скрипт и стиль с версией
 const tpl = fs.readFileSync(path.join(root, 'templates', 'solutions', 'catalog.html'), 'utf8');
 assert.ok(!/[{}]/.test(tpl), 'в шаблоне есть { или }');

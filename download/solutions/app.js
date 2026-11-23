@@ -17,6 +17,18 @@
       var s = String(u == null ? '' : u).trim();
       return /^https?:\/\/[^\s"'<>]+$/i.test(s) ? s : '';
     },
+    // имя файла картинки (без суффикса и расширения): буквы, цифры, дефис
+    safeImg: function (v) {
+      var s = String(v == null ? '' : v).trim();
+      return /^[A-Za-z0-9][A-Za-z0-9-]{2,60}$/.test(s) ? s : '';
+    },
+    // «Автор | Сервис | URL страницы фото» → {author, service, url}; без автора — null
+    parseCredit: function (v) {
+      var p = String(v == null ? '' : v).split('|').map(function (x) { return x.trim(); });
+      if (!p[0]) return null;
+      return { author: p[0], service: p[1] || 'Unsplash', url: Core.safeUrl(p[2]) };
+    },
+    imgUrl: function (name, size) { return '/download/solutions/img/' + name + (size === 'l' ? '-l.webp' : '-s.webp'); },
     refs: function (v) { // null | {id,val} | [{id,val}] → массив
       if (!v) return [];
       return Array.isArray(v) ? v : [v];
@@ -33,6 +45,8 @@
         category: cat ? { id: Number(cat.id), val: cat.val } : null,
         industries: Core.refs(row['Отрасль']).map(function (x) { return { id: Number(x.id), val: x.val }; }),
         platforms: Core.refs(row['Надстройка над']).map(function (x) { return { id: Number(x.id), val: x.val }; }),
+        img: Core.safeImg(row['Картинка']),
+        credit: Core.parseCredit(row['Источник изображения']),
         demo: Core.safeUrl(row['Демо ссылка']),
         demoSoon: Core.isOn(row['Демо скоро']),
         published: Core.isOn(row['Опубликовано']),
@@ -140,7 +154,8 @@
       '<select id="sl-plat" aria-label="Надстройка над">' + opts(state.plats, f.plat, 'Надстройка над: любая') + '</select></div>';
     if (!items.length) h += '<p class="sl-muted">По этим условиям ничего не нашлось. Сбросьте фильтры или <a href="#/apply">опишите задачу в заявке</a>.</p>';
     h += '<div class="sl-grid">' + items.map(function (s) {
-      return '<a class="sl-card" href="#/s/' + s.id + '"><h3>' + esc(s.title) + '</h3><p>' + esc(s.short) + '</p>' +
+      var pic = s.img ? '<img class="sl-thumb" loading="lazy" width="480" height="320" src="' + esc(Core.imgUrl(s.img, 's')) + '" alt="' + esc(s.title) + '">' : '';
+      return '<a class="sl-card" href="#/s/' + s.id + '">' + pic + '<h3>' + esc(s.title) + '</h3><p>' + esc(s.short) + '</p>' +
         tags((s.category ? [s.category] : []).concat(s.platforms)) + '</a>';
     }).join('') + '</div>';
     app.innerHTML = h;
@@ -158,7 +173,12 @@
     if (!s) { app.innerHTML = '<p>Такого решения нет в каталоге. <a href="#/">Вернуться к каталогу</a></p>'; return; }
     var demo = s.demo && !s.demoSoon ? '<a class="sl-btn" href="' + esc(s.demo) + '" target="_blank" rel="noopener">Попробовать демо</a>'
       : s.demoSoon ? '<span class="sl-btn alt" aria-disabled="true">Демо скоро</span>' : '';
-    var h = '<a class="sl-back" href="#/">← Каталог</a><h1 class="sl-h">' + esc(s.title) + '</h1><p class="sl-muted">' + esc(s.short) + '</p>' +
+    var hero = '';
+    if (s.img) {
+      var cr = s.credit ? '<figcaption class="sl-credit">Фото: ' + (s.credit.url ? '<a href="' + esc(s.credit.url) + '" target="_blank" rel="noopener">' + esc(s.credit.author) + ' / ' + esc(s.credit.service) + '</a>' : esc(s.credit.author) + ' / ' + esc(s.credit.service)) + '</figcaption>' : '';
+      hero = '<figure class="sl-hero"><img src="' + esc(Core.imgUrl(s.img, 'l')) + '" width="1600" height="900" alt="' + esc(s.title) + '">' + cr + '</figure>';
+    }
+    var h = '<a class="sl-back" href="#/">← Каталог</a>' + hero + '<h1 class="sl-h">' + esc(s.title) + '</h1><p class="sl-muted">' + esc(s.short) + '</p>' +
       tags((s.category ? [s.category] : []).concat(s.industries, s.platforms));
     h += '<div class="sl-actions">' + demo + '<a class="sl-btn' + (demo ? ' alt' : '') + '" href="#/apply/' + s.id + '">' + (s.demo && !s.demoSoon ? 'Оставить заявку' : 'Запросить демо') + '</a></div>';
     h += '<h2 class="sl-h2">Какую боль закрывает</h2><p>' + esc(s.pain).replace(/\n+/g, '</p><p>') + '</p>';
