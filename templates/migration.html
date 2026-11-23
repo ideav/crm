@@ -50,6 +50,7 @@
                 <div class="mig-opts" id="mig-export-opts">
                     <label><input type="checkbox" class="mig-exp" data-k="data" checked> данные таблиц</label>
                     <label><input type="checkbox" class="mig-exp" data-k="queries" checked> запросы</label>
+                    <label><input type="checkbox" class="mig-exp" data-k="roles" checked> роли и права</label>
                     <label><input type="checkbox" class="mig-exp" data-k="users" checked> пользователи</label>
                     <label><input type="checkbox" class="mig-exp" data-k="menus" checked> меню</label>
                     <label><input type="checkbox" class="mig-exp" data-k="files" checked> файлы (шаблоны/скрипты)</label>
@@ -59,7 +60,7 @@
                         <input type="checkbox" id="mig-obfuscate"> <b>обфускация данных</b> (обезличить суммы, названия и тексты)
                     </label>
                 </div>
-                <div class="mig-note">Переносятся: таблицы с подписями и свойствами колонок, ссылками и подчинёнными таблицами, их записи, запросы со всеми полями колонок (фильтры, функции, форматы, «скрыть», сортировка, SET). Не переносятся: роли и их права, пароли пользователей, служебные объекты с ID ниже порога. Пользователь получает роль по её ID в базе-приёмнике.</div>
+                <div class="mig-note">Переносятся: таблицы с подписями и свойствами колонок, ссылками и подчинёнными таблицами, их записи, запросы со всеми полями колонок (фильтры, функции, форматы, «скрыть», сортировка, SET), роли с правами на объекты и пунктами меню. Не переносятся: пароли пользователей, служебные объекты с ID ниже порога. Служебная роль пользователя (ID ниже порога) берётся по ID, перенесённая — по новому ID.</div>
                 <textarea class="mig-json" id="mig-export-json" placeholder="Здесь появится JSON конфигурации…" readonly></textarea>
                 <div class="mig-summary" id="mig-export-summary"></div>
             </div>
@@ -68,9 +69,15 @@
         <div class="mig-card">
             <h2><i class="pi pi-upload"></i> 2. Импорт / развёртывание</h2>
             <div class="mig-body">
+                <div class="mig-opts" id="mig-mode-opts">
+                    <label title="База пустая или без этих таблиц: всё создаётся заново; занятое имя получает суффикс."><input type="radio" name="mig-mode" id="mig-mode-install" checked> <b>установка</b> в новую базу</label>
+                    <label title="База уже работает на прошлой версии пакета: таблицы, колонки, запросы, роли и меню сопоставляются по именам и обновляются, записи базы остаются."><input type="radio" name="mig-mode" id="mig-mode-update"> <b>обновление</b> этой базы (данные базы сохраняются)</label>
+                </div>
                 <div class="mig-opts" id="mig-import-opts">
-                    <label><input type="checkbox" class="mig-imp" data-k="tables" checked> таблицы+данные</label>
+                    <label><input type="checkbox" class="mig-imp" data-k="tables" checked> таблицы</label>
+                    <label><input type="checkbox" class="mig-imp" data-k="data" checked> записи таблиц</label>
                     <label><input type="checkbox" class="mig-imp" data-k="queries" checked> запросы</label>
+                    <label><input type="checkbox" class="mig-imp" data-k="roles" checked> роли и права</label>
                     <label><input type="checkbox" class="mig-imp" data-k="menus" checked> меню</label>
                     <label><input type="checkbox" class="mig-imp" data-k="files" checked> файлы (шаблоны/скрипты)</label>
                     <label><input type="checkbox" class="mig-imp" data-k="users"> пользователи</label>
@@ -82,7 +89,7 @@
                     <button class="mig-btn" id="mig-use-export-btn" type="button"><i class="pi pi-arrow-up"></i> Взять из экспорта выше</button>
                     <button class="mig-btn mig-btn-primary" id="mig-import-btn" type="button"><i class="pi pi-play"></i> Развернуть на этой БД</button>
                 </div>
-                <div class="mig-note">Термины переиспользуются, если свободны; занятые получают суффикс, чтобы не было конфликта имён и полей. Пароли не переносятся — импортированным пользователям нужно задать пароль.</div>
+                <div class="mig-note">Установка: термины переиспользуются, если свободны; занятые получают суффикс, чтобы не было конфликта имён и полей. Обновление: таблица, колонка, запрос, роль и пункт меню с тем же именем обновляются на месте, недостающие добавляются; записи пакета попадают только в новые таблицы, записи базы не трогаются; колонки и таблицы, которых нет в пакете, остаются; смена типа колонки не выполняется и отмечается в журнале. В файлах экранов имя базы-источника и ID её таблиц, колонок и запросов заменяются на здешние, каждая замена — в журнале. Пароли не переносятся — импортированным пользователям нужно задать пароль.</div>
             </div>
         </div>
 
@@ -93,7 +100,7 @@
                 <div class="mig-row" style="margin-top:8px">
                     <button class="mig-btn mig-btn-danger" id="mig-rollback-btn" type="button" disabled><i class="pi pi-trash"></i> Удалить объекты последнего импорта</button>
                 </div>
-                <div class="mig-note">Удаляются все объекты и записи с ID ≥ ID первого созданного при импорте — записи, затем колонки, затем типы; несколько циклов с корректной обработкой ссылок (останов, если цикл ничего не удалил или циклов больше 100). Перед таблицей снимается её ref-тип (referenced), если он создан этим же импортом.</div>
+                <div class="mig-note">Удаляются все объекты и записи с ID ≥ ID первого созданного при импорте — записи, затем колонки, затем типы; несколько циклов с корректной обработкой ссылок (останов, если цикл ничего не удалил или циклов больше 100). Перед таблицей снимается её ref-тип (referenced), если он создан этим же импортом. Сначала возвращаются прежние значения изменённых объектов (свойства колонок, реквизиты запросов, прав и меню) и прежнее содержимое перезаписанных файлов; файлы, которых до импорта не было, удаляются.</div>
             </div>
         </div>
 
@@ -193,7 +200,7 @@
         if(obfuscate && !OBF){ log('Модуль обфускации не загружен (js/migr-obfuscate.js) — экспорт без обезличивания.', 'warn'); obfuscate = false; }
         el('mig-export-btn').disabled = true;
         log('Экспорт: порог служебных ID < ' + threshold + (obfuscate ? '; обфускация ВКЛ (≤' + OBF.OBF_MAX_RECORDS + ' записей/таблицу)' : ''), 'dim');
-        var pkg = { kind:'integram-migration', version:1, created_at: nowIso(), source_db: DB, service_max: threshold, obfuscated: obfuscate, tables:[], queries:[], users:[], menus:[], files:[] };
+        var pkg = { kind:'integram-migration', version:1, created_at: nowIso(), source_db: DB, service_max: threshold, obfuscated: obfuscate, tables:[], queries:[], roles:[], users:[], menus:[], files:[] };
         try{
             // --- tables + records ---
             var meta = await getJson('metadata');
@@ -247,6 +254,22 @@
                     log('запрос «' + q.r[0] + '» (id ' + q.i + '): колонок ' + columns.length, 'ok');
                 }
             }
+            // --- roles (type 42) with grants (116, up = role); служебные роли (< порога) есть в каждой базе (issue #5636) ---
+            if(opt.roles){
+                var allR = await getJson('object/42?JSON_OBJ&LIMIT=0,100000');
+                var rlist = (Array.isArray(allR) ? allR : []).filter(function(r){ return parseInt(r.i, 10) >= threshold; });
+                for(var rj = 0; rj < rlist.length; rj++){
+                    var ro = rlist[rj];
+                    var gl = await getJson('object/116?JSON_OBJ&F_U=' + ro.i + '&LIMIT=0,100000');
+                    var grants = (Array.isArray(gl) ? gl : []).map(function(g){
+                        var ov = String(g.r[0] || '');
+                        var p = ov.indexOf(':');
+                        return { old_id:String(g.i), obj_old_id: p > -1 ? ov.slice(0, p) : ov, obj_name: p > -1 ? ov.slice(p + 1) : '', fields:recordFields(metaById['116'], g.r) };
+                    });
+                    pkg.roles.push({ old_id:String(ro.i), name:String(ro.r[0] || ''), fields:recordFields(metaById['42'], ro.r), grants:grants });
+                    log('роль «' + ro.r[0] + '» (id ' + ro.i + '): прав ' + grants.length, 'ok');
+                }
+            }
             // --- users (type 18), excluding the db-name owner ---
             if(opt.users){
                 var allU = await getJson('object/18?JSON_OBJ&LIMIT=0,100000');
@@ -264,12 +287,16 @@
             if(opt.menus){
                 var meta151 = (Array.isArray(meta) ? meta : []).filter(function(x){ return String(x.id) === '151'; })[0];
                 var reqIdx = menuReqIndex(meta151);
-                var allM = await getJson('object/151?JSON_OBJ&F_U=145&LIMIT=0,100000');
-                (Array.isArray(allM) ? allM : []).forEach(function(m){
-                    if(parseInt(m.i, 10) < threshold){ return; }
-                    pkg.menus.push({ old_id:String(m.i), up:String(m.u), name:String(m.r[0] || ''), href:String(reqIdx.href > -1 ? (m.r[reqIdx.href] || '') : ''), icon:String(reqIdx.icon > -1 ? (m.r[reqIdx.icon] || '') : '') });
-                    log('меню «' + m.r[0] + '» (id ' + m.i + ')', 'ok');
-                });
+                // меню подчинено роли: пункты администратора и пункты перенесённых ролей (issue #5636)
+                var menuOwners = ['145'].concat(pkg.roles.map(function(r){ return r.old_id; }));
+                for(var mo = 0; mo < menuOwners.length; mo++){
+                    var allM = await getJson('object/151?JSON_OBJ&F_U=' + menuOwners[mo] + '&LIMIT=0,100000');
+                    (Array.isArray(allM) ? allM : []).forEach(function(m){
+                        if(parseInt(m.i, 10) < threshold){ return; }
+                        pkg.menus.push({ old_id:String(m.i), up:String(m.u), name:String(m.r[0] || ''), href:String(reqIdx.href > -1 ? (m.r[reqIdx.href] || '') : ''), icon:String(reqIdx.icon > -1 ? (m.r[reqIdx.icon] || '') : '') });
+                        log('меню «' + m.r[0] + '» (id ' + m.i + ')', 'ok');
+                    });
+                }
             }
             // --- files (templates + download), HTML-scraped ---
             if(opt.files){
@@ -285,7 +312,7 @@
             var json = JSON.stringify(pkg, null, 2);
             el('mig-export-json').value = json;
             el('mig-download-btn').disabled = false;
-            el('mig-export-summary').innerHTML = 'Готово: таблиц <b>' + pkg.tables.length + '</b>, запросов <b>' + pkg.queries.length + '</b>, пользователей <b>' + pkg.users.length + '</b>, меню <b>' + pkg.menus.length + '</b>, файлов <b>' + pkg.files.length + '</b>. Размер JSON: <b>' + Math.round(json.length / 1024) + ' КБ</b>.' + (obfuscate ? ' <span class="mig-badge">обезличено</span> справочников как есть: <b>' + dictKept.length + '</b>.' : '');
+            el('mig-export-summary').innerHTML = 'Готово: таблиц <b>' + pkg.tables.length + '</b>, запросов <b>' + pkg.queries.length + '</b>, ролей <b>' + pkg.roles.length + '</b>, пользователей <b>' + pkg.users.length + '</b>, меню <b>' + pkg.menus.length + '</b>, файлов <b>' + pkg.files.length + '</b>. Размер JSON: <b>' + Math.round(json.length / 1024) + ' КБ</b>.' + (obfuscate ? ' <span class="mig-badge">обезличено</span> справочников как есть: <b>' + dictKept.length + '</b>.' : '');
             log('Экспорт завершён.', 'ok');
         }catch(err){
             log('Ошибка экспорта: ' + err.message, 'err');
@@ -351,6 +378,24 @@
         return {};
     }
 
+    // Обновление (issue #5636): колонка этой базы, соответствующая колонке пакета, — по подписи,
+    // иначе по имени термина.
+    function colLabel(r){ return (r.field_attrs && r.field_attrs.alias) ? String(r.field_attrs.alias) : String(r.val); }
+    function findColumn(tgtT, c, used){
+        var reqs = (tgtT.reqs || []).filter(function(r){ return !used[String(r.id)]; });
+        return reqs.filter(function(r){ return colLabel(r) === String(c.name); })[0]
+            || reqs.filter(function(r){ return String(r.val) === String(c.term_name || c.name) && !(r.field_attrs && r.field_attrs.alias); })[0]
+            || null;
+    }
+    function attrsDiffer(hit, c){
+        var o = hit.field_attrs || {}, n = c.field_attrs || {};
+        if(colLabel(hit) !== String(c.name)){ return true; }
+        if(!c.field_attrs){ return false; }
+        function b(x){ return !!x; }
+        return String(o['default'] || '') !== String(n['default'] || '') || b(o.multi) !== b(n.multi) || b(o.key) !== b(n.key)
+            || b(o.required) !== b(n.required) || JSON.stringify(o.action || null) !== JSON.stringify(n.action || null);
+    }
+
     // Порядок записей: таблица после родительских (подчинённая под записью родителя), по
     // возможности — после таблиц, на которые ссылается. Петли ссылок разрешаются дописью.
     function tableImportOrder(tables, pkgTables){
@@ -407,16 +452,122 @@
 
     function stripRefId(v){ var s = String(v || ''); return /^\d+:/.test(s) ? s.slice(s.indexOf(':') + 1) : s; }
 
+    function stripRefTail(v){ var s = String(v || ''); return /^\d+:/.test(s) ? s.slice(0, s.indexOf(':')) : s; }
+
+    function reEsc(s){ return String(s).replace(/[.*+?^$()|[\]\\]/g, '\\$&').replace(/[{}]/g, '\\$&'); }
+
+    // Текст файла экрана (issue #5636): экран, собранный в базе-источнике, зашивает её имя
+    // («/src/», «/download/src/», 'src') и id её таблиц, колонок и запросов. Заменяются:
+    //  - имя базы в адресе и в строке-литерале;
+    //  - id в адресах API (report/N, object/N, edit_obj/N, dash/N, _m_*/N, _d_*/N) и в
+    //    именах полей tN, F_N, FR_N — любые перенесённые объекты;
+    //  - отдельное число в коде (T = 464, line: 466) — только id таблицы, колонки или запроса
+    //    не ниже порога, и не число с единицей измерения (500px, 300ms).
+    // Возвращает текст и список замен для журнала; адреса на объекты источника, которых нет
+    // в пакете, попадают в missing.
+    function remapFileContent(text, srcDb, dstDb, idMap, schemaIds, serviceMax, isCode){
+        var s = String(text), hits = [], missing = [];
+        function note(list, item){ if(list.indexOf(item) === -1){ list.push(item); } }
+        if(srcDb && dstDb && srcDb !== dstDb){
+            var e = reEsc(srcDb);
+            s = s.replace(new RegExp('/' + e + '(?=[/?#"\'\\s]|$)', 'g'), function(){ note(hits, '/' + srcDb + ' → /' + dstDb); return '/' + dstDb; });
+            s = s.replace(new RegExp('([\'"])' + e + '\\1', 'g'), function(all, q){ note(hits, q + srcDb + q + ' → ' + q + dstDb + q); return q + dstDb + q; });
+        }
+        function mapId(id){ return idMap[id] && String(idMap[id]) !== String(id) ? String(idMap[id]) : null; }
+        s = s.replace(/\b(report|object|edit_obj|dash|_m_[a-z]+|_d_[a-z_]+)\/(\d+)\b/g, function(all, kind, id){
+            var n = mapId(id);
+            if(n){ note(hits, all + ' → ' + kind + '/' + n); return kind + '/' + n; }
+            if(!idMap[id] && parseInt(id, 10) >= serviceMax){ note(missing, all); }
+            return all;
+        });
+        s = s.replace(/\b(t|F_|FR_)(\d+)\b/g, function(all, pre, id){
+            var n = schemaIds[id] ? mapId(id) : null;
+            if(n){ note(hits, all + ' → ' + pre + n); return pre + n; }
+            return all;
+        });
+        if(isCode){
+            s = s.replace(/(^|[^\w.$\/#-])(\d+)(?![\w.%$])/g, function(all, lead, id){
+                if(!schemaIds[id] || parseInt(id, 10) < serviceMax){ return all; }
+                var n = mapId(id);
+                if(!n){ return all; }
+                note(hits, id + ' → ' + n);
+                return lead + n;
+            });
+        }
+        return { text:s, hits:hits, missing:missing };
+    }
+    // В html заменяем отдельные числа только внутри script: разметка (width="500") — не код.
+    function remapFile(f, srcDb, dstDb, idMap, schemaIds, serviceMax){
+        var name = String(f.name || '').toLowerCase();
+        var isJs = /\.(js|mjs)$/.test(name);
+        if(!isJs && !/\.(html?|css|json|txt|md)$/.test(name)){ return { text:f.content, hits:[], missing:[] }; }
+        var base = remapFileContent(f.content, srcDb, dstDb, idMap, schemaIds, serviceMax, isJs);
+        if(isJs || !/\.html?$/.test(name)){ return base; }
+        var hits = base.hits.slice();
+        var text = base.text.replace(/(<script\b[^>]*>)([\s\S]*?)(<\/script>)/gi, function(all, open, body, close){
+            var r = remapFileContent(body, null, null, idMap, schemaIds, serviceMax, true);
+            r.hits.forEach(function(h){ if(hits.indexOf(h) === -1){ hits.push(h); } });
+            return open + r.text + close;
+        });
+        return { text:text, hits:hits, missing:base.missing };
+    }
+
+    // Маска права (t49): id записей в @N, !@N, @IN(a,b) и чистый список id — новыми (issue #5636).
+    function remapMask(v, idMap){
+        var s = String(v == null ? '' : v);
+        if(/^\d+(,\d+)*$/.test(s)){ return remapIdList(s, idMap); }
+        return s.replace(/(@IN\()([\d,\s]+)(\))/gi, function(all, a, list, b){
+            return a + list.split(',').map(function(x){ x = x.trim(); return idMap[x] || x; }).join(',') + b;
+        }).replace(/(!?@)(\d+)\b/g, function(all, a, id){ return a + (idMap[id] || id); });
+    }
+
+    // Текущие значения записи по id реквизита (ссылка — id цели), главное значение — под ключом типа.
+    function currentParams(metaT, typeId, r){
+        var out = {};
+        out[String(typeId)] = String(r && r[0] != null ? r[0] : '');
+        ((metaT && metaT.reqs) || []).forEach(function(req, i){
+            if(req.arr_id){ return; }
+            var v = r ? r[i + 1] : null;
+            v = v == null ? '' : String(v);
+            if(req.ref && /^\d+(,\d+)*:/.test(v)){ v = v.slice(0, v.indexOf(':')); }
+            out[String(req.id)] = v;
+        });
+        return out;
+    }
+
+    // Файл из dir_admin: найденный отдаётся вложением, иначе — текст «Файл не найден».
+    async function readFile(root, dir, name){
+        var res = await fetch(apiUrl('dir_admin/?' + root + '=1&add_path=' + encodeURIComponent(dir ? '/' + dir : '') + '&gf=' + encodeURIComponent(name)), { credentials:'same-origin' });
+        var cd = res.headers && res.headers.get ? (res.headers.get('Content-Disposition') || '') : '';
+        var txt = await res.text();
+        return { exists: res.ok && /attachment/i.test(cd), content: txt };
+    }
+    async function deleteFile(root, dir, name){
+        var fd = new FormData();
+        fd.append(root, '1');
+        fd.append('add_path', dir ? '/' + dir : '');
+        fd.append('del[]', name);
+        fd.append('delete', '1');
+        fd.append('_xsrf', XSRF);
+        fd.append('token', TOKEN);
+        var res = await fetch(apiUrl('dir_admin/'), { method:'POST', credentials:'same-origin', body: fd });
+        return res.ok;
+    }
+
     // Реквизиты записи запроса или колонки запроса: ссылка на перенесённую запись — новым id,
     // остальные ссылки — текстом (ядро находит запись по значению), прочее — как есть.
-    function applyRecordFields(params, fields, known, idMap){
+    // svcMax (обновление, issue #5636): _m_set не ищет ссылку по тексту, как _m_new, а требует id —
+    // ссылка на служебную запись (функция, формат: id ниже порога, одинаковы в каждой базе) уходит id.
+    function applyRecordFields(params, fields, known, idMap, svcMax){
         Object.keys(fields || {}).forEach(function(reqId){
             if(known && Object.keys(known).length && !known[reqId]){ return; }
             var f = fields[reqId];
             var v = f.value;
             if(f.ref_id != null){
-                var ids = String(f.ref_id).split(',').map(function(o){ return idMap[o]; });
+                var oldIds = String(f.ref_id).split(',');
+                var ids = oldIds.map(function(o){ return idMap[o]; });
                 if(ids.every(Boolean)){ v = ids.join(','); }
+                else if(svcMax && oldIds.every(function(o){ return /^\d+$/.test(o) && parseInt(o, 10) < svcMax; })){ v = oldIds.join(','); }
             }
             params['t' + reqId] = v;
         });
@@ -470,27 +621,66 @@
         if(!pkg || pkg.kind !== 'integram-migration'){ log('Это не пакет integram-migration.', 'err'); return; }
         var opt = {};
         document.querySelectorAll('.mig-imp').forEach(function(c){ opt[c.getAttribute('data-k')] = c.checked; });
+        if(opt.data === undefined){ opt.data = true; }
+        var update = !!(el('mig-mode-update') && el('mig-mode-update').checked);
+        if(update && pkg.source_db && pkg.source_db === DB){ log('Пакет выгружен из этой же базы — обновлять её им нечем.', 'err'); return; }
         el('mig-import-btn').disabled = true;
+        log('Режим: ' + (update ? 'обновление этой базы — данные базы сохраняются' : 'установка'), 'dim');
 
         var created = [];             // { id, kind }  kind: 'record' | 'req' | 'type'
+        var restore = [];             // прежнее состояние изменённых объектов: { kind:'set'|'attrs'|'file', … }
         var idMap = {};               // old table/req/record id -> new id
-        function track(id, kind){ if(id != null && id !== '' && id !== 0){ created.push({ id:String(id), kind:kind }); } }
+        var schemaIds = {};           // old id таблиц, колонок и запросов — для подмены в файлах
+        var trackedIds = {};
+        function track(id, kind){ if(id != null && id !== '' && id !== 0 && !trackedIds[String(id)]){ trackedIds[String(id)] = true; created.push({ id:String(id), kind:kind }); } }
+        // _m_set существующей записи с запоминанием прежних значений для отката
+        var savedKeys = {};
+        async function setExisting(id, params, old){
+            var back = {}, changed = {}, any = false;
+            Object.keys(params).forEach(function(k){
+                var reqId = k.replace(/^t/, '');
+                var was = old && old[reqId] != null ? String(old[reqId]) : '';
+                if(String(params[k]) === was){ return; }
+                changed[k] = params[k]; any = true;
+                if(!savedKeys[id + '|' + k]){ savedKeys[id + '|' + k] = true; back[k] = was; }
+            });
+            if(!any){ return false; }
+            var r = await post('_m_set/' + id, changed);
+            var e = firstError(r);
+            if(e){ Object.keys(back).forEach(function(k){ delete savedKeys[id + '|' + k]; }); log('  запись ' + id + ': не обновлена — ' + e, 'warn'); return false; }
+            if(Object.keys(back).length){ restore.push({ kind:'set', id:String(id), params:back }); }
+            return true;
+        }
+        function saveState(){
+            var firstId = created.reduce(function(a, c){ var n = parseInt(c.id, 10); return (a == null || n < a) ? n : a; }, null);
+            var rec = { created:created, restore:restore, firstId:firstId, ts:nowIso(), source_db:(pkg && pkg.source_db), count:created.length, mode:update ? 'update' : 'install' };
+            try{ localStorage.setItem(LS_KEY, JSON.stringify(rec)); }
+            catch(e){ rec.restore = restore.filter(function(x){ return x.kind !== 'file'; }); try{ localStorage.setItem(LS_KEY, JSON.stringify(rec)); log('Прежние версии файлов не поместились в хранилище браузера — откат их не вернёт.', 'warn'); }catch(e2){} }
+            return firstId;
+        }
 
         try{
             // read target structure for term-reuse decisions
             var meta = await getJson('metadata');
-            var tableIds = {}, origSet = {}, tgtReqs = {};
+            var tableIds = {}, origSet = {}, tgtReqs = {}, tgtMeta = {}, tgtByName = {};
+            var serviceMax = parseInt(pkg.service_max, 10) || 460;
             (Array.isArray(meta) ? meta : []).forEach(function(t){
                 tableIds[String(t.id)] = true;
+                tgtMeta[String(t.id)] = t;
                 tgtReqs[String(t.id)] = {};
                 (t.reqs || []).forEach(function(r){ origSet[String(r.orig)] = true; tgtReqs[String(t.id)][String(r.id)] = true; });
+                if(parseInt(t.id, 10) >= serviceMax && !tgtByName[String(t.val)]){ tgtByName[String(t.val)] = t; }
             });
+            if(!update && opt.tables){
+                var clash = (pkg.tables || []).filter(function(t){ return tgtByName[String(t.name)]; }).map(function(t){ return t.name; });
+                if(clash.length){ log('В базе уже есть таблицы ' + clash.map(function(n){ return '«' + n + '»'; }).join(', ') + ': установка создаст рядом копии с суффиксом. Чтобы обновить их на месте, выберите режим «обновление».', 'warn'); }
+            }
 
             async function applyColumnAttrs(reqId, c, withRequired){
                 if(!reqId){ return; }
                 var fa = c.field_attrs;
                 if(!fa){ await post('_d_alias/' + reqId, { val:c.name }); return; } // пакет прежнего формата
-                var p = { val:fa['default'] || '', alias:c.name };
+                var p = { val:fa['default'] || '', alias:c.noAlias ? '' : c.name }; // noAlias: колонка базы без подписи, имя совпадает — подпись не заводим
                 if(fa.multi){ p.multi = 1; }
                 if(fa.key){ p.key = 1; }
                 if(withRequired){ p.set_null = 1; }
@@ -518,15 +708,41 @@
                 return { id:id, fresh:false }; // free to reuse (rule 3)
             }
 
+            // Почему колонку этой базы нельзя считать той же колонкой пакета ('' — можно).
+            function columnMismatch(hit, c, kind){
+                if(kind.arr){ return String(hit.arr_id || '') === String(idMap[kind.arr] || '-') ? '' : 'в базе это не подчинённая таблица «' + (pkgTables[kind.arr] || {}).name + '»'; }
+                if(kind.ref){
+                    var want = idMap[kind.ref] || (parseInt(kind.ref, 10) < serviceMax ? kind.ref : '');
+                    return String(hit.ref || '') === String(want) ? '' : 'в базе она ' + (hit.ref ? 'ссылается на другую таблицу' : 'не ссылка');
+                }
+                if(hit.ref || hit.arr_id){ return 'в базе она ' + (hit.ref ? 'ссылка' : 'подчинённая таблица') + ', в пакете — значение'; }
+                return (parseInt(hit.type, 10) || 3) === (parseInt(c.type_code, 10) || 3) ? '' : 'тип в базе ' + hit.type + ', в пакете ' + c.type_code;
+            }
+
             // ---- TABLES ----
-            var serviceMax = parseInt(pkg.service_max, 10) || 460;
+            var matched = {};             // old table id -> таблица этой базы, обновляемая на месте
             if(opt.tables && Array.isArray(pkg.tables)){
                 var pkgTables = {};
-                pkg.tables.forEach(function(t){ pkgTables[String(t.old_id)] = t; });
+                pkg.tables.forEach(function(t){ pkgTables[String(t.old_id)] = t; schemaIds[String(t.old_id)] = true; });
                 // 1) термины всех таблиц — раньше колонок: ссылка и подчинённая таблица указывают
                 //    на таблицу по id, а цель может идти в пакете позже (issue #5410)
                 for(var ti = 0; ti < pkg.tables.length; ti++){
                     var t = pkg.tables[ti];
+                    var same = update ? tgtByName[String(t.name)] : null;
+                    if(same && (parseInt(same.type, 10) || 3) !== (parseInt(t.base_code, 10) || 3)){
+                        log('таблица «' + t.name + '»: в базе другой базовый тип (' + same.type + ', в пакете ' + t.base_code + ') — заводится новая', 'warn');
+                        same = null;
+                    }
+                    if(same){
+                        matched[t.old_id] = same;
+                        idMap[t.old_id] = String(same.id);
+                        if(t.unique && String(same.unique) !== '1'){
+                            var ue0 = firstError(await post('_d_save/' + same.id, { val:same.val, t:same.type, unique:1 }));
+                            if(ue0){ log('  таблица «' + t.name + '»: флаг «уникальный» не установлен — ' + ue0, 'warn'); }
+                        }
+                        log('таблица «' + t.name + '» → id ' + same.id + ' (обновляется на месте)', 'ok');
+                        continue;
+                    }
                     var tterm = await getTerm(t.base_code, t.name);
                     if(t.unique){ // id типа — в адресе _d_save/<id> (issue #5596)
                         var ue = firstError(await post('_d_save/' + tterm.id, { val: tterm.renamed || t.name, t:t.base_code, unique:1 }));
@@ -539,16 +755,41 @@
                 for(var tj = 0; tj < pkg.tables.length; tj++){
                     var tc = pkg.tables[tj];
                     var newTableId = idMap[tc.old_id];
+                    var tgtT = matched[tc.old_id];
+                    var usedReqs = {};
                     for(var ci = 0; ci < (tc.columns || []).length; ci++){
                         var c = tc.columns[ci];
                         var kind = columnKind(c, pkgTables);
                         var newReqId = null;
+                        schemaIds[String(c.old_req_id)] = true;
+                        if(tgtT){
+                            var hit = findColumn(tgtT, c, usedReqs);
+                            if(hit){
+                                usedReqs[String(hit.id)] = true;
+                                var why = columnMismatch(hit, c, kind);
+                                if(why){
+                                    log('  колонка «' + c.name + '» таблицы «' + tc.name + '»: ' + why + ' — колонка не изменена, значения в неё не переносятся; смену типа с переносом данных нужно сделать вручную', 'warn');
+                                    continue;
+                                }
+                                idMap[c.old_req_id] = String(hit.id);
+                                c.noAlias = !(hit.field_attrs && hit.field_attrs.alias) && String(hit.val) === String(c.name);
+                                if(attrsDiffer(hit, c)){
+                                    restore.push({ kind:'attrs', id:String(hit.id), name:c.name, fa:hit.field_attrs || null, na:(c.field_attrs && c.field_attrs.action) || null });
+                                    await applyColumnAttrs(hit.id, c, false);
+                                    log('  колонка «' + c.name + '»: свойства обновлены', 'dim');
+                                }
+                                continue;
+                            }
+                        }
                         if(kind.arr && idMap[kind.arr]){
                             newReqId = recId(await post('_d_req/' + newTableId, { t:idMap[kind.arr] }));
                         } else if(kind.ref && (idMap[kind.ref] || parseInt(kind.ref, 10) < serviceMax)){
                             // служебная цель (Пользователь, Роль…) есть в каждой базе под тем же id
-                            var rf = await post('_d_ref/' + (idMap[kind.ref] || kind.ref), {});
-                            var refType = objId(rf); track(refType, 'type');
+                            var refTo = String(idMap[kind.ref] || kind.ref);
+                            var rf = await post('_d_ref/' + refTo, {});
+                            var refType = objId(rf);
+                            // _d_ref отдаёт ref-тип, если он у таблицы уже есть: такой — не наш, откат его не трогает (issue #5636)
+                            if(!(tgtMeta[refTo] && String(tgtMeta[refTo].referenced || '') === String(refType))){ track(refType, 'type'); }
                             newReqId = recId(await post('_d_req/' + newTableId, { t:refType }));
                         } else {
                             if(kind.ref){ log('  колонка «' + c.name + '»: таблицы-цели ' + kind.ref + ' нет в пакете — перенесена текстом', 'warn'); }
@@ -558,6 +799,12 @@
                         track(newReqId, 'req');
                         await applyColumnAttrs(newReqId, c, false);
                         idMap[c.old_req_id] = newReqId;
+                        if(tgtT){ log('  колонка «' + c.name + '» добавлена в таблицу «' + tc.name + '»', 'ok'); }
+                    }
+                    if(tgtT){
+                        (tgtT.reqs || []).forEach(function(r){
+                            if(!usedReqs[String(r.id)]){ log('  колонка «' + colLabel(r) + '» таблицы «' + tc.name + '» есть только в этой базе — оставлена', 'dim'); }
+                        });
                     }
                 }
                 // 3) записи: родительская таблица раньше подчинённой, справочник — по возможности
@@ -567,6 +814,25 @@
                 for(var to = 0; to < order.length; to++){
                     var tr = order[to];
                     var trId = idMap[tr.old_id];
+                    if(matched[tr.old_id]){
+                        // обновление: записи базы не трогаются, записи пакета сопоставляются с ними
+                        // по главному значению (и родителю), чтобы ссылки, SET и маски вели на здешние
+                        var have = await getJson('object/' + trId + '?JSON_OBJ' + (tr.subordinate ? '&F_U=0' : '') + '&LIMIT=0,100000');
+                        var byKey = {}, dup = {};
+                        (Array.isArray(have) ? have : []).forEach(function(h){
+                            var key = (tr.subordinate ? String(h.u) + '|' : '') + String(h.r && h.r[0] != null ? h.r[0] : '');
+                            if(byKey[key]){ dup[key] = true; } else { byKey[key] = String(h.i); }
+                        });
+                        var linked = 0;
+                        (tr.records || []).forEach(function(rec){
+                            var up = tr.subordinate ? String(idMap[rec.up] || '') + '|' : '';
+                            var key = up + String(rec.values && rec.values[0] != null ? rec.values[0] : '');
+                            if(byKey[key] && !dup[key] && rec.old_id){ idMap[rec.old_id] = byKey[key]; linked++; }
+                        });
+                        log('  «' + tr.name + '»: записи базы сохранены (' + (Array.isArray(have) ? have.length : 0) + '), записей пакета не записано ' + (tr.records || []).length + ', сопоставлено по значению ' + linked, 'dim');
+                        continue;
+                    }
+                    if(!opt.data){ continue; }
                     var recs = (tr.records || []).slice().sort(function(a, b){ return (parseInt(a.old_id, 10) || 0) - (parseInt(b.old_id, 10) || 0); });
                     var made = 0, orphans = 0;
                     for(var ri = 0; ri < recs.length; ri++){
@@ -628,20 +894,48 @@
                     (t.columns || []).forEach(function(c){ if(columnKind(c, allTables).ref){ refReqs[String(c.old_req_id)] = true; } });
                 });
                 var newQueries = [];
+                var haveQ = {}, oldQ = {};
+                pkg.queries.forEach(function(q){ schemaIds[String(q.old_id)] = true; });
+                if(update){
+                    var exQ = await getJson('object/22?JSON_OBJ&LIMIT=0,100000');
+                    (Array.isArray(exQ) ? exQ : []).forEach(function(x){
+                        if(parseInt(x.i, 10) < serviceMax){ return; }
+                        var nm = String(x.r[0] || '');
+                        if(!haveQ[nm]){ haveQ[nm] = String(x.i); oldQ[String(x.i)] = currentParams(tgtMeta['22'], 22, x.r); }
+                    });
+                }
                 for(var qi = 0; qi < pkg.queries.length; qi++){
                     var q = pkg.queries[qi];
                     var qp = { up:1, t22:q.name };
-                    applyRecordFields(qp, q.fields, tgtReqs['22'], idMap);
-                    var qr = await post('_m_new/22', qp);
-                    var newQid = recId(qr); track(newQid, 'record');
-                    if(newQid){ idMap[q.old_id] = newQid; newQueries.push({ q:q, id:newQid }); }
-                    log('запрос «' + q.name + '» → id ' + newQid, 'ok');
+                    applyRecordFields(qp, q.fields, tgtReqs['22'], idMap, update ? serviceMax : 0);
+                    var newQid, oldCols = null;
+                    if(haveQ[q.name]){
+                        newQid = haveQ[q.name];
+                        var qset = Object.assign({}, qp); delete qset.up; delete qset.t22;
+                        await setExisting(newQid, qset, oldQ[newQid]);
+                        idMap[q.old_id] = newQid; newQueries.push({ q:q, id:newQid, old:oldQ[newQid] });
+                        log('запрос «' + q.name + '» → id ' + newQid + ' (обновляется на месте)', 'ok');
+                        var exC = await getJson('object/28?JSON_OBJ&F_U=' + newQid + '&LIMIT=0,100000');
+                        oldCols = {};
+                        (Array.isArray(exC) ? exC : []).forEach(function(x){
+                            var cur = currentParams(tgtMeta['28'], 28, x.r);
+                            cur['28'] = stripRefTail(cur['28']);
+                            var nm = String(cur['100'] || '');
+                            if(!oldCols[nm]){ oldCols[nm] = { id:String(x.i), cur:cur }; }
+                        });
+                    } else {
+                        var qr = await post('_m_new/22', qp);
+                        newQid = recId(qr); track(newQid, 'record');
+                        if(newQid){ idMap[q.old_id] = newQid; newQueries.push({ q:q, id:newQid }); }
+                        log('запрос «' + q.name + '» → id ' + newQid, 'ok');
+                    }
+                    var usedCols = {};
                     for(var qci = 0; qci < (q.columns || []).length; qci++){
                         var qc = q.columns[qci];
                         var src = idMap[qc.source_old_id] || qc.source_old_id;
                         var cp = { up:newQid, t28:src, t100:qc.name };
                         if(qc.fields){
-                            applyRecordFields(cp, qc.fields, tgtReqs['28'], idMap);
+                            applyRecordFields(cp, qc.fields, tgtReqs['28'], idMap, update ? serviceMax : 0);
                             if(cp.t132 != null && refReqs[String(qc.source_old_id)]){ cp.t132 = remapIdList(cp.t132, idMap); }
                         } else { // пакет прежнего формата: функция и формат там записаны как «id:значение»
                             if(qc.formula){ cp.t101 = qc.formula; }
@@ -649,8 +943,34 @@
                             if(qc.format){ cp.t84 = stripRefId(qc.format); }
                             if(qc.sort){ cp.t109 = qc.sort; }
                         }
+                        var oc = oldCols ? oldCols[String(qc.name)] : null;
+                        if(oc && !usedCols[oc.id]){
+                            usedCols[oc.id] = true;
+                            if(String(cp.t28) !== String(oc.cur['28'])){
+                                // источник колонки сменился: главное значение колонки запроса _m_set не меняет
+                                // (Check_Grant(<id>, 28) в index.php отказывает) — колонка пересоздаётся, прежняя
+                                // запоминается целиком для отката
+                                var rcr = await post('_m_new/28', cp);
+                                var rce = firstError(rcr);
+                                if(rce || !recId(rcr)){ log('  запрос «' + q.name + '»: колонка «' + qc.name + '» не пересоздана — ' + (rce || 'нет id'), 'warn'); continue; }
+                                track(recId(rcr), 'record');
+                                var dr = firstError(await post('_m_del/' + oc.id, {}));
+                                if(dr){ log('  запрос «' + q.name + '»: прежняя колонка «' + qc.name + '» не удалена — ' + dr, 'warn'); continue; }
+                                restore.push({ kind:'recreate', type:'28', up:String(newQid), id:oc.id, cur:oc.cur });
+                                log('  запрос «' + q.name + '»: колонка «' + qc.name + '» пересоздана на новый источник (встала в конец списка колонок)', 'dim');
+                                continue;
+                            }
+                            var cset = Object.assign({}, cp); delete cset.up; delete cset.t28;
+                            // поля, которых в пакете нет, а в базе заполнены, — очищаются: колонка как в пакете
+                            Object.keys(oc.cur).forEach(function(k){ if(k !== '28' && k !== '100' && cset['t' + k] === undefined && oc.cur[k] !== '' && tgtReqs['28'][k]){ cset['t' + k] = ''; } });
+                            await setExisting(oc.id, cset, oc.cur);
+                            continue;
+                        }
                         var qcr = await post('_m_new/28', cp);
                         track(recId(qcr), 'record');
+                    }
+                    if(oldCols){
+                        Object.keys(oldCols).forEach(function(nm){ if(!usedCols[oldCols[nm].id]){ log('  запрос «' + q.name + '»: колонка «' + nm + '» есть только в этой базе — оставлена', 'warn'); } });
                     }
                 }
                 // адреса report/<id> в реквизитах запросов («Сформировать», URL) — после создания всех
@@ -662,7 +982,73 @@
                         var nv = remapLinks(qf[reqId].value, idMap, serviceMax, function(l){ log('  запрос «' + newQueries[nq].q.name + '»: адрес ' + l + ' — объекта нет в пакете, оставлен как есть', 'warn'); });
                         if(nv !== String(qf[reqId].value)){ fx['t' + reqId] = nv; changed = true; }
                     });
-                    if(changed){ await post('_m_set/' + newQueries[nq].id, fx); }
+                    if(changed && newQueries[nq].old){ await setExisting(newQueries[nq].id, fx, newQueries[nq].old); }
+                    else if(changed){ await post('_m_set/' + newQueries[nq].id, fx); }
+                }
+            }
+
+            // ---- ROLES + GRANTS (issue #5636) ----
+            var rolesMoved = {};
+            if(opt.roles && Array.isArray(pkg.roles) && pkg.roles.length){
+                var exR = await getJson('object/42?JSON_OBJ&LIMIT=0,100000');
+                var roleByName = {};
+                // обновление: роль ищется без учёта регистра и пробелов по краям («директор» = «Директор»)
+                var roleKey = function(n){ return update ? String(n || '').trim().toLowerCase() : String(n || ''); };
+                (Array.isArray(exR) ? exR : []).forEach(function(x){ var nm = roleKey(x.r[0]); if(!roleByName[nm]){ roleByName[nm] = x; } });
+                for(var rn = 0; rn < pkg.roles.length; rn++){
+                    var ro = pkg.roles[rn];
+                    var sameR = roleByName[roleKey(ro.name)];
+                    var roleId, oldGrants = null;
+                    var rdesc = ro.fields && ro.fields['135'] ? ro.fields['135'].value : '';
+                    if(sameR && (update || parseInt(sameR.i, 10) < serviceMax)){
+                        // одноимённая роль: в обновлении — та же роль; служебная (admin, user) — всегда она
+                        roleId = String(sameR.i);
+                        if(update && rdesc){ await setExisting(roleId, { t135:rdesc }, currentParams(tgtMeta['42'], 42, sameR.r)); }
+                        var exG = await getJson('object/116?JSON_OBJ&F_U=' + roleId + '&LIMIT=0,100000');
+                        oldGrants = {};
+                        (Array.isArray(exG) ? exG : []).forEach(function(g){ oldGrants[stripRefTail(g.r[0])] = { id:String(g.i), cur:currentParams(tgtMeta['116'], 116, g.r) }; });
+                        log('роль «' + ro.name + '» → id ' + roleId + ' (есть в базе)', 'ok');
+                    } else {
+                        var rname = ro.name;
+                        if(sameR){ var rk = 1; while(roleByName[roleKey(rname + ' ' + rk)]){ rk++; } rname = rname + ' ' + rk; }
+                        var rp = { up:1, t42:rname };
+                        if(rdesc){ rp.t135 = rdesc; }
+                        var rr = await post('_m_new/42', rp);
+                        roleId = recId(rr);
+                        var re = firstError(rr);
+                        if(!roleId){ log('роль «' + ro.name + '» не создана — ' + (re || 'нет id'), 'err'); continue; }
+                        track(roleId, 'record');
+                        log('роль «' + ro.name + '» → id ' + roleId + (rname !== ro.name ? ' (как «' + rname + '»)' : ''), 'ok');
+                    }
+                    idMap[ro.old_id] = String(roleId);
+                    rolesMoved[ro.old_id] = true;
+                    var gMade = 0, gSkip = [];
+                    for(var gi = 0; gi < (ro.grants || []).length; gi++){
+                        var g = ro.grants[gi];
+                        var obj = String(g.obj_old_id);
+                        var newObj = idMap[obj] || (parseInt(obj, 10) < serviceMax ? obj : null);
+                        if(!newObj){ gSkip.push(g.obj_name || obj); continue; }
+                        var gp = {};
+                        Object.keys(g.fields || {}).forEach(function(reqId){
+                            var f = g.fields[reqId];
+                            if(reqId === '136'){ gp.t136 = f.ref_id != null ? String(f.ref_id) : f.value; return; } // уровень: 52/53/54 — служебные записи
+                            gp['t' + reqId] = reqId === '49' ? remapMask(f.value, idMap) : f.value;
+                        });
+                        var og = oldGrants ? oldGrants[String(newObj)] : null;
+                        if(og){
+                            ['136', '49', '55', '56'].forEach(function(k){ if(gp['t' + k] === undefined && og.cur[k]){ gp['t' + k] = ''; } });
+                            await setExisting(og.id, gp, og.cur);
+                            continue;
+                        }
+                        gp.up = roleId; gp.t116 = newObj;
+                        var gr = await post('_m_new/116', gp);
+                        var ge = firstError(gr);
+                        if(ge || !recId(gr)){ log('  роль «' + ro.name + '»: право на «' + (g.obj_name || obj) + '» не выдано — ' + (ge || 'нет id'), 'warn'); continue; }
+                        track(recId(gr), 'record');
+                        gMade++;
+                    }
+                    log('  роль «' + ro.name + '»: прав выдано ' + gMade + (oldGrants ? ' (остальные обновлены на месте)' : ''), 'dim');
+                    if(gSkip.length){ log('  роль «' + ro.name + '»: объектов нет в пакете, права пропущены: ' + gSkip.join(', '), 'warn'); }
                 }
             }
 
@@ -674,19 +1060,47 @@
                 for(var ui = 0; ui < pkg.users.length; ui++){
                     var u = pkg.users[ui];
                     var login = u.login;
+                    if(logins[login] && update){ log('пользователь «' + login + '» уже есть — не изменён', 'dim'); continue; }
                     if(logins[login]){ var k = 1; while(logins[login + '_' + k]){ k++; } login = login + '_' + k; }
                     logins[login] = true;
-                    var ur = await post('_m_new/18', { up:1, t18:login, t115:u.role_id });
+                    // роль: перенесённая — новым id, служебная (< порога) — тем же; иначе роли в этой базе нет (issue #5636)
+                    var uRole = '';
+                    if(u.role_id){
+                        if(rolesMoved[u.role_id]){ uRole = idMap[u.role_id]; }
+                        else if(parseInt(u.role_id, 10) < serviceMax){ uRole = u.role_id; }
+                    }
+                    var up18 = { up:1, t18:login };
+                    if(uRole){ up18.t115 = uRole; }
+                    var ur = await post('_m_new/18', up18);
                     track(recId(ur), 'record');
-                    log('пользователь «' + login + '» → id ' + recId(ur) + ' (без пароля)', 'ok');
+                    if(u.role_id && !uRole){ log('пользователь «' + login + '» → id ' + recId(ur) + ' БЕЗ РОЛИ: роли ' + u.role_id + ' нет в пакете (выгрузите пакет с «роли и права»)', 'err'); }
+                    else { log('пользователь «' + login + '» → id ' + recId(ur) + (uRole ? ', роль ' + uRole : '') + ' (без пароля)', 'ok'); }
                 }
             }
 
             // ---- MENUS ----
             if(opt.menus && Array.isArray(pkg.menus)){
+                var menuSeen = {};
                 for(var mi = 0; mi < pkg.menus.length; mi++){
                     var m = pkg.menus[mi];
-                    var mp = { up: m.up || 145, t151:m.name, t153:remapLinks(m.href, idMap, serviceMax, function(l){ log('  меню «' + m.name + '»: адрес ' + l + ' — объекта нет в пакете, оставлен как есть', 'warn'); }) };
+                    var mUp = String(m.up || 145);
+                    var newUp = idMap[mUp] || (parseInt(mUp, 10) < serviceMax ? mUp : null);
+                    if(!newUp){ log('меню «' + m.name + '»: роли ' + mUp + ' нет в этой базе — пункт пропущен', 'warn'); continue; }
+                    var href = remapLinks(m.href, idMap, serviceMax, function(l){ log('  меню «' + m.name + '»: адрес ' + l + ' — объекта нет в пакете, оставлен как есть', 'warn'); });
+                    if(update && !menuSeen[newUp]){
+                        var exM = await getJson('object/151?JSON_OBJ&F_U=' + newUp + '&LIMIT=0,100000');
+                        menuSeen[newUp] = {};
+                        (Array.isArray(exM) ? exM : []).forEach(function(x){ var nm = String(x.r[0] || ''); if(!menuSeen[newUp][nm]){ menuSeen[newUp][nm] = x; } });
+                    }
+                    var oldM = update ? menuSeen[newUp][m.name] : null;
+                    if(oldM){
+                        var mset = { t153:href };
+                        if(m.icon){ mset.t391 = m.icon; }
+                        var changedM = await setExisting(String(oldM.i), mset, currentParams(tgtMeta['151'], 151, oldM.r));
+                        log('меню «' + m.name + '» → id ' + oldM.i + (changedM ? ' (обновлено)' : ' (без изменений)'), 'ok');
+                        continue;
+                    }
+                    var mp = { up:newUp, t151:m.name, t153:href };
                     if(m.icon){ mp.t391 = m.icon; }
                     var mr = await post('_m_new/151', mp);
                     track(recId(mr), 'record');
@@ -695,24 +1109,29 @@
             }
 
             // ---- FILES ----
+            // имя базы-источника и id её объектов — здешними (issue #5636); прежнее содержимое
+            // перезаписываемого файла сохраняется для отката
             if(opt.files && Array.isArray(pkg.files)){
                 for(var fi = 0; fi < pkg.files.length; fi++){
                     var f = pkg.files[fi];
-                    var ok = await uploadFile(f.root, f.dir ? '/' + f.dir : '', f.name, f.content);
-                    log((ok ? 'файл загружен: ' : 'не удалось загрузить: ') + f.root + '/' + (f.dir ? f.dir + '/' : '') + f.name, ok ? 'ok' : 'err');
+                    var where = f.root + '/' + (f.dir ? f.dir + '/' : '') + f.name;
+                    var mf = remapFile(f, pkg.source_db, DB, idMap, schemaIds, serviceMax);
+                    var before = await readFile(f.root, f.dir, f.name);
+                    if(before.exists && before.content === mf.text){ log('файл без изменений: ' + where, 'dim'); continue; }
+                    var ok = await uploadFile(f.root, f.dir ? '/' + f.dir : '', f.name, mf.text);
+                    if(ok){ restore.push({ kind:'file', root:f.root, dir:f.dir || '', name:f.name, existed:before.exists, content:before.exists ? before.content : null }); }
+                    log((ok ? 'файл загружен: ' : 'не удалось загрузить: ') + where + (ok && before.exists ? ' (заменён; прежний вернёт откат)' : ''), ok ? 'ok' : 'err');
+                    if(mf.hits.length){ log('  замены: ' + mf.hits.join('; '), 'warn'); }
+                    if(mf.missing.length){ log('  ссылки на объекты источника, которых нет в пакете: ' + mf.missing.join(', '), 'warn'); }
                 }
             }
 
-            // persist created set for rollback
-            var firstId = created.reduce(function(a, c){ var n = parseInt(c.id, 10); return (a == null || n < a) ? n : a; }, null);
-            var rec = { created:created, firstId:firstId, ts:nowIso(), source_db:pkg.source_db, count:created.length };
-            try{ localStorage.setItem(LS_KEY, JSON.stringify(rec)); }catch(e){}
+            var firstId = saveState();
             refreshRollback();
-            log('Импорт завершён. Создано объектов: ' + created.length + ', первый ID: ' + firstId, 'ok');
+            log('Импорт завершён. Создано объектов: ' + created.length + (restore.length ? ', изменено: ' + restore.length : '') + ', первый ID: ' + firstId, 'ok');
         }catch(err){
             log('Ошибка импорта: ' + err.message + '. Уже созданные объекты можно удалить откатом.', 'err');
-            var firstId2 = created.reduce(function(a, c){ var n = parseInt(c.id, 10); return (a == null || n < a) ? n : a; }, null);
-            try{ localStorage.setItem(LS_KEY, JSON.stringify({ created:created, firstId:firstId2, ts:nowIso(), source_db:(pkg && pkg.source_db), count:created.length })); }catch(e){}
+            saveState();
             refreshRollback();
         }
         el('mig-import-btn').disabled = false;
@@ -732,10 +1151,31 @@
     async function doRollback(){
         var rec;
         try{ rec = JSON.parse(localStorage.getItem(LS_KEY)); }catch(e){ rec = null; }
-        if(!rec || !rec.created || !rec.created.length){ log('Нет сохранённого импорта для отката.', 'err'); return; }
-        if(!confirm('Удалить ' + rec.created.length + ' объектов последнего импорта (ID ≥ ' + rec.firstId + ')?')){ return; }
+        var nRestore = rec && rec.restore ? rec.restore.length : 0;
+        if(!rec || ((!rec.created || !rec.created.length) && !nRestore)){ log('Нет сохранённого импорта для отката.', 'err'); return; }
+        rec.created = rec.created || [];
+        if(!confirm('Удалить ' + rec.created.length + ' объектов последнего импорта' + (rec.firstId != null ? ' (ID ≥ ' + rec.firstId + ')' : '') + (nRestore ? ' и вернуть прежние значения ' + nRestore + ' изменённых объектов и файлов' : '') + '?')){ return; }
         clearLog();
         el('mig-rollback-btn').disabled = true;
+        // issue #5636: сначала прежние значения изменённых объектов — они могут ссылаться на созданное импортом
+        if(nRestore){
+            var failed = [];
+            for(var ri = rec.restore.length - 1; ri >= 0; ri--){
+                var it = rec.restore[ri], okR = true;
+                if(it.kind === 'set'){ okR = !firstError(await post('_m_set/' + it.id, it.params)); }
+                else if(it.kind === 'attrs'){ okR = await restoreAttrs(it); }
+                else if(it.kind === 'recreate'){ // удалённая при обновлении запись (колонка запроса) — заново из снимка
+                    var rp = { up:it.up };
+                    Object.keys(it.cur || {}).forEach(function(k){ if(it.cur[k] !== ''){ rp['t' + k] = it.cur[k]; } });
+                    var rres = await post('_m_new/' + it.type, rp);
+                    okR = !firstError(rres) && !!recId(rres);
+                }
+                else if(it.kind === 'file'){ okR = it.existed ? await uploadFile(it.root, it.dir ? '/' + it.dir : '', it.name, it.content) : await deleteFile(it.root, it.dir, it.name); }
+                if(!okR){ failed.push(it); log('не удалось вернуть ' + (it.kind === 'file' ? 'файл ' + it.root + '/' + (it.dir ? it.dir + '/' : '') + it.name : it.kind + ' ' + it.id), 'warn'); }
+            }
+            log('возвращено прежних значений: ' + (nRestore - failed.length) + ' из ' + nRestore, failed.length ? 'warn' : 'ok');
+            rec.restore = failed;
+        }
         // issue #5602: перед таблицей снимаем её ref-тип (referenced из metadata),
         // иначе проверка _d_del считает ref-тип экземпляром и отказывает.
         var refOfTable = {};
@@ -775,8 +1215,8 @@
             remaining = next;
             if(deletedThis === 0){ break; }
         }
-        if(remaining.length){
-            log('Остались объекты (внешние ссылки / служебные зависимости): ' + remaining.map(function(x){ return x.id; }).join(', '), 'warn');
+        if(remaining.length || (rec.restore && rec.restore.length)){
+            if(remaining.length){ log('Остались объекты (внешние ссылки / служебные зависимости): ' + remaining.map(function(x){ return x.id; }).join(', '), 'warn'); }
             rec.created = remaining;
             try{ localStorage.setItem(LS_KEY, JSON.stringify(rec)); }catch(e){}
         } else {
@@ -786,11 +1226,25 @@
         refreshRollback();
     }
 
+    // Прежние свойства колонки (обновление, issue #5636)
+    async function restoreAttrs(it){
+        var fa = it.fa || {};
+        var p = { val:fa['default'] || '', alias:fa.alias || '' };
+        if(fa.multi){ p.multi = 1; }
+        if(fa.key){ p.key = 1; }
+        if(fa.required){ p.set_null = 1; }
+        var r = await post('_d_attrs/' + it.id, p);
+        if(firstError(r)){ return false; }
+        if(JSON.stringify(fa.action || null) !== JSON.stringify(it.na || null)){ await post('_d_action/' + it.id, { action: fa.action ? JSON.stringify(fa.action) : '' }); }
+        return true;
+    }
+
     function refreshRollback(){
         var rec = null;
         try{ rec = JSON.parse(localStorage.getItem(LS_KEY)); }catch(e){ rec = null; }
-        if(rec && rec.created && rec.created.length){
-            el('mig-rollback-info').innerHTML = 'Последний импорт из «<b>' + esc(rec.source_db || '?') + '</b>» (' + esc(rec.ts || '') + '): создано объектов <b>' + rec.created.length + '</b>, первый ID <b>' + rec.firstId + '</b>.';
+        var nr = rec && rec.restore ? rec.restore.length : 0;
+        if(rec && ((rec.created && rec.created.length) || nr)){
+            el('mig-rollback-info').innerHTML = 'Последний импорт из «<b>' + esc(rec.source_db || '?') + '</b>» (' + esc(rec.ts || '') + (rec.mode === 'update' ? ', обновление' : '') + '): создано объектов <b>' + (rec.created || []).length + '</b>' + (rec.firstId != null ? ', первый ID <b>' + rec.firstId + '</b>' : '') + (nr ? ', изменено <b>' + nr + '</b>' : '') + '.';
             el('mig-rollback-btn').disabled = false;
         } else {
             el('mig-rollback-info').textContent = 'Импорт ещё не выполнялся в этом браузере (или откат уже выполнен).';
