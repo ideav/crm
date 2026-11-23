@@ -1,0 +1,24 @@
+<!-- Страница решения (issue 5652): h1 и краткий текст отдаёт сервер блоком отчёта solseo, дальше app.js рисует полную карточку -->
+<link rel="stylesheet" href="/download/solutions/app.css?v=4">
+<div id="sl-root">
+  <header class="sl-top">
+    <div class="sl-wrap sl-top-in">
+      <a class="sl-logo" href="/solutions/catalog"><span class="sl-dot"></span>Решения на Интеграме</a>
+      <nav class="sl-nav">
+        <a href="/solutions/catalog">Каталог</a>
+        <a href="#/apply">Оставить заявку</a>
+      </nav>
+    </div>
+  </header>
+  <main id="sl-app" class="sl-wrap" aria-live="polite">
+    <!-- Begin:solseo -->
+    <article>
+      <h1 class="sl-h">{title}</h1>
+      <p class="sl-muted">{descr}</p>
+      <p>{pain}</p>
+    </article>
+    <!-- End:solseo -->
+  </main>
+  <footer class="sl-foot"><div class="sl-wrap">Готовые продукты на платформе Интеграм. Демо и подбор — по заявке.</div></footer>
+</div>
+<script src="/download/solutions/app.js?v=4"></script>
