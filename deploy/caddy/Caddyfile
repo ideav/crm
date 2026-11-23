@@ -35,6 +35,37 @@
 		?X-Content-Type-Options nosniff
 		?Referrer-Policy strict-origin-when-cross-origin
 		?Content-Security-Policy "frame-ancestors 'self' https://webvisor.com https://*.webvisor.com https://metrika.yandex.ru https://*.metrika.yandex.ru"
+		# Скрипты и стили — пока только отчёты (python2node#1421): браузер ничего не блокирует, нарушения
+		# шлёт на /_csp-report. 'unsafe-inline' нет намеренно: inline-скрипты и стили должны попасть в отчёты.
+		Content-Security-Policy-Report-Only "script-src 'self' https://mc.yandex.ru https://mc.yandex.com https://yastatic.net https://smartcaptcha.yandexcloud.net https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://unpkg.com https://ajax.googleapis.com https://code.jquery.com; style-src 'self' https://fonts.googleapis.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://unpkg.com https://maxcdn.bootstrapcdn.com https://stackpath.bootstrapcdn.com https://code.jquery.com; report-uri /_csp-report"
+	}
+	# Отчёты CSP — в журнал Caddy /var/log/caddy/csp-report.log, по строке JSON на отчёт (поле csp_report),
+	# в Apache не идут. Тело обрезается до 8 КБ, журнал крутится по 10 МБ × 5. Остальные запросы
+	# в этот журнал не пишутся (log_skip), в journald отчёты не дублируются.
+	@csp_report {
+		host ideav.ru www.ideav.ru
+		path /_csp-report
+		method POST
+	}
+	@not_csp_report not {
+		host ideav.ru www.ideav.ru
+		path /_csp-report
+		method POST
+	}
+	log csp_report {
+		output file /var/log/caddy/csp-report.log {
+			roll_size 10MiB
+			roll_keep 5
+		}
+		format json
+	}
+	log_skip @not_csp_report
+	handle @csp_report {
+		request_body {
+			max_size 8KB
+		}
+		log_append csp_report {http.request.body}
+		respond 204
 	}
 	@ws {
 		host ideav.ru www.ideav.ru
