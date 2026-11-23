@@ -72,6 +72,9 @@
 .atex-lo-kv > span { color: var(--atex-lo-muted); }
 .atex-lo-kv > b { font-weight: 500; text-align: right; }
 .atex-lo-kv small { display: block; font-weight: 400; color: var(--atex-lo-muted); }
+.atex-lo-die-near { align-items: center; }
+.atex-lo-die-near > span { flex: 0 0 auto; }
+.atex-lo-die-near select { min-width: 0; max-width: 70%; font: inherit; padding: 2px 4px; border: 1px solid var(--atex-lo-border); border-radius: 4px; background: transparent; color: inherit; }
 
 .atex-lo-flags { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px; }
 .atex-lo-badge { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 500; }

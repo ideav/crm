@@ -12,6 +12,8 @@
 //     кратно ручьям заказа, этикетки помещаются на раппорт вала, наименьший пробег (отчёт
 //     `die_runs`); ручной выбор перекрывает автоподбор; нож не найден — «Подбор ножа = нет
 //     ножа» и причина в карточке;
+//   - «Нож / Тип ножа» в карточке (#5667): выбор из 6 ближайших по размеру ножей пишет нож
+//     вручную и «Тип ножей» позиции (nearestDies, manualDieWrite);
 //   - «Нужно заказать нож» — ручная отметка менеджера (#5569): держит позицию, как нет ножа;
 //   - минимальная партия (`labelMinBatch`): этикеток с одного мастер-рулона длиной
 //     LABEL_MASTER_ROLL_M; меньше — предупреждение, не блокировка;
@@ -134,6 +136,7 @@
                 usedFormat: reqVal(rec, r.usedFormat),
                 sleeveWidth: reqVal(rec, r.sleeveWidth),
                 state: reqVal(rec, r.state),
+                typeName: rec.typeName == null ? '' : String(rec.typeName),
                 selectable: !!(stateId && selectableStates && selectableStates[stateId]),
                 revs: mileage ? (mileage[rec.id] || 0) : 0
             };
@@ -240,6 +243,55 @@
         // Ширина втулки — из ножа, если в позиции её нет (её читает втулкорез).
         if (dieRes.ok && !(num(pos.sleeveWidth) > 0) && num(dieRes.die.sleeveWidth) > 0) out.write.sleeveWidth = String(num(dieRes.die.sleeveWidth));
         return out;
+    }
+
+    var NEAREST_DIES = 6;
+
+    // Ближайшие по размеру ножи для ручного выбора в карточке (#5667): состояние «Нож
+    // подбирается», основа сырья позиции (не задана — любая); по сумме отклонений сторон, дальше
+    // меньший пробег и номер. Допуск LABEL_DIE_SIZE_TOLERANCE_MM список не ограничивает.
+    // → [{ ...нож, deviation: мм }], не больше limit (по умолчанию 6).
+    function nearestDies(pos, dies, limit) {
+        var w = num(pos && pos.width), l = num(pos && pos.length);
+        if (!(w > 0) || !(l > 0)) return [];
+        var baseOf = function(v) { return String(v == null ? '' : v).replace(/^\s*\d+:/, '').replace(/\s+/g, ' ').trim().toLowerCase(); };
+        var base = baseOf(pos && pos.base);
+        return (dies || []).filter(function(d) {
+            return d.selectable === true && num(d.width) > 0 && num(d.length) > 0 &&
+                (base === '' || baseOf(d.base) === base);
+        }).map(function(d) {
+            var out = Object.assign({}, d);
+            out.deviation = Math.round((Math.abs(num(d.width) - w) + Math.abs(num(d.length) - l)) * 100) / 100;
+            return out;
+        }).sort(function(a, b) {
+            if (a.deviation !== b.deviation) return a.deviation - b.deviation;
+            var ma = Number(a.revs) || 0, mb = Number(b.revs) || 0;
+            if (ma !== mb) return ma - mb;
+            return String(a.no).localeCompare(String(b.no), 'ru', { numeric: true });
+        }).slice(0, limit > 0 ? limit : NEAREST_DIES);
+    }
+
+    // «Тип ножей» позиции по ножу: имя его «Типа ножа», если оно разбирается как тип 1С, иначе
+    // «Ш х Д (втулка)» из параметров типа; без размера или втулки — «».
+    function dieKnifeType(d) {
+        if (!d) return '';
+        var name = String(d.typeName || '').trim();
+        if (name && lp.parseKnifeType(name).ok) return name;
+        var w = num(d.width), l = num(d.length), s = num(d.sleeveWidth);
+        if (!(w > 0) || !(l > 0) || !(s > 0)) return '';
+        var mm = function(v) { return String(v).replace('.', ','); };
+        return mm(w) + ' х ' + mm(l) + ' (' + mm(s) + ')';
+    }
+
+    // Ручной выбор ножа из списка ближайших (#5667): расчёт позиции с этим ножом и запись —
+    // нож, «Подбор ножа = вручную» и «Тип ножей» выбранного ножа (если отличается).
+    function manualDieWrite(pos, dieId, dies, settings) {
+        var p = Object.assign({}, pos, { pick: lp.DIE_PICK.MANUAL, dieId: String(dieId) });
+        var plan = planPosition(p, dies, settings);
+        var write = Object.assign({}, plan.write);
+        var kt = plan.die.ok ? dieKnifeType(plan.die.die) : '';
+        if (kt && kt !== String(pos.knifeType || '').trim()) write.knifeType = kt;
+        return { plan: plan, write: write };
     }
 
     // Что записано в позиции и расходится с расчётом → { show, text }. Пока подбор пишется
@@ -361,6 +413,9 @@
         planPosition: planPosition,
         writeDiffers: writeDiffers,
         recordedNote: recordedNote,
+        nearestDies: nearestDies,
+        dieKnifeType: dieKnifeType,
+        manualDieWrite: manualDieWrite,
         minBatchAdvice: minBatchAdvice,
         validatePositionForm: validatePositionForm,
         itsResetOnSave: itsResetOnSave,
@@ -436,6 +491,10 @@
             if (act) return self.action(act.getAttribute('data-lo-action'), act);
             var pick = e.target.closest('[data-lo-position]');
             if (pick) return self.select(pick.getAttribute('data-lo-position'));
+        });
+        this.root.addEventListener('change', function(e) {
+            var el = e.target.closest ? e.target.closest('[data-lo-change="die-near"]') : null;
+            if (el && el.value) self.pickNear(self.current(), el.value);
         });
         this.init().catch(function(err) {
             console.error('[label-orders] ❌', err);
@@ -650,6 +709,20 @@
         } else {
             html += '<div class="atex-lo-message is-error">' + esc(plan.die.reason || 'нож не подобран') + '</div>';
         }
+        // #5667: другой нож из ближайших по размеру — выбор пишет и «Нож», и «Тип ножей».
+        var near = nearestDies(p, this.dies);
+        if (d && !near.some(function(x) { return String(x.id) === String(d.id); })) near.unshift(d);
+        if (near.length) {
+            var optLabel = function(x) {
+                var dv = x.deviation != null ? x.deviation : Math.round((Math.abs(num(x.width) - num(p.width)) + Math.abs(num(x.length) - num(p.length))) * 100) / 100;
+                return '№ ' + x.no + ' / ' + (x.typeName || dieKnifeType(x) || (x.width + ' × ' + x.length)) + (dv > 0 ? ' (±' + String(dv).replace('.', ',') + ')' : ' (точно)');
+            };
+            html += '<label class="atex-lo-kv atex-lo-die-near"><span>Нож / Тип ножа</span><select data-lo-change="die-near"' + (this.busy ? ' disabled' : '') + '>' +
+                (d ? '' : '<option value="" selected>— выберите нож —</option>') +
+                near.map(function(x) {
+                    return '<option value="' + esc(x.id) + '"' + (d && String(x.id) === String(d.id) ? ' selected' : '') + '>' + esc(optLabel(x)) + '</option>';
+                }).join('') + '</select></label>';
+        }
         var rec = recordedNote(p, plan, this.picking);
         if (rec.show) html += '<div class="atex-lo-note is-warn">' + esc(rec.text) + '</div>';
 
@@ -735,6 +808,26 @@
             });
         }).catch(function(err) {
             console.error('[label-orders] ❌ подбор', err);
+            self.message('Не записано: ' + err.message, 'error');
+        }).then(function() { self.busy = false; self.picking = false; if (self.selectedId) self.renderCard(); });
+    };
+
+    // Выбор ножа из списка ближайших (#5667): нож вручную + «Тип ножей» выбранного ножа.
+    AtexLabelOrders.prototype.pickNear = function(p, dieId) {
+        var self = this;
+        if (!p || this.busy) return Promise.resolve();
+        if (String(p.dieId) === String(dieId) && p.pick === lp.DIE_PICK.MANUAL) return Promise.resolve();
+        var r = manualDieWrite(p, dieId, this.dies, this.settings);
+        this.busy = true;
+        this.picking = true;
+        if (this.selectedId === p.id) this.renderCard();
+        return this.post('_m_set/' + encodeURIComponent(p.id) + '?JSON', this.fieldsOf(r.write)).then(function() {
+            return self.reload(true).then(function() {
+                self.message('Позиция заказа ' + p.orderNo + ': нож № ' + r.plan.die.die.no + ' (вручную)' +
+                    (r.write.knifeType ? ', тип ножей «' + r.write.knifeType + '»' : ''), 'ok');
+            });
+        }).catch(function(err) {
+            console.error('[label-orders] ❌ выбор ножа', err);
             self.message('Не записано: ' + err.message, 'error');
         }).then(function() { self.busy = false; self.picking = false; if (self.selectedId) self.renderCard(); });
     };
