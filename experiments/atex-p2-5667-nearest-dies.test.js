@@ -89,4 +89,33 @@ var POS = { id: 'p1', width: 100, length: 72, base: 'ПП', orderStreams: 1, kni
     assert(built[0].typeName === '100 x 71,5 (70)', 'typeName в ноже', JSON.stringify(built[0].typeName));
 })();
 
+// ── 5. «Выбрать нож вручную»: точного размера нет — ближайшие варианты ──────
+// Заказ 5730, этикетка 102 × 111: окно было пустым («Ножей этого размера в базе нет»).
+(function() {
+    assert(typeof LO.manualDieList === 'function', 'core.manualDieList есть');
+    if (typeof LO.manualDieList !== 'function') return;
+    var pos = { width: 102, length: 111, base: 'ПП' };
+    var dies = [
+        die('1', 100, 110),                          // 3
+        die('2', 102, 110, { base: 'Бумага' }),      // 1, другая основа — видна, но помечена
+        die('3', 103, 111, { selectable: false }),   // 1, не подбирается — видна, помечена
+        die('4', 105, 115),                          // 7
+        die('5', 90, 100),                           // 23
+        die('6', 110, 120),                          // 17
+        die('7', 101, 112),                          // 2
+        die('8', 150, 150)                           // 87
+    ];
+    var list = LO.manualDieList(pos, dies);
+    assert(list.length === 6, 'точного нет — 6 ближайших', ids(list));
+    assert(ids(list) === '2,3,7,1,4,6', 'по близости размера, любая основа и состояние', ids(list));
+    assert(list[0].otherBase === true && list[1].otherBase === false, 'другая основа помечена', JSON.stringify(list.map(function(d) { return d.otherBase; })));
+    var exact = [die('10', 102, 111), die('11', 102, 111, { revs: 5 }), die('12', 102, 111, { base: 'Бумага' })].concat(dies);
+    var withExact = LO.manualDieList(pos, exact);
+    assert(withExact.slice(0, 3).every(function(d) { return d.deviation === 0; }), 'точные — первыми', ids(withExact));
+    assert(withExact.length === 6, 'вместе с точными — не больше 6, когда точных меньше 6', ids(withExact));
+    var many = [];
+    for (var i = 0; i < 8; i++) many.push(die('e' + i, 102, 111));
+    assert(LO.manualDieList(pos, many.concat(dies)).length === 8, 'точных больше 6 — показываются все точные', String(LO.manualDieList(pos, many.concat(dies)).length));
+})();
+
 console.log('\n' + passed + '/' + total + ' passed');

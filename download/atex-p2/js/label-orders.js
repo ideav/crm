@@ -271,6 +271,33 @@
         }).slice(0, limit > 0 ? limit : NEAREST_DIES);
     }
 
+    // Список окна «Выбрать нож вручную» (#5667): ножи любой основы и состояния — диспетчер
+    // видит, почему автоподбор их не взял. Все ножи точного размера (±0,05 мм) и ближайшие по
+    // сумме отклонений сторон, пока в списке меньше limit (6). Порядок — отклонение, пробег, номер.
+    // → [{ ...нож, deviation: мм, otherBase: основа не та, что у сырья позиции }].
+    function manualDieList(pos, dies, limit) {
+        var w = num(pos && pos.width), l = num(pos && pos.length);
+        if (!(w > 0) || !(l > 0)) return [];
+        var n = limit > 0 ? limit : NEAREST_DIES;
+        var baseOf = function(v) { return String(v == null ? '' : v).replace(/^\s*\d+:/, '').replace(/\s+/g, ' ').trim().toLowerCase(); };
+        var base = baseOf(pos && pos.base);
+        var all = (dies || []).filter(function(d) { return num(d.width) > 0 && num(d.length) > 0; }).map(function(d) {
+            var out = Object.assign({}, d);
+            var dw = Math.abs(num(d.width) - w), dl = Math.abs(num(d.length) - l);
+            out.exact = dw <= 0.05 + 1e-9 && dl <= 0.05 + 1e-9;
+            out.deviation = out.exact ? 0 : Math.round((dw + dl) * 100) / 100;
+            out.otherBase = base !== '' && baseOf(d.base) !== base;
+            return out;
+        }).sort(function(a, b) {
+            if (a.deviation !== b.deviation) return a.deviation - b.deviation;
+            var ma = Number(a.revs) || 0, mb = Number(b.revs) || 0;
+            if (ma !== mb) return ma - mb;
+            return String(a.no).localeCompare(String(b.no), 'ru', { numeric: true });
+        });
+        var exact = all.filter(function(d) { return d.exact; });
+        return exact.length >= n ? exact : all.slice(0, n);
+    }
+
     // «Тип ножей» позиции по ножу: имя его «Типа ножа», если оно разбирается как тип 1С, иначе
     // «Ш х Д (втулка)» из параметров типа; без размера или втулки — «».
     function dieKnifeType(d) {
@@ -433,6 +460,7 @@
         writeDiffers: writeDiffers,
         recordedNote: recordedNote,
         nearestDies: nearestDies,
+        manualDieList: manualDieList,
         dieKnifeType: dieKnifeType,
         manualDieWrite: manualDieWrite,
         minBatchAdvice: minBatchAdvice,
@@ -789,7 +817,7 @@
             case 'pick': return this.pickOne(this.current(), null);
             case 'pick-all': return this.pickAll();
             case 'manual': return this.openManual(this.current());
-            case 'manual-choose': return this.pickOne(this.current(), el.getAttribute('data-die'));
+            case 'manual-choose': this.closeModal(); return this.pickNear(this.current(), el.getAttribute('data-die'));
             case 'auto': return this.pickOne(this.current(), '');
             case 'its': return this.toggleIts(this.current());
             case 'its-needed': return this.toggleItsNeeded(this.current());
@@ -991,17 +1019,19 @@
         });
     };
 
-    // Ручной выбор: все ножи этого размера (любой основы и состояния) — диспетчер видит, почему
-    // автоподбор их не взял.
+    // Ручной выбор (manualDieList): ножи точного размера и ближайшие, любой основы и состояния —
+    // диспетчер видит, почему автоподбор их не взял. Выбор пишет нож и «Тип ножей» (pickNear).
     AtexLabelOrders.prototype.openManual = function(p) {
         if (!p) return;
-        var w = num(p.width), l = num(p.length);
-        var list = this.dies.filter(function(d) { return Math.abs(num(d.width) - w) <= 0.05 && Math.abs(num(d.length) - l) <= 0.05; })
-            .sort(function(a, b) { return a.revs - b.revs; });
+        var list = manualDieList(p, this.dies);
+        var exactCount = list.filter(function(d) { return d.exact; }).length;
         var html = '<h2 class="atex-lo-panel-title">Нож для ' + esc(p.width + ' × ' + p.length) + ' мм</h2>';
-        html += list.length ? '<table class="atex-lo-table"><thead><tr><th>Нож</th><th>Основа</th><th>Состояние</th><th class="num">Ручьёв</th><th>Вал</th><th class="num">Пробег, об</th><th></th></tr></thead><tbody>' +
+        if (list.length && !exactCount) html += '<div class="atex-lo-note is-warn">Ножей этого размера нет — ближайшие по размеру.</div>';
+        html += list.length ? '<table class="atex-lo-table"><thead><tr><th>Нож</th><th>Тип ножа</th><th class="num">Отклонение, мм</th><th>Основа</th><th>Состояние</th><th class="num">Ручьёв</th><th>Вал</th><th class="num">Пробег, об</th><th></th></tr></thead><tbody>' +
             list.map(function(d) {
-                return '<tr' + (d.selectable ? '' : ' class="is-muted"') + '><td>' + esc(d.no) + '</td><td>' + esc(d.base || '—') + '</td><td>' + esc(d.state || '—') +
+                return '<tr' + (d.selectable && !d.otherBase ? '' : ' class="is-muted"') + '><td>' + esc(d.no) + '</td><td>' + esc(d.typeName || (d.width + ' × ' + d.length)) +
+                    '</td><td class="num">' + (d.exact ? 'точно' : '±' + esc(String(d.deviation).replace('.', ','))) +
+                    '</td><td>' + esc(d.base || '—') + (d.otherBase ? ' <small>(не та основа)</small>' : '') + '</td><td>' + esc(d.state || '—') +
                     '</td><td class="num">' + esc(d.streams || '—') + '</td><td>' + esc(d.cylinder || '—') + '</td><td class="num">' + esc(fmtInt(d.revs)) +
                     '</td><td><button class="atex-lo-btn" type="button" data-lo-action="manual-choose" data-die="' + esc(d.id) + '">Выбрать</button></td></tr>';
             }).join('') + '</tbody></table>'
