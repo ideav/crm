@@ -866,8 +866,7 @@ class CabinetController {
                         <div class="database-stat"><span>Шаблон:</span> <strong>${this.escapeHtml(templateLabel)}</strong></div>
                         <div class="database-stat"><span>Расход:</span> <strong>${recordCount}</strong></div>
                         <div class="database-stat ${planDatePassed ? 'database-stat-expired' : ''}"><span>Оплачено до:</span> <strong class="${planDatePassed ? 'plan-date-expired' : ''}">${planDate}</strong></div>
-                        <div class="database-stat" title="${this.escapeHtml(aiUsageTitle)}"><span>ИИ:</span> <strong>${this.escapeHtml(aiUsageText)}</strong></div>
-                        <div class="database-stat" title="Расход ИИ в единицах тарифа за текущий период"><span>ИИ-токены:</span> <strong>${this.escapeHtml(aiUnits)}</strong></div>
+                        <div class="database-stat database-stat-wide" title="${this.escapeHtml(aiUsageTitle)}"><span>ИИ:</span> <strong>${this.escapeHtml(aiUsageText)}</strong></div>
                         <div class="database-stat" title="Запуски ИИ-агента за текущий период"><span>Запуски агента:</span> <strong>${this.escapeHtml(agentRuns)}</strong></div>
                     </div>
                     <div class="database-settings">

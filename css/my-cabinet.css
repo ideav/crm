@@ -420,6 +420,7 @@ button.mc-kpi:hover { border-color: var(--mc-accent); transform: translateY(-1px
     color: var(--mc-muted);
 }
 .mc-content .database-stat strong { font-size: .95rem; font-weight: 650; color: var(--mc-text); overflow-wrap: anywhere; }
+.mc-content .database-stat-wide { grid-column: span 2; }
 .mc-content .database-stat-expired { border-color: var(--mc-danger); }
 .mc-content .database-card-new .database-stat { background: var(--mc-surface); }
 .mc-content .database-settings {
@@ -463,6 +464,7 @@ button.mc-kpi:hover { border-color: var(--mc-accent); transform: translateY(-1px
 .mc-content .database-card-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin-left: auto; }
 @media (max-width: 600px) {
     .mc-content .database-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .mc-content .database-stat-wide { grid-column: auto; }
     .mc-content .database-card-actions { margin-left: 0; }
 }
 .mc-content .database-name-link { font-size: 1.1rem; font-weight: 700; color: var(--mc-text); }

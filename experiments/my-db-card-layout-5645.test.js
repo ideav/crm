@@ -134,6 +134,8 @@ test('#5645: показатели — плитками, подпись и зна
     const [card] = render([DB]);
     const stats = block(card, 'database-stats').html;
     const tiles = stats.match(/<div class="database-stat[ "]/g) || [];
-    assert.strictEqual(tiles.length, 6, 'шесть плиток');
+    assert.strictEqual(tiles.length, 5, 'пять плиток: ИИ-токены не дублируют ИИ');
+    assert.ok(!stats.includes('ИИ-токены'), 'плитки «ИИ-токены» нет — то же число показывает «ИИ»');
+    assert.ok(/Запуски агента:<\/span>\s*<strong[^>]*>0</.test(stats));
     assert.ok(/Оплачено до:<\/span>\s*<strong[^>]*>23 декабря 2026</.test(stats));
 });
