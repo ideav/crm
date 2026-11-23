@@ -559,10 +559,10 @@ class CabinetController {
     }
 
     populateBalance() {
-        const balanceAmount = document.getElementById('balance-amount');
-        if (balanceAmount) {
-            balanceAmount.textContent = this.userData.Balance || '0';
-        }
+        ['balance-amount', 'tariff-balance'].forEach(elId => {
+            const el = document.getElementById(elId);
+            if (el) el.textContent = this.userData.Balance || '0';
+        });
         // Load transaction history lazily when balance section is visible
         this.loadTransactionHistory();
     }
@@ -1343,7 +1343,9 @@ class CabinetController {
 
         try {
             const host = this.apiConfig.host;
-            const url = 'https://' + host + '/my/report/1278?JSON&confirmed=1&plan=' + encodeURIComponent(planID);
+            // JSON_KV: массив строк запроса, [] — строка не прошла условие запроса (не хватает
+            // средств или план уже подключён). ?JSON отдаёт объект {columns, data}, не массив.
+            const url = 'https://' + host + '/my/report/1278?JSON_KV&confirmed=1&plan=' + encodeURIComponent(planID);
             const resp = await fetch(url, {
                 method: 'POST',
                 credentials: 'include',
@@ -1351,16 +1353,19 @@ class CabinetController {
             });
             if (!resp.ok) throw new Error('HTTP ' + resp.status);
             const data = await resp.json();
+            const serverError = Array.isArray(data) ? (data[0] && data[0].error) : (data && data.error);
+            if (serverError) throw new Error(serverError);
 
-            if (Array.isArray(data) && data.length > 0 && data[0]) {
+            if (Array.isArray(data) && data.length > 0) {
                 showToast('Тарифный план изменён', 'success');
                 const paid = parseFloat(amountText) || 0;
                 window.paidThisMonth = (window.paidThisMonth || 0) + paid;
-                await this.loadUserData();
-                this.loadTransactionHistory();
             } else {
-                showToast('Произошла ошибка, обратитесь в поддержку', 'error');
+                showToast('План не изменён: на счёте недостаточно средств или этот план уже подключён', 'info');
             }
+            // Баланс и план на экране — из базы, а не из прежней загрузки страницы
+            await this.loadUserData();
+            this.loadTransactionHistory();
         } catch (err) {
             console.error('[cabinet] changePlan error:', err);
             showToast('Произошла ошибка, обратитесь в поддержку', 'error');

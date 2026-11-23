@@ -194,6 +194,7 @@ html[data-my-mode="cabinet"] body {
     margin-bottom: 1rem;
 }
 .mc-kpis-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.mc-kpis-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .mc-kpi {
     display: flex;
     flex-direction: column;
@@ -445,6 +446,7 @@ button.mc-kpi:hover { border-color: var(--mc-accent); transform: translateY(-1px
 @media (max-width: 600px) {
     .mc-kpis,
     .mc-kpis-2,
+    .mc-kpis-3,
     .mc-form-grid { grid-template-columns: 1fr; }
     .mc-search input { min-width: 0; width: 100%; }
     .mc-tabs { display: flex; overflow-x: auto; }
