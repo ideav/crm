@@ -55,6 +55,13 @@
       }
       return h;
     },
+    // схема в конце страницы решения: крупная картинка и подпись под ней (python2node#1425)
+    schemeFigure: function (sc, title) {
+      if (!sc || !sc.img) return '';
+      var e = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', '\'': '&#39;' }[c]; }); };
+      return '<figure class="sl-scheme"><img loading="lazy" src="' + e(Core.imgUrl(sc.img, 'l')) + '" width="1600" height="900" alt="' + e(sc.caption || title) + '">' +
+        (sc.caption ? '<figcaption class="sl-scheme-cap">' + e(sc.caption) + '</figcaption>' : '') + '</figure>';
+    },
     imgUrl: function (name, size) { return '/download/solutions/img/' + name + (size === 'l' ? '-l.webp' : '-s.webp'); },
     refs: function (v) { // null | {id,val} | [{id,val}] → массив
       if (!v) return [];
@@ -74,6 +81,7 @@
         industries: Core.refs(row['Отрасль']).map(function (x) { return { id: Number(x.id), val: x.val }; }),
         platforms: Core.refs(row['Надстройка над']).map(function (x) { return { id: Number(x.id), val: x.val }; }),
         img: Core.safeImg(row['Картинка']),
+        scheme: Core.safeImg(row['Схема']) ? { img: Core.safeImg(row['Схема']), caption: String(row['Подпись схемы'] || '').trim() } : null,
         credit: Core.parseCredit(row['Источник изображения']),
         demo: Core.safeUrl(row['Демо ссылка']),
         demoSoon: Core.isOn(row['Демо скоро']),
@@ -216,6 +224,7 @@
     h += '<h2 class="sl-h2">Какую боль закрывает</h2><p>' + esc(s.pain).replace(/\n+/g, '</p><p>') + '</p>';
     if (s.features.length) h += '<h2 class="sl-h2">Что умеет</h2><ul class="sl-list">' + s.features.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>';
     if (s.steps.length) h += '<h2 class="sl-h2">Как переезжаем</h2><ol class="sl-steps">' + s.steps.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ol>';
+    h += Core.schemeFigure(s.scheme, s.title);
     app.innerHTML = h;
     document.title = s.title + ' — Решения Интеграм';
   }

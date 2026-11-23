@@ -45,6 +45,9 @@ h2.sl-h2{font-size:19px;margin:28px 0 8px}
 .sl-card .sl-thumb{margin-bottom:4px}
 .sl-hero{margin:12px 0 20px}
 .sl-hero img{display:block;width:100%;height:auto;aspect-ratio:16/9;object-fit:cover;border-radius:12px;background:var(--sl-soft)}
+.sl-scheme{margin:28px 0 8px}
+.sl-scheme img{display:block;width:100%;height:auto;border-radius:12px;border:1px solid var(--sl-line,#e3e6ea);background:#fff}
+.sl-scheme-cap{margin-top:6px;font-size:13px;color:var(--sl-mut)}
 .sl-credit{margin-top:4px;font-size:12px;color:var(--sl-mut)}
 .sl-credit a{color:inherit}
 /* backlogram#997: подпись портала в шапке движка длиннее 300px из css/styles.css */
