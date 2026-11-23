@@ -1,6 +1,6 @@
 // Мерка к ideav/backlogram#1000: картинка-иллюстрация в шапке решения на широком экране — 2/3 ширины,
 // картинка без источника (своя схема, как у LLM-маршрутизатора) — во всю ширину.
-// rules: none (defect backlogram#1000)
+// rules: none (defect #5657)
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
