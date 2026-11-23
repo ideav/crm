@@ -55,10 +55,19 @@
       }
       return h;
     },
+    esc: function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', '\'': '&#39;' }[c]; }); },
+    // картинка в шапке решения. С источником — фото-иллюстрация: на широком экране сужается до 2/3
+    // (.sl-hero-photo, backlogram#1000). Без источника — своя схема, остаётся во всю ширину.
+    heroFigure: function (s) {
+      if (!s || !s.img) return '';
+      var e = Core.esc, c = s.credit;
+      var cr = c ? '<figcaption class="sl-credit">Фото: ' + (c.url ? '<a href="' + e(c.url) + '" target="_blank" rel="noopener">' + e(c.author) + ' / ' + e(c.service) + '</a>' : e(c.author) + ' / ' + e(c.service)) + '</figcaption>' : '';
+      return '<figure class="sl-hero' + (c ? ' sl-hero-photo' : '') + '"><img src="' + e(Core.imgUrl(s.img, 'l')) + '" width="1600" height="900" alt="' + e(s.title) + '">' + cr + '</figure>';
+    },
     // схема в конце страницы решения: крупная картинка и подпись под ней (python2node#1425)
     schemeFigure: function (sc, title) {
       if (!sc || !sc.img) return '';
-      var e = function (v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', '\'': '&#39;' }[c]; }); };
+      var e = Core.esc;
       return '<figure class="sl-scheme"><img loading="lazy" src="' + e(Core.imgUrl(sc.img, 'l')) + '" width="1600" height="900" alt="' + e(sc.caption || title) + '">' +
         (sc.caption ? '<figcaption class="sl-scheme-cap">' + e(sc.caption) + '</figcaption>' : '') + '</figure>';
     },
@@ -250,11 +259,7 @@
     if (!s) { app.innerHTML = '<p>Такого решения нет в каталоге. <a href="' + CATALOG + '">Вернуться к каталогу</a></p>'; return; }
     var demo = s.demo && !s.demoSoon ? '<a class="sl-btn" href="' + esc(s.demo) + '" target="_blank" rel="noopener">Попробовать демо</a>'
       : s.demoSoon ? '<span class="sl-btn alt" aria-disabled="true">Демо скоро</span>' : '';
-    var hero = '';
-    if (s.img) {
-      var cr = s.credit ? '<figcaption class="sl-credit">Фото: ' + (s.credit.url ? '<a href="' + esc(s.credit.url) + '" target="_blank" rel="noopener">' + esc(s.credit.author) + ' / ' + esc(s.credit.service) + '</a>' : esc(s.credit.author) + ' / ' + esc(s.credit.service)) + '</figcaption>' : '';
-      hero = '<figure class="sl-hero"><img src="' + esc(Core.imgUrl(s.img, 'l')) + '" width="1600" height="900" alt="' + esc(s.title) + '">' + cr + '</figure>';
-    }
+    var hero = Core.heroFigure(s);
     var h = '<a class="sl-back" href="' + CATALOG + '">← Каталог</a>' + hero + '<h1 class="sl-h">' + esc(s.title) + '</h1><p class="sl-muted">' + esc(s.short) + '</p>' +
       tags(kinded(s.category ? [s.category] : [], 'cat').concat(kinded(s.industries, 'ind'), kinded(s.platforms, 'plat')));
     h += '<div class="sl-actions">' + demo + '<a class="sl-btn' + (demo ? ' alt' : '') + '" href="#/apply/' + s.id + '">' + (s.demo && !s.demoSoon ? 'Оставить заявку' : 'Запросить демо') + '</a></div>';

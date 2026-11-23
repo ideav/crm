@@ -46,6 +46,7 @@ a.sl-tag{color:inherit;text-decoration:none}a.sl-tag:hover{background:var(--sl-a
 .sl-card .sl-thumb{margin-bottom:4px}
 .sl-hero{margin:12px 0 20px}
 .sl-hero img{display:block;width:100%;height:auto;aspect-ratio:16/9;object-fit:cover;border-radius:12px;background:var(--sl-soft)}
+@media (min-width:768px){.sl-hero-photo{max-width:66%}}
 .sl-scheme{margin:28px 0 8px}
 .sl-scheme img{display:block;width:100%;height:auto;border-radius:12px;border:1px solid var(--sl-line,#e3e6ea);background:#fff}
 .sl-scheme-cap{margin-top:6px;font-size:13px;color:var(--sl-mut)}
