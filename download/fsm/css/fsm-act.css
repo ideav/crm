@@ -1,0 +1,80 @@
+/* FSM: реестр актов и печатная форма акта. */
+.fsm-nowrap { white-space: nowrap; }
+.fsm-act-small { font-size: 12px; }
+.fsm-act-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 8px 0 12px; }
+.fsm-act-tile { display: flex; flex-direction: column; gap: 2px; text-align: left; padding: 10px 12px; border: 1px solid var(--w-line); border-radius: 8px; background: var(--w-card); color: var(--w-text); cursor: pointer; font: inherit; border-left: 4px solid var(--w-blue); }
+.fsm-act-tile:hover { border-color: var(--w-blue); }
+.fsm-act-tile-v { font-size: 1.5rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+.fsm-act-tile-t { font-size: 12px; color: var(--w-muted); }
+.fsm-act-tile-ok { border-left-color: var(--w-green); }
+.fsm-act-tile-warn { border-left-color: var(--w-amber); }
+.fsm-act-tile-crit { border-left-color: var(--w-red); }
+.fsm-act-tile-sum { cursor: default; }
+.fsm-act-tile-on { background: var(--w-blue-soft); border-color: var(--w-blue); }
+.fsm-act-tools { align-items: center; }
+.fsm-act-selinfo { margin: 0; flex: 1 1 240px; }
+.fsm-act-chk { width: 18px; height: 18px; cursor: pointer; }
+
+/* экранные кнопки над листом */
+.fsm-act-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; max-width: 210mm; margin: 0 auto 12px; }
+.fsm-act-barinfo { margin-left: auto; }
+
+/* лист А4 на экране */
+.fsm-act-paper { padding: 4px 0 24px; }
+.fsm-act-sheet { width: 210mm; max-width: 100%; margin: 0 auto; padding: 15mm; background: #fff; color: #111; box-shadow: 0 2px 14px rgba(0, 0, 0, .25); border-radius: 2px; font-size: 13px; line-height: 1.4; font-family: "Times New Roman", Georgia, serif; }
+.fsm-act-sheet h3 { margin: 14px 0 6px; font-size: 14px; }
+.fsm-act-org { border-bottom: 2px solid #111; padding-bottom: 6px; font-size: 15px; }
+.fsm-act-org span { font-size: 11px; color: #555; }
+.fsm-act-title { margin: 14px 0 12px; text-align: center; font-size: 17px; }
+.fsm-act-kv { width: 100%; border-collapse: collapse; }
+.fsm-act-kv th { width: 28%; text-align: left; vertical-align: top; padding: 3px 8px 3px 0; font-weight: 600; }
+.fsm-act-kv td { padding: 3px 0; vertical-align: top; }
+.fsm-act-note { margin: 10px 0 0; padding: 6px 10px; border: 1px solid #111; font-weight: 600; }
+.fsm-act-note-warn { border-color: #b45309; background: #fef3c7; }
+.fsm-act-note-info { border-color: #2563eb; background: #dbeafe; }
+.fsm-act-tbl { width: 100%; border-collapse: collapse; }
+.fsm-act-tbl th, .fsm-act-tbl td { border: 1px solid #555; padding: 4px 6px; vertical-align: top; text-align: left; }
+.fsm-act-tbl th { background: #f1f5f9; font-size: 12px; }
+.fsm-act-tbl .r { text-align: right; white-space: nowrap; }
+.fsm-act-tbl .n { width: 28px; text-align: center; }
+.fsm-act-chk-row td { font-size: 12px; color: #333; border-top-style: dotted; }
+.fsm-act-sum { margin: 10px 0 4px auto; border-collapse: collapse; min-width: 260px; }
+.fsm-act-sum th { text-align: left; padding: 2px 14px 2px 0; font-weight: 400; }
+.fsm-act-sum td { text-align: right; padding: 2px 0; font-variant-numeric: tabular-nums; }
+.fsm-act-sum-total th, .fsm-act-sum-total td { border-top: 1px solid #111; font-weight: 700; padding-top: 4px; }
+.fsm-act-words { margin: 6px 0; }
+.fsm-act-remarks { margin: 8px 0; }
+.fsm-act-sign { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 22px; break-inside: avoid; }
+.fsm-act-signh { font-weight: 700; margin-bottom: 4px; }
+.fsm-act-line { border-bottom: 1px solid #111; height: 46px; }
+.fsm-act-sigimg { display: block; max-width: 100%; max-height: 90px; margin: 6px 0 2px; }
+.fsm-act-stamp { display: inline-block; margin-top: 8px; padding: 6px 10px; border: 2px solid #15803d; color: #15803d; border-radius: 4px; font-size: 12px; font-weight: 600; transform: rotate(-2deg); }
+.fsm-act-stamp-bad { border-color: #b91c1c; color: #b91c1c; }
+.fsm-act-photos { margin-top: 18px; border-top: 1px dashed #999; padding-top: 6px; }
+.fsm-act-photogrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.fsm-act-photogrid figure { margin: 0; break-inside: avoid; }
+.fsm-act-photogrid img { width: 100%; height: 150px; object-fit: cover; border: 1px solid #999; }
+.fsm-act-photogrid figcaption { font-size: 11px; color: #444; }
+.fsm-act-nophoto { height: 150px; border: 1px dashed #999; display: flex; align-items: center; justify-content: center; font-size: 12px; }
+
+@media (max-width: 700px) {
+    .fsm-act-sheet { padding: 12px; font-size: 12px; overflow-x: auto; }
+    .fsm-act-sign { grid-template-columns: 1fr; gap: 14px; }
+    .fsm-act-photogrid { grid-template-columns: repeat(2, 1fr); }
+    .fsm-act-kv th { width: 34%; }
+}
+
+@page { size: A4; margin: 15mm; }
+@media print {
+    html, body, .app-layout, .app-content, .fsm-act-screen { height: auto !important; min-height: 0 !important; overflow: visible !important; display: block !important; padding: 0 !important; margin: 0 !important; }
+    .fsm-act-bar { display: none !important; }
+    .fsm-act-paper { padding: 0 !important; height: 0; }
+    body * { visibility: hidden !important; }
+    .fsm-act-sheet, .fsm-act-sheet * { visibility: visible !important; }
+    .fsm-act-sheet { position: absolute; left: 0; top: 0; width: 100%; max-width: none; margin: 0; padding: 0; box-shadow: none; border-radius: 0; overflow: visible; font-size: 12pt; }
+    .fsm-act-photos { break-before: page; page-break-before: always; border-top: 0; margin-top: 0; padding-top: 0; }
+    .fsm-act-tbl tr, .fsm-act-sum { break-inside: avoid; }
+    .fsm-act-stamp { transform: none; }
+    .fsm-act-sheet, .fsm-act-sheet th, .fsm-act-note-warn, .fsm-act-note-info { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+.fsm-act-screen .fsm-table th { white-space: nowrap; }
