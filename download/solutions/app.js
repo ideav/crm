@@ -146,6 +146,19 @@
       if (String(v.comment || '').trim()) f['Комментарий'] = String(v.comment).trim().slice(0, 3000);
       return f;
     },
+    // Уведомление о заявке в Telegram-чат заявок (#5660): поля сайтового /telegram-notify.php (backlogram).
+    // sol — выбранное решение из каталога или null; origin — https://ideav.ru
+    buildNotify: function (v, sol, origin, db) {
+      var task = [];
+      if (sol) {
+        task.push('Решение: ' + sol.title);
+        task.push('Страница: ' + origin + (sol.slug ? '/' + db + '/' + sol.slug : '/' + db + '/catalog#/s/' + sol.id));
+      } else task.push('Решение: не выбрано');
+      var c = String(v.comment || '').trim().slice(0, 3000);
+      if (c) task.push('', c);
+      return { source: 'solutions', name: String(v.name || '').trim().slice(0, 200), company: String(v.company || '').trim().slice(0, 200),
+        contact: String(v.contact || '').trim().slice(0, 200), task: task.join('\n') };
+    },
     // подпись в шапке движка (.navbar-workspace), backlogram#997: страница решения и заявка по решению — «коробка», остальное — каталог
     workspaceTitle: function (r) {
       return r && (r.view === 'solution' || r.view === 'legacy' || (r.view === 'apply' && r.id)) ? 'Ваша персональная коробка' : 'Копируем любые решения и делаем их под вас';
@@ -301,6 +314,15 @@
         return r.json().then(function (j) {
           if (!r.ok || (j && (j.error || (Array.isArray(j) && j[0] && j[0].error)))) throw new Error('fail');
         });
+      }).then(function () {
+        // Запись в базе — главное; уведомление в Telegram вдогонку (#5660). Скрипт сайта сам кладёт его в спул
+        // и дошлёт cron-ом; капчу не просит при cookie idb_* (её ставит и гостевая сессия). Сбой заявку не отменяет.
+        var sol = (state.list || []).filter(function (s) { return String(s.id) === String(v.solution); })[0] || null;
+        var n = Core.buildNotify(v, sol, location.origin, DB), fd = new FormData();
+        Object.keys(n).forEach(function (k) { fd.set(k, n[k]); });
+        return fetch('/telegram-notify.php', { method: 'POST', credentials: 'same-origin', body: fd })
+          .then(function (r) { if (!r.ok && window.console) console.warn('solutions: telegram-notify', r.status); },
+            function (e) { if (window.console) console.warn('solutions: telegram-notify', e); });
       }).then(function () {
         app.innerHTML = '<h1 class="sl-h">Спасибо, заявка принята</h1><p>Мы свяжемся с вами по указанному контакту.</p><p><a href="' + CATALOG + '">Вернуться к каталогу</a></p>';
       }).catch(function () { busy = false; msg.textContent = 'Не удалось отправить заявку. Попробуйте ещё раз чуть позже.'; });
