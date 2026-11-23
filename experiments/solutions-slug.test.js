@@ -8,10 +8,10 @@ const root = path.join(__dirname, '..');
 const C = require(path.join(root, 'download', 'solutions', 'app.js'));
 const read = (...p) => fs.readFileSync(path.join(root, ...p), 'utf8');
 
-// адреса 20 решений: это и контракт для рекламы, и список обязательных файлов-переходников
+// адреса 21 решения: это и контракт для рекламы, и список обязательных файлов-переходников
 const SLUGS = ['wfm', 'mdm', 'sverka', 'bi', 'loyalty', 'budgeting', 'srm', 'b2b-portal', 'service-desk', 'resource-planning',
-  'toir', 'field-service', 'pim', 'mes', 'kedo', 'debitorka', 'cpq', 'task-tracker', 'bpm-camunda', 'ohrana-truda'];
-assert.strictEqual(new Set(SLUGS).size, 20);
+  'toir', 'field-service', 'pim', 'mes', 'kedo', 'debitorka', 'cpq', 'task-tracker', 'bpm-camunda', 'ohrana-truda', 'llm-router'];
+assert.strictEqual(new Set(SLUGS).size, 21);
 
 // slug: короткая латиница, цифры, дефис; ядро приводит адрес к нижнему регистру, поэтому заглавные не годятся
 SLUGS.forEach(s => assert.strictEqual(C.safeSlug(s), s, s));
