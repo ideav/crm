@@ -28,6 +28,33 @@
       if (!p[0]) return null;
       return { author: p[0], service: p[1] || 'Unsplash', url: Core.safeUrl(p[2]) };
     },
+    // адрес решения: латиница, цифры, дефис (ядро приводит путь к нижнему регистру)
+    safeSlug: function (v) {
+      var s = String(v == null ? '' : v).trim();
+      return /^[a-z0-9][a-z0-9-]{0,60}$/.test(s) ? s : '';
+    },
+    // ссылка карточки: чистый адрес, а без адреса — прежняя hash-ссылка
+    solutionHref: function (db, s) { return s.slug ? '/' + db + '/' + s.slug : '#/s/' + s.id; },
+    bySlug: function (list, slug) {
+      return list.filter(function (x) { return x.slug && x.slug === slug; })[0] || null;
+    },
+    // куда уводить старую ссылку #/s/<id>; пусто — у решения нет адреса
+    legacyTarget: function (list, id, db) {
+      var s = list.filter(function (x) { return x.id === id; })[0];
+      return s && s.slug ? '/' + db + '/' + s.slug : '';
+    },
+    // путь важнее hash: /<база>/<slug> — страница решения; hash остаётся для каталога, заявки и старых ссылок
+    parseLocation: function (pathname, hash) {
+      var h = Core.parseHash(hash);
+      if (h.view === 'solution') return { view: 'legacy', id: h.id };
+      if (h.view === 'apply') return h;
+      var seg = String(pathname || '').split('/')[2] || '';
+      if (seg && seg.toLowerCase() !== 'catalog') {
+        try { seg = decodeURIComponent(seg); } catch (e) { /* битый адрес оставляем как есть */ }
+        return { view: 'solution', slug: seg.toLowerCase() };
+      }
+      return h;
+    },
     imgUrl: function (name, size) { return '/download/solutions/img/' + name + (size === 'l' ? '-l.webp' : '-s.webp'); },
     refs: function (v) { // null | {id,val} | [{id,val}] → массив
       if (!v) return [];
@@ -38,6 +65,7 @@
       return {
         id: Number(row.id),
         title: row['Решение'] || '',
+        slug: Core.safeSlug(row['Адрес']),
         short: row['Кратко'] || '',
         pain: row['Боль'] || '',
         features: Core.splitLines(row['Что умеет']),
@@ -98,7 +126,7 @@
     },
     // подпись в шапке движка (.navbar-workspace), backlogram#997: страница решения и заявка по решению — «коробка», остальное — каталог
     workspaceTitle: function (r) {
-      return r && (r.view === 'solution' || (r.view === 'apply' && r.id)) ? 'Ваша персональная коробка' : 'Копируем любые решения и делаем их под вас';
+      return r && (r.view === 'solution' || r.view === 'legacy' || (r.view === 'apply' && r.id)) ? 'Ваша персональная коробка' : 'Копируем любые решения и делаем их под вас';
     }
   };
 
@@ -108,6 +136,7 @@
 
   var DB = (location.pathname.match(/^\/([^\/]+)\//) || [])[1] || 'solutions';
   var app = document.getElementById('sl-app');
+  var CATALOG = '/' + DB + '/catalog';
   var state = { list: null, cats: [], inds: [], plats: [], error: '' };
 
   function esc(s) {
@@ -159,7 +188,7 @@
     if (!items.length) h += '<p class="sl-muted">По этим условиям ничего не нашлось. Сбросьте фильтры или <a href="#/apply">опишите задачу в заявке</a>.</p>';
     h += '<div class="sl-grid">' + items.map(function (s) {
       var pic = s.img ? '<img class="sl-thumb" loading="lazy" width="480" height="320" src="' + esc(Core.imgUrl(s.img, 's')) + '" alt="' + esc(s.title) + '">' : '';
-      return '<a class="sl-card" href="#/s/' + s.id + '">' + pic + '<h3>' + esc(s.title) + '</h3><p>' + esc(s.short) + '</p>' +
+      return '<a class="sl-card" href="' + esc(Core.solutionHref(DB, s)) + '">' + pic + '<h3>' + esc(s.title) + '</h3><p>' + esc(s.short) + '</p>' +
         tags((s.category ? [s.category] : []).concat(s.platforms)) + '</a>';
     }).join('') + '</div>';
     app.innerHTML = h;
@@ -172,9 +201,8 @@
     if (f.q) { var n = qi.value.length; qi.focus(); qi.setSelectionRange(n, n); }
   }
 
-  function viewSolution(id) {
-    var s = state.list.filter(function (x) { return x.id === id; })[0];
-    if (!s) { app.innerHTML = '<p>Такого решения нет в каталоге. <a href="#/">Вернуться к каталогу</a></p>'; return; }
+  function viewSolution(s) {
+    if (!s) { app.innerHTML = '<p>Такого решения нет в каталоге. <a href="' + CATALOG + '">Вернуться к каталогу</a></p>'; return; }
     var demo = s.demo && !s.demoSoon ? '<a class="sl-btn" href="' + esc(s.demo) + '" target="_blank" rel="noopener">Попробовать демо</a>'
       : s.demoSoon ? '<span class="sl-btn alt" aria-disabled="true">Демо скоро</span>' : '';
     var hero = '';
@@ -182,18 +210,18 @@
       var cr = s.credit ? '<figcaption class="sl-credit">Фото: ' + (s.credit.url ? '<a href="' + esc(s.credit.url) + '" target="_blank" rel="noopener">' + esc(s.credit.author) + ' / ' + esc(s.credit.service) + '</a>' : esc(s.credit.author) + ' / ' + esc(s.credit.service)) + '</figcaption>' : '';
       hero = '<figure class="sl-hero"><img src="' + esc(Core.imgUrl(s.img, 'l')) + '" width="1600" height="900" alt="' + esc(s.title) + '">' + cr + '</figure>';
     }
-    var h = '<a class="sl-back" href="#/">← Каталог</a>' + hero + '<h1 class="sl-h">' + esc(s.title) + '</h1><p class="sl-muted">' + esc(s.short) + '</p>' +
+    var h = '<a class="sl-back" href="' + CATALOG + '">← Каталог</a>' + hero + '<h1 class="sl-h">' + esc(s.title) + '</h1><p class="sl-muted">' + esc(s.short) + '</p>' +
       tags((s.category ? [s.category] : []).concat(s.industries, s.platforms));
     h += '<div class="sl-actions">' + demo + '<a class="sl-btn' + (demo ? ' alt' : '') + '" href="#/apply/' + s.id + '">' + (s.demo && !s.demoSoon ? 'Оставить заявку' : 'Запросить демо') + '</a></div>';
     h += '<h2 class="sl-h2">Какую боль закрывает</h2><p>' + esc(s.pain).replace(/\n+/g, '</p><p>') + '</p>';
     if (s.features.length) h += '<h2 class="sl-h2">Что умеет</h2><ul class="sl-list">' + s.features.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>';
     if (s.steps.length) h += '<h2 class="sl-h2">Как переезжаем</h2><ol class="sl-steps">' + s.steps.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ol>';
     app.innerHTML = h;
-    document.title = s.title + ' — Решения';
+    document.title = s.title + ' — Решения Интеграм';
   }
 
   function viewApply(id) {
-    var h = '<a class="sl-back" href="#/">← Каталог</a><h1 class="sl-h">Заявка</h1><p class="sl-muted">Оставьте контакт: мы покажем демо или обсудим вашу задачу.</p>' +
+    var h = '<a class="sl-back" href="' + CATALOG + '">← Каталог</a><h1 class="sl-h">Заявка</h1><p class="sl-muted">Оставьте контакт: мы покажем демо или обсудим вашу задачу.</p>' +
       '<form class="sl-form" id="sl-form" novalidate>' +
       '<label>Ваше имя<input name="name" maxlength="200" required autocomplete="name"></label>' +
       '<label>Компания<input name="company" maxlength="200" autocomplete="organization"></label>' +
@@ -222,18 +250,22 @@
           if (!r.ok || (j && (j.error || (Array.isArray(j) && j[0] && j[0].error)))) throw new Error('fail');
         });
       }).then(function () {
-        app.innerHTML = '<h1 class="sl-h">Спасибо, заявка принята</h1><p>Мы свяжемся с вами по указанному контакту.</p><p><a href="#/">Вернуться к каталогу</a></p>';
+        app.innerHTML = '<h1 class="sl-h">Спасибо, заявка принята</h1><p>Мы свяжемся с вами по указанному контакту.</p><p><a href="' + CATALOG + '">Вернуться к каталогу</a></p>';
       }).catch(function () { busy = false; msg.textContent = 'Не удалось отправить заявку. Попробуйте ещё раз чуть позже.'; });
     };
   }
 
   function route() {
-    var r = Core.parseHash(location.hash);
+    var r = Core.parseLocation(location.pathname, location.hash);
     document.title = 'Решения на Интеграме';
     var ws = document.querySelector('.navbar-workspace');
     if (ws) ws.textContent = Core.workspaceTitle(r);
     if (state.error) { app.innerHTML = '<p class="sl-err">' + esc(state.error) + '</p>'; return; }
-    if (r.view === 'solution') viewSolution(r.id);
+    if (r.view === 'legacy') {
+      var to = Core.legacyTarget(state.list || [], r.id, DB);
+      if (to) { location.replace(to); return; }
+      viewSolution((state.list || []).filter(function (x) { return x.id === r.id; })[0]);
+    } else if (r.view === 'solution') viewSolution(Core.bySlug(state.list || [], r.slug));
     else if (r.view === 'apply') viewApply(r.id);
     else viewCatalog(r.q);
     document.getElementById('sl-root').scrollTop = 0;
