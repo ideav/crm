@@ -220,6 +220,7 @@ table.xlsx-grid td:hover { background: rgba(13, 110, 253, .22); }
                 </select>
             </div>
             <input type="text" placeholder="Ввести формулу для расчета поля" class="form-control" id="set-formula">
+            <select class="form-control" style="max-width:15rem" id="formula-tpl" onchange="insertFormulaTemplate(this)" title="Готовые формулы для типовых преобразований"></select>
             <div class="input-group-append">
             <button class="btn btn-outline-secondary" type="button" onclick="doSaveFormula()" id="set-formula-btn">Сохранить</button>
             </div>
@@ -255,6 +256,25 @@ table.xlsx-grid td:hover { background: rgba(13, 110, 253, .22); }
             </div>
             <div id="xlsx-sheets-note" class="small mb-2 p-2" style="display:none;border:1px solid var(--bs-warning,#ffc107);border-radius:4px;background:rgba(255,193,7,.12)"></div>
             <div id="xlsx-grid" class="xlsx-grid-wrap"></div>
+            <details id="xlsx-opts" class="mt-2 small">
+                <summary style="cursor:pointer"><b>Преобразования</b> — объединённые ячейки, шапка, листы, периоды, цвет, итоги</summary>
+                <div class="mt-2" style="display:grid;gap:.4rem">
+                    <label class="mb-0"><input type="checkbox" id="xo-merges" class="xo"> Разнести значение объединённой ячейки на весь её диапазон</label>
+                    <label class="mb-0">Строк в шапке: <input type="number" id="xo-hdr" class="xo form-control form-control-sm d-inline-block" style="width:4.5rem" min="1" max="5" value="1"> <span style="color:var(--text-secondary)">— 2–3 строки склеиваются: «Январь / План» → «Январь План» (нужна галка «первая строка — заголовок»)</span></label>
+                    <label class="mb-0">Колонки «текст как есть»: <input type="text" id="xo-text" class="xo form-control form-control-sm d-inline-block" style="width:9rem" placeholder="B, F:G"> <span style="color:var(--text-secondary)">— артикулы, штрихкоды, ИНН, СНИЛС, телефоны: без экспоненты и с ведущими нулями</span></label>
+                    <div>Пропускать строки: со словами <input type="text" id="xo-words" class="xo form-control form-control-sm d-inline-block" style="width:10rem" placeholder="Итого, Всего">
+                        с пустой колонкой <input type="text" id="xo-keycol" class="xo form-control form-control-sm d-inline-block" style="width:3.5rem" placeholder="B">
+                        <label class="mb-0 ml-1"><input type="checkbox" id="xo-deep" class="xo"> оставить только нижний уровень группировки (подытоги 1С)</label></div>
+                    <label class="mb-0"><input type="checkbox" id="xo-sheets" class="xo"> Все листы книги с этой же разметкой — имя листа в колонку «Лист»</label>
+                    <div>Развернуть колонки-периоды в строки: <input type="text" id="xo-pivot" class="xo form-control form-control-sm d-inline-block" style="width:7rem" placeholder="D:AH">
+                        <label class="mb-0 ml-1"><input type="checkbox" id="xo-pivot-empty" class="xo"> сохранять пустые значения</label>
+                        <span style="color:var(--text-secondary)">— строки «объект — Период — Значение»; дату из заголовка даст формула «День месяца → дата»</span></div>
+                    <div id="xo-colors-wrap" style="display:none">Цвет заливки → значение
+                        <select id="xo-color-mode" class="xo form-control form-control-sm d-inline-block" style="width:auto"><option value="empty">в пустые клетки</option><option value="all">во все клетки</option></select>
+                        <div id="xo-colors" class="mt-1" style="display:flex;flex-wrap:wrap;gap:.4rem .9rem"></div></div>
+                    <div style="color:var(--text-secondary)">Буквы колонок — как в сетке выше. Порядок: объединения → цвет → диапазон → шапка → пропуск строк → листы → разворот.</div>
+                </div>
+            </details>
             <div class="mt-2"><button type="button" class="btn btn-primary" onclick="applyXlsxRange()">Применить диапазон</button></div>
         </div>
     </div>
@@ -289,6 +309,7 @@ table.xlsx-grid td:hover { background: rgba(13, 110, 253, .22); }
     <div id="preview" style="/*overflow-x: auto*/" class="mt-3 mb-5"></div>
 </div>
 <script src="/js/papaparse5.3.1.min.js"></script>
+<script src="/js/upload-xlsx-transforms.js?{_global_.version}.1"></script>
 <script>
 function showNotification(message, type) {
     type = type || 'info';
@@ -1052,6 +1073,7 @@ function intApi(m,u,b,vars,index){ // Параметры: метод, адрес
                     saveSet['xlsx']={sheet:$('#xlsx-sheet').val(),r0:xlsxSel.r0,c0:xlsxSel.c0,r1:xlsxSel.r1,c1:xlsxSel.c1};
                 else if(uploadSets[chosenSet]&&uploadSets[chosenSet].xlsx)
                     saveSet['xlsx']=uploadSets[chosenSet].xlsx;
+                if(saveSet['xlsx']&&xlsxWorkbook&&xlsxRows.length) saveSet['xlsx'].opts=xlsxGetOpts();   // issue #5642: преобразования панели
                 // issue #3824: значение настройки (t273 = JSON всего набора) кладём в ТЕЛО
                 // POST, а не в query-строку URL — иначе при большом наборе колонок/формул URL
                 // перерастал лимит и сервер отвечал 414 (Request-URI Too Long). intApi для
@@ -1498,6 +1520,65 @@ var xlsxWorkbook=null, xlsxRows=[], xlsxSel={r0:0,c0:0,r1:null,c1:null};
 // настройки. Применяется при следующей загрузке .xlsx (handleExcelFile), т.к. в
 // момент применения настройки сам файл ещё не выбран. null — нечего восстанавливать.
 var xlsxSavedSel=null;
+var xlsxOpts={};
+// issue #5642: настройки панели «Преобразования» ↔ объект xlsxOpts (он же уходит в
+// сохранённую настройку импорта рядом с листом и диапазоном).
+function xlsxGetOpts(){
+    var colors={},o;
+    $('#xo-colors input[data-key]').each(function(){ var v=$(this).val(); if(v!=='') colors[$(this).attr('data-key')]=v; });
+    o={fillMerges:$('#xo-merges').prop('checked')?1:0, headerRows:parseInt($('#xo-hdr').val(),10)||1
+        ,textCols:$('#xo-text').val()||'', allSheets:$('#xo-sheets').prop('checked')?1:0
+        ,unpivot:$('#xo-pivot').val()||'', unpivotKeepEmpty:$('#xo-pivot-empty').prop('checked')?1:0
+        ,colorMode:$('#xo-color-mode').val()||'empty'};
+    if($('#xo-words').val()||$('#xo-keycol').val()||$('#xo-deep').prop('checked'))
+        o.skip={words:$('#xo-words').val()||'', emptyCol:$('#xo-keycol').val()||'', deepest:$('#xo-deep').prop('checked')?1:0};
+    if(Object.keys(colors).length) o.colors=colors;
+    xlsxOpts=o;
+    return o;
+}
+function xlsxSetOpts(o){
+    o=o||{};
+    var sk=o.skip||{};
+    xlsxOpts=o;
+    $('#xo-merges').prop('checked',!!o.fillMerges);
+    $('#xo-hdr').val(o.headerRows||1);
+    $('#xo-text').val(o.textCols||'');
+    $('#xo-words').val(sk.words||'');
+    $('#xo-keycol').val(sk.emptyCol||'');
+    $('#xo-deep').prop('checked',!!sk.deepest);
+    $('#xo-sheets').prop('checked',!!o.allSheets);
+    $('#xo-pivot').val(o.unpivot||'');
+    $('#xo-pivot-empty').prop('checked',!!o.unpivotKeepEmpty);
+    $('#xo-color-mode').val(o.colorMode||'empty');
+    if(o.fillMerges||(o.headerRows>1)||o.textCols||o.skip||o.allSheets||o.unpivot||o.colors)
+        $('#xlsx-opts').prop('open',true);
+}
+// Список цветов заливки текущего листа (п. 4 #5642): образец, число клеток, поле значения.
+function xlsxRefreshColors(){
+    if(!xlsxWorkbook||!window.UploadXlsx) return;
+    var ws=xlsxWorkbook.Sheets[$('#xlsx-sheet').val()];
+    var fills=ws?UploadXlsx.listFills(UploadXlsx.readSheet(window.XLSX,ws,{})):[];
+    var map=xlsxOpts.colors||{};
+    if(!fills.length){ $('#xo-colors').html(''); $('#xo-colors-wrap').hide(); return; }
+    $('#xo-colors').html(fills.map(function(f){
+        var rgb=/^[0-9A-F]{6}$/.test(f.key)?'#'+f.key:'transparent';
+        return '<label class="mb-0" title="'+escape(f.key)+'"><span style="display:inline-block;width:1.1rem;height:1.1rem;vertical-align:middle;border:1px solid var(--border-color,#dee2e6);background:'+rgb+'"></span> '
+            +(rgb==='transparent'?escape(f.key)+' ':'')+'('+f.count+') = <input type="text" class="xo form-control form-control-sm d-inline-block" style="width:7rem" data-key="'+escape(f.key)+'" value="'+escape(map[f.key]||'')+'" placeholder="значение"></label>';
+    }).join(''));
+    $('#xo-colors-wrap').show();
+}
+// п. 8 #5642: готовая формула для выбранного поля; [Поле] → имя этого поля.
+function insertFormulaTemplate(sel){
+    var t=UploadXlsx.formulaTemplates[sel.value];
+    sel.value='';
+    if(!t) return;
+    if($('#fields').val()===''||$('#fields').val()===null){ showNotification('Сначала выберите поле для формулы', 'error'); return; }
+    $('#set-formula').val(t.f.replace('[Поле]','['+$('#n'+$('#fields').val()).val()+']')).focus();
+}
+$(function(){
+    if(!window.UploadXlsx) return;
+    $('#formula-tpl').html('<option value="">Шаблон формулы…</option>'+UploadXlsx.formulaTemplates.map(function(t,i){ return '<option value="'+i+'">'+escape(t.name)+'</option>'; }).join(''));
+});
 var XLSX_GRID_MAX_R=60, XLSX_GRID_MAX_C=40;
 
 function isExcelFile(name){ return /\.(xlsx|xlsm|xlsb|xls)$/i.test(name||''); }
@@ -1522,13 +1603,15 @@ function handleExcelFile(file){
     ensureXlsx().then(function(XLSX){
         var fr=new FileReader();
         fr.onload=function(e){
-            try{ xlsxWorkbook=XLSX.read(new Uint8Array(e.target.result),{type:'array',cellDates:true}); }
+            try{ xlsxWorkbook=XLSX.read(new Uint8Array(e.target.result),{type:'array',cellDates:true,cellStyles:true}); }
             catch(err){ $('#xlsx-area').hide(); xlsxShowError('Не удалось прочитать Excel: '+err.message); return; }
             if(!xlsxWorkbook.SheetNames.length){ $('#xlsx-area').hide(); xlsxShowError('В файле нет листов'); return; }
             $('#xlsx-sheet').html(xlsxWorkbook.SheetNames.map(function(n){ return '<option>'+escape(n)+'</option>'; }).join(''));
             // issue #3384: если из сохранённой настройки пришёл выбор листа/диапазона и
             // этот лист есть в книге — восстанавливаем его (один раз), иначе авто-определение.
             var saved=xlsxSavedSel; xlsxSavedSel=null;
+            // issue #5642: преобразования из сохранённой настройки — в панель до применения диапазона.
+            xlsxSetOpts(saved&&saved.opts?saved.opts:xlsxOpts);
             if(saved&&saved.sheet&&xlsxWorkbook.SheetNames.indexOf(saved.sheet)!==-1){
                 $('#xlsx-sheet').val(saved.sheet);
                 renderXlsxSheet(saved.sheet,saved);
@@ -1545,6 +1628,7 @@ function handleExcelFile(file){
                 xlsxSetAreaCollapsed(false);
             }
             updateXlsxSheetsNote();
+            xlsxRefreshColors();
         };
         fr.onerror=function(){ $('#xlsx-area').hide(); xlsxShowError('Ошибка чтения файла'); };
         fr.readAsArrayBuffer(file);
@@ -1663,12 +1747,10 @@ function xlsxToggleArea(){
 // чтобы не прятать панель, когда применять нечего.
 function applyXlsxRange(){
     if(!xlsxRows.length){ xlsxShowError('Лист пуст'); return false; }
-    var eR=xlsxEndR(), eC=xlsxEndC(), out=[];
-    for(var r=xlsxSel.r0;r<=eR;r++){
-        var row=[];
-        for(var c=xlsxSel.c0;c<=eC;c++) row.push(xlsxRows[r]&&xlsxRows[r][c]!==undefined?xlsxRows[r][c]:'');
-        if(row.some(function(v){ return String(v).trim()!==''; })) out.push(row);
-    }
+    // issue #5642: диапазон проходит через преобразования панели «Преобразования»
+    // (js/upload-xlsx-transforms.js). Без включённых опций результат — те же строки
+    // диапазона без пустых, что и прямое чтение сетки.
+    var out=UploadXlsx.build(window.XLSX,xlsxWorkbook,$('#xlsx-sheet').val(),xlsxSel,xlsxOpts,$('#header').prop('checked')).rows;
     if(!out.length){ xlsxShowError('В выбранном диапазоне нет данных'); return false; }
     // issue #3374: распознанные строки кладём в #input как текст (CSV), чтобы их
     // можно было отредактировать перед загрузкой; дальше идёт обычный текстовый путь
@@ -1691,7 +1773,8 @@ $(document).on('click','#xlsx-grid td[data-r]',function(e){
     if(e.shiftKey){ if(r>=xlsxSel.r0 && c>=xlsxSel.c0){ xlsxSel.r1=r; xlsxSel.c1=c; drawXlsxGrid(); } }
     else { xlsxSel.r0=r; xlsxSel.c0=c; xlsxSel.r1=null; xlsxSel.c1=null; drawXlsxGrid(); }
 });
-$(document).on('change','#xlsx-sheet',function(){ renderXlsxSheet(this.value); updateXlsxSheetsNote(); });
+$(document).on('change','#xlsx-sheet',function(){ renderXlsxSheet(this.value); updateXlsxSheetsNote(); xlsxRefreshColors(); });
+$(document).on('change','#xlsx-opts .xo',function(){ xlsxGetOpts(); });
 
 $(function(){
     $("#sortable").sortable({update:function(){gatherSet();importParse();}});
