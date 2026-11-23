@@ -17,6 +17,8 @@
 
 {
 	email care@ideav.ru
+	# Прокси reg.ru (cv5378055.regru.cloud) ходит на :443 без SNI — см. блок в конце.
+	default_sni cv5378055.regru.cloud
 	on_demand_tls {
 		ask http://127.0.0.1:9180/my/_domain_ok
 	}
@@ -131,4 +133,27 @@ https:// {
 # HTTP чужих доменов — на HTTPS (у сайтов сервера редирект свой, от автоматического HTTPS Caddy).
 http:// {
 	redir https://{host}{uri} 308
+}
+
+# Прокси reg.ru: «phpMyAdmin» в панели reg.ru открывает https://cv5378055.regru.cloud/<путь>/phpmyadmin/,
+# прокси шлёт это на :443 сервера без SNI и сертификат не проверяет. До Caddy (#5573) это отдавал
+# Apache со своим самоподписанным — здесь так же. tls internal не годится: без SNI Caddy его не
+# находит и уходит в on-demand (ядро отвечает 404). Сертификат — файл, в репо его нет:
+#   N=cv5378055.regru.cloud; openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj "/CN=$N" \
+#     -addext "subjectAltName=DNS:$N" -keyout /etc/caddy/certs/$N.key -out /etc/caddy/certs/$N.pem
+#   chown caddy:caddy /etc/caddy/certs/$N.*   (sites.sh чужие файлы в certs не трогает)
+# Путь phpMyAdmin секретный (Alias в /etc/apache2/conf.d/phpmyadmin-apache.conf) — в репо его нет,
+# он в /etc/caddy/env: PMA_PATH=/<путь>/phpmyadmin. Без переменной путь-заглушка, наружу ничего.
+# Кроме phpMyAdmin под этим именем ничего не отдаём.
+cv5378055.regru.cloud {
+	tls /etc/caddy/certs/cv5378055.regru.cloud.pem /etc/caddy/certs/cv5378055.regru.cloud.key
+	handle {$PMA_PATH:/__pma_path_not_set__}* {
+		reverse_proxy https://127.0.0.1:8443 {
+			transport http {
+				tls_server_name cv5378055.regru.cloud
+				tls_insecure_skip_verify
+			}
+		}
+	}
+	respond 404
 }
