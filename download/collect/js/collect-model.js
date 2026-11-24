@@ -13,7 +13,7 @@
 
     W.loadModel = function () {
         if (M.loaded) return M.loaded;
-        var names = ['Правило', 'Ступень', 'Ключевая ставка', 'Менеджер', 'Шаблон письма', 'Клиент', 'Договор', 'Отгрузка', 'Оплата', 'Обещание', 'Претензия', 'Дело', 'График реструктуризации', 'Задача по долгу', 'Контакт', 'Запрос разблокировки'];
+        var names = ['Настройка демо', 'Правило', 'Ступень', 'Ключевая ставка', 'Менеджер', 'Шаблон письма', 'Клиент', 'Договор', 'Отгрузка', 'Оплата', 'Обещание', 'Претензия', 'Дело', 'График реструктуризации', 'Задача по долгу', 'Контакт', 'Запрос разблокировки'];
         M.loaded = W.all2(names).then(function (d) {
             M.raw = d;
             M.build();
@@ -29,14 +29,19 @@
     M.reload = function () { M.loaded = null; return W.loadModel(); };
 
     M.build = function () {
-        var R = M.raw, m = {};
+        var R = M.raw, m = {}, sm = {};
+        (R['Настройка демо'] || []).forEach(function (r) { sm[r['Код']] = W.dec(r['Значение']); });
+        M.settingRows = R['Настройка демо'] || [];
+        M.S = C.settingsFrom(sm);
+        W.TODAY = C.todayFor(M.S, W.localIso());
         R['Правило'].forEach(function (r) { m[r['Правило']] = C.num(r['Значение правила']); });
         M.rules = { stopDays: m['Порог стоп-отгрузки по просрочке, дн'], stopSum: m['Порог стоп-отгрузки по сумме просрочки'], byLimit: m['Стоп-отгрузка по лимиту долга'] === 1,
-            claimDays: m['Претензионный срок по умолчанию, дн'] || 30, grace: m['Льготные дни графика реструктуризации'] || 0, dsoDays: m['Окно расчёта DSO, дн'] || 90 };
+            mode: M.S.stopMode, keyAuto: M.S.keyAuto, claimDays: m['Претензионный срок по умолчанию, дн'] || 30, grace: m['Льготные дни графика реструктуризации'] || 0, dsoDays: m['Окно расчёта DSO, дн'] || 90 };
         M.ruleRows = R['Правило'];
-        M.stages = R['Ступень'].map(function (r) {
+        M.stagesBase = R['Ступень'].map(function (r) {
             return { id: r._id, code: r['Код'], name: r['Ступень'], from: C.num(r['С дня просрочки']), byAge: truthy(r['По возрасту долга']), action: r['Действие'], owner: r['Исполнитель'], color: r['Цвет'] || 'info' };
         });
+        M.stages = C.applyStageProfile(M.stagesBase, M.S.profile);
         M.stageBy = {}; M.stages.forEach(function (s) { M.stageBy[s.code] = s; });
         M.stageByName = {}; M.stages.forEach(function (s) { M.stageByName[s.name] = s; });
         M.rates = R['Ключевая ставка'].map(function (r) { return { from: C.toIso(r['Ключевая ставка']), rate: C.num(r['Ставка']), note: r['Основание'] }; }).sort(function (a, b) { return a.from < b.from ? -1 : 1; });

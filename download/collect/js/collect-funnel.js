@@ -24,29 +24,40 @@
     function saveAnd(host, p, msg) {
         return p.then(function () { W.toast(msg); return M.reload(); }).then(function () { render(host); }).catch(function (e) { W.toast(e.message, true); });
     }
+    var OWNERS = ['Система', 'Менеджер', 'Кредитный контролёр', 'Юрист'];
+    var PROFILE_NAME = { soft: 'Мягкий', strict: 'Жёсткий' };
     function stages(host) {
-        var can = W.canWrite('Ступень'), inputs = {};
-        var order = M.stages.filter(function (s) { return s.byAge; }).sort(function (a, b) { return a.from - b.from; });
+        var can = W.canWrite('Ступень'), custom = M.S.profile === 'custom', dayCan = can && custom;
+        var order = M.stagesBase.filter(function (s) { return s.byAge; }).sort(function (a, b) { return a.from - b.from; });
         var rows = order.map(function (s) {
-            var inp = W.el('input', { type: 'number', min: 0, value: s.from, 'aria-label': 'С дня просрочки: ' + s.name, 'class': 'dbt-in', disabled: !can || s.code === 'before' });
-            inputs[s.id] = inp;
-            return { s: s, inp: inp };
+            var eff = M.stageBy[s.code] || s;
+            var inp = W.el('input', { type: 'number', min: 0, value: custom ? s.from : eff.from, 'aria-label': 'С дня просрочки: ' + s.name, 'class': 'dbt-in', disabled: !dayCan || s.code === 'before' });
+            var act = W.el('input', { type: 'text', value: s.action, 'aria-label': 'Что делаем: ' + s.name, 'class': 'dbt-in dbt-in-wide', disabled: !can });
+            var own = W.select(OWNERS, s.owner); own.disabled = !can; own.setAttribute('aria-label', 'Кто: ' + s.name);
+            return { s: s, inp: inp, act: act, own: own };
         });
         var tbl = W.table([
             { t: 'Ступень', html: function (r) { return W.badge(r.s.name, r.s.color); } },
             { t: 'С какого дня просрочки', html: function () { return ''; } },
-            { t: 'Что делаем', html: function (r) { return W.esc(r.s.action); } },
-            { t: 'Кто', html: function (r) { return W.esc(r.s.owner); } }], rows);
-        // вставить поля ввода во вторую колонку
-        [].slice.call(tbl.querySelectorAll('tbody tr')).forEach(function (tr, i) { tr.children[1].appendChild(rows[i].inp); });
+            { t: 'Что делаем', html: function () { return ''; } },
+            { t: 'Кто', html: function () { return ''; } }], rows);
+        [].slice.call(tbl.querySelectorAll('tbody tr')).forEach(function (tr, i) { tr.children[1].appendChild(rows[i].inp); tr.children[2].appendChild(rows[i].act); tr.children[3].appendChild(rows[i].own); });
         var save = W.btn('Сохранить ступени и пересчитать реестр', function () {
             var prev = 0, ops = [], bad = '';
-            rows.forEach(function (r) { var v = Math.round(C.num(r.inp.value)); if (r.s.code !== 'before') { if (v <= prev) bad = 'Дни ступеней должны возрастать: «' + r.s.name + '»'; prev = v; if (v !== r.s.from) ops.push(M.set(r.s.id, { 'С дня просрочки': v })); } });
+            rows.forEach(function (r) {
+                var f = {}, v = Math.round(C.num(r.inp.value));
+                if (r.s.code !== 'before' && custom) { if (v <= prev) bad = 'Дни ступеней должны возрастать: «' + r.s.name + '»'; prev = v; if (v !== r.s.from) f['С дня просрочки'] = v; }
+                if (r.act.value !== r.s.action) f['Действие'] = r.act.value;
+                if (r.own.value !== r.s.owner) f['Исполнитель'] = r.own.value;
+                if (Object.keys(f).length) ops.push(M.set(r.s.id, f));
+            });
             if (bad) { W.toast(bad, true); return; }
             if (!ops.length) { W.toast('Ничего не изменилось'); return; }
             saveAnd(host, Promise.all(ops), 'Ступени сохранены, реестр пересчитан');
         }, 'dbt-primary');
-        return W.el('div', {}, [W.el('h2', { text: 'Ступени воронки' }), W.el('p', { 'class': 'dbt-sub', text: 'Ступень определяется возрастом самого старого долга. Измените день и сохраните: клиенты перейдут между ступенями без участия программиста.' }), tbl, can ? W.el('p', {}, [save]) : W.el('p', { 'class': 'dbt-mini', text: 'Править ступени может финансовый директор.' })]);
+        var note = custom ? 'Ступень определяется возрастом самого старого долга. Измените день, действие или исполнителя и сохраните: клиенты перейдут между ступенями без участия программиста.'
+            : 'Сейчас действует профиль границ «' + PROFILE_NAME[M.S.profile] + '» (экран «Настройки»): показаны его дни. Действия и исполнителей править можно; свои дни — после переключения профиля на «Свои границы».';
+        return W.el('div', {}, [W.el('h2', { text: 'Ступени воронки' }), W.el('p', { 'class': 'dbt-sub', text: note }), tbl, can ? W.el('p', {}, [save]) : W.el('p', { 'class': 'dbt-mini', text: 'Править ступени может финансовый директор.' })]);
     }
     function rules(host) {
         var can = W.canWrite('Правило');
@@ -64,7 +75,8 @@
         }, 'dbt-primary');
         // стоп-решения
         var need = M.rows.filter(function (r) { return r.dec.stop && !r.stop; }), keep = M.rows.filter(function (r) { return r.dec.needDirector; });
-        return W.el('div', {}, [W.el('h2', { text: 'Правила стоп-отгрузки' }), tbl, can ? W.el('p', {}, [save]) : W.el('p', { 'class': 'dbt-mini', text: 'Править правила может финансовый директор.' }),
+        var MODE = { days: 'с N-го дня просрочки', sum: 'от суммы просрочки', either: 'день или сумма', both: 'и день, и сумма', limit: 'по лимиту клиента', any: 'любое из условий: день, сумма, лимит' };
+        return W.el('div', {}, [W.el('h2', { text: 'Правила стоп-отгрузки' }), W.el('p', { 'class': 'dbt-sub', text: 'Условие стопа (экран «Настройки»): ' + MODE[M.S.stopMode] + '. Ключевые клиенты: ' + (M.S.keyAuto ? 'стоп как у всех.' : 'решает директор.') + ' Ниже — пороги.' }), tbl, can ? W.el('p', {}, [save]) : W.el('p', { 'class': 'dbt-mini', text: 'Править правила может финансовый директор.' }),
             W.el('p', { html: 'По текущим правилам: нужен стоп — <b>' + need.length + '</b> клиентов, решение за директором (ключевые) — <b>' + keep.length + '</b>.' }),
             need.length ? W.table([{ t: 'Клиент', k: 'name' }, { t: 'Почему', html: function (r) { return W.esc(r.dec.reasons.join('; ')); } }], need) : null]);
     }
