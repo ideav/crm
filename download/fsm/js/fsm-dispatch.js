@@ -18,9 +18,9 @@
     function prioRank(n) { var p = M.prios.filter(function (x) { return x['Приоритет'] === n; })[0]; return p ? C.num(p['Порядок']) : 9; }
     function prioKind(n) { return { 'Аварийный': 'crit', 'Срочный': 'warn' }[n] || 'info'; }
     function bd(text, kind) { return W.badge(text, kind); }
-    function isLate(o) { return C.isOpen(o) && C.slaState(o, W.now()).state === 'late'; }
+    function isLate(o) { return C.isOpen(o) && C.slaState(o, W.now(), W.opts).state === 'late'; }
     function slaHtml(o) {
-        var s = C.slaState(o, W.now()), k = { ok: 'ok', risk: 'warn', late: 'crit', met: 'ok', missed: 'crit', none: 'info' }[s.state];
+        var s = C.slaState(o, W.now(), W.opts), k = { ok: 'ok', risk: 'warn', late: 'crit', met: 'ok', missed: 'crit', none: 'info' }[s.state];
         var pref = s.stage === 'arrive' ? 'Прибытие: ' : s.stage === 'finish' ? 'Завершение: ' : '';
         return bd(pref + s.text, k);
     }
@@ -60,7 +60,7 @@
             if (o.status === 'Новый') c.nw++;
             if (['Назначен', 'В пути', 'На объекте', 'Ждёт запчасти'].indexOf(o.status) >= 0) c.work++;
             if (o.status === 'Ждёт запчасти') c.parts++;
-            if (C.isOpen(o)) { var s = C.slaState(o, now).state; if (s === 'late') c.late++; else if (s === 'risk') c.risk++; }
+            if (C.isOpen(o)) { var s = C.slaState(o, now, W.opts).state; if (s === 'late') c.late++; else if (s === 'risk') c.risk++; }
         });
         return c;
     }
@@ -170,7 +170,7 @@
         var btns = [];
         if (o.status === 'Новый' || o.status === 'Назначен') btns.push({ text: 'Подобрать инженера', cls: 'fsm-primary', fn: function () { pickFor(o); } });
         if (canW() && o.status === 'Выполнен') btns.push({ text: 'Проверить и закрыть', cls: 'fsm-primary', fn: function (close) {
-            act(function () { return W.setStatus(M, o, 'Закрыт', { 'Проверен': 1 }, 'Проверен диспетчером').then(function () { o.checked = true; }); }, 'Наряд ' + o.num + ' закрыт').then(function () { close(); refreshAll(); }, function () { });
+            act(function () { return W.setStatus(M, o, 'Закрыт', { 'Проверен': 1 }, 'Проверен диспетчером').then(function () { o.checked = true; return W.stockWriteoff(M, o, 'close'); }).then(function (plan) { if (plan.length) W.toast('Списано со склада в машине: ' + plan.length + ' поз.'); }); }, 'Наряд ' + o.num + ' закрыт').then(function () { close(); refreshAll(); }, function () { });
             return false;
         } });
         if (canW() && C.isOpen(o)) btns.push({ text: 'Отменить наряд', cls: 'fsm-danger', fn: function () { cancelModal(o); } });
@@ -198,6 +198,14 @@
     }
     function selOrder() { return M.orders.filter(function (o) { return o.id === S.sel; })[0] || null; }
     function selectOrder(o) { S.sel = o.id; S.selReq = ''; S.off = offOf(o); renderDays(); renderTiles(); renderContent(); }
+    /* Строка «по каким правилам подобрано» - значения из настроек демо. */
+    function rulesLine() {
+        var op = M.opts, n = function (c) { return String(C.opt(op, c)).replace('.', ','); }, bans = [];
+        if (C.opt(op, 'pick.ban_skill')) bans.push('нет навыка'); if (C.opt(op, 'pick.ban_permit')) bans.push('допуск истёк'); if (C.opt(op, 'pick.ban_load')) bans.push('лимит нарядов');
+        if (C.opt(op, 'pick.max_km') > 0) bans.push('дальше ' + n('pick.max_km') + ' км');
+        var dist = C.opt(op, 'dist.method') === 'road' ? 'по дорогам (геокодер не подключён, считаем по прямой' : 'по прямой';
+        return 'Правила подбора (из настроек): километр -' + n('pick.w_km') + ', наряд на день -' + n('pick.w_load') + ', свой район +' + n('pick.w_district') + '. Запреты: ' + (bans.join(', ') || 'нет') + '. Расстояние ' + dist + ' x ' + n('dist.coef') + (C.opt(op, 'dist.method') === 'road' ? ')' : '') + '.';
+    }
     function rank(o) { return C.rankEngineers(o, M.ctx()); }
     function reassign(order, eng) {
         var was = order.eng;
@@ -231,6 +239,7 @@
             center.appendChild(el('div', { 'class': 'fsm-disp-sum', html: bd(o.prio, prioKind(o.prio)) + ' <b>' + esc(o.wt) + '</b>, ' + esc(addr(o)) + '. Окно ' + esc(winText(o)) + '. ' + slaHtml(o) }));
             if (o.eng) center.appendChild(el('div', { 'class': 'fsm-disp-assigned', text: 'Сейчас назначен: ' + o.eng + ' (статус «' + o.status + '»). Можно переназначить.' }));
             if (!best) center.appendChild(el('div', { 'class': 'fsm-disp-assigned fsm-disp-noeng', text: 'Подходящих инженеров нет. Можно назначить вручную с предупреждением.' }));
+            center.appendChild(el('div', { 'class': 'fsm-sub fsm-disp-rules', text: rulesLine() }));
             var cols = [
                 { t: '#', html: function (r) { return String(rk.indexOf(r) + 1); } },
                 { t: 'Инженер', html: function (r) { return '<b>' + esc(r.eng) + '</b>' + (r === best ? ' ' + bd('Рекомендуется', 'info') : '') + '<div class="fsm-sub">' + esc(r.e.district || '') + '</div>'; } },
@@ -426,8 +435,9 @@
                 var a0 = C.parseDt(w0.value), a1 = C.parseDt(w1.value);
                 if (!a0 || !a1 || a1 <= a0) { W.toast('Проверьте окно прибытия', true); return false; }
                 var p = M.prios.filter(function (x) { return x['Приоритет'] === prio.value; })[0] || {}, created = Math.floor(W.now() / MIN) * MIN, num = nextNum();
+                var due = C.orderDue({ prio: prio.value, win0: a0, win1: a1, arrDue: created + C.num(p['SLA прибытие, ч']) * coef * HOUR, finDue: created + C.num(p['SLA завершение, ч']) * coef * HOUR }, M.opts); /* плановое ТО: срок по настройкам */
                 var f = { 'Наряд': num, 'Заявка': q.num, 'Заказчик': q.client, 'Объект': q.obj, 'Оборудование': q.eq, 'Вид работ': work.value, 'Приоритет': prio.value, 'Статус': 'Новый', 'Создан': C.toApi(created),
-                    'Окно с': C.toApi(a0), 'Окно по': C.toApi(a1), 'Прибыть до': C.toApi(created + C.num(p['SLA прибытие, ч']) * coef * HOUR), 'Завершить до': C.toApi(created + C.num(p['SLA завершение, ч']) * coef * HOUR), 'Неисправность': q.text };
+                    'Окно с': C.toApi(a0), 'Окно по': C.toApi(a1), 'Прибыть до': C.toApi(due.arrDue), 'Завершить до': C.toApi(due.finDue), 'Неисправность': q.text };
                 act(function () {
                     return W.post('_m_new/' + W.tid('Наряд') + '?JSON', { up: 1, fields: f }).then(function (j) {
                         var id = (Array.isArray(j) ? j[0] : j).id; if (!id) throw new Error('Сервер не вернул id наряда');
