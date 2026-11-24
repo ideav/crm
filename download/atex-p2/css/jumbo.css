@@ -103,6 +103,9 @@
 @media (max-width: 1000px) { .atex-jb-layout { grid-template-columns: minmax(0, 1fr); } }
 
 .atex-jb-panel { padding: 10px 12px; border: 1px solid var(--atex-jb-border); border-radius: 8px; background: var(--atex-jb-panel); overflow-x: auto; }
+/* Панель — ребёнок flex-колонки .atex-jb со своим скроллом: overflow-x у панели обнуляет её
+   min-height, и без flex-shrink: 0 колонка сжимает панель до рамки (#5711). */
+.atex-jc-picker { flex-shrink: 0; }
 /* Карта раскроя (#5707): без выбранной партии — невысокая плашка, прилеплена к низу экрана;
    с партией — обычная панель в потоке (форма бывает выше экрана, sticky обрезал бы её верх). */
 .atex-jc-picker.is-collapsed {
