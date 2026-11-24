@@ -1,4 +1,4 @@
-// rules: none (demo)
+// rules: none (defect #5681)
 // PIM (демо-копия, ideav/crm#5681, backlogram#989): расчёт полноты карточки по площадкам, соответствия значений, импорт, массовое заполнение, выгрузка.
 const test = require('node:test');
 const assert = require('node:assert');

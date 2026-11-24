@@ -1,4 +1,4 @@
-// rules: none (demo)
+// rules: none (defect #5685)
 // PSA (демо-копия, ideav/backlogram#986): чистые функции ёмкости, загрузки, проверки брони, подбора и маржи.
 const test = require('node:test');
 const assert = require('node:assert');

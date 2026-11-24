@@ -1,4 +1,4 @@
-// rules: none (demo)
+// rules: none (defect #5678)
 // CPQ (демо-копия, ideav/crm#5678): движок правил совместимости и цены. Каталог берётся из фикстуры, как строки таблиц базы.
 const test = require('node:test');
 const assert = require('node:assert');
