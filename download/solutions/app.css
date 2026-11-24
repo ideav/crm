@@ -57,3 +57,12 @@ a.sl-tag{color:inherit;text-decoration:none}a.sl-tag:hover{background:var(--sl-a
 .sl-credit a{color:inherit}
 /* backlogram#997: подпись портала в шапке движка длиннее 300px из css/styles.css */
 .navbar-workspace{max-width:min(520px,calc(100vw - 520px))}
+.sl-items li{margin:6px 0}
+.sl-ask{white-space:nowrap;font-size:14px;color:var(--sl-acc)}
+.sl-price{background:var(--sl-card);border:1px solid var(--sl-line);border-radius:12px;padding:4px 18px 8px;margin:24px 0}
+.sl-price-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin:8px 0 12px}
+.sl-price-grid div{background:var(--sl-soft);border-radius:10px;padding:10px 14px}
+.sl-price-grid dt{font-size:13px;color:var(--sl-mut)}
+.sl-price-grid dd{margin:2px 0 0;font-size:20px;font-weight:700}
+.sl-cmp{margin:4px 0 12px;font-size:15px}.sl-cmp summary{cursor:pointer;color:var(--sl-mut)}
+.sl-from{color:var(--sl-fg)!important;font-weight:600;font-size:14px!important}
