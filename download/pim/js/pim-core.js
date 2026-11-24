@@ -32,16 +32,132 @@
 
     /* ---------- значения карточки ---------- */
     /* attr = {name, type, field}; field - ключ системного поля карточки (name, desc, brand, country, barcode, weight) */
-    function getValue(p, attr) {
+    function getValue(p, attr, ch, S) {
         if (!attr) return '';
         if (attr.field) {
-            var m = { name: p.name, desc: p.desc, brand: p.brand, country: p.country, barcode: p.barcode, weight: p.weight };
+            var m = { name: ch ? titleFor(p, ch, S) : p.name, desc: p.desc, brand: p.brand, country: p.country, barcode: p.barcode, weight: p.weight };
             var v = m[attr.field];
             if (attr.field === 'weight') return num(v) > 0 ? String(v) : '';
             return empty(v) ? '' : String(v);
         }
         var x = p.values ? p.values[attr.name] : '';
         return empty(x) ? '' : String(x);
+    }
+
+    /* ---------- настройки демо (опции) ---------- */
+    /* Каждое спорное решение - настройка: администратор переключает её на экране «Настройки», расчёт читает значение, а не константу.
+       variants: [код, название, кому подходит]; def - значение по умолчанию; type: select | channels (список площадок через |). */
+    var OPTIONS = [
+        { code: 'title_mode', group: 'Названия и описания', title: 'Название карточки', type: 'select', def: 'common',
+          hint: 'Одно название на все площадки или своё название для каждой.',
+          variants: [['common', 'Одно название на все площадки', 'Подходит, когда карточек много и бренд говорит одним голосом: название подгоняют под самый строгий лимит'],
+                     ['per_channel', 'Своё название на каждую площадку', 'Подходит, когда у площадок свои правила поиска и длины: название хранится отдельно для каждой']] },
+        { code: 'value_map_scope', group: 'Соответствия значений', title: 'Справочник соответствий', type: 'select', def: 'category',
+          hint: 'Где хранятся соответствия «наше значение - значение площадки».',
+          variants: [['category', 'По категории', 'Подходит, когда в разных категориях один и тот же цвет или материал называют по-разному'],
+                     ['channel', 'Общий справочник на площадку', 'Подходит, когда значение достаточно привязать один раз на площадку: оно действует во всех категориях']] },
+        { code: 'ready_rule', group: 'Готовность и выгрузка', title: 'Правило статуса «Готово к выгрузке»', type: 'select', def: 'any',
+          hint: 'Когда карточку можно перевести в «Готово к выгрузке».',
+          variants: [['any', 'Хотя бы на одной площадке 100%', 'Подходит, когда начинают с одной площадки, остальные догоняют позже'],
+                     ['all', '100% на всех выбранных площадках', 'Подходит, когда карточка уходит везде одновременно и неполная не нужна нигде'],
+                     ['manual', 'Вручную, без проверки', 'Подходит, когда решение принимает руководитель, а система только подсвечивает пробелы']] },
+        { code: 'active_channels', group: 'Готовность и выгрузка', title: 'Площадки в работе', type: 'channels', def: '',
+          hint: 'Правило готовности считается только по отмеченным площадкам (ничего не отмечено - все).', variants: [] },
+        { code: 'export_scope', group: 'Готовность и выгрузка', title: 'Что попадает в файл площадки', type: 'select', def: 'channel_ok',
+          hint: 'Какие карточки идут в файл конкретной площадки.',
+          variants: [['channel_ok', 'Только прошедшие проверку этой площадки', 'Подходит, когда площадка отклоняет файл целиком из-за одной плохой строки'],
+                     ['ready_with_gaps', 'Все в статусе «Готово», пропуски пустыми', 'Подходит, когда площадка принимает неполные строки и сама показывает ошибки при загрузке']] },
+        { code: 'approve_by', group: 'Права', title: 'Кто утверждает карточки', type: 'select', def: 'managers',
+          hint: 'Кто может перевести карточку в «Готово к выгрузке».',
+          variants: [['managers', 'Руководитель и контент-менеджер', 'Подходит, когда нужен второй взгляд: ассистент только отправляет на проверку'],
+                     ['editors', 'Любой, кто правит карточки', 'Подходит небольшой команде, где отдельной проверки нет']] },
+        { code: 'limits_note', group: 'Площадки', title: 'Пометка про лимиты площадок', type: 'select', def: 'show',
+          hint: 'Лимиты, обязательность и справочники площадок меняются: пометка напоминает сверить их с документацией.',
+          variants: [['show', 'Показывать «сверить с документацией площадки»', 'Подходит, пока лимиты внесены по памяти или по старому файлу'],
+                     ['hide', 'Не показывать', 'Подходит, когда лимиты уже сверены и актуальны']] }
+    ];
+    function optionByCode(code) { return OPTIONS.filter(function (o) { return o.code === code; })[0]; }
+    function variantsText(o) { return o.variants.map(function (v) { return v.join('='); }).join('|'); }
+    /* Значение настройки: допустимое из S, иначе значение по умолчанию. */
+    function opt(S, code) {
+        var o = optionByCode(code), v = S && S[code];
+        if (!o) return v;
+        if (v === undefined || v === null) return o.def;
+        v = String(v).trim();
+        if (o.type === 'select') return o.variants.some(function (x) { return x[0] === v; }) ? v : o.def;
+        return v;
+    }
+    /* rows - [{code, value}] из таблицы «Настройки демо» -> {код: значение} со всеми настройками. */
+    function resolveSettings(rows) {
+        var raw = {}, S = {};
+        (rows || []).forEach(function (r) { if (r && r.code) raw[r.code] = r.value; });
+        OPTIONS.forEach(function (o) { S[o.code] = opt(raw, o.code); });
+        return S;
+    }
+    /* Площадки в работе: отмеченные в настройке; пусто - все. */
+    function activeChannels(S, names) {
+        var chosen = String(opt(S, 'active_channels') || '').split('|').map(function (x) { return x.trim(); }).filter(Boolean);
+        var out = names.filter(function (n) { return chosen.indexOf(n) >= 0; });
+        return out.length ? out : names.slice();
+    }
+    /* Название карточки для площадки: своё (режим «своё на площадку» и оно задано), иначе общее. */
+    function titleFor(p, ch, S) {
+        if (opt(S, 'title_mode') === 'per_channel' && p.titles && !empty(p.titles[ch.name])) return String(p.titles[ch.name]);
+        return empty(p.name) ? '' : String(p.name);
+    }
+    /* Самый строгий лимит названия среди площадок в работе. */
+    function strictestTitleLimit(channels, S) {
+        var act = activeChannels(S, channels.map(function (c) { return c.name; })), best = null;
+        channels.forEach(function (c) { if (act.indexOf(c.name) >= 0 && num(c.titleLimit) > 0 && (!best || num(c.titleLimit) < best.limit)) best = { limit: num(c.titleLimit), channel: c.name }; });
+        return best;
+    }
+    /* Лимит длины строки справочника: для названия и описания - лимит площадки (его правят на экране площадок). */
+    function limitFor(ca, attr, ch) {
+        if (attr && attr.field === 'name' && num(ch.titleLimit) > 0) return num(ch.titleLimit);
+        if (attr && attr.field === 'desc' && num(ch.descLimit) > 0) return num(ch.descLimit);
+        return num(ca.limit);
+    }
+    /* Пометка про лимиты площадки: null - не показывать. */
+    function limitsNote(ch, S) {
+        if (opt(S, 'limits_note') === 'hide') return null;
+        if (!empty(ch.limitsChecked)) return { warn: false, text: 'Лимиты сверены с документацией площадки: ' + ch.limitsChecked };
+        return { warn: true, text: 'Лимиты демонстрационные: сверить с документацией площадки' };
+    }
+    /* Кто может утверждать: caps = {card, edit, feed} (права на таблицы). */
+    function canApprove(S, caps) {
+        if (!caps.card) return false;
+        return opt(S, 'approve_by') === 'editors' ? true : !!(caps.feed || !caps.edit);
+    }
+    /* Таблица соответствий: raw {ключ атрибута площадки: {наше в нижнем регистре: значение площадки}}.
+       scope = channel: соответствие, заданное в одной категории, действует во всех категориях площадки для того же нашего атрибута. */
+    function buildValueMap(raw, chanAttrs, scope) {
+        var out = {}, byKey = {}, groups = {};
+        Object.keys(raw || {}).forEach(function (k) { out[k] = Object.assign({}, raw[k]); });
+        if (scope !== 'channel') return out;
+        chanAttrs.forEach(function (a) { byKey[a.key] = a; if (a.ours) (groups[a.channel + '|' + a.ours] = groups[a.channel + '|' + a.ours] || []).push(a.key); });
+        Object.keys(groups).forEach(function (g) {
+            var keys = groups[g], merged = {};
+            keys.forEach(function (k) { var m = (raw || {})[k] || {}; Object.keys(m).forEach(function (n) { if (merged[n] === undefined) merged[n] = m[n]; }); });
+            keys.forEach(function (k) {
+                var vals = byKey[k].values || [], res = Object.assign({}, out[k] || {});
+                Object.keys(merged).forEach(function (n) {
+                    if (res[n] === undefined && (!vals.length || vals.some(function (v) { return norm(v) === norm(merged[n]); }))) res[n] = merged[n];
+                });
+                out[k] = res;
+            });
+        });
+        return out;
+    }
+    /* Операции записи названий по площадкам: titles {площадка: текст}, p.titleIds {площадка: id строки}. */
+    function titleOps(p, titles) {
+        var ops = [];
+        Object.keys(titles || {}).forEach(function (chan) {
+            var v = titles[chan], id = p.titleIds && p.titleIds[chan];
+            if (id && v === '') ops.push({ op: 'del', id: id });
+            else if (id) ops.push({ op: 'save', id: id, fields: { 'Название для площадки': v } });
+            else if (v !== '') ops.push({ op: 'new', id: 'Название для площадки', up: p.id, fields: { 'Название для площадки': v, 'Площадка': chan } });
+        });
+        return ops;
     }
 
     /* Перевод нашего значения в значение справочника площадки: совпадение без учёта регистра или строка соответствия.
@@ -60,7 +176,7 @@
        M = {attrs: {имя: {name,type,field}}, valueMap}.
        Результат: {pct, required, ok, items[], blockers[]}; item.state: ok | missing | invalid | long | unmapped. */
     function checkChannel(p, ch, chanAttrs, M) {
-        var items = [], reqTotal = 0, reqOk = 0;
+        var S = M && M.settings, items = [], reqTotal = 0, reqOk = 0;
         function push(it) { items.push(it); if (it.required) { reqTotal++; if (it.state === 'ok') reqOk++; } }
         chanAttrs.filter(function (a) { return a.channel === ch.name && a.category === p.category; })
             .sort(function (a, b) { return (a.order || 0) - (b.order || 0); })
@@ -68,14 +184,15 @@
                 var base = { key: ca.key, label: ca.title, ours: ca.ours, required: !!ca.required };
                 var attr = M.attrs[ca.ours];
                 if (!ca.ours || !attr) { push(Object.assign(base, { state: 'unmapped', msg: ca.title + ': нет соответствия нашему атрибуту' })); return; }
-                var raw = getValue(p, attr);
+                var raw = getValue(p, attr, ch, S);
                 if (raw === '') { push(Object.assign(base, { state: 'missing', msg: 'не заполнено: ' + ca.title })); return; }
                 if (attr.field === 'barcode') {
                     var pr = eanProblem(raw);
                     if (pr) { push(Object.assign(base, { state: 'invalid', msg: ca.title + ': ' + pr })); return; }
                 }
-                if (ca.limit && raw.length > ca.limit) {
-                    push(Object.assign(base, { state: 'long', msg: ca.title + ': ' + raw.length + ' симв. при лимите ' + ca.limit, len: raw.length, limit: ca.limit })); return;
+                var lim = limitFor(ca, attr, ch);
+                if (lim && raw.length > lim) {
+                    push(Object.assign(base, { state: 'long', msg: ca.title + ': ' + raw.length + ' симв. при лимите ' + lim, len: raw.length, limit: lim })); return;
                 }
                 if (attr.type === 'number' && !isNum(raw)) { push(Object.assign(base, { state: 'invalid', msg: ca.title + ': «' + raw + '» не число' })); return; }
                 var t = translate(ca, raw, M.valueMap);
@@ -113,15 +230,20 @@
     /* ---------- переходы статусов ---------- */
     var STATUSES = ['Черновик', 'На проверке', 'Готово к выгрузке'];
     /* Что мешает перевести карточку в статус. Для «На проверке» хватает общих данных; «Готово к выгрузке» - 100% хотя бы по одной площадке. */
-    function statusBlockers(p, target, results, commonOk) {
+    function statusBlockers(p, target, results, commonOk, S) {
         var b = [];
         if (target === 'На проверке') {
             if (empty(p.name)) b.push('нет названия');
             if (empty(p.category)) b.push('не выбрана категория');
             if (empty(p.brand)) b.push('не указан бренд');
         } else if (target === 'Готово к выгрузке') {
-            var any = Object.keys(results || {}).some(function (k) { return results[k].pct >= 100; });
-            if (!any) b.push('нет ни одной площадки с полнотой 100%');
+            var rule = opt(S, 'ready_rule'), act = activeChannels(S, Object.keys(results || {}));
+            if (rule === 'any') {
+                if (!act.some(function (k) { return results[k].pct >= 100; })) b.push('нет ни одной площадки с полнотой 100%');
+            } else if (rule === 'all') {
+                var low = act.filter(function (k) { return results[k].pct < 100; });
+                if (low.length) b.push('не 100% на площадках: ' + low.map(function (k) { return k + ' (' + results[k].pct + '%)'; }).join(', '));
+            }
         }
         return b;
     }
@@ -234,14 +356,24 @@
     function buildExport(cards, ch, chanAttrs, M) {
         var cols = exportColumns(ch, chanAttrs), ok = [], bad = [];
         cards.forEach(function (p) {
-            var r = checkChannel(p, ch, chanAttrs, M);
-            if (r.blockers.length) { bad.push({ p: p, reasons: r.blockers.map(function (b) { return b.msg; }), pct: r.pct }); return; }
-            var cell = { 'Артикул': p.sku, 'Категория': r.items.length && chanAttrs.filter(function (a) { return a.channel === ch.name && a.category === p.category; })[0].catTitle || p.category };
-            r.items.forEach(function (it) { if (it.key === '_photos') return; cell[it.label] = it.value !== undefined ? it.value : ''; });
+            var r = checkChannel(p, ch, chanAttrs, M), gaps = opt(M && M.settings, 'export_scope') === 'ready_with_gaps' && r.blockers.length;
+            if (r.blockers.length && !gaps) { bad.push({ p: p, reasons: r.blockers.map(function (b) { return b.msg; }), pct: r.pct }); return; }
+            var first = chanAttrs.filter(function (a) { return a.channel === ch.name && a.category === p.category; })[0];
+            var cell = { 'Артикул': p.sku, 'Категория': first && first.catTitle || p.category };
+            r.items.forEach(function (it) { if (it.key === '_photos') return; cell[it.label] = it.state === 'ok' && it.value !== undefined ? it.value : ''; });
             if (num(ch.minPhotos) > 0) cell['Количество фото'] = String(num(p.photos));
-            ok.push({ p: p, cells: cols.map(function (c) { return cell[c] === undefined ? '' : cell[c]; }) });
+            ok.push({ p: p, gaps: gaps ? r.blockers.map(function (b) { return b.msg; }) : [], pct: r.pct, cells: cols.map(function (c) { return cell[c] === undefined ? '' : cell[c]; }) });
         });
         return { columns: cols, ok: ok, bad: bad };
+    }
+    /* Какие карточки берутся в выгрузку: «Готово к выгрузке»; все карточки - только если разрешено настройкой «что попадает в файл». */
+    function exportCards(cards, S, includeAll) {
+        var all = opt(S, 'export_scope') !== 'ready_with_gaps' && includeAll;
+        return cards.filter(function (p) { return all || p.status === 'Готово к выгрузке'; });
+    }
+    /* Сколько карточек пройдёт в «Готово к выгрузке» при правиле из S. cards: [{p, res}]. */
+    function readyCount(cards, S) {
+        return cards.filter(function (c) { return statusBlockers(c.p, 'Готово к выгрузке', c.res, true, S).length === 0; }).length;
     }
     function csvEscape(v, sep) { var s = String(v === undefined || v === null ? '' : v); return (s.indexOf(sep) >= 0 || /["\n\r]/.test(s)) ? '"' + s.replace(/"/g, '""') + '"' : s; }
     function toCsv(columns, rows, sep) { sep = sep || ';'; return [columns].concat(rows).map(function (r) { return r.map(function (v) { return csvEscape(v, sep); }).join(sep); }).join('\r\n') + '\r\n'; }
@@ -283,5 +415,7 @@
     return { num: num, isNum: isNum, empty: empty, norm: norm, round1: round1, eanValid: eanValid, eanProblem: eanProblem, getValue: getValue, translate: translate, checkChannel: checkChannel,
         checkAll: checkAll, level: level, buildTitle: buildTitle, STATUSES: STATUSES, statusBlockers: statusBlockers, planMassFill: planMassFill, parseDelimited: parseDelimited,
         mapColumns: mapColumns, importRow: importRow, columnStats: columnStats, exportColumns: exportColumns, buildExport: buildExport, toCsv: toCsv, toSpreadsheetXml: toSpreadsheetXml,
-        summarize: summarize, topReasons: topReasons, almostReady: almostReady };
+        OPTIONS: OPTIONS, optionByCode: optionByCode, variantsText: variantsText, opt: opt, resolveSettings: resolveSettings, activeChannels: activeChannels, titleFor: titleFor,
+        strictestTitleLimit: strictestTitleLimit, limitFor: limitFor, limitsNote: limitsNote, canApprove: canApprove, buildValueMap: buildValueMap, titleOps: titleOps,
+        exportCards: exportCards, readyCount: readyCount, summarize: summarize, topReasons: topReasons, almostReady: almostReady };
 });

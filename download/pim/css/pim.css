@@ -107,3 +107,6 @@
 .pim-ta { width: 100%; min-height: 130px; font: 12px/1.4 ui-monospace, Consolas, monospace; }
 @media (max-width: 800px) { .pim { padding: 10px; } .pim-two, .pim-split { grid-template-columns: 1fr; } .pim-rowline { grid-template-columns: 110px minmax(0, 1fr) 46px; } }
 .pim-bar input[type=search] { min-width: 240px; }
+label.pim-opt { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; margin: 4px 0; border: 1px solid var(--w-line); border-radius: 8px; cursor: pointer; }
+label.pim-opt.pim-opt-on { border-color: var(--w-green); background: var(--w-green-soft); }
+label.pim-opt input { margin-top: 4px; }
