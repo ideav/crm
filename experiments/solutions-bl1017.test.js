@@ -1,6 +1,6 @@
 // Мерка к backlogram#1017: цель заявки портала «Решения» для Директа с оплатой за конверсии.
 // Платная цель sol_lead уходит только от живого человека; всё прочее — sol_lead_blocked.
-// rules: none (defect backlogram#1017)
+// rules: none (defect #5698)
 const assert = require('assert');
 const path = require('path');
 const C = require(path.join(__dirname, '..', 'download', 'solutions', 'app.js'));
