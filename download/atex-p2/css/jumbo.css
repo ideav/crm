@@ -103,6 +103,17 @@
 @media (max-width: 1000px) { .atex-jb-layout { grid-template-columns: minmax(0, 1fr); } }
 
 .atex-jb-panel { padding: 10px 12px; border: 1px solid var(--atex-jb-border); border-radius: 8px; background: var(--atex-jb-panel); overflow-x: auto; }
+/* Карта раскроя (#5707): без выбранной партии — невысокая плашка, прилеплена к низу экрана;
+   с партией — обычная панель в потоке (форма бывает выше экрана, sticky обрезал бы её верх). */
+.atex-jc-picker.is-collapsed {
+    position: sticky;
+    bottom: 0;
+    z-index: 5;
+    padding: 6px 12px;
+    border-color: var(--atex-navy, #134174);
+    box-shadow: 0 -2px 10px rgba(15, 23, 42, 0.15);
+}
+.atex-jc-picker.is-collapsed .atex-jb-empty { padding: 0; }
 .atex-jb-panel-title { margin: 4px 0 8px; font-size: 0.95rem; font-weight: 600; }
 .atex-jb-muted { color: var(--atex-jb-muted); font-size: 0.85rem; margin: 4px 0; }
 .atex-jb-empty { color: var(--atex-jb-muted); padding: 8px 0; }

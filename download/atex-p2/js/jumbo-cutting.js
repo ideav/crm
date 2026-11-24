@@ -247,6 +247,9 @@
         this.picked = -1;
         this.renderBatches();
         this.pick();
+        // #5707: раскрытая форма стоит внизу страницы — показать её начало.
+        var el = this.$('atex-jc-picker');
+        if (el && el.scrollIntoView) el.scrollIntoView({ block: 'start', behavior: 'smooth' });
     };
 
     AtexJumboCutting.prototype.demandForPicker = function() {
@@ -308,7 +311,10 @@
     AtexJumboCutting.prototype.renderPicker = function() {
         var el = this.$('atex-jc-picker');
         var b = this.currentBatch();
-        if (!b) { el.innerHTML = '<div class="atex-jb-empty">Выберите партию джамбо справа — здесь появятся варианты карты раскроя.</div>'; return; }
+        // #5707: без партии — невысокая плашка, прилепленная к низу экрана (CSS .is-collapsed);
+        // с партией — полная форма подбора. После записи задания партия сбрасывается — снова плашка.
+        el.classList.toggle('is-collapsed', !b);
+        if (!b) { el.innerHTML = '<div class="atex-jb-empty"><b>Карта раскроя.</b> Выберите партию в «Партии джамбо к резке» — здесь появятся варианты карты.</div>'; return; }
         var g = b.geometry;
         var deficitAll = this.groups.filter(function(x) { return x.deficit > 0 && x.materialId === b.materialId; });
         var deficitM = deficitAll.reduce(function(a, x) { return a + x.deficit; }, 0);
