@@ -6,7 +6,8 @@
     var host = document.getElementById('dbt-app');
     var ds = host ? host.dataset : {};
     W.ctx = { db: ds.db || location.pathname.split('/')[1], xsrf: ds.xsrf || '', user: ds.user || '', role: ds.role || '', screen: ds.screen || '' };
-    W.TODAY = '2026-11-23'; /* дата демо */
+    W.TODAY = '2026-11-23'; /* демо-дата по умолчанию; опция «Дата сегодня» (экран «Настройки») переопределяет её в модели */
+    W.localIso = function () { var d = new Date(); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); };
 
     W.dec = function (s) { return typeof s === 'string' ? s.replace(/&comma;/g, ',') : s; };
     W.esc = function (s) { return String(s === undefined || s === null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); };

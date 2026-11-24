@@ -88,6 +88,20 @@
         sorted.forEach(function (s) { if (s.from >= 1 && s.from <= d) cur = s; });
         return cur;
     }
+    /* Опция «профиль границ ступеней»: custom - дни из таблицы «Ступень» (редактируются на экране); soft и strict - готовые наборы дней. */
+    var STAGE_PROFILES = {
+        custom: null,
+        soft: { remind: 1, call: 15, stop: 30, claim: 60, court: 90 },
+        strict: { remind: 1, call: 4, stop: 8, claim: 15, court: 31 }
+    };
+    function applyStageProfile(stages, profile) {
+        var p = STAGE_PROFILES[profile];
+        return stages.map(function (s) {
+            var o = {}; Object.keys(s).forEach(function (k) { o[k] = s[k]; });
+            if (p && p[s.code] !== undefined) o.from = p[s.code];
+            return o;
+        });
+    }
     /* Ступень клиента: суд и реструктуризация перекрывают возраст долга. */
     function clientStage(days, stages, flags) {
         flags = flags || {};
@@ -99,16 +113,25 @@
     }
 
     /* ---------- Стоп-отгрузка ---------- */
-    /* client: {limit, key}; m: {maxDays, overdue, debt}; rules: {stopDays, stopSum, byLimit}; opts: {restructOk} */
+    /* client: {limit, key}; m: {maxDays, overdue, debt}; rules: {stopDays, stopSum, byLimit, mode, keyAuto}; opts: {restructOk}.
+       Опция «условие стопа» (rules.mode): days - с N-го дня; sum - от суммы; either - день или сумма; both - и день, и сумма; limit - только лимит клиента; any - любое из трёх (по умолчанию).
+       Опция «ключевой клиент» (rules.keyAuto): false - решает директор; true - стоп как у всех. */
     function stopDecision(client, m, rules, opts) {
         opts = opts || {};
+        var mode = rules.mode || 'any', keyAuto = !!rules.keyAuto;
+        var d = rules.stopDays > 0 && m.maxDays >= rules.stopDays;
+        var s = rules.stopSum > 0 && m.overdue >= rules.stopSum;
+        var l = client.limit > 0 && m.debt > client.limit && (mode === 'limit' || !!rules.byLimit);
+        var hit = mode === 'days' ? d : mode === 'sum' ? s : mode === 'either' ? (d || s) : mode === 'both' ? (d && s) : mode === 'limit' ? l : (d || s || l);
         var reasons = [];
-        if (rules.stopDays > 0 && m.maxDays >= rules.stopDays) reasons.push('просрочка ' + m.maxDays + ' дн. (порог ' + rules.stopDays + ')');
-        if (rules.stopSum > 0 && m.overdue >= rules.stopSum) reasons.push('просроченная сумма ' + fmtRub(m.overdue) + ' (порог ' + fmtRub(rules.stopSum) + ')');
-        if (rules.byLimit && client.limit > 0 && m.debt > client.limit) reasons.push('долг ' + fmtRub(m.debt) + ' выше лимита ' + fmtRub(client.limit));
+        if (hit) {
+            if (d && mode !== 'sum' && mode !== 'limit') reasons.push('просрочка ' + m.maxDays + ' дн. (порог ' + rules.stopDays + ')');
+            if (s && mode !== 'days' && mode !== 'limit') reasons.push('просроченная сумма ' + fmtRub(m.overdue) + ' (порог ' + fmtRub(rules.stopSum) + ')');
+            if (l && (mode === 'limit' || mode === 'any')) reasons.push('долг ' + fmtRub(m.debt) + ' выше лимита ' + fmtRub(client.limit));
+        }
         if (!reasons.length) return { stop: false, needDirector: false, reasons: [] };
         if (opts.restructOk) return { stop: false, needDirector: false, reasons: reasons, note: 'отгрузка под действующий график реструктуризации' };
-        if (client.key) return { stop: false, needDirector: true, reasons: reasons, note: 'ключевой клиент: решение директора' };
+        if (client.key && !keyAuto) return { stop: false, needDirector: true, reasons: reasons, note: 'ключевой клиент: решение директора' };
         return { stop: true, needDirector: false, reasons: reasons };
     }
 
@@ -173,11 +196,19 @@
         var cap = capPct > 0 ? round2(amount * capPct / 100) : 0, capped = cap > 0 && raw > cap;
         return { total: capped ? cap : raw, raw: raw, cap: cap, capped: capped, days: days, rows: rows, basis: 'contract' };
     }
+    /* Опция «что начислять в претензии» (policy): by-contract - способ, записанный в договоре (по умолчанию); penalty - всегда неустойка по договору
+       (если ставки в договоре нет - проценты по ст. 395 ГК); 395 - всегда проценты по ст. 395 ГК. */
+    function effectiveBasis(contract, policy) {
+        if (policy === '395') return '395';
+        if (policy === 'penalty') return contract.rate > 0 ? 'contract' : '395';
+        return contract.basis || 'none';
+    }
     /* Пени по документу по способу, выбранному в договоре: 'contract' | '395' | 'none'. */
-    function penaltyFor(doc, pays, asOf, contract, rates) {
+    function penaltyFor(doc, pays, asOf, contract, rates, opts) {
         var mine = pays.filter(function (p) { return p.doc === doc.id; });
-        if (contract.basis === '395') return interest395(doc.amount, doc.due, mine, asOf, rates);
-        if (contract.basis === 'contract') return penaltyContract(doc.amount, doc.due, mine, asOf, contract.rate, contract.cap);
+        var basis = effectiveBasis(contract, opts && opts.policy), cap = opts && opts.capOff ? 0 : contract.cap;
+        if (basis === '395') return interest395(doc.amount, doc.due, mine, asOf, rates);
+        if (basis === 'contract') return penaltyContract(doc.amount, doc.due, mine, asOf, contract.rate, cap);
         return { total: 0, days: 0, rows: [], basis: 'none' };
     }
 
@@ -244,6 +275,35 @@
         return w;
     }
 
+    /* ---------- Настройки демо ---------- */
+    var SETTING_DEFAULTS = { 'today.mode': 'demo', 'today.demo': '2026-11-23', 'funnel.profile': 'custom', 'stop.mode': 'any', 'stop.key': 'director', 'claim.basis': 'by-contract', 'claim.cap': 'on' };
+    var SETTING_ALLOWED = {
+        'today.mode': ['demo', 'real'], 'funnel.profile': ['custom', 'soft', 'strict'], 'stop.mode': ['days', 'sum', 'either', 'both', 'limit', 'any'],
+        'stop.key': ['director', 'auto'], 'claim.basis': ['by-contract', 'penalty', '395'], 'claim.cap': ['on', 'off']
+    };
+    /* map: {код: значение} -> нормализованные настройки; неизвестное или пустое значение заменяется значением по умолчанию. */
+    function settingsFrom(map) {
+        map = map || {};
+        var v = {};
+        Object.keys(SETTING_DEFAULTS).forEach(function (k) {
+            var x = map[k] === undefined || map[k] === null ? '' : String(map[k]).trim();
+            if (k === 'today.demo') v[k] = /^\d{4}-\d{2}-\d{2}$/.test(toIso(x)) ? toIso(x) : SETTING_DEFAULTS[k];
+            else v[k] = SETTING_ALLOWED[k].indexOf(x) >= 0 ? x : SETTING_DEFAULTS[k];
+        });
+        return { todayMode: v['today.mode'], todayDemo: v['today.demo'], profile: v['funnel.profile'], stopMode: v['stop.mode'], keyAuto: v['stop.key'] === 'auto', claimBasis: v['claim.basis'], capOff: v['claim.cap'] === 'off' };
+    }
+    /* Дата «сегодня»: реальная (realIso - дата браузера) или зафиксированная демо-дата. */
+    function todayFor(S, realIso) { return S.todayMode === 'real' && realIso ? realIso : S.todayDemo; }
+    /* Подпись диапазона дней ступени для экранов: «8–14 дн.», «61+ дн.». */
+    function stageRange(stages, code) {
+        var s = stages.filter(function (x) { return x.code === code; })[0];
+        if (!s) return '';
+        if (code === 'restructuring') return 'График';
+        if (code === 'before') return 'До срока';
+        var next = stages.filter(function (x) { return x.code !== 'restructuring' && x.from > s.from; }).sort(function (a, b) { return a.from - b.from; })[0];
+        return next ? (next.from - 1 > s.from ? s.from + '–' + (next.from - 1) : String(s.from)) + ' дн.' : s.from + '+ дн.';
+    }
+
     /* ---------- Тексты ---------- */
     function fill(text, vars) { return String(text || '').replace(/\{([^{}]+)\}/g, function (m, k) { return vars[k] === undefined ? m : vars[k]; }); }
     /* Претензия: массив абзацев. d: {seller, buyer, contractNo, contractDate, docs:[{number,date,due,balance,days}], principal, penalty:{basis,total,rows}, penaltyRate, sendDate, asOf, term} */
@@ -265,7 +325,8 @@
     return {
         utc: utc, iso: iso, addDays: addDays, diffDays: diffDays, toIso: toIso, toDmy: toDmy, num: num, round2: round2, fmtRub: fmtRub, isLeap: isLeap,
         BUCKETS: BUCKETS, overdueDays: overdueDays, bucketOf: bucketOf, openDocs: openDocs, aging: aging, ledger: ledger,
-        stageFor: stageFor, clientStage: clientStage, stopDecision: stopDecision,
+        stageFor: stageFor, clientStage: clientStage, stopDecision: stopDecision, STAGE_PROFILES: STAGE_PROFILES, applyStageProfile: applyStageProfile,
+        effectiveBasis: effectiveBasis, SETTING_DEFAULTS: SETTING_DEFAULTS, settingsFrom: settingsFrom, todayFor: todayFor, stageRange: stageRange,
         interest395: interest395, penaltyContract: penaltyContract, penaltyFor: penaltyFor, rateAt: rateAt, claimTerm: claimTerm,
         restructureCheck: restructureCheck, dso: dso, revenueFor: revenueFor, byManager: byManager, forecast: forecast, fill: fill, buildClaim: buildClaim
     };
