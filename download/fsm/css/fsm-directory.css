@@ -1,0 +1,38 @@
+/* FSM: справочники. */
+.fsm-nowrap { white-space: nowrap; }
+.fsm-dir-small { font-size: 12px; }
+.fsm-dir-sec h2 { margin-top: 20px; }
+.fsm-dir-warn { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 8px; }
+.fsm-dir-warn .fsm-badge { font-size: 13px; padding: 3px 12px; }
+.fsm-dir-chip { display: inline-block; padding: 1px 8px; margin: 1px 2px 1px 0; border-radius: 10px; font-size: 12px; line-height: 1.5; white-space: nowrap; }
+.fsm-dir-chip-n { background: rgba(107, 114, 128, .15); color: var(--w-muted); }
+.fsm-dir-lowbox { padding: 10px 14px; border: 1px solid var(--w-line); border-radius: 8px; background: var(--w-card); margin-bottom: 6px; }
+.fsm-dir-lowbox-bad { border-color: var(--w-red); background: var(--w-red-soft); }
+.fsm-dir-lowbox ul { margin-top: 6px; }
+.fsm-dir-red { color: var(--w-red); }
+.fsm-dir-lowcell { background: var(--w-red-soft); color: var(--w-red); font-weight: 700; }
+.fsm-dir-swatch { display: inline-block; width: 14px; height: 14px; border-radius: 3px; vertical-align: -2px; border: 1px solid var(--w-red); }
+.fsm-dir-stock th { white-space: normal; min-width: 90px; }
+.fsm-dir-stock td:first-child, .fsm-dir-stock th:first-child { position: sticky; left: 0; background: var(--w-card); white-space: nowrap; z-index: 1; }
+.fsm-dir-mini { font-size: 13px; }
+.fsm-dir-card h4, .fsm-dir-eqcard h4 { margin: 14px 0 6px; }
+.fsm-dir-flags { margin-bottom: 8px; }
+.fsm-dir-eq { display: grid; grid-template-columns: minmax(240px, 380px) 1fr; gap: 14px; align-items: start; }
+.fsm-dir-eqlist { display: flex; flex-direction: column; gap: 4px; max-height: 70vh; overflow: auto; }
+.fsm-dir-eqitem { display: flex; flex-direction: column; text-align: left; gap: 1px; padding: 7px 10px; border: 1px solid var(--w-line); border-radius: 6px; background: var(--w-card); color: var(--w-text); font: inherit; cursor: pointer; }
+.fsm-dir-eqitem span { font-size: 12px; }
+.fsm-dir-eqitem:hover { border-color: var(--w-blue); }
+.fsm-dir-eqitem-on { border-color: var(--w-blue); background: var(--w-blue-soft); }
+.fsm-dir-eqcard h3 { margin: 0 0 6px; }
+.fsm-dir-timeline { list-style: none; margin: 0; padding: 0 0 0 4px; border-left: 2px solid var(--w-line); }
+.fsm-dir-timeline li { display: flex; gap: 10px; padding: 6px 0 6px 12px; position: relative; }
+.fsm-dir-timeline li::before { content: ''; position: absolute; left: -7px; top: 12px; width: 10px; height: 10px; border-radius: 50%; background: var(--w-blue); border: 2px solid var(--w-card); }
+.fsm-dir-tl-d { min-width: 80px; color: var(--w-muted); font-variant-numeric: tabular-nums; }
+.fsm-dir-tl-m { margin-top: 2px; }
+.fsm-dir-clients td:first-child { min-width: 200px; }
+.fsm-dir-objrow > td { background: var(--w-bg); padding: 8px; }
+@media (max-width: 800px) {
+    .fsm-dir-eq { grid-template-columns: 1fr; }
+    .fsm-dir-eqlist { max-height: 260px; }
+    .fsm-dir-timeline li { flex-direction: column; gap: 2px; }
+}
