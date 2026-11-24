@@ -225,10 +225,10 @@
     METRIKA_ID: 108758829,
     // Платная цель — только от живого человека. Защита: форма появляется лишь после клика «Оставить заявку»
     // (sol_apply_open), в сессии был настоящий жест (isTrusted), страница прожила ≥ 2,5 с, форму заполняли ≥ 4 с,
-    // браузер не автоматизирован, скрытое поле пустое. Иначе — sol_lead_blocked (видно в отчётах, Директ за неё не платит).
+    // браузер не автоматизирован, скрытое поле пустое, платной заявки в этой сессии браузера ещё не было. Иначе — sol_lead_blocked (видно в отчётах, Директ за неё не платит).
     leadGoal: function (sig) {
       var s = sig || {};
-      var ok = s.trusted === true && s.webdriver === false && s.honeypot === false &&
+      var ok = s.trusted === true && s.webdriver === false && s.honeypot === false && s.repeat !== true &&
         Number(s.aliveMs) >= 2500 && Number(s.formMs) >= 4000;
       return ok ? 'sol_lead' : 'sol_lead_blocked';
     },
@@ -248,6 +248,10 @@
 
   // Метрика (backlogram#1017): стандартный тег; hash-маршруты (#/apply) считаются просмотрами
   var T0 = Date.now(), trusted = false;
+  // Платная цель — раз за сессию браузера: повторные отправки одного посетителя Директ не оплачивает
+  var LEAD_KEY = 'sl_lead_sent', leadSent = false;
+  function leadRepeat() { if (leadSent) return true; try { return sessionStorage.getItem(LEAD_KEY) === '1'; } catch (e) { return false; } }
+  function markLead() { leadSent = true; try { sessionStorage.setItem(LEAD_KEY, '1'); } catch (e) { /* хранилище недоступно — хватит флага */ } }
   ['pointerdown', 'pointermove', 'touchstart', 'keydown', 'wheel', 'scroll'].forEach(function (ev) {
     window.addEventListener(ev, function (e) { if (e.isTrusted) trusted = true; }, { passive: true, capture: true });
   });
@@ -401,7 +405,7 @@
       var fields = Core.buildRequest(v);
       if (!fields) { msg.textContent = 'Укажите имя и контакт.'; return; }
       var now = Date.now(), leadGoal = Core.leadGoal({ trusted: trusted && e.isTrusted !== false, webdriver: !!navigator.webdriver,
-        honeypot: !!v.website, aliveMs: now - T0, formMs: now - opened });
+        honeypot: !!v.website, aliveMs: now - T0, formMs: now - opened, repeat: leadRepeat() });
       if (v.website) { goal('sol_lead_blocked', Core.goalParams(pickSol(v.solution))); form.outerHTML = '<p class="sl-ok">Спасибо, заявка принята.</p>'; return; } // ловушка для ботов
       busy = true; msg.textContent = '';
       api('xsrf?JSON').then(function (x) {
@@ -417,6 +421,7 @@
         // и дошлёт cron-ом; капчу не просит при cookie idb_* (её ставит и гостевая сессия). Сбой заявку не отменяет.
         var sol = pickSol(v.solution);
         goal(leadGoal, Core.goalParams(sol)); // цель — только после записи заявки в базу
+        if (leadGoal === 'sol_lead') markLead();
         var n = Core.buildNotify(v, sol, location.origin, DB), fd = new FormData();
         Object.keys(n).forEach(function (k) { fd.set(k, n[k]); });
         return fetch('/telegram-notify.php', { method: 'POST', credentials: 'same-origin', body: fd })
