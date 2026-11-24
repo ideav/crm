@@ -9,8 +9,8 @@
     function decorate(M, a) {
         var o = M.orderBy[a.order] || null;
         a.o = o; a.obj = o ? o.obj : ''; a.warranty = !!(o && o.warranty); a.kind = kindOf(a);
-        a.pay = a.warranty ? 0 : (a.total || (a.works + a.mats));
         a.gross = a.works + a.mats;
+        a.pay = a.warranty ? C.payable(M.opts, a.gross, true) : (a.total || a.gross); /* гарантия: сумма 0 или по прайсу - настройка warranty.mode */
         return a;
     }
     function badgesOf(a) {
@@ -187,7 +187,7 @@
             h += kv('Время работ', 'прибытие: ' + E(o && o.arr ? C.fmtDt(o.arr) : '—') + '; завершение: ' + E(o && o.fin ? C.fmtDt(o.fin) : '—'));
             h += '</table>';
             if (o && o.repeat) h += '<div class="fsm-act-note fsm-act-note-warn">Повторный выезд по наряду № ' + E(o.repOf || '—') + '</div>';
-            if (a.warranty) h += '<div class="fsm-act-note fsm-act-note-info">Гарантийный случай: стоимость работ и материалов не оплачивается.</div>';
+            if (a.warranty) h += '<div class="fsm-act-note fsm-act-note-info">' + (a.pay ? 'Гарантийный случай: стоимость работ и материалов указана по прайсу для взаиморасчётов.' : 'Гарантийный случай: стоимость работ и материалов не оплачивается.') + '</div>';
 
             h += '<h3>Выполненные работы</h3><table class="fsm-act-tbl"><thead><tr><th class="n">№</th><th>Вид работ</th><th class="r">Нормо-часы</th><th class="r">Стоимость, ₽</th></tr></thead><tbody>';
             h += '<tr><td class="n">1</td><td>' + E(wk.name || (o ? o.wt : '')) + '</td><td class="r">' + E(W.right(wk.norm)) + '</td><td class="r">' + rub(a.works) + '</td></tr>';
@@ -209,7 +209,7 @@
             }
 
             h += '<table class="fsm-act-sum"><tr><th>Работы</th><td>' + rub(a.works) + ' ₽</td></tr><tr><th>Материалы</th><td>' + rub(a.mats) + ' ₽</td></tr>';
-            if (a.warranty) h += '<tr><th>Стоимость по расценкам</th><td>' + rub(a.gross) + ' ₽</td></tr><tr><th>Скидка по гарантии</th><td>' + rub(a.gross) + ' ₽</td></tr>';
+            if (a.warranty && !a.pay) h += '<tr><th>Стоимость по расценкам</th><td>' + rub(a.gross) + ' ₽</td></tr><tr><th>Скидка по гарантии</th><td>' + rub(a.gross) + ' ₽</td></tr>';
             h += '<tr class="fsm-act-sum-total"><th>Итого к оплате</th><td>' + rub(a.pay) + ' ₽</td></tr></table>';
             h += '<p class="fsm-act-words">Итого к оплате: <b>' + E(C.rubWords(a.pay)) + '</b>' + (a.pay ? ' (НДС не облагается, демонстрационный пример)' : '') + '</p>';
             h += '<p class="fsm-act-remarks"><b>Замечания:</b> ' + (a.remarks ? E(a.remarks).replace(/\n/g, '<br>') : 'нет') + '</p>';
@@ -217,6 +217,7 @@
             var sigUrl = fileUrl(a.sig), sigBlock;
             if (a.kind === 'refused') sigBlock = '<div class="fsm-act-stamp fsm-act-stamp-bad">Подпись отсутствует.<br>Отказ: ' + E(a.refuseWhy || 'причина не указана') + '</div>';
             else if (sigUrl) sigBlock = '<img class="fsm-act-sigimg" src="' + E(sigUrl) + '" alt="Подпись заказчика"><div class="fsm-act-small">Подписано на экране устройства' + (a.signedAt ? ', ' + E(C.fmtDt(a.signedAt)) : '') + '</div>';
+            else if (a.signedAt && a.signMethod === 'sms') sigBlock = '<div class="fsm-act-stamp">Подписано кодом из СМС (демо-имитация),<br>' + E(C.fmtDt(a.signedAt)) + '</div>';
             else if (a.signedAt) sigBlock = '<div class="fsm-act-stamp">Подписано на экране устройства,<br>' + E(C.fmtDt(a.signedAt)) + '</div>';
             else sigBlock = '<div class="fsm-act-stamp fsm-act-stamp-bad">Подпись отсутствует</div>';
             h += '<div class="fsm-act-sign"><div><div class="fsm-act-signh">Исполнитель</div><div>Инженер ' + E(a.eng || '—') + '</div><div class="fsm-act-line"></div><div class="fsm-act-small">подпись</div></div>';
@@ -239,12 +240,12 @@
     /* Лёгкая загрузка: только то, что нужно актам (без отчётов, недоступных инженерам). */
     function soft(n) { return W.canRead(n) ? W.rows(n).catch(function () { return []; }) : Promise.resolve([]); }
     function load() {
-        return Promise.all([soft('Акт'), soft('Наряд'), soft('Объект'), soft('Оборудование'), soft('Заказчик'), soft('Вид работ')]).then(function (r) {
-            var M = { objects: {}, equipment: {}, clients: {}, works: {}, orderBy: {} };
+        return Promise.all([soft('Акт'), soft('Наряд'), soft('Объект'), soft('Оборудование'), soft('Заказчик'), soft('Вид работ'), soft('Настройка демо')]).then(function (r) {
+            var M = { opts: W.parseOpts(r[6]), objects: {}, equipment: {}, clients: {}, works: {}, orderBy: {} };
             M.acts = r[0].map(function (x) {
                 return { id: x._id, num: x['Акт'], order: x['Наряд'], client: x['Заказчик'], eng: x['Инженер'], created: C.parseDt(x['Составлен']), signer: x['Подписал'], role: x['Должность подписанта'], sig: x['Подпись'],
                     signedAt: C.parseDt(x['Подписан']), refused: W.bool(x['Отказ клиента']), refuseWhy: x['Причина отказа'], works: C.num(x['Сумма работ']), mats: C.num(x['Сумма материалов']), total: C.num(x['Итого']),
-                    remarks: x['Замечания'], exported: W.bool(x['Выгружен в 1С']) };
+                    signMethod: x['Способ подписи'], remarks: x['Замечания'], exported: W.bool(x['Выгружен в 1С']) };
             });
             r[1].forEach(function (x) { M.orderBy[x['Наряд']] = { id: x._id, num: x['Наряд'], obj: x['Объект'], eq: x['Оборудование'], wt: x['Вид работ'], fault: x['Неисправность'], arr: C.parseDt(x['Прибыл']), fin: C.parseDt(x['Завершён']), repeat: W.bool(x['Повторный']), repOf: x['Повтор наряда'], warranty: W.bool(x['Гарантийный']) }; });
             r[2].forEach(function (x) { M.objects[x['Объект']] = { address: x['Адрес'] }; });

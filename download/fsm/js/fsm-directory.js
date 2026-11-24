@@ -102,7 +102,7 @@
         h += '<h4>История нарядов (' + hist.length + ')</h4>';
         if (!hist.length) h += '<p class="fsm-sub">Нарядов по этому оборудованию нет.</p>';
         else h += '<ol class="fsm-dir-timeline">' + hist.map(function (o) {
-            var d = o.fin || o.arr || o.dep || o.win0 || o.created, s = C.slaState(o, now);
+            var d = o.fin || o.arr || o.dep || o.win0 || o.created, s = C.slaState(o, now, W.opts);
             var sla = s.state === 'met' ? W.badge('в срок', 'ok') : s.state === 'missed' ? W.badge('с просрочкой', 'crit') : s.state === 'none' ? '' : W.slaBadge(o);
             return '<li><div class="fsm-dir-tl-d">' + E(C.fmtDate(d)) + '</div><div class="fsm-dir-tl-b"><b>' + E(o.wt) + '</b> <span class="fsm-sub">' + E(o.num) + '</span><div class="fsm-dir-tl-m">' + E(o.eng || 'без инженера') + ' ' +
                 W.badge(o.status, W.STATUS_CLS[o.status] || 'info') + ' ' + sla + (o.repeat ? ' ' + W.badge('Повторный выезд', 'warn') : '') + (o.warranty ? ' ' + W.badge('Гарантия', 'info') : '') + '</div></div></li>';
