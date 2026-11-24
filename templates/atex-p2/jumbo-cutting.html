@@ -3,11 +3,11 @@
 <!-- и docs/WORKSPACE_DEVELOPMENT_GUIDE.md. URL: /atex/jumbo-cutting -->
 <link rel="stylesheet" href="/download/{_global_.z}/css/atex-brand.css?{_global_.version}.3">
 <link rel="stylesheet" href="/download/{_global_.z}/css/atex-progress.css?{_global_.version}.1">
-<link rel="stylesheet" href="/download/{_global_.z}/css/jumbo.css?{_global_.version}.2">
+<link rel="stylesheet" href="/download/{_global_.z}/css/jumbo.css?{_global_.version}.3">
 <script src="/download/{_global_.z}/js/atex-progress.js?{_global_.version}.1" defer></script>
 <script src="/download/{_global_.z}/js/label-production.js?{_global_.version}.52" defer></script>
 <script src="/download/{_global_.z}/js/jumbo-cut-map.js?{_global_.version}.2" defer></script>
-<script src="/download/{_global_.z}/js/jumbo-cutting.js?{_global_.version}.3" defer></script>
+<script src="/download/{_global_.z}/js/jumbo-cutting.js?{_global_.version}.4" defer></script>
 
 <div id="atex-jc-app" class="atex-jb atex-brand"
      data-db="{_global_.z}"
@@ -33,7 +33,6 @@
                 <h2 class="atex-jb-panel-title">Потребность в форматах — задания высечки без мастер-рулона</h2>
                 <div id="atex-jc-demand"></div>
             </section>
-            <section id="atex-jc-picker" class="atex-jb-panel"></section>
         </div>
         <aside class="atex-jb-side">
             <section class="atex-jb-panel">
@@ -47,6 +46,9 @@
             </section>
         </aside>
     </div>
+
+    <!-- #5707: карта раскроя под обеими колонками; без партии — плашка внизу экрана. -->
+    <section id="atex-jc-picker" class="atex-jb-panel atex-jc-picker is-collapsed"></section>
 
     <div id="atex-jc-modal" class="atex-jb-modal" hidden>
         <div class="atex-jb-modal-box" role="dialog" aria-modal="true">
