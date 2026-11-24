@@ -16303,29 +16303,55 @@ function BtActionRequest($recId, $colId, $noWrite){
 }
 # </button-triggers-866>
 
+# #5704: id из адреса /{db}/<действие>/<номер|имя>[/<имя записи>]. Имя ищется среди запросов
+# (report/smartq/sql) или таблиц, запись — среди записей найденной таблицы. Промах по таблице
+# или записи не отвечает сразу (разбор идёт до входа — иначе 404 без входа выдаёт, какие имена
+# и значения есть): id пустой, промах — в $GLOBALS["ROUTE_MISS"], ответ даёт Route_miss() после
+# Validate_Token(). Пустой id не уходит в SQL действия, id таблицы не подменяет запись.
+function Route_id($a, $com){
+	global $z;
+	if(!isset($com[3]) || $com[3] === "")	# «/{db}/object/» — номера нет
+		return "";
+	if(is_numeric($com[3]))
+		return (int)$com[3];
+	if($a === "ai")	# /{db}/ai/agent, /{db}/ai/chat — третий сегмент не имя
+		return "";
+	$name = addslashes(urldecode($com[3]));
+	if($a === "report" || $a === "smartq" || $a === "sql"){
+		if($row = mysqli_fetch_array(Exec_sql("SELECT id FROM $z WHERE t=".REPORT." AND val='$name'", "Get report by name")))
+			return $row["id"];
+		my_die(t9n("[RU]Запрос не найден[EN]Report not found"), "404 Not Found");
+	}
+	if(!($row = mysqli_fetch_array(Exec_sql("SELECT id FROM $z WHERE up=0 AND val='$name'", "Get object by name")))){
+		$GLOBALS["ROUTE_MISS"] = 0;
+		return "";
+	}
+	$id = $row["id"];
+	if(!isset($com[4]) || $com[4] === "")	# #5242: «object/Таблица/» — пустой сегмент не имя записи
+		return $id;
+	if($row = mysqli_fetch_array(Exec_sql("SELECT id FROM $z WHERE t=$id AND up!=0 AND val='".addslashes(urldecode($com[4]))."'", "Get record by name")))
+		return $row["id"];
+	$GLOBALS["ROUTE_MISS"] = (int)$id;	# таблица есть, записи нет
+	return "";
+}
+# #5704: ответ на промах Route_id — вызывается после входа. Нет таблицы — 404 «Таблица не найдена».
+# Нет записи — 404 «Запись не найдена» только тому, кто читает таблицу; без права на таблицу —
+# 403, как и для существующей записи: отсутствие значения не выдаётся тому, кто его не видит.
+function Route_miss($table){
+	if(!$table)
+		my_die(t9n("[RU]Таблица не найдена[EN]Table not found"), "404 Not Found");
+	if(!Grant_1level($table))
+		my_die(t9n("[RU]У вас нет доступа к таблице ".$table."[EN]The table ".$table." is not granted"), "403 Forbidden");
+	my_die(t9n("[RU]Запись не найдена[EN]Record not found"), "404 Not Found");
+}
+
 # ################# Start here #################
 $time_start = microtime(TRUE);
 $blocks = array();
 $a = $GLOBALS["GLOBAL_VARS"]["action"] = isset($com[2]) ? $com[2] : "";
 $next_act = isset($_REQUEST["next_act"]) ? addslashes($_REQUEST["next_act"]) : "";
 
-if(isset($com[3]))
-    if(is_numeric($com[3]))
-        $id = (int)$com[3];
-    elseif($a === "report" || $a === "smartq" || $a === "sql"){
-    	if($row = mysqli_fetch_array(Exec_sql("SELECT id FROM $z WHERE t=".REPORT." AND val='".addslashes(urldecode($com[3]))."'", "Get report by name")))
-    	    $id = $row["id"];
-    	else
-    	    my_die(t9n("[RU]Запрос не найден[EN]Report not found"), "404 Not Found");
-    }
-    elseif($row = mysqli_fetch_array(Exec_sql("SELECT id FROM $z WHERE up=0 AND val='".addslashes(urldecode($com[3]))."'", "Get object by name"))){
-	    $id = $row["id"];
-        if(isset($com[4]) && ($com[4] !== ""))	# #5242: «object/Таблица/» — пустой сегмент не имя записи (иначе находился ref-тип up=0, val='')
-        	if($row = mysqli_fetch_array(Exec_sql("SELECT id FROM $z WHERE t=$id AND up!=0 AND val='".addslashes(urldecode($com[4]))."'", "Get record by name")))
-        	    $id = $row["id"];
-	}
-if(!isset($id))
-    $id = "";
+$id = Route_id($a, $com);
 $GLOBALS["GLOBAL_VARS"]["id"] = $id;
 
 #Exec_sql("Set transaction isolation level read uncommitted", "No lock");
@@ -16769,6 +16795,8 @@ if(Validate_Token())
 	}
 	if(Json_body_merge())	# #5242: тело application/json — те же параметры, что и форма; ответ — JSON
 		$GLOBALS["dumpAPI"] = 1;
+	if(isset($GLOBALS["ROUTE_MISS"]))	# #5704: промах адреса по имени — ответ только вошедшему
+		Route_miss($GLOBALS["ROUTE_MISS"]);
     $_REQUEST = array_merge($_POST, $_GET);
     $up = isset($_REQUEST["up"]) ? (int)$_REQUEST["up"] : 0;
     $t = isset($_REQUEST["t"]) ? (int)$_REQUEST["t"] : 0;
