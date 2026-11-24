@@ -11,15 +11,16 @@
         return W.loadModel().then(function (M) {
             var cards = M.cards(), sum = C.summarize(cards, M.channels), tr = C.topReasons(sum, 7);
             var ready = sum.byStatus['Готово к выгрузке'] || 0;
-            var fullAll = cards.filter(function (c) { return M.channels.every(function (ch) { return c.res[ch.name].pct >= 100; }); }).length;
+            var act = C.activeChannels(M.settings, M.channels.map(function (c) { return c.name; })), fullAll = cards.filter(function (c) { return act.every(function (n) { return c.res[n].pct >= 100; }); }).length;
+            var rule = C.optionByCode('ready_rule').variants.filter(function (v) { return v[0] === C.opt(M.settings, 'ready_rule'); })[0][1];
             var lines = M.journalLines.filter(function (l) { return l['Результат']; }), rej = lines.filter(function (l) { return l['Результат'] === 'Отклонена'; }).length;
             host.innerHTML = '';
             host.appendChild(W.el('h1', { text: 'Сводка контент-менеджера' }));
             host.appendChild(W.el('p', { 'class': 'pim-sub', text: 'Данные на ' + W.dmy(W.TODAY) + '. Нажмите на показатель или строку, чтобы открыть нужные карточки.' }));
             host.appendChild(W.el('div', { 'class': 'pim-kpis' }, [
                 kpi(sum.total, 'Карточек в мастере', M.categories ? Object.keys(M.categories).length + ' категорий' : '', ''),
-                kpi(ready + ' <small>(' + Math.round(100 * ready / sum.total) + '%)</small>', 'Готово к выгрузке', 'статус «Готово к выгрузке»', 'status=' + encodeURIComponent('Готово к выгрузке')),
-                kpi(fullAll, 'Полны на всех площадках', 'зелёные по всем четырём', ''),
+                kpi(ready + ' <small>(' + Math.round(100 * ready / sum.total) + '%)</small>', 'Готово к выгрузке', 'правило: ' + W.esc(rule), 'status=' + encodeURIComponent('Готово к выгрузке')),
+                kpi(fullAll, 'Полны на площадках в работе', 'зелёные по: ' + act.map(W.short).join(', '), ''),
                 kpi(lines.length ? Math.round(100 * rej / lines.length) + '%' : '—', 'Отклонено при первой загрузке', rej + ' из ' + lines.length + ' строк в журнале', '')]));
 
             var left = W.el('div', { 'class': 'pim-card' }), right = W.el('div', { 'class': 'pim-card' });

@@ -6,8 +6,8 @@
 
     W.openCard = function (host, M, p, back) {
         var cat = M.categories[p.category] || { attrs: [], type: '' };
-        var tmp = JSON.parse(JSON.stringify({ sku: p.sku, name: p.name, category: p.category, brand: p.brand, country: p.country, barcode: p.barcode, desc: p.desc, weight: p.weight, photos: p.photos, status: p.status, values: p.values }));
-        var dirty = {}, dirtyVals = {}, tab = M.channels[0] ? M.channels[0].name : '', inputs = {}, right = W.el('div', { 'class': 'pim-card' }), head = W.el('div', {}), brands = [], countries = [];
+        var tmp = JSON.parse(JSON.stringify({ sku: p.sku, name: p.name, category: p.category, brand: p.brand, country: p.country, barcode: p.barcode, desc: p.desc, weight: p.weight, photos: p.photos, status: p.status, values: p.values, titles: p.titles }));
+        var dirty = {}, dirtyVals = {}, dirtyTitles = {}, perChan = C.opt(M.settings, 'title_mode') === 'per_channel', tab = M.channels[0] ? M.channels[0].name : '', inputs = {}, right = W.el('div', { 'class': 'pim-card' }), head = W.el('div', {}), brands = [], countries = [];
         var can = W.caps();
 
         function recompute() { return C.checkAll(tmp, M.channels, M.chanAttrs, M); }
@@ -38,7 +38,7 @@
                 form.appendChild(fld(label, el, cls, badFor(res, ours)));
             }
             var name = W.el('input', { type: 'text', value: tmp.name || '' }); name.addEventListener('input', function () { tmp.name = name.value; dirty.name = name.value; renderRight(); renderHead(); markBad(); });
-            sys('name', 'Название', name, 'pim-wide', 'Название');
+            sys('name', perChan ? 'Название (общее, по умолчанию)' : 'Название', name, 'pim-wide', 'Название');
             var desc = W.el('textarea', {}); desc.value = tmp.desc || ''; desc.addEventListener('input', function () { setField('desc', desc.value); markBad(); });
             sys('desc', 'Описание', desc, 'pim-wide', 'Описание');
             var brand = W.select([['', '— не задано —']].concat(brands.map(function (b) { return [b, b]; })), tmp.brand || ''); brand.addEventListener('change', function () { setField('brand', brand.value); markBad(); });
@@ -89,28 +89,36 @@
             });
             right.appendChild(ul);
             if (ch && ch.titleLimit) {
-                var n = (tmp.name || '').length;
-                right.appendChild(W.el('p', { 'class': 'pim-counter' + (n > ch.titleLimit ? ' pim-counter-bad' : ''), text: 'Название: ' + n + ' симв. при лимите ' + ch.titleLimit + '. Шаблон площадки: ' + ch.template }));
+                var shown = C.titleFor(tmp, ch, M.settings), n = shown.length;
+                if (perChan) {
+                    var ti = W.el('textarea', { rows: 2 }); ti.value = tmp.titles[tab] || ''; ti.placeholder = 'Пусто - берётся общее название'; ti.disabled = !can.titles;
+                    ti.addEventListener('input', function () { tmp.titles[tab] = ti.value; dirtyTitles[tab] = ti.value; renderHead(); var c = right.querySelector('.pim-counter'); if (c) { var m = C.titleFor(tmp, ch, M.settings).length; c.textContent = 'Название для ' + tab + ': ' + m + ' симв. при лимите ' + ch.titleLimit; c.className = 'pim-counter' + (m > ch.titleLimit ? ' pim-counter-bad' : ''); } });
+                    right.appendChild(W.field('Название для ' + tab + ' (свое; пусто - общее)', ti));
+                }
+                right.appendChild(W.el('p', { 'class': 'pim-counter' + (n > ch.titleLimit ? ' pim-counter-bad' : ''), text: 'Название' + (perChan ? ' для ' + tab : '') + ': ' + n + ' симв. при лимите ' + ch.titleLimit + '. Шаблон площадки: ' + ch.template }));
+                if (!perChan) { var st = C.strictestTitleLimit(M.channels, M.settings); if (st) right.appendChild(W.el('p', { 'class': 'pim-sub', text: 'Название общее для всех площадок: ориентир - самый строгий лимит (' + st.channel + ', ' + st.limit + ' симв.). Раздельные названия включает руководитель в «Настройках».' })); }
             }
+            var ln = ch && C.limitsNote(ch, M.settings); if (ln) right.appendChild(W.el('p', { 'class': ln.warn ? 'pim-note' : 'pim-sub', text: ln.text }));
             if (!M.chanAttrs.some(function (a) { return a.channel === tab && a.category === p.category; })) right.appendChild(W.el('p', { 'class': 'pim-note', text: 'Для категории нет набора атрибутов этой площадки: добавьте его на экране «Площадки и соответствия».' }));
         }
         function titleModal(ch) {
             var s = C.buildTitle(ch.template, tmp, cat.type), tooLong = ch.titleLimit && s.length > ch.titleLimit;
             W.modal('Название по шаблону ' + ch.name, W.el('div', {}, [W.el('p', { 'class': 'pim-sub', text: 'Шаблон: ' + ch.template }), W.el('p', { html: '<b>' + W.esc(s) + '</b>' }), W.el('p', { 'class': 'pim-counter' + (tooLong ? ' pim-counter-bad' : ''), text: s.length + ' симв. при лимите ' + ch.titleLimit })]),
-                [{ text: 'Отмена' }, { text: 'Применить', cls: 'pim-primary', fn: function () { tmp.name = s; dirty.name = s; if (inputs['Название']) inputs['Название'].value = s; refresh(); buildLeft(); } }]);
+                [{ text: 'Отмена' }, { text: 'Применить', cls: 'pim-primary', fn: function () { if (perChan) { tmp.titles[ch.name] = s; dirtyTitles[ch.name] = s; } else { tmp.name = s; dirty.name = s; if (inputs['Название']) inputs['Название'].value = s; } refresh(); buildLeft(); } }]);
         }
 
         function changeStatus(target) {
-            var res = recompute(), b = C.statusBlockers(tmp, target, res);
+            var res = recompute(), b = C.statusBlockers(tmp, target, res, true, M.settings);
             if (b.length) { W.toast('Нельзя: ' + b.join('; '), true); return; }
             saveAll({ status: target });
         }
         function saveAll(extra) {
             var fields = Object.assign({}, dirty, extra || {});
             if (fields.status && fields.status === p.status) delete fields.status;
+            var titles = {}; Object.keys(dirtyTitles).forEach(function (c) { if ((p.titles[c] || '') !== dirtyTitles[c]) titles[c] = dirtyTitles[c]; });
             var vals = {}; Object.keys(dirtyVals).forEach(function (a) { if ((p.values[a] || '') !== dirtyVals[a]) vals[a] = dirtyVals[a]; });
-            if (!Object.keys(fields).length && !Object.keys(vals).length) { W.toast('Изменений нет'); return; }
-            W.saveCard(p, { fields: fields, values: vals }).then(function () { dirty = {}; dirtyVals = {}; tmp.status = p.status; W.toast('Сохранено, версия ' + p.version); M.check(p); renderHead(); renderRight(); buildActions(); }).catch(function (e) { W.toast(e.message, true); });
+            if (!Object.keys(fields).length && !Object.keys(vals).length && !Object.keys(titles).length) { W.toast('Изменений нет'); return; }
+            W.saveCard(p, { fields: fields, values: vals, titles: titles }).then(function () { dirty = {}; dirtyVals = {}; dirtyTitles = {}; tmp.status = p.status; W.toast('Сохранено, версия ' + p.version); M.check(p); renderHead(); renderRight(); buildActions(); }).catch(function (e) { W.toast(e.message, true); });
         }
         var actions = W.el('div', { 'class': 'pim-bar' });
         function buildActions() {
