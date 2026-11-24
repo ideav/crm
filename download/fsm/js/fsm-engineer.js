@@ -118,7 +118,7 @@
     function slaEl(o) {
         var s = el('span', { 'class': 'fsm-eng-sla' });
         function upd() {
-            var st = C.slaState(o, W.now()), k = { ok: 'ok', risk: 'warn', late: 'crit', met: 'ok', missed: 'crit', none: 'info' }[st.state];
+            var st = C.slaState(o, W.now(), W.opts), k = { ok: 'ok', risk: 'warn', late: 'crit', met: 'ok', missed: 'crit', none: 'info' }[st.state];
             var pre = st.stage === 'arrive' ? 'Прибыть: ' : st.stage === 'finish' ? 'Завершить: ' : '';
             s.innerHTML = W.badge(pre + st.text, k);
         }
@@ -223,7 +223,7 @@
         eb.appendChild(el('h3', { text: 'История ремонтов' }));
         if (!hist.length) eb.appendChild(el('div', { 'class': 'fsm-eng-muted', text: 'Других нарядов по этому оборудованию нет' }));
         hist.forEach(function (x) {
-            var res = isClosed(x) ? x.status + ', ' + C.slaState(x, now).text : x.status;
+            var res = isClosed(x) ? x.status + ', ' + C.slaState(x, now, W.opts).text : x.status;
             eb.appendChild(html('div', 'fsm-eng-hist', '<div><b>' + esc(C.fmtDate(x.fin || x.arr || x.win0 || x.created)) + '</b> ' + esc(x.num) + (x.repeat ? ' ' + W.badge('Повторный', 'crit') : '') + '</div><div>' + esc(x.wt) + '</div><div class="fsm-eng-muted">' + esc(x.eng || 'без инженера') + ' · ' + esc(res) + '</div>'));
         });
         wrap.appendChild(eb);
@@ -448,37 +448,47 @@
         return { node: wrap, has: function () { return st.ink; }, blob: function () { return new Promise(function (res, rej) { cv.toBlob(function (b) { b ? res(new File([b], 'podpis.png', { type: 'image/png' })) : rej(new Error('Не удалось сохранить подпись')); }, 'image/png'); }); } };
     }
 
+    /* Подтверждение кодом из СМС (способ подписи act.sign_mode = sms). Шлюз в демо не подключён: код показывается на экране как имитация. */
+    function smsBlock(phone) {
+        var st = { sent: '' }, note = el('div', { 'class': 'fsm-eng-note fsm-eng-note-warn', style: 'display:none' }), inp = el('input', { type: 'text', inputmode: 'numeric', maxlength: '4', 'class': 'fsm-eng-in', placeholder: 'Код из СМС', autocomplete: 'off' });
+        var node = el('div', { 'class': 'fsm-eng-sms' }, [
+            el('div', { 'class': 'fsm-eng-muted', text: 'Код уйдёт клиенту на номер ' + (phone || '(телефон не указан)') + '. Клиент называет его инженеру.' }),
+            el('button', { type: 'button', 'class': 'fsm-eng-bigbtn fsm-eng-second', 'data-act': 'sms-send', text: 'Отправить код клиенту', onclick: function () {
+                st.sent = String(1000 + Math.floor(Math.random() * 9000)); note.style.display = ''; note.textContent = 'Демо-имитация: СМС-шлюз не подключён, клиенту ушёл бы код ' + st.sent + '.'; inp.focus();
+            } }), note, W.field('Код от клиента', inp)]);
+        return { node: node, sent: function () { return st.sent; }, value: function () { return inp.value; } };
+    }
     /* ---------- экран акта ---------- */
     function renderAct() {
         var o = curOrder(), M = S.M, d = S.d, wrap = el('div', { 'class': 'fsm-eng-wrap fsm-eng-withbar' });
         wrap.appendChild(topbar('Акт по наряду ' + o.num, function () { S.view = 'order'; render(0); }));
-        var wt = M.works[o.wt] || { price: 0 }, mats = d.mats.filter(function (m) { return m.qty > 0; }), tot = C.actTotals({ price: wt.price }, mats, o.warranty), pr = C.checkProgress(d.checks);
+        var wt = M.works[o.wt] || { price: 0 }, mats = d.mats.filter(function (m) { return m.qty > 0; }), tot = C.actTotals({ price: wt.price }, mats, o.warranty, M.opts), pr = C.checkProgress(d.checks);
         var sum = box('Сводка', [html('div', 'fsm-eng-big', esc(o.wt)), kv('Ставка работ', '<b>' + esc(money(wt.price)) + '</b>')]);
         sum.appendChild(el('h3', { text: 'Материалы' }));
         if (!mats.length) sum.appendChild(el('div', { 'class': 'fsm-eng-muted', text: 'Материалы не списаны' }));
         mats.forEach(function (m) { sum.appendChild(html('div', 'fsm-eng-matrow', '<span>' + esc(m.name) + '</span><span>' + esc(qty(m.qty)) + ' ' + esc(m.unit) + ' × ' + esc(money(m.price)) + ' = <b>' + esc(money(C.matSum(m))) + '</b></span>')); });
         sum.appendChild(html('div', '', kv('Материалы', esc(money(tot.mats)))));
         sum.appendChild(html('div', 'fsm-eng-total', 'Итого к оплате <b>' + esc(money(tot.total)) + '</b>'));
-        if (o.warranty) sum.appendChild(html('div', 'fsm-eng-note fsm-eng-note-ok', 'Гарантийный наряд: итого 0 ₽. Стоимость работ и материалов без гарантии составила бы ' + esc(money(tot.sum)) + '.'));
+        if (o.warranty) sum.appendChild(html('div', 'fsm-eng-note fsm-eng-note-ok', tot.total ? 'Гарантийный наряд: сумма по прайсу ' + esc(money(tot.sum)) + ' (так задано в настройках, для взаиморасчётов).' : 'Гарантийный наряд: итого 0 ₽. Стоимость работ и материалов без гарантии составила бы ' + esc(money(tot.sum)) + '.'));
         if (pr.done < pr.total) sum.appendChild(html('div', 'fsm-eng-note fsm-eng-note-warn', 'Чек-лист выполнен не полностью: ' + pr.done + ' из ' + pr.total + '. Проверьте, прежде чем подписывать.'));
         wrap.appendChild(sum);
         var rem = el('textarea', { rows: 3, 'class': 'fsm-eng-ta', placeholder: 'Замечания по работам, рекомендации клиенту' });
         var signer = el('input', { type: 'text', 'class': 'fsm-eng-in', value: (M.clients[o.client] || {})['Контактное лицо'] || '', autocomplete: 'off' });
         var role = el('input', { type: 'text', 'class': 'fsm-eng-in', placeholder: 'Например, управляющий', autocomplete: 'off' });
-        var pad = sigPad();
+        var plan = C.signPlan(M.opts), pad = plan.ink ? sigPad() : null, sms = plan.code ? smsBlock((M.clients[o.client] || {})['Телефон']) : null;
         var agree = el('input', { type: 'checkbox', id: 'fsm-eng-agree' });
         wrap.appendChild(box('Подписание', [W.field('Замечания', rem), W.field('Кто подписывает (ФИО)', signer), W.field('Должность', role),
-            el('div', { 'class': 'fsm-eng-fieldlab', text: 'Подпись' }), pad.node,
+            plan.ink ? el('div', { 'class': 'fsm-eng-fieldlab', text: 'Подпись' }) : el('div', { 'class': 'fsm-eng-fieldlab', text: 'Подтверждение: код из СМС' }), plan.ink ? pad.node : sms.node,
             el('label', { 'class': 'fsm-eng-agree', 'for': 'fsm-eng-agree' }, [agree, el('span', { text: 'Клиент ознакомлен с актом' })])]));
         var bar = el('div', { 'class': 'fsm-eng-bar2' }), inner = el('div', { 'class': 'fsm-eng-bar2in' }); bar.appendChild(inner);
         function chk() {
-            if (!signer.value.trim()) { signer.focus(); W.toast('Укажите, кто подписывает', true); return false; }
-            if (!pad.has()) { W.toast('Нужна подпись клиента', true); return false; }
+            var v = C.signCheck(M.opts, { signer: signer.value, ink: pad && pad.has(), code: sms && sms.value(), sentCode: sms && sms.sent() });
+            if (!v.ok) { if (!signer.value.trim()) signer.focus(); W.toast(v.why, true); return false; }
             if (!agree.checked) { W.toast('Отметьте, что клиент ознакомлен с актом', true); return false; }
             return true;
         }
         inner.appendChild(el('button', { type: 'button', 'class': 'fsm-eng-bigbtn fsm-eng-primary', 'data-act': 'sign', text: 'Подписать и закрыть наряд', onclick: function () {
-            if (chk()) finishAct(o, { signed: true, signer: signer.value.trim(), role: role.value.trim(), remarks: rem.value.trim(), pad: pad, tot: tot });
+            if (chk()) finishAct(o, { signed: true, method: plan.mode, signer: signer.value.trim(), role: role.value.trim(), remarks: rem.value.trim(), pad: pad, tot: tot });
         } }));
         inner.appendChild(el('button', { type: 'button', 'class': 'fsm-eng-bigbtn fsm-eng-second', 'data-act': 'refuse', text: 'Клиент отсутствует / отказался', onclick: function () {
             var ta = el('textarea', { rows: 3, 'class': 'fsm-eng-ta', placeholder: 'Например, клиент отсутствует на объекте' });
@@ -496,19 +506,21 @@
         var d = S.d, now = C.toApi(W.now()), num = 'А-' + digits(o.num), actId = null, T = p.tot, used = {};
         var f = { 'Акт': num, 'Наряд': o.num, 'Заказчик': o.client, 'Инженер': S.eng.name, 'Составлен': now, 'Сумма работ': String(T.works), 'Сумма материалов': String(T.mats), 'Итого': String(T.total) };
         if (p.remarks) f['Замечания'] = p.remarks;
-        if (p.signed) { f['Подписал'] = p.signer; f['Подписан'] = now; if (p.role) f['Должность подписанта'] = p.role; } else { f['Отказ клиента'] = 1; f['Причина отказа'] = p.why; }
+        if (p.signed) { f['Подписал'] = p.signer; f['Подписан'] = now; f['Способ подписи'] = p.method || 'screen'; if (p.role) f['Должность подписанта'] = p.role; } else { f['Отказ клиента'] = 1; f['Причина отказа'] = p.why; }
         d.mats.forEach(function (m) { if ((!m.src || m.src === 'Склад в машине') && m.qty > 0) used[m.name] = (used[m.name] || 0) + m.qty; });
         S.q.then(function () { return W.post('_m_new/' + W.tid('Акт') + '?JSON', { up: 1, fields: f }); }).then(function (j) {
             actId = String(j.id || j.obj); if (!actId) throw new Error('Не удалось создать акт');
-            return p.signed ? p.pad.blob().then(function (b) { return postFile('_m_set/' + actId + '?JSON', 't' + reqId('Акт', 'Подпись'), b); }) : null;
+            return p.signed && p.pad ? p.pad.blob().then(function (b) { return postFile('_m_set/' + actId + '?JSON', 't' + reqId('Акт', 'Подпись'), b); }) : null;
         }).then(function () {
             return W.setStatus(S.M, o, 'Выполнен', { 'Завершён': now }, 'Акт ' + num);
         }).then(function () { return W.addEvent(o, p.signed ? 'Акт подписан' : 'Акт без подписи', p.signed ? p.signer : p.why); })
             .then(function () {
-                return Promise.all(d.stock.filter(function (s) { return used[s.name]; }).map(function (s) {
-                    var left = C.round2(Math.max(0, s.qty - used[s.name])); s.qty = left;
-                    return W.post('_m_set/' + s.id + '?JSON', { fields: { 'Количество': String(left) } });
-                }));
+                /* склад в машине: списание при акте - только если так задано в настройках (stock.writeoff), иначе его сделает диспетчер при закрытии наряда */
+                var plan = C.writeoffPlan(S.M.opts, 'act', d.stock, d.mats);
+                return Promise.all(plan.map(function (s) {
+                    d.stock.forEach(function (x) { if (x.id === s.id) x.qty = s.qty; });
+                    return W.post('_m_set/' + s.id + '?JSON', { fields: { 'Количество': String(s.qty) } });
+                })).then(function () { return plan.length ? W.addEvent(o, 'Склад списан', 'при акте: ' + plan.map(function (x) { return x.name + ' -' + W.right(x.used); }).join(', ')) : null; });
             }).then(reload).then(function () {
                 S.busy = false; S.view = 'done'; S.act = { id: actId, num: num, signed: p.signed, why: p.why, total: T.total, warranty: o.warranty }; render(0);
             }).catch(function (e) {

@@ -38,7 +38,7 @@
             var q = r[0]; if (!q) throw new Error('КП не найдено или нет доступа');
             var byName = {}; m.products.forEach(function (p) { byName[p.name] = p.key; });
             var items = r[1].sort(function (a, b) { return C.num(a['Позиция КП']) - C.num(b['Позиция КП']); }).map(function (x) {
-                return { rowId: x._id, product: byName[x['Изделие']], qty: C.num(x['Количество']), unit: C.num(x['Цена за единицу']), lineTotal: C.num(x['Сумма позиции']), sel: x['Конфигурация'] ? x['Конфигурация'].split('|') : [] };
+                return { rowId: x._id, product: byName[x['Изделие']], qty: C.num(x['Количество']), unit: C.num(x['Цена за единицу']), lineTotal: C.num(x['Сумма позиции']), disc: C.num(x['Скидка позиции, %']), sel: x['Конфигурация'] ? x['Конфигурация'].split('|') : [] };
             });
             return { id: q._id, code: q['КП'], client: q['Клиент'], mgr: q['Менеджер'], status: q['Статус КП'], date: C.toIso(q['Дата КП']), until: C.toIso(q['Действует до']), disc: C.num(q['Скидка менеджера, %']), subtotal: C.num(q['Сумма без скидки']), total: C.num(q['Итого']), margin: C.num(q['Маржа, %']),
                 needs: !!q['Требуется согласование'], approver: q['Согласующая роль'], lost: q['Причина отказа'], version: C.num(q['Версия']) || 1, comment: q['Комментарий'], items: items,
@@ -51,8 +51,9 @@
     };
     /* Пересчитанные поля КП для записи */
     W.quoteFields = function (m, st, clientGroup) {
-        var q = C.priceQuote(m, st.items.map(function (i) { return { product: i.product, sel: i.sel, qty: i.qty }; }), clientGroup, st.disc, m.me.role);
-        return { q: q, fields: { 'Скидка менеджера, %': st.disc, 'Сумма без скидки': q.subtotal, 'Итого': q.total, 'Маржа, %': q.marginPct, 'Требуется согласование': q.approval.needs ? 1 : '',
+        var q = C.priceQuote(m, st.items.map(function (i) { return { product: i.product, sel: i.sel, qty: i.qty, disc: i.disc }; }), clientGroup, st.disc, m.me.role);
+        /* при скидке по позициям в КП хранится наибольшая скидка позиции: именно она сверяется с лимитом роли */
+        return { q: q, fields: { 'Скидка менеджера, %': q.byLines ? q.discountPct : st.disc, 'Сумма без скидки': q.subtotal, 'Итого': q.total, 'Маржа, %': q.marginPct, 'Требуется согласование': q.approval.needs ? 1 : '',
             'Согласующая роль': q.approval.needs ? (q.approval.approver || '') : '' } };
     };
     W.saveItems = function (m, qid, items, q, oldRows) {
@@ -62,7 +63,7 @@
             items.forEach(function (it, i) {
                 chain = chain.then(function () {
                     var p = q.lines[i];
-                    return W.post('_m_new/' + W.tid('Позиция КП') + '?JSON', { up: qid, fields: { 'Позиция КП': i + 1, 'Изделие': m.prodBy[it.product].name, 'Количество': p.qty, 'Конфигурация': it.sel.join('|'), 'Цена за единицу': p.unit, 'Сумма позиции': p.total } });
+                    return W.post('_m_new/' + W.tid('Позиция КП') + '?JSON', { up: qid, fields: { 'Позиция КП': i + 1, 'Изделие': m.prodBy[it.product].name, 'Количество': p.qty, 'Конфигурация': it.sel.join('|'), 'Цена за единицу': p.unit, 'Скидка позиции, %': p.discPct, 'Сумма позиции': p.payable } });
                 });
             });
             return chain;

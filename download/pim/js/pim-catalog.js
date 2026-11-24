@@ -53,8 +53,8 @@
 
     function bulkStatus(target, host) {
         var ids = Object.keys(S.sel), ok = [], skip = 0;
-        ids.forEach(function (id) { var p = M.byId[id], b = C.statusBlockers(p, target, p._res || M.check(p)); if (b.length || p.status === target) skip++; else ok.push(p); });
-        if (!ok.length) { W.toast('Ни одну карточку нельзя перевести: ' + (target === 'Готово к выгрузке' ? 'нет площадки со 100%' : 'проверьте данные'), true); return; }
+        ids.forEach(function (id) { var p = M.byId[id], b = C.statusBlockers(p, target, p._res || M.check(p), true, M.settings); if (b.length || p.status === target) skip++; else ok.push(p); });
+        if (!ok.length) { W.toast('Ни одну карточку нельзя перевести: ' + (target === 'Готово к выгрузке' ? 'не выполнено правило готовности (см. «Настройки»)' : 'проверьте данные'), true); return; }
         var ops = []; ok.forEach(function (p) { W.cardOps(p, { fields: { status: target } }).forEach(function (o) { ops.push(o); }); });
         W.batch(ops).then(function () { ok.forEach(function (p) { W.applyLocal(p, { fields: { status: target } }); }); W.toast('Статус «' + target + '»: ' + ok.length + (skip ? ', пропущено ' + skip : '')); S.sel = {}; render(host); }).catch(function (e) { W.toast(e.message, true); });
     }

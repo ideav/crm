@@ -93,23 +93,27 @@
     W.loadModel = function () {
         var soft = function (n, up) { return W.rows(n, up).catch(function () { return []; }); };
         return Promise.all([W.rows('Товар'), soft('Значение атрибута', '-1'), W.rows('Атрибут'), W.rows('Категория'), soft('Атрибут категории', '-1'), W.rows('Атрибут площадки'),
-            W.rows('Соответствие значения'), W.rows('Площадка'), W.rows('Статус карточки'), soft('Выгрузка'), soft('Строка выгрузки', '-1')]).then(function (r) {
-            var M = { attrs: {}, categories: {}, channels: [], chanAttrs: [], valueMap: {}, vmIds: {}, statuses: [], products: [], byId: {}, journal: r[9], journalLines: r[10] };
+            W.rows('Соответствие значения'), W.rows('Площадка'), W.rows('Статус карточки'), soft('Выгрузка'), soft('Строка выгрузки', '-1'), soft('Настройки демо'), soft('Название для площадки', '-1')]).then(function (r) {
+            var M = { attrs: {}, categories: {}, channels: [], chanAttrs: [], valueMap: {}, vmIds: {}, statuses: [], products: [], byId: {}, journal: r[9], journalLines: r[10], rawMap: {} };
+            M.settingRows = r[11]; W.S = M.settings = Core.resolveSettings(r[11].map(function (x) { return { code: x['Код настройки'], value: x['Значение настройки'] }; }));
             r[2].forEach(function (a) { M.attrs[a['Атрибут']] = { id: a._id, name: a['Атрибут'], type: a['Тип значения'] || 'text', unit: a['Единица'], values: W.split(a['Допустимые значения']), field: a['Поле карточки'] || '' }; });
             var catById = {};
             r[3].forEach(function (c) { var o = { id: c._id, name: c['Категория'], type: c['Тип товара'], attrs: [] }; M.categories[o.name] = o; catById[o.id] = o; });
             r[4].forEach(function (x) { var c = catById[x._up]; if (c && x._ref['Атрибут']) c.attrs.push({ name: x['Атрибут'], required: W.truthy(x['Обязателен']), order: Core.num(x['Порядок']) }); });
             Object.keys(M.categories).forEach(function (k) { M.categories[k].attrs.sort(function (a, b) { return a.order - b.order; }); });
-            M.channels = r[7].map(function (c) { return { id: c._id, name: c['Площадка'], code: c['Код'], type: c['Тип площадки'], titleLimit: Core.num(c['Лимит названия']), descLimit: Core.num(c['Лимит описания']), minPhotos: Core.num(c['Мин. фото']), template: c['Шаблон названия'], format: c['Формат выгрузки'], api: c['Подключение API'] }; });
+            M.channels = r[7].map(function (c) { return { id: c._id, name: c['Площадка'], code: c['Код'], type: c['Тип площадки'], titleLimit: Core.num(c['Лимит названия']), descLimit: Core.num(c['Лимит описания']), minPhotos: Core.num(c['Мин. фото']), template: c['Шаблон названия'], format: c['Формат выгрузки'], api: c['Подключение API'], limitsChecked: W.dmy(W.iso(c['Лимиты сверены'])), limitsSource: c['Источник лимитов'] }; });
             r[5].forEach(function (a) { M.chanAttrs.push({ id: a._id, key: a['Атрибут площадки'], channel: a['Площадка'], category: a['Категория'], catTitle: a['Категория площадки'], title: a['Название на площадке'], ours: a['Наш атрибут'], required: W.truthy(a['Обязателен']), values: W.split(a['Допустимые значения']), limit: Core.num(a['Лимит длины']), order: Core.num(a['Порядок']) }); });
-            r[6].forEach(function (v) { var k = v['Атрибут площадки'], n = Core.norm(v['Соответствие значения']); (M.valueMap[k] = M.valueMap[k] || {})[n] = v['Значение площадки']; (M.vmIds[k] = M.vmIds[k] || {})[n] = v._id; });
+            r[6].forEach(function (v) { var k = v['Атрибут площадки'], n = Core.norm(v['Соответствие значения']); (M.rawMap[k] = M.rawMap[k] || {})[n] = v['Значение площадки']; (M.vmIds[k] = M.vmIds[k] || {})[n] = v._id; });
+            M.rebuildMap = function () { M.valueMap = Core.buildValueMap(M.rawMap, M.chanAttrs, Core.opt(M.settings, 'value_map_scope')); };
+            M.rebuildMap();
             M.statuses = r[8].sort(function (a, b) { return Core.num(a['Порядок']) - Core.num(b['Порядок']); }).map(function (s) { return s['Статус карточки']; });
             M.products = r[0].map(function (p) {
                 var o = { id: p._id, sku: p['Товар'], name: p['Название товара'], category: p['Категория'], brand: p['Бренд'], supplier: p['Поставщик'], country: p['Страна производства'], barcode: p['Штрихкод'], desc: p['Описание товара'],
-                    weight: p['Вес, г'], photos: Core.num(p['Фото, шт']), status: p['Статус карточки'], version: Core.num(p['Версия']) || 1, updated: W.iso(p['Обновлён']), owner: p['Ответственный'], price: p['Цена, ₽'], values: {}, valueIds: {} };
+                    weight: p['Вес, г'], photos: Core.num(p['Фото, шт']), status: p['Статус карточки'], version: Core.num(p['Версия']) || 1, updated: W.iso(p['Обновлён']), owner: p['Ответственный'], price: p['Цена, ₽'], values: {}, valueIds: {}, titles: {}, titleIds: {} };
                 M.byId[o.id] = o; return o;
             });
             r[1].forEach(function (v) { var p = M.byId[v._up]; if (p && v._ref['Атрибут']) { p.values[v['Атрибут']] = v['Значение атрибута']; p.valueIds[v['Атрибут']] = v._id; } });
+            r[12].forEach(function (t) { var p = M.byId[t._up]; if (p && t['Площадка']) { p.titles[t['Площадка']] = t['Название для площадки']; p.titleIds[t['Площадка']] = t._id; } });
             M.chan = function (n) { return M.channels.filter(function (c) { return c.name === n; })[0]; };
             M.check = function (p) { p._res = Core.checkAll(p, M.channels, M.chanAttrs, M); return p._res; };
             M.checkAll = function () { M.products.forEach(M.check); return M; };
@@ -120,7 +124,8 @@
     /* Что может текущий пользователь (по правам на таблицы, а не по названию роли). */
     W.caps = function () {
         var edit = W.canWrite('Значение атрибута'), card = W.canWrite('Товар');
-        return { card: card, edit: edit, approve: card && (W.canWrite('Выгрузка') || !edit), review: card, mapping: W.canWrite('Соответствие значения'), feed: W.canWrite('Выгрузка') };
+        return { card: card, edit: edit, approve: Core.canApprove(W.S, { card: card, edit: edit, feed: W.canWrite('Выгрузка') }), review: card, mapping: W.canWrite('Соответствие значения'), feed: W.canWrite('Выгрузка'),
+            titles: W.canWrite('Название для площадки'), limits: W.canWrite('Площадка'), settings: W.canWrite('Настройки демо') };
     };
     /* Операции записи для набора изменений карточки (поля и значения атрибутов); версия растёт, дата обновляется. */
     W.cardOps = function (p, changes) {
@@ -134,11 +139,12 @@
             else if (id) ops.push({ op: 'save', id: id, fields: { 'Значение атрибута': v } });
             else if (v !== '') ops.push({ op: 'new', id: 'Значение атрибута', up: p.id, fields: { 'Значение атрибута': v, 'Атрибут': a } });
         });
-        return ops;
+        return ops.concat(Core.titleOps(p, changes.titles));
     };
     W.applyLocal = function (p, changes) {
         Object.keys(changes.fields || {}).forEach(function (key) { p[key] = key === 'photos' ? Core.num(changes.fields[key]) : changes.fields[key]; });
         Object.keys(changes.values || {}).forEach(function (a) { if (changes.values[a] === '') delete p.values[a]; else p.values[a] = changes.values[a]; });
+        Object.keys(changes.titles || {}).forEach(function (c) { if (changes.titles[c] === '') delete p.titles[c]; else p.titles[c] = changes.titles[c]; });
         p.version += 1; p.updated = W.TODAY;
     };
     W.saveCard = function (p, changes) { return W.batch(W.cardOps(p, changes)).then(function () { W.applyLocal(p, changes); return p; }); };
@@ -156,11 +162,11 @@
     W.mapValueModal = function (M, ca, ours, done) {
         var n = Core.norm(ours), exist = M.vmIds[ca.key] && M.vmIds[ca.key][n];
         var sel = W.select([['', '— выберите —']].concat(ca.values.map(function (v) { return [v, v]; })), (M.valueMap[ca.key] || {})[n] || '');
-        W.modal('Соответствие значения', W.el('div', {}, [W.el('p', { 'class': 'pim-sub', text: ca.channel + ' / ' + ca.title + ': наше значение «' + ours + '» нужно привести к справочнику площадки.' }), W.field('Значение площадки', sel)]),
+        W.modal('Соответствие значения', W.el('div', {}, [W.el('p', { 'class': 'pim-sub', text: ca.channel + ' / ' + ca.title + ': наше значение «' + ours + '» нужно привести к справочнику площадки.' + (Core.opt(M.settings, 'value_map_scope') === 'channel' ? ' Справочник общий на площадку: соответствие подействует во всех категориях.' : ' Справочник по категории: для других категорий соответствие задаётся отдельно.') }), W.field('Значение площадки', sel)]),
             [{ text: 'Отмена' }, { text: 'Сохранить', cls: 'pim-primary', keep: true, fn: function (close) {
                 if (!sel.value) { W.toast('Выберите значение площадки', true); return false; }
                 var op = exist ? { op: 'save', id: exist, fields: { 'Значение площадки': sel.value } } : { op: 'new', id: 'Соответствие значения', up: 1, fields: { 'Соответствие значения': ours, 'Атрибут площадки': ca.key, 'Значение площадки': sel.value } };
-                W.batch([op]).then(function (res) { (M.valueMap[ca.key] = M.valueMap[ca.key] || {})[n] = sel.value; (M.vmIds[ca.key] = M.vmIds[ca.key] || {})[n] = exist || res[0].id; M.checkAll(); W.toast('Соответствие сохранено'); close(); if (done) done(); }).catch(function (e) { W.toast(e.message, true); });
+                W.batch([op]).then(function (res) { (M.rawMap[ca.key] = M.rawMap[ca.key] || {})[n] = sel.value; M.rebuildMap(); (M.vmIds[ca.key] = M.vmIds[ca.key] || {})[n] = exist || res[0].id; M.checkAll(); W.toast('Соответствие сохранено'); close(); if (done) done(); }).catch(function (e) { W.toast(e.message, true); });
                 return false; } }]);
     };
     /* Создать карточки из импорта пачками (родитель адресуется через :idN внутри пакета). */

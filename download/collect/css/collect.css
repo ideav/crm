@@ -139,3 +139,11 @@
 .dbt .dbt-table td.dbt-num { white-space: nowrap; }
 .dbt .dbt-table td { vertical-align: middle; }
 .dbt .dbt-barrow .dbt-num { white-space: nowrap; }
+.dbt-opts { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; margin-bottom: 12px; }
+.dbt-opt .dbt-sub { margin: 0 0 8px; }
+.dbt-radio { display: flex; gap: 8px; align-items: flex-start; padding: 6px 8px; border-radius: 6px; cursor: pointer; }
+.dbt-radio input { margin-top: 3px; }
+.dbt-radio-on { background: var(--w-bg, rgba(0, 120, 255, .08)); }
+.dbt-opt-for { margin: 8px 0 0; }
+.dbt-opt-now { margin-bottom: 12px; }
+.dbt-in-wide { min-width: 260px; width: 100%; }

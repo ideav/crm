@@ -105,23 +105,28 @@
             return W.el('div', { 'class': 'cpq-item' }, [W.el('div', { 'class': 'cpq-item-h' }, [W.el('strong', { text: (i + 1) + '. ' + pr.name }), W.el('span', { 'class': 'cpq-num', text: C.money(p.total) + ' ₽' })]),
                 W.el('div', { 'class': 'cpq-muted cpq-small', text: it.qty + ' шт × ' + C.money(p.unit) + ' ₽' + (p.volumePct ? ', скидка за объём ' + p.volumePct + '%' : '') }),
                 W.el('div', { 'class': 'cpq-muted cpq-small', text: C.describe(M, it.sel).join(', ') }),
+                q.byLines ? W.el('div', { 'class': 'cpq-kv' }, [W.el('span', { text: 'Скидка позиции, %' + (p.discAmount ? ' (−' + C.money(p.discAmount) + ' ₽)' : '') }),
+                    W.el('input', { type: 'number', min: '0', max: '60', step: '0.5', value: String(it.disc || 0), 'aria-label': 'Скидка позиции ' + (i + 1) + ', %', 'class': 'cpq-qty', 'data-id': 'disc-line', onchange: e => { it.disc = Math.max(0, C.num(e.target.value)); draw(); } })]) : null,
                 W.el('div', { 'class': 'cpq-row' }, [W.btn('Изменить', () => { st.edit = i; st.product = it.product; st.sel = it.sel.slice(); st.qty = it.qty; st.notes = null; draw(); window.scrollTo(0, 0); }),
                     W.btn('Удалить', () => { st.items.splice(i, 1); st.edit = -1; draw(); }, 'cpq-danger')])]);
         })));
         const kv = (k, v, cls) => W.el('div', { 'class': 'cpq-kv ' + (cls || '') }, [W.el('span', { text: k }), W.el('span', { 'class': 'cpq-num', text: v })]);
         box.appendChild(kv('Сумма по позициям', C.money(q.subtotal) + ' ₽'));
         const d = W.el('input', { type: 'number', min: '0', max: '60', step: '0.5', value: String(st.disc), 'aria-label': 'Скидка менеджера, %', 'class': 'cpq-qty', 'data-id': 'disc', onchange: e => { st.disc = Math.max(0, C.num(e.target.value)); draw(); } });
-        box.appendChild(W.el('div', { 'class': 'cpq-kv' }, [W.el('span', { text: 'Скидка менеджера, %' }), d]));
+        if (!q.byLines) box.appendChild(W.el('div', { 'class': 'cpq-kv' }, [W.el('span', { text: 'Скидка менеджера, %' }), d]));
+        else box.appendChild(W.el('p', { 'class': 'cpq-muted cpq-small', text: 'Скидка задаётся по позициям; в лимит идёт наибольшая: ' + C.round1(q.discountPct) + '%.' }));
         const a = q.approval;
-        const meter = W.el('div', { 'class': 'cpq-meter', 'aria-hidden': 'true' }, [W.el('div', { 'class': 'cpq-meter-fill ' + (a.blocked ? 'cpq-crit' : (a.needs ? 'cpq-warn' : 'cpq-ok')), style: 'width:' + Math.min(100, st.disc / a.maxLimit * 100) + '%' }),
+        const meter = W.el('div', { 'class': 'cpq-meter', 'aria-hidden': 'true' }, [W.el('div', { 'class': 'cpq-meter-fill ' + (a.blocked ? 'cpq-crit' : (a.needs ? 'cpq-warn' : 'cpq-ok')), style: 'width:' + Math.min(100, q.discountPct / a.maxLimit * 100) + '%' }),
             W.el('div', { 'class': 'cpq-meter-mark', style: 'left:' + Math.min(100, a.limit / a.maxLimit * 100) + '%', title: 'Ваш лимит' })]);
         box.appendChild(meter);
         box.appendChild(W.el('p', { 'class': 'cpq-muted cpq-small', text: 'Ваша роль: ' + M.me.role + ', лимит скидки ' + C.round1(a.limit) + '%. Предел компании ' + C.round1(a.maxLimit) + '%.' }));
-        if (st.disc > 0) box.appendChild(kv('Скидка', '−' + C.money(q.discount) + ' ₽'));
+        if (q.discount > 0) box.appendChild(kv(q.byLines ? 'Скидки по позициям, ' + q.effectivePct + '% от суммы' : 'Скидка', '−' + C.money(q.discount) + ' ₽'));
         box.appendChild(kv('Итого без НДС', C.money(q.total) + ' ₽', 'cpq-strong cpq-big'));
         box.appendChild(kv('НДС ' + q.vatPct + '%', C.money(q.vat) + ' ₽'));
         box.appendChild(kv('Итого с НДС', C.money(q.totalVat) + ' ₽', 'cpq-strong'));
-        box.appendChild(kv('Маржа (видна только продажам)', q.marginPct + '%' + ' при минимуме ' + C.round1(a.minMargin) + '%', q.approval.lowMargin ? 'cpq-bad' : ''));
+        const mv = a.marginView;
+        if (mv === 'show') box.appendChild(kv('Маржа (видна только продажам)', q.marginPct + '%' + ' при минимуме ' + C.round1(a.minMargin) + '%', a.lowMargin ? 'cpq-bad' : ''));
+        else if (mv === 'flag') box.appendChild(kv('Маржа', C.marginText(M, M.me.role, q.marginPct), a.lowMargin ? 'cpq-bad' : ''));
         if (a.blocked) box.appendChild(W.el('div', { 'class': 'cpq-banner cpq-b-crit', role: 'alert' }, a.reasons.join('. ')));
         else if (a.needs) box.appendChild(W.el('div', { 'class': 'cpq-banner cpq-b-warn', role: 'status' }, [W.el('strong', { text: 'Нужно согласование: ' + (a.approver || '') + '. ' }), a.reasons.join('. ')]));
         else box.appendChild(W.el('div', { 'class': 'cpq-banner cpq-b-ok', role: 'status' }, 'Скидка в пределах вашего лимита, согласование не требуется.'));
@@ -176,7 +181,10 @@
             if (!id) return;
             return W.loadQuote(id, M).then(d => {
                 st.id = d.id; st.code = d.code; st.client = d.client; st.disc = d.disc; st.status = d.status; st.version = d.version;
-                st.items = d.items.map(x => ({ product: x.product, sel: x.sel, qty: x.qty })); st.oldRows = d.items;
+                st.items = d.items.map(x => ({ product: x.product, sel: x.sel, qty: x.qty, disc: x.disc }));
+                /* КП, сохранённое со скидкой на всё КП, при скидке по позициям открывается с той же скидкой у каждой позиции */
+                if (M.opts.discountMode === 'lines' && d.disc && !st.items.some(x => x.disc)) st.items.forEach(x => { x.disc = d.disc; });
+                st.oldRows = d.items;
             });
         }).then(draw);
     });

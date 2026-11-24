@@ -16,7 +16,7 @@
         var d0 = C.dayStart(now), dow = (new Date(d0).getUTCDay() + 6) % 7, mon = d0 - dow * DAY, a, b, note = '';
         if (key === 'week') {
             a = mon; b = mon + 7 * DAY;
-            var k0 = C.kpi(orders, a, b, now); if (k0.met + k0.missed < 10) { a -= 7 * DAY; b -= 7 * DAY; note = 'На этой неделе пока мало завершённых нарядов, показана прошлая неделя'; }
+            var k0 = C.kpi(orders, a, b, now, W.opts); if (k0.met + k0.missed < 10) { a -= 7 * DAY; b -= 7 * DAY; note = 'На этой неделе пока мало завершённых нарядов, показана прошлая неделя'; }
             return { a: a, b: b, pa: a - 7 * DAY, pb: a, note: note, label: C.fmtDate(a).slice(0, 5) + ' – ' + C.fmtDate(b - DAY).slice(0, 5) };
         }
         var n = key === 'd7' ? 7 : 30;
@@ -28,14 +28,14 @@
     function compute(M, rep, key, now) {
         var R = range(M.orders, key, now), D = {};
         D.range = R;
-        D.cur = C.kpi(M.orders, R.a, R.b, now);
-        D.prev = C.kpi(M.orders, R.pa, R.pb, now);
-        D.weeks = C.weekly(M.orders, now, 6);
+        D.cur = C.kpi(M.orders, R.a, R.b, now, W.opts);
+        D.prev = C.kpi(M.orders, R.pa, R.pb, now, W.opts);
+        D.weeks = C.weekly(M.orders, now, 6, W.opts);
         D.worstWeek = -1; var mx = 0;
         D.weeks.forEach(function (w, i) { if (w.missed > mx) { mx = w.missed; D.worstWeek = i; } });
         /* открытые наряды в SLA-риске и просрочке (по всем нарядам, не по периоду) */
-        D.alert = M.orders.filter(function (o) { if (!C.isOpen(o)) return false; var s = C.slaState(o, now); return s.state === 'late' || s.state === 'risk'; })
-            .map(function (o) { return { o: o, s: C.slaState(o, now) }; }).sort(function (x, y) { return x.s.left - y.s.left; });
+        D.alert = M.orders.filter(function (o) { if (!C.isOpen(o)) return false; var s = C.slaState(o, now, W.opts); return s.state === 'late' || s.state === 'risk'; })
+            .map(function (o) { return { o: o, s: C.slaState(o, now, W.opts) }; }).sort(function (x, y) { return x.s.left - y.s.left; });
         D.lateNow = D.alert.filter(function (x) { return x.s.state === 'late'; }).length;
         /* сегодня */
         var today = M.orders.filter(function (o) { return o.status !== 'Отменён' && isToday(o, now); });
