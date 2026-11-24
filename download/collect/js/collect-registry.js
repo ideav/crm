@@ -4,7 +4,6 @@
     var W = window.Dbt, C = W.core, M = W.M;
     var state = { mgr: '', stage: '', q: '', onlyOver: true };
     var BUCKET_CLS = { cur: 'dbt-b-cur', b30: 'dbt-b-30', b60: 'dbt-b-60', b90: 'dbt-b-90', b90p: 'dbt-b-90p' };
-    var STAGE_SHORT = { before: 'До срока', remind: '1–7 дн.', call: '8–14 дн.', stop: '15–30 дн.', claim: '31–60 дн.', court: '61+ дн.', restructuring: 'График' };
 
     function kpi(label, value, sub, cls) {
         return W.el('div', { 'class': 'dbt-kpi ' + (cls || '') }, [W.el('div', { 'class': 'dbt-kpi-v', text: value }), W.el('div', { 'class': 'dbt-kpi-l', text: label }), W.el('div', { 'class': 'dbt-kpi-s', text: sub || '' })]);
@@ -45,7 +44,7 @@
         host.appendChild(W.el('div', { 'class': 'dbt-funnel', role: 'group', 'aria-label': 'Воронка просрочки' }, fun.map(function (f) {
             var st = M.stageBy[f.code] || { name: f.code, color: 'info' };
             return W.el('button', { type: 'button', 'class': 'dbt-step dbt-step-' + (st.color || 'info') + (state.stage === f.code ? ' dbt-step-on' : ''), 'data-stage': f.code, onclick: function () { state.stage = state.stage === f.code ? '' : f.code; render(host); } },
-                [W.el('span', { 'class': 'dbt-step-n', text: String(f.n) }), W.el('span', { 'class': 'dbt-step-t', text: st.name }), W.el('span', { 'class': 'dbt-step-s', text: STAGE_SHORT[f.code] + ' · ' + W.money(f.sum) + ' ₽' })]);
+                [W.el('span', { 'class': 'dbt-step-n', text: String(f.n) }), W.el('span', { 'class': 'dbt-step-t', text: st.name }), W.el('span', { 'class': 'dbt-step-s', text: C.stageRange(M.stages, f.code) + ' · ' + W.money(f.sum) + ' ₽' })]);
         })));
         // фильтры
         var mgrs = [['', 'Все менеджеры']].concat(M.managers.map(function (m) { return [m['Менеджер'], m['Менеджер']]; }));

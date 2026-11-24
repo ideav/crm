@@ -13,13 +13,13 @@
         var rows = items.map(function (i) {
             var mine = pays.filter(function (p) { return p.doc === i.id; });
             var doc = M.docs.filter(function (d) { return d.id === i.id; })[0];
-            var a = k.rate > 0 ? C.penaltyContract(doc.amount, doc.due, mine, send, k.rate, k.cap) : { total: 0, rows: [] };
+            var a = k.rate > 0 ? C.penaltyContract(doc.amount, doc.due, mine, send, k.rate, M.S.capOff ? 0 : k.cap) : { total: 0, rows: [] };
             var b = C.interest395(doc.amount, doc.due, mine, send, M.rates);
             return { item: i, contract: a, k395: b };
         });
         var sum = function (f) { return rows.reduce(function (s, x) { return C.round2(s + f(x)); }, 0); };
         var tot = { principal: sum(function (x) { return x.item.balance; }), contract: sum(function (x) { return x.contract.total; }), k395: sum(function (x) { return x.k395.total; }) };
-        var use = way || k.basis;
+        var use = way || C.effectiveBasis(k, M.S.claimBasis);
         var pen = use === 'contract' ? tot.contract : use === '395' ? tot.k395 : 0;
         return { k: k, rows: rows, tot: tot, use: use, pen: pen, items: items };
     }
@@ -64,7 +64,7 @@
             { t: 'Отгрузка', k: 'doc' }, { t: 'Период', html: function (p) { return C.toDmy(p.from) + ' – ' + C.toDmy(p.to); } }, { t: 'Дней', num: true, html: function (p) { return p.days; } },
             { t: 'База, ₽', num: true, html: function (p) { return W.money2(p.principal); } }, { t: 'Ставка, %', num: true, html: function (p) { return String(p.rate).replace('.', ','); } },
             { t: 'Дней в году', num: true, html: function (p) { return p.yd; } }, { t: 'Проценты, ₽', num: true, html: function (p) { return W.money2(p.sum); } }], per));
-        wrap.appendChild(W.el('p', { 'class': 'dbt-mini', text: 'Формула: база × ставка × дней / дней в году. Ключевая ставка берётся из справочника с датами (' + M.rates.length + ' записей); значения за 2026 год демонстрационные, перед боевым использованием сверить с сайтом Банка России.' }));
+        wrap.appendChild(W.el('p', { 'class': 'dbt-mini', text: 'Формула: база × ставка × дней / дней в году. Ключевая ставка берётся из справочника с датами (' + M.rates.length + ' записей); значения сверены с историей ключевой ставки на сайте Банка России (cbr.ru).' }));
         // срок
         var t = C.claimTerm(sd, k.claimDays, W.TODAY);
         wrap.appendChild(W.el('div', { 'class': 'dbt-term' }, [W.el('b', { text: 'Срок до обращения в суд: ' }), W.el('span', { text: 'претензия направлена ' + C.toDmy(sd) + ' — ' + t.term + ' календарных дней истекают ' + C.toDmy(t.last) + '; иск в арбитражный суд можно подать с ' + C.toDmy(t.earliestSuit) + ' (ч. 5 ст. 4 АПК РФ, если договором не установлен иной срок).' })]));
