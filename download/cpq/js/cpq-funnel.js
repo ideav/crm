@@ -19,13 +19,14 @@
         const won = by['Выиграно'] || { n: 0, sum: 0 }, lost = by['Проиграно'] || { n: 0, sum: 0 };
         const open = base.filter(q => !W.CLOSED[q.status]), openSum = open.reduce((s, q) => s + q.total, 0);
         const waiting = by['На согласовании'] ? by['На согласовании'].n : 0;
+        const myRole = M.me.role, mview = C.marginView(M, myRole), policyOff = M.opts.marginPolicy === 'off';
         const below = base.filter(q => q.margin < minM && !W.CLOSED[q.status]).length;
         host.appendChild(W.el('div', { 'class': 'cpq-head' }, [W.el('div', {}, [W.el('h1', { text: 'Воронка КП' }), W.el('p', { 'class': 'cpq-sub', text: 'Все коммерческие предложения: от черновика до договора. Скидки и маржа видны в момент КП, согласование не уходит в мессенджеры.' })]),
             W.el('a', { 'class': 'cpq-btn cpq-primary', href: W.url('wizard'), text: 'Новое КП' })]));
         const kpi = (k, v, sub, cls) => W.el('div', { 'class': 'cpq-kpi ' + (cls || '') }, [W.el('span', { 'class': 'cpq-muted', text: k }), W.el('strong', { text: v }), W.el('span', { 'class': 'cpq-muted cpq-small', text: sub || '' })]);
         const conv = won.n + lost.n ? Math.round(won.n / (won.n + lost.n) * 100) : 0;
         host.appendChild(W.el('div', { 'class': 'cpq-kpis' }, [kpi('В работе', C.money(openSum) + ' ₽', open.length + ' КП'), kpi('Выиграно', C.money(won.sum) + ' ₽', won.n + ' КП'), kpi('Конверсия в заказ', conv + '%', 'выиграно из закрытых'),
-            kpi('Ждут согласования', String(waiting), 'скидка выше лимита', waiting ? 'cpq-kpi-warn' : ''), kpi('Ниже минимальной маржи', String(below), 'в открытых КП', below ? 'cpq-kpi-bad' : '')]));
+            kpi('Ждут согласования', String(waiting), 'скидка выше лимита', waiting ? 'cpq-kpi-warn' : ''), mview === 'hide' || policyOff ? null : kpi('Ниже минимальной маржи', String(below), 'в открытых КП', below ? 'cpq-kpi-bad' : '')]));
         const mgrSel = W.select([['', 'Все менеджеры']].concat(M.managers.map(m => [m['Менеджер'], m['Менеджер']])), st.mgr); mgrSel.onchange = () => { st.mgr = mgrSel.value; render(); };
         const search = W.el('input', { type: 'search', placeholder: 'Номер или клиент', value: st.q, 'aria-label': 'Поиск', onchange: e => { st.q = e.target.value; render(); } });
         host.appendChild(W.el('div', { 'class': 'cpq-bar' }, [W.field('Менеджер', mgrSel), W.field('Поиск', search), st.status ? W.btn('Сбросить этап: ' + st.status, () => { st.status = ''; render(); }) : null]));
@@ -42,9 +43,9 @@
             { k: 'code', t: 'КП', html: r => '<strong>' + W.esc(r.code) + '</strong>' }, { k: 'client', t: 'Клиент' }, { k: 'mgr', t: 'Менеджер' },
             { k: 'status', t: 'Статус', html: r => W.badge(r.status, W.STATUS_KIND[r.status]) }, { k: 'date', t: 'Дата', html: r => W.esc(C.toDmy(r.date)) },
             { k: 'disc', t: 'Скидка', num: true, html: r => r.disc ? W.esc(C.round1(r.disc) + '%') : '-' }, { k: 'total', t: 'Итого, ₽', num: true },
-            { k: 'margin', t: 'Маржа', num: true, cls: r => (r.margin < minM ? 'cpq-bad-text' : ''), html: r => W.esc(C.round1(r.margin) + '%') },
+            mview === 'hide' ? null : { k: 'margin', t: 'Маржа', num: true, cls: r => (!policyOff && r.margin < minM ? 'cpq-bad-text' : ''), html: r => W.esc(C.marginText(M, myRole, r.margin)) },
             { k: 'approver', t: 'Согласование', html: r => r.needs ? (r.status === 'На согласовании' ? W.badge('ждёт: ' + (r.approver || 'руководитель'), 'warn') : W.esc(r.approver || '')) : '<span class="cpq-muted">не нужно</span>' }
-        ], list, { onrow: r => { location.href = W.url('quote') + '#id=' + r.id; }, empty: 'КП не найдено' }));
+        ].filter(Boolean), list, { onrow: r => { location.href = W.url('quote') + '#id=' + r.id; }, empty: 'КП не найдено' }));
         const prod = {}; items.forEach(i => { prod[i['Изделие']] = (prod[i['Изделие']] || 0) + C.num(i['Сумма']); });
         const keys = Object.keys(prod).sort((a, b) => prod[b] - prod[a]), mx = prod[keys[0]] || 1;
         if (keys.length) {

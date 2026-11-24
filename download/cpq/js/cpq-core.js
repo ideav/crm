@@ -28,6 +28,54 @@
     }
     function money(x) { return String(round(num(x))).replace(/\B(?=(\d{3})+(?!\d))/g, ' '); }
 
+    /* ---------- Настраиваемые опции демо ----------
+     * Значения лежат в таблице «Настройка» (колонки «Код», «Значение», «Значение настройки»). Ядро читает их, а не константы;
+     * если строки в базе нет, действует вариант по умолчанию (он же исходное поведение демо). */
+    var OPTION_DEFAULTS = {
+        DISCOUNT_MODE: 'quote',   /* quote: одна скидка на КП; lines: скидка по каждой позиции */
+        LIMITS_MODE: 'roles',     /* roles: лимит у каждой роли; flat: единый лимит менеджерам */
+        LIMIT_FLAT: 10,           /* единый лимит, % (для LIMITS_MODE=flat) */
+        LIMIT_COMPANY: 0,         /* предел скидки компании, %; 0 = лимит коммерческого директора */
+        MARGIN_POLICY: 'approve', /* approve: ниже минимума - согласование; block: запрет; off: не контролировать */
+        MARGIN_VIEW: 'show',      /* show: цифра; flag: только отметка; hide: скрыта (для ролей без права согласовать) */
+        STATUS_MANUAL: 'deny'     /* deny: менеджер меняет статус только экранами; allow: может вручную */
+    };
+    var NUMERIC_OPTS = { LIMIT_FLAT: 1, LIMIT_COMPANY: 1 };
+    function parseOptions(rows) {
+        var o = {}; Object.keys(OPTION_DEFAULTS).forEach(function (k) { o[k] = OPTION_DEFAULTS[k]; });
+        (rows || []).forEach(function (r) {
+            var code = r['Код'];
+            if (!code || !(code in OPTION_DEFAULTS)) return;
+            if (NUMERIC_OPTS[code]) { var raw = r['Значение настройки']; if (raw !== undefined && raw !== '') o[code] = Math.max(0, num(raw)); }
+            else if (r['Значение']) o[code] = String(r['Значение']).trim();
+        });
+        return { discountMode: o.DISCOUNT_MODE === 'lines' ? 'lines' : 'quote', limitsMode: o.LIMITS_MODE === 'flat' ? 'flat' : 'roles', flatLimit: o.LIMIT_FLAT,
+            companyLimit: o.LIMIT_COMPANY, marginPolicy: { block: 'block', off: 'off' }[o.MARGIN_POLICY] || 'approve', marginView: { flag: 'flag', hide: 'hide' }[o.MARGIN_VIEW] || 'show',
+            statusManual: o.STATUS_MANUAL === 'allow' ? 'allow' : 'deny' };
+    }
+    function roleOf(m, name) { return m.roles.filter(function (r) { return r.name === name; })[0] || { name: name, limit: 0, level: 0, approves: false }; }
+    /* Собственный лимит скидки роли: при едином лимите его получают все, кто не согласует; согласующие держат лимит из таблицы. */
+    function limitOf(m, roleName) {
+        var r = roleOf(m, roleName);
+        return m.opts.limitsMode === 'flat' && !r.approves ? m.opts.flatLimit : r.limit;
+    }
+    /* Предел скидки компании: заданный числом или лимит старшего согласующего. */
+    function companyLimit(m) {
+        if (m.opts.companyLimit > 0) return m.opts.companyLimit;
+        var ap = m.roles.filter(function (r) { return r.approves; }).sort(function (a, b) { return a.limit - b.limit; });
+        return ap.length ? ap[ap.length - 1].limit : 0;
+    }
+    /* Что роль видит про маржу: согласующие видят всегда, остальные - по опции. */
+    function marginView(m, roleName) { return roleOf(m, roleName).approves ? 'show' : m.opts.marginView; }
+    function marginText(m, roleName, marginPct) {
+        var v = marginView(m, roleName), min = m.settings['Минимальная маржа, %'] || 0;
+        if (v === 'show') return round1(marginPct) + '%';
+        if (v === 'flag') return m.opts.marginPolicy !== 'off' && marginPct < min - 1e-9 ? 'ниже минимума' : 'в норме';
+        return '';
+    }
+    /* Может ли роль вручную поставить любой статус КП (без прохождения экранов). Руководители могут всегда. */
+    function canSetStatus(m, roleName) { return roleOf(m, roleName).approves || m.opts.statusManual === 'allow'; }
+
     var TYPE_BY_NAME = { 'Требует': 'requires', 'Исключает': 'excludes', 'Только вместе': 'together', 'По умолчанию': 'default' };
     var TYPE_NAME = { requires: 'Требует', excludes: 'Исключает', together: 'Только вместе', 'default': 'По умолчанию' };
 
@@ -66,6 +114,7 @@
         (rows.roles || []).forEach(function (r) { m.roles.push({ name: r['Роль продаж'], limit: num(r['Лимит скидки, %']), approves: !!num(r['Согласует']), level: num(r['Уровень']) }); });
         m.roles.sort(function (a, b) { return a.level - b.level; });
         (rows.settings || []).forEach(function (s) { m.settings[s['Настройка']] = num(s['Значение настройки']); });
+        m.opts = parseOptions(rows.settings);
         return index(m);
     }
     function index(m) {
@@ -264,31 +313,44 @@
         var total = round(unit * qty * (1 - vol / 100));
         return { parts: parts, listUnit: list, markupPct: mk, markupAmount: unit - list, unit: unit, qty: qty, volumePct: vol, volumeAmount: unit * qty - total, total: total, cost: round(cost * qty) };
     }
-    /* Согласование скидки: лимит роли менеджера, минимальная маржа, ближайший согласующий. */
+    /* Согласование скидки: лимит роли менеджера, минимальная маржа (по политике опции), ближайший согласующий.
+     * discountPct - скидка, которую сверяем с лимитом: при скидке по позициям это наибольшая из скидок позиций. */
     function approval(m, discountPct, marginPct, roleName) {
-        var role = m.roles.filter(function (r) { return r.name === roleName; })[0] || { name: roleName, limit: 0, level: 0 };
+        var role = roleOf(m, roleName), own = limitOf(m, roleName), view = marginView(m, roleName), policy = m.opts.marginPolicy;
         var minMargin = m.settings['Минимальная маржа, %'] === undefined ? 0 : m.settings['Минимальная маржа, %'];
         var approvers = m.roles.filter(function (r) { return r.approves; }).sort(function (a, b) { return a.limit - b.limit; });
-        var maxLimit = approvers.length ? approvers[approvers.length - 1].limit : role.limit;
-        var reasons = [], overLimit = discountPct > role.limit + 1e-9, lowMargin = marginPct < minMargin - 1e-9, blocked = discountPct > maxLimit + 1e-9, by = null;
-        if (overLimit) reasons.push('Скидка ' + round1(discountPct) + '% выше вашего лимита ' + round1(role.limit) + '%');
-        if (lowMargin) reasons.push('Маржа ' + round1(marginPct) + '% ниже минимальной ' + round1(minMargin) + '%');
+        var maxLimit = companyLimit(m);
+        var reasons = [], overLimit = discountPct > own + 1e-9, lowMargin = policy !== 'off' && marginPct < minMargin - 1e-9, blocked = discountPct > maxLimit + 1e-9, by = null;
+        if (overLimit) reasons.push('Скидка ' + round1(discountPct) + '% выше вашего лимита ' + round1(own) + '%');
+        if (lowMargin) reasons.push(view === 'show' ? 'Маржа ' + round1(marginPct) + '% ниже минимальной ' + round1(minMargin) + '%' : 'Маржа ниже допустимой');
         if (blocked) reasons.push('Скидка выше предела компании ' + round1(maxLimit) + '%: нужна индивидуальная схема');
-        if (overLimit || lowMargin) {
+        if (lowMargin && policy === 'block') { blocked = true; reasons.push('Сделка ниже минимальной маржи запрещена настройкой'); }
+        if ((overLimit || lowMargin) && !blocked) {
             var cand = approvers.filter(function (r) { return r.limit >= discountPct - 1e-9 && r.level > role.level; })[0];
             if (lowMargin) cand = approvers[approvers.length - 1];
             by = cand ? cand.name : null;
         }
-        return { needs: (overLimit || lowMargin) && !blocked, blocked: blocked, approver: by, reasons: reasons, limit: role.limit, minMargin: minMargin, overLimit: overLimit, lowMargin: lowMargin, maxLimit: maxLimit };
+        return { needs: (overLimit || lowMargin) && !blocked, blocked: blocked, approver: by, reasons: reasons, limit: own, minMargin: minMargin, overLimit: overLimit, lowMargin: lowMargin, maxLimit: maxLimit, marginView: view };
     }
-    /* КП целиком: позиции, скидка менеджера, НДС, маржа, нужно ли согласование. */
+    /* КП целиком: позиции, скидка (на всё КП или по позициям - по опции), НДС, маржа, нужно ли согласование.
+     * discountPct - скидка на всё КП; при скидке по позициям берётся line.disc каждой позиции. */
     function priceQuote(m, lines, custGroup, discountPct, roleName) {
-        var priced = lines.map(function (l) { return priceLine(m, l, custGroup); });
+        var byLines = m.opts.discountMode === 'lines';
+        var priced = lines.map(function (l) {
+            var p = priceLine(m, l, custGroup);
+            p.discPct = byLines ? Math.max(0, num(l.disc)) : 0;
+            p.discAmount = round(p.total * p.discPct / 100);
+            p.payable = p.total - p.discAmount;
+            return p;
+        });
         var subtotal = priced.reduce(function (s, x) { return s + x.total; }, 0), cost = priced.reduce(function (s, x) { return s + x.cost; }, 0);
-        var d = Math.max(0, num(discountPct)), disc = round(subtotal * d / 100), total = subtotal - disc;
+        var d, disc;
+        if (byLines) { disc = priced.reduce(function (s, x) { return s + x.discAmount; }, 0); d = priced.reduce(function (s, x) { return Math.max(s, x.discPct); }, 0); }
+        else { d = Math.max(0, num(discountPct)); disc = round(subtotal * d / 100); }
+        var total = subtotal - disc;
         var vatPct = m.settings['НДС, %'] === undefined ? 20 : m.settings['НДС, %'], vat = round(total * vatPct / 100);
         var margin = total > 0 ? (total - cost) / total * 100 : 0;
-        return { lines: priced, subtotal: subtotal, discountPct: d, discount: disc, total: total, vatPct: vatPct, vat: vat, totalVat: total + vat, cost: cost, marginPct: round1(margin),
+        return { lines: priced, subtotal: subtotal, discountPct: d, discount: disc, effectivePct: subtotal > 0 ? round1(disc / subtotal * 100) : 0, byLines: byLines, total: total, vatPct: vatPct, vat: vat, totalVat: total + vat, cost: cost, marginPct: round1(margin),
             approval: approval(m, d, margin, roleName) };
     }
     function describe(m, sel) {
@@ -341,6 +403,7 @@
         num: num, round: round, round1: round1, toIso: toIso, toDmy: toDmy, addDays: addDays, money: money, TYPE_NAME: TYPE_NAME, TYPE_BY_NAME: TYPE_BY_NAME,
         buildModel: buildModel, index: index, rulesFor: rulesFor, initial: initial, toggle: toggle, evaluate: evaluate, tryAdd: tryAdd,
         volumePct: volumePct, markupOf: markupOf, priceLine: priceLine, priceQuote: priceQuote, approval: approval, describe: describe,
-        analyze: analyze, lint: lint
+        analyze: analyze, lint: lint,
+        OPTION_DEFAULTS: OPTION_DEFAULTS, parseOptions: parseOptions, limitOf: limitOf, companyLimit: companyLimit, marginView: marginView, marginText: marginText, canSetStatus: canSetStatus
     };
 });
