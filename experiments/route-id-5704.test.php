@@ -4,21 +4,30 @@
 #
 # Запуск: php experiments/route-id-5704.test.php (в гейте — через одноимённый .test.js)
 #
-# Функция Route_id берётся ИЗ index.php как есть и выполняется в своём пространстве имён:
-# Exec_sql, mysqli_fetch_array и my_die подменены (my_die запоминает текст и код ответа).
+# Функции Route_id и Route_miss берутся ИЗ index.php как есть и выполняются в своём пространстве
+# имён: Exec_sql, mysqli_fetch_array, Grant_1level и my_die подменены (my_die запоминает текст и
+# код ответа). Адрес разбирается до входа, поэтому Route_id на промахе не отвечает сам, а
+# помечает промах; ответ (Route_miss) — после Validate_Token. Запрос «как в index.php» = Route_id,
+# затем, если пользователь вошёл и есть промах, Route_miss.
 #
 # Что проверяется:
 #   1) номер — id без запросов к базе; пустой сегмент — пустой id;
 #   2) запрос по имени: найден — id, нет — 404 «Запрос не найден»;
 #   3) таблица по имени: найдена — id; нет — 404 «Таблица не найдена», SQL действия не выполняется;
 #   4) запись по имени: найдена — id записи; нет — 404 «Запись не найдена», а не id таблицы;
-#      «Таблица/» (пустой сегмент записи) — id таблицы;
+#      без права на таблицу — 403, а не 404; «Таблица/» (пустой сегмент записи) — id таблицы;
+#   4а) без входа промах не отвечает: Route_id не зовёт my_die, id пустой (не id таблицы);
 #   5) /{db}/ai/agent — третий сегмент не имя: пустой id без запросов.
 
 namespace T5704;
 
 error_reporting(E_ALL & ~E_DEPRECATED);
 mb_internal_encoding("UTF-8");
+set_error_handler(function($no, $str, $file, $line){	# предупреждение в коде ядра — провал, а не шум
+	$GLOBALS["failed"]++;
+	echo "  FAIL предупреждение PHP: $str (строка $line)\n";
+	return TRUE;
+});
 
 $failed = 0;
 function ok($cond, $name, $info = ""){
@@ -37,6 +46,8 @@ $z = "t";
 class Died extends \Exception { public $code_http; function __construct($msg, $code){ parent::__construct($msg); $this->code_http = $code; } }
 function t9n($msg){ return preg_replace('/\[RU\](.*?)\[EN\].*/s', '$1', $msg); }
 function my_die($msg, $code = ""){ throw new Died($msg, $code); }
+$GRANTED = array(500 => "READ");	# права вошедшего на таблицы
+function Grant_1level($id){ return isset($GLOBALS["GRANTED"][$id]) ? $GLOBALS["GRANTED"][$id] : FALSE; }
 
 # ── База: таблица «Клиент» (id 500) с записью «Альфа» (id 501), запрос «Сводка» (id 700) ──
 $DB = array(
@@ -75,18 +86,25 @@ function Exec_sql($sql, $msg){
 
 # ── Код ядра ──────────────────────────────────────────────────────────────────────────────
 $src = file_get_contents(__DIR__."/../index.php");
-if(!preg_match('/^function Route_id\(.*?^}\n/ms', str_replace("\r\n", "\n", $src), $m)){
-	fwrite(STDERR, "В index.php нет функции Route_id — мерка потеряла предмет\n");
-	exit(1);
+foreach(array("Route_id", "Route_miss") as $fn){
+	if(!preg_match('/^function '.$fn.'\(.*?^}\n/ms', str_replace("\r\n", "\n", $src), $m)){
+		fwrite(STDERR, "В index.php нет функции $fn — мерка потеряла предмет\n");
+		exit(1);
+	}
+	eval("namespace T5704;\n".$m[0]);
 }
-eval("namespace T5704;\n".$m[0]);
 
 # Адрес как в index.php: explode("/") от strtolower(REQUEST_URI) без «?…»
-function route($uri){
+function route($uri, $loggedIn = TRUE){
 	$com = explode("/", explode("?", strtolower($uri))[0]);
 	$GLOBALS["SQL_LOG"] = array();
+	unset($GLOBALS["ROUTE_MISS"]);
 	try{
-		return array("id" => Route_id(isset($com[2]) ? $com[2] : "", $com), "code" => NULL, "msg" => NULL, "sql" => $GLOBALS["SQL_LOG"]);
+		$id = Route_id(isset($com[2]) ? $com[2] : "", $com);
+		$miss = isset($GLOBALS["ROUTE_MISS"]);
+		if($loggedIn && $miss)
+			Route_miss($GLOBALS["ROUTE_MISS"]);
+		return array("id" => $id, "code" => NULL, "msg" => NULL, "sql" => $GLOBALS["SQL_LOG"], "miss" => $miss);
 	}
 	catch(Died $e){
 		return array("id" => NULL, "code" => $e->code_http, "msg" => $e->getMessage(), "sql" => $GLOBALS["SQL_LOG"]);
@@ -125,6 +143,18 @@ $r = route("/t/_m_set/".enc("Клиент")."/".enc("Нет такой запи�
 ok($r["code"] === "404 Not Found" && $r["msg"] === "Запись не найдена", "нет — 404 «Запись не найдена», а не id таблицы", shown($r));
 $r = route("/t/object/".enc("Клиент")."/");
 ok($r["id"] === 500 && !in_array("Get record by name", $r["sql"]), "«Таблица/» — id таблицы, запись не ищется", shown($r));
+$GRANTED = array();
+$r = route("/t/_m_set/".enc("Клиент")."/".enc("Нет такой записи"));
+ok($r["code"] === "403 Forbidden" && $r["msg"] === "У вас нет доступа к таблице 500", "без права на таблицу — 403, а не «Запись не найдена»", shown($r));
+$GRANTED = array(500 => "READ");
+
+echo "── 4а. без входа промах не отвечает ──\n";
+foreach(array("/t/object/".enc("НетТакой")."/?JSON=1", "/t/object/".enc("Клиент")."/".enc("Нет такой записи")) as $uri){
+	$r = route($uri, FALSE);
+	ok($r["code"] === NULL && $r["id"] === "" && $r["miss"] === TRUE, "$uri — до входа ответа нет, id пустой, промах помечен", shown($r));
+}
+$r = route("/t/object/".enc("Клиент")."/".enc("Альфа"), FALSE);
+ok($r["id"] === 501 && $r["miss"] === FALSE, "найденная запись — промаха нет", shown($r));
 
 echo "── 5. третий сегмент — не имя ──\n";
 foreach(array("/t/ai/agent", "/t/ai/agent/settings", "/t/ai/chat") as $uri){
