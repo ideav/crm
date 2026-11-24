@@ -63,7 +63,7 @@
             var g = P.el('tr', { 'class': 'psa-grp' }, [P.el('td', { html: P.esc(pool.name) + ' <span class="psa-av">' + pr.length + ' чел.</span>' })]);
             weeks.forEach(function (w, i) {
                 var plan = 0, cap = 0; pr.forEach(function (r) { plan += r.l[i].plan; cap += r.l[i].cap; });
-                g.appendChild(P.el('td', { 'class': 'psa-gv', text: cap ? Math.round(plan / cap * 100) + '%' : '–' }));
+                g.appendChild(P.el('td', { 'class': 'psa-gv', text: cap ? (P.unit() === 'hours' ? C.round1(plan) + ' ч' : Math.round(plan / cap * 100) + '%') : '–' }));
             });
             tb.appendChild(g);
             pr.forEach(function (r) {
@@ -85,7 +85,8 @@
     function cellModal(host, M, e, l) {
         var body = P.el('div', {});
         var items = l.items.map(function (i) { return M.bookings.filter(function (b) { return b.id === i.id; })[0]; }).filter(Boolean);
-        var inputs = {};
+        var inputs = {}, unit = M.rules.unit;
+        function hrs(id) { return C.fromInput(e, inputs[id].value, unit); }
         var info = P.el('div', {}), strip = P.el('div', {}), res = P.el('div', {});
         var absn = (M.abs[e.name] || []).filter(function (a) { return a.to >= l.week && a.from <= C.addDays(l.week, 6); });
         info.innerHTML = '<div class="psa-kv"><span>Ёмкость недели</span><b>' + C.round1(l.cap) + ' ч</b></div><div class="psa-kv"><span>План (брони)</span><b>' + C.round1(l.plan) + ' ч</b></div>' +
@@ -94,19 +95,19 @@
         body.appendChild(info);
         var canEdit = P.canWrite('Бронь');
         var tb = P.el('div', { 'class': 'psa-tablewrap', style: 'margin:10px 0' });
-        var tbl = P.el('table', { 'class': 'psa-table' }, [P.el('thead', {}, [P.el('tr', {}, ['Проект', 'Вид', 'Статус', 'Срок', 'Часов в нед.'].map(function (t) { return P.el('th', { text: t }); }))])]);
+        var tbl = P.el('table', { 'class': 'psa-table' }, [P.el('thead', {}, [P.el('tr', {}, ['Проект', 'Вид', 'Статус', 'Срок', unit === 'pct' ? '% ставки' : 'Часов в нед.'].map(function (t) { return P.el('th', { text: t }); }))])]);
         var tbd = P.el('tbody', {});
         items.forEach(function (b) {
-            var inp = P.input('number', b.hpw, { min: 0, max: 60, step: 1, style: 'width:72px' }); inputs[b.id] = inp;
+            var inp = P.input('number', C.toInput(e, b.hpw, unit), { min: 0, max: unit === 'pct' ? 200 : 60, step: 1, style: 'width:72px' }); inputs[b.id] = inp;
             inp.disabled = !canEdit || b.status !== 'Подтверждена' && b.status !== 'Запрошена';
             inp.addEventListener('input', recalc);
-            tbd.appendChild(P.el('tr', {}, [P.el('td', { text: b.project }), P.el('td', { html: P.badge(b.kind, b.kind === 'Жёсткая' ? 'info' : 'mute') }), P.el('td', { html: P.badge(b.status, b.status === 'Запрошена' ? 'warn' : 'ok') }), P.el('td', { text: C.toShort(b.from) + ' - ' + C.toShort(b.to) }), P.el('td', {}, [inp])]));
+            tbd.appendChild(P.el('tr', {}, [P.el('td', { text: P.projLabel(b.project) }), P.el('td', { html: P.badge(b.kind, b.kind === 'Жёсткая' ? 'info' : 'mute') }), P.el('td', { html: P.badge(b.status, b.status === 'Запрошена' ? 'warn' : 'ok') }), P.el('td', { text: C.toShort(b.from) + ' - ' + C.toShort(b.to) }), P.el('td', {}, [inp])]));
         });
         if (!items.length) tbd.appendChild(P.el('tr', {}, [P.el('td', { colspan: 5, 'class': 'psa-empty', text: 'На этой неделе броней нет' })]));
         tbl.appendChild(tbd); tb.appendChild(tbl); body.appendChild(tb);
         body.appendChild(strip); body.appendChild(res);
         function modified() {
-            return M.bookings.map(function (b) { if (!inputs[b.id]) return b; var c = Object.assign({}, b); c.hpw = C.num(inputs[b.id].value); return c; });
+            return M.bookings.map(function (b) { if (!inputs[b.id]) return b; var c = Object.assign({}, b); c.hpw = hrs(b.id); return c; });
         }
         var worst = null;
         function recalc() {
@@ -116,15 +117,15 @@
             strip.appendChild(P.loadStrip(M, e, list, ws));
             var ov = C.overloadWeeks(e, ws, list, M.hol, M.abs[e.name] || [], M.rules);
             var tooBig = ov.some(function (x) { return x.pct > M.rules.overbook; });
-            res.appendChild(P.el('div', { 'class': 'psa-warnbox ' + (tooBig ? 'psa-e' : ov.length ? 'psa-w' : 'psa-g'), text: ov.length ? 'Выше 100% на ' + ov.length + ' нед. из 8, максимум ' + Math.round(Math.max.apply(null, ov.map(function (x) { return x.pct; }))) + '%' : 'Перегрузки нет' }));
+            res.appendChild(P.el('div', { 'class': 'psa-warnbox ' + (tooBig ? 'psa-e' : ov.length ? 'psa-w' : 'psa-g'), text: ov.length ? 'Выше ' + M.rules.limit + '% на ' + ov.length + ' нед. из 8, максимум ' + Math.round(Math.max.apply(null, ov.map(function (x) { return x.pct; }))) + '%' : 'Перегрузки нет' }));
             worst = tooBig; if (saveBtn) saveBtn.disabled = false;
         }
         var saveBtn = canEdit && items.length ? P.btn('Сохранить загрузку', function () {
-            var ch = items.filter(function (b) { return C.num(inputs[b.id].value) !== b.hpw; });
+            var ch = items.filter(function (b) { return Number(inputs[b.id].value) !== C.toInput(e, b.hpw, unit); });
             if (!ch.length) return;
-            var chk = C.checkBooking(e, Object.assign({}, ch[0], { hpw: C.num(inputs[ch[0].id].value) }), modified().filter(function (b) { return b.id !== ch[0].id; }), M.hol, M.abs[e.name] || [], M.rules);
+            var chk = C.checkBooking(e, Object.assign({}, ch[0], { hpw: hrs(ch[0].id) }), modified().filter(function (b) { return b.id !== ch[0].id; }), M.hol, M.abs[e.name] || [], M.rules);
             if (!chk.ok) { P.toast(chk.errors[0], true); return false; }
-            Promise.all(ch.map(function (b) { return P.update(b.rid, { 'Часов в неделю': C.num(inputs[b.id].value) }); })).then(function () { ch.forEach(function (b) { b.hpw = C.num(inputs[b.id].value); }); P.toast('Загрузка обновлена'); m.close(); render(host, M); }).catch(function (er) { P.toast(er.message, true); });
+            Promise.all(ch.map(function (b) { return P.update(b.rid, { 'Часов в неделю': hrs(b.id) }); })).then(function () { ch.forEach(function (b) { b.hpw = hrs(b.id); }); P.toast('Загрузка обновлена'); m.close(); render(host, M); }).catch(function (er) { P.toast(er.message, true); });
             return false;
         }, 'psa-primary') : null;
         var m = P.modal(e.name + ': неделя с ' + C.toShort(l.week), body, [{ text: 'Закрыть' }], true);

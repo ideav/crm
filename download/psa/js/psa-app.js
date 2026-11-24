@@ -13,8 +13,8 @@
     P.dec = function (s) { return typeof s === 'string' ? s.replace(/&comma;/g, ',') : s; };
     P.esc = function (s) { return String(s === undefined || s === null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); };
     P.url = function (p) { return '/' + P.ctx.db + '/' + p; };
-    P.get = function (p) {
-        return fetch(P.url(p), { credentials: 'same-origin' }).then(function (r) {
+    P.get = function (p, init) {
+        return fetch(P.url(p), Object.assign({ credentials: 'same-origin' }, init || {})).then(function (r) {
             if (!r.ok) throw new Error('HTTP ' + r.status + ' ' + p);
             return r.json();
         });
@@ -49,7 +49,7 @@
         var id = P.tid(name), out = [], PAGE = 700, PAR = 4;
         function batch(off) {
             var ps = [];
-            for (var i = 0; i < PAR; i++) ps.push(P.get('object/' + id + '/?JSON_OBJ&NAMED&LIMIT=' + (off + i * PAGE) + ',' + PAGE));
+            for (var i = 0; i < PAR; i++) ps.push(P.get('object/' + id + '/?JSON_OBJ&NAMED&LIMIT=' + (off + i * PAGE) + ',' + PAGE, name === 'Настройка демо' ? { cache: 'no-store' } : null));
             return Promise.all(ps).then(function (pages) {
                 var done = false;
                 pages.forEach(function (j) {
@@ -73,13 +73,15 @@
     var modelP = null;
     P.model = function () {
         if (modelP) return modelP;
-        var names = ['Пул', 'Правило', 'Нерабочий день', 'Сотрудник', 'Навык сотрудника', 'Отсутствие', 'Проект', 'Ставка продажи', 'Запрос ресурса', 'Бронь', 'Неделя таймшита', 'Навык', 'Грейд'];
+        var names = ['Пул', 'Правило', 'Нерабочий день', 'Сотрудник', 'Навык сотрудника', 'Отсутствие', 'Проект', 'Ставка продажи', 'Запрос ресурса', 'Бронь', 'Неделя таймшита', 'Навык', 'Грейд', 'Настройка демо'];
         var needTs = /^(dashboard|timesheets|projects)$/.test(P.ctx.screen);
         modelP = Promise.all(names.map(function (n) { if (n === 'Неделя таймшита' && !needTs) return Promise.resolve([]); return n === 'Ставка продажи' ? P.rows(n).catch(function () { return null; }) : P.rows(n); })).then(function (r) {
             var M = { today: P.TODAY, hasRates: !!r[7], canCost: false };
             M.pools = (r[0] || []).map(function (x) { return { name: x['Пул'], head: x['Руководитель пула'], login: x['Логин руководителя'] }; });
             var rl = {}; (r[1] || []).forEach(function (x) { rl[x['Правило']] = C.num(x['Значение правила']); });
             M.rules = { limit: rl['Лимит загрузки'] || 100, overbook: rl['Допустимый овербукинг'] || 110, overbookWeeks: rl['Овербукинг не дольше'] || 2, softDays: rl['Срок жизни мягкой брони'] || 14, utilTarget: rl['Целевая утилизация'] || 80, marginMin: rl['Порог маржи проекта'] || 20, dayHours: rl['Рабочих часов в день'] || 8, tolerance: rl['Допуск план-факт'] || 15 };
+            var sv = {}; M.settingRows = {}; (r[13] || []).forEach(function (x) { sv[x['Настройка демо']] = x['Значение настройки']; M.settingRows[x['Настройка демо']] = x; });
+            M.settings = C.parseSettings(sv); M.rules = C.applySettings(M.rules, M.settings);
             M.hol = {}; (r[2] || []).forEach(function (x) { M.hol[C.toIso(x['Нерабочий день'])] = C.num(x['Рабочих часов']); });
             M.emps = (r[3] || []).map(function (x) {
                 return { id: x._id, name: x['Сотрудник'], num: x['Табельный номер'], pool: x['Пул'], position: x['Должность'], grade: x['Грейд'], fte: C.num(x['Ставка занятости']) || 1, cost: x['Себестоимость часа'] === undefined ? null : C.num(x['Себестоимость часа']), hire: C.toIso(x['Дата приёма']), type: x['Тип занятости'] };
@@ -93,26 +95,39 @@
             M.projects = (r[6] || []).map(function (x) {
                 return { id: x._id, name: x['Проект'], code: x['Код проекта'], cust: x['Заказчик'], contract: x['Тип договора'], pm: x['Руководитель проекта'], pmLogin: x['Логин РП'], status: x['Статус проекта'], from: C.toIso(x['Начало проекта']), to: C.toIso(x['Окончание проекта']), budgetHours: C.num(x['Бюджет часов']), price: x['Выручка по договору'] === undefined ? null : C.num(x['Выручка по договору']), ready: C.num(x['Готовность, %']) };
             });
-            M.projBy = P.map(M.projects, 'name'); M.projById = P.map(M.projects, 'id');
+            M.allProjects = M.projects; M.projBy = P.map(M.projects, 'name'); M.projById = P.map(M.projects, 'id');
             M.canPrice = M.projects.length > 0 && M.projects[0].price !== null;
             M.projects.forEach(function (p) { if (p.price === null) p.price = 0; });
+            /* опция «кому видна финансовая часть»: роль вне списка не видит ставки и маржу, даже если права на поля выданы */
+            M.moneyAllowed = C.canSeeMoney(P.ctx.role, M.rules.finView); M.canCost = M.canCost && M.moneyAllowed; M.canPrice = M.canPrice && M.moneyAllowed;
+            /* опция «проекты руководителя проекта»: свои или все */
+            M.projects = C.visibleProjects(M.allProjects, P.ctx.role, P.ctx.user, M.rules.pmScope);
+            M.hidden = {}; M.allProjects.forEach(function (p) { if (M.projects.indexOf(p) < 0) M.hidden[p.name] = 1; });
             M.rates = {}; (r[7] || []).forEach(function (x) { M.rates[x['Проект'] + '|' + x['Грейд']] = C.num(x['Ставка продажи за час']); });
             M.reqs = (r[8] || []).map(function (x) {
                 return { id: x._id, code: x['Запрос ресурса'], project: x['Проект'], role: x['Роль на проекте'], skill: x['Навык'], minGrade: x['Мин. грейд'], minLevel: C.num(x['Мин. уровень навыка']) || 1, from: C.toIso(x['Нужно с']), to: C.toIso(x['Нужно по']), hpw: C.num(x['Часов в неделю']), priority: x['Приоритет запроса'], status: x['Статус запроса'], suggested: x['Предложенный сотрудник'] || '' };
             });
             M.bookings = (r[9] || []).map(function (x) {
-                return { id: x['Бронь'], rid: x._id, project: x['Проект'], emp: x['Сотрудник'], role: x['Роль на проекте'], kind: x['Вид брони'], status: x['Статус брони'], from: C.toIso(x['Бронь с']), to: C.toIso(x['Бронь по']), hpw: C.num(x['Часов в неделю']), expires: C.toIso(x['Истекает']), requester: x['Заявитель'], approver: x['Согласующий'], decision: x['Решение'], decDate: C.toIso(x['Дата решения']) };
+                return { id: x['Бронь'], rid: x._id, project: x['Проект'], emp: x['Сотрудник'], role: x['Роль на проекте'], kind: x['Вид брони'], status: x['Статус брони'], from: C.toIso(x['Бронь с']), to: C.toIso(x['Бронь по']), hpw: C.num(x['Часов в неделю']), expires: C.toIso(x['Истекает']), requester: x['Заявитель'], approver: x['Согласующий'], decision: x['Решение'], decDate: C.toIso(x['Дата решения']), signed: x['Подписи согласования'] || '' };
             });
             M.ts = (r[10] || []).map(function (x) { return { id: x._id, week: C.toIso(x['Неделя таймшита']), emp: x['Сотрудник'], project: x['Проект'], hours: C.num(x['Часов факт']), status: x['Статус таймшита'] }; });
+            M.reqs = M.reqs.filter(function (q) { return !M.hidden[q.project]; });
+            M.listBookings = C.visibleBookings(M.bookings, M.allProjects, P.ctx.role, P.ctx.user, M.rules.pmScope);
             M.skillList = (r[11] || []).map(function (x) { return x['Навык']; });
             M.gradeList = (r[12] || []).sort(function (a, b) { return C.num(a['Порядок грейда']) - C.num(b['Порядок грейда']); }).map(function (x) { return x['Грейд']; });
             M.me = M.pools.filter(function (p) { return p.login === P.ctx.user; })[0] || null;
             M.myProjects = M.projects.filter(function (p) { return p.pmLogin === P.ctx.user; });
+            P.cur = M;
             return M;
         });
         return modelP;
     };
     P.resetModel = function () { modelP = null; };
+    /* Опции демо в экранах: единица планирования и скрытые проекты. */
+    P.unit = function () { return P.cur ? P.cur.rules.unit : 'pct'; };
+    P.projLabel = function (name) { return P.cur && P.cur.hidden && P.cur.hidden[name] ? 'Другой проект' : name; };
+    P.hpwText = function (e, hpw) { return P.unit() === 'pct' ? C.toInput(e, hpw, 'pct') + '%' : C.num(hpw) + ' ч'; };
+    P.hpwTitle = function () { return P.unit() === 'pct' ? '% ставки' : 'Ч/нед'; };
     P.billable = function (M, name) { var p = M.projBy[name]; return !!p && p.contract !== 'Внутренний'; };
 
     /* ---------- DOM ---------- */

@@ -6,7 +6,7 @@
 })(typeof self !== 'undefined' ? self : this, function () {
     'use strict';
     var DAY = 86400000;
-    var DEFAULT_RULES = { limit: 100, overbook: 110, overbookWeeks: 2, softDays: 14, utilTarget: 80, marginMin: 20, dayHours: 8 };
+    var DEFAULT_RULES = { limit: 100, overbook: 110, overbookWeeks: 2, softDays: 14, utilTarget: 80, marginMin: 20, dayHours: 8, unit: 'pct', hardBan: true, route: 'pool', pmScope: 'all', finView: 'fin_pmo' };
     var GRADES = ['junior', 'middle', 'senior', 'lead'];
 
     function utc(s) { var p = s.split('-'); return Date.UTC(+p[0], +p[1] - 1, +p[2]); }
@@ -86,7 +86,12 @@
         if (l.pct >= 50) return 'ok';
         return 'free';
     }
-    /* Проверка брони при вводе: ошибки блокируют, предупреждения нет. existing - все брони, newB - новая или изменённая. */
+    /* Загрузка недели словами в выбранной единице: «150%» или «60 ч из 40 ч». */
+    function fmtOver(l, rules) { return rules.unit === 'hours' ? round1(l.plan) + ' ч из ' + round1(l.cap) + ' ч' : Math.round(l.pct) + '%'; }
+    /* Порог в процентах ёмкости недели l в выбранной единице: «110%» или «44 ч». */
+    function fmtLimit(l, pct, rules) { return rules.unit === 'hours' ? round1(l.cap * pct / 100) + ' ч' : pct + '%'; }
+    /* Проверка брони при вводе: ошибки блокируют, предупреждения нет. existing - все брони, newB - новая или изменённая.
+       Опции: rules.limit, rules.overbook (допуск), rules.overbookWeeks (0 - без ограничения), rules.hardBan (запрет второй жёсткой брони), rules.unit (единица в сообщениях). */
     function checkBooking(emp, newB, existing, hol, abs, rules) {
         rules = rules || DEFAULT_RULES;
         var list = existing.filter(function (b) { return b.id !== newB.id; }).concat([newB]);
@@ -98,15 +103,15 @@
             if (l.cap === 0) return; /* сотрудник отсутствует всю неделю: предупреждение ниже, в перегрузку не считается */
             if (l.pct !== null && l.pct > rules.limit) { streak++; if (streak > maxStreak) maxStreak = streak; } else streak = 0;
             if (l.pct !== null && (!worst || l.pct > worst.pct)) worst = l;
-            if (newB.kind === 'Жёсткая') {
+            if (newB.kind === 'Жёсткая' && rules.hardBan !== false) {
                 var hard = list.filter(function (b) { return b.kind === 'Жёсткая'; });
                 var lh = loadWeek(emp, w, hard, hol, abs, { pending: true });
-                if (lh.pct !== null && lh.pct > rules.limit) errors.push('Жёсткие брони на неделе ' + toShort(w) + ' занимают ' + Math.round(lh.pct) + '% ёмкости: вторая жёсткая бронь сверх 100% запрещена');
+                if (lh.pct !== null && lh.pct > rules.limit) errors.push('Жёсткие брони на неделе ' + toShort(w) + ' занимают ' + fmtOver(lh, rules) + ' ёмкости: вторая жёсткая бронь сверх ' + fmtLimit(lh, rules.limit, rules) + ' запрещена');
             }
         });
-        if (worst && worst.pct > rules.overbook) errors.push('Перегрузка ' + Math.round(worst.pct) + '% на неделе ' + toShort(worst.week) + ' выше допустимых ' + rules.overbook + '%');
-        else if (worst && worst.pct > rules.limit) warnings.push('Загрузка ' + Math.round(worst.pct) + '% на неделе ' + toShort(worst.week) + ': выше 100%, допустимый овербукинг до ' + rules.overbook + '%');
-        if (maxStreak > rules.overbookWeeks) errors.push('Загрузка выше 100% дольше ' + rules.overbookWeeks + ' недель подряд (' + maxStreak + ')');
+        if (worst && worst.pct > rules.overbook) errors.push('Перегрузка ' + fmtOver(worst, rules) + ' на неделе ' + toShort(worst.week) + ' выше допустимых ' + fmtLimit(worst, rules.overbook, rules));
+        else if (worst && worst.pct > rules.limit) warnings.push('Загрузка ' + fmtOver(worst, rules) + ' на неделе ' + toShort(worst.week) + ': выше ' + fmtLimit(worst, rules.limit, rules) + ', допустимый овербукинг до ' + fmtLimit(worst, rules.overbook, rules));
+        if (rules.overbookWeeks > 0 && maxStreak > rules.overbookWeeks) errors.push('Загрузка выше ' + rules.limit + '% дольше ' + rules.overbookWeeks + ' недель подряд (' + maxStreak + ')');
         weeks.forEach(function (l) { if (l.cap === 0 && l.base > 0 && newB.hpw > 0 && bookingHoursWeek(newB, l.week, hol) > 0) warnings.push('Неделя ' + toShort(l.week) + ': сотрудник в отпуске или на больничном'); });
         return { errors: errors, warnings: warnings, weeks: weeks, ok: errors.length === 0 };
     }
@@ -115,6 +120,101 @@
         rules = rules || DEFAULT_RULES;
         return weeks.map(function (w) { return loadWeek(emp, w, bookings, hol, abs, { pending: true }); })
             .filter(function (l) { return l.base > 0 && (l.cap === 0 ? l.plan > 0 : l.pct > rules.limit); });
+    }
+    /* ---------- настраиваемые опции демо (таблица «Настройка демо») ---------- */
+    var SETTING_DEFS = [
+        { code: 'unit', group: 'Единица планирования', title: 'Единица планирования', type: 'choice', def: 'pct', options: [['pct', '% ставки'], ['hours', 'Часы в неделю']],
+          hint: 'В чём планируют и показывают загрузку: на тепловой карте и в форме брони.', when: '% ставки - когда люди работают на разных долях ставки и важна доля времени; часы - когда проекты считают трудозатратами и бюджетом часов.' },
+        { code: 'limit', group: 'Перегрузка и овербукинг', title: 'Порог перегрузки, %', type: 'number', def: 100, min: 50, max: 200,
+          hint: 'Загрузка недели выше этого значения от ёмкости считается овербукингом.', when: '100 - стандарт; ниже (90) - если нужен запас на непроектную работу; выше - если норма у вас перекрыта сверхурочными.' },
+        { code: 'overbook', group: 'Перегрузка и овербукинг', title: 'Допуск овербукинга, %', type: 'number', def: 110, min: 50, max: 300,
+          hint: 'Верхняя граница: выше бронь не сохраняется; между порогом и допуском - предупреждение.', when: '110 - короткие пики терпимы; 100 - овербукинг запрещён; 130 - проектная организация с плавающей загрузкой.' },
+        { code: 'overbookWeeks', group: 'Перегрузка и овербукинг', title: 'Сколько недель подряд выше порога', type: 'number', def: 2, min: 0, max: 26,
+          hint: 'Дольше этого срока загрузка выше порога блокирует бронь; 0 - срок не ограничен.', when: '2 - пик допустим как временный; 0 - если у вас длинные периоды повышенной загрузки нормальны.' },
+        { code: 'hardBan', group: 'Перегрузка и овербукинг', title: 'Вторая жёсткая бронь сверх порога', type: 'choice', def: 'yes', options: [['yes', 'Запрещать'], ['no', 'Разрешать в допуске овербукинга']],
+          hint: 'Жёсткая бронь гарантирует человека проекту; вторую жёсткую сверх порога можно не пускать.', when: 'Запрещать - когда жёсткая бронь для вас обязательство перед заказчиком; разрешать - когда она лишь приоритет.' },
+        { code: 'route', group: 'Согласование брони', title: 'Маршрут согласования', type: 'choice', def: 'pool', options: [['pool', 'Руководитель пула'], ['pool_emp', 'Руководитель пула + подтверждение сотрудника'], ['committee', 'Комитет: руководитель пула и PMO']],
+          hint: 'Кто должен сказать «да», чтобы бронь стала подтверждённой.', when: 'Руководитель пула - небольшая компания; + сотрудник - когда важно согласие человека; комитет - когда ресурсы дефицитны и распределяются на уровне портфеля.' },
+        { code: 'pmScope', group: 'Видимость', title: 'Проекты, видимые руководителю проекта', type: 'choice', def: 'all', options: [['all', 'Все проекты'], ['own', 'Только свои']],
+          hint: 'Что видит руководитель проекта на экранах броней, проектов и запросов.', when: 'Все - открытая культура, РП видят чужие проекты и договариваются; только свои - когда проекты конфиденциальны или у заказчиков конкурирующие интересы.' },
+        { code: 'finView', group: 'Видимость', title: 'Кому видна финансовая часть (ставки, маржа)', type: 'choice', def: 'fin_pmo', options: [['finance', 'Директор и финансовый директор'], ['fin_pmo', '+ руководитель PMO'], ['leaders', 'Все руководители']],
+          hint: 'Кому на экранах показываются себестоимость, ставки продажи, маржа и стоимость бенча.', when: 'Директор и финдиректор - ставки конфиденциальны; + PMO - портфельщик отвечает за маржу; все руководители - прозрачная модель (ролям дополнительно выдаются права на ставки).' }
+    ];
+    function parseSettings(map) {
+        map = map || {};
+        var o = {};
+        SETTING_DEFS.forEach(function (d) {
+            var raw = map[d.code], v = d.def;
+            if (raw !== undefined && raw !== null && String(raw).trim() !== '') {
+                if (d.type === 'choice') { if (d.options.some(function (x) { return x[0] === String(raw).trim(); })) v = String(raw).trim(); }
+                else { var n = parseFloat(String(raw).replace(',', '.')); if (!isNaN(n) && n >= d.min && n <= d.max) v = n; }
+            }
+            o[d.code] = v;
+        });
+        if (o.overbook < o.limit) o.overbook = o.limit;
+        o.hardBan = o.hardBan === 'yes';
+        return o;
+    }
+    function applySettings(rules, s) { var r = {}; Object.keys(rules).forEach(function (k) { r[k] = rules[k]; }); Object.keys(s).forEach(function (k) { r[k] = s[k]; }); return r; }
+    /* Единица планирования: ввод в % ставки <-> часы в неделю (100% ставки = 40 ч x ставка занятости). */
+    function fromInput(emp, v, unit) { return unit === 'pct' ? round2(num(v) / 100 * 40 * (emp.fte || 1)) : num(v); }
+    function toInput(emp, hpw, unit) { return unit === 'pct' ? Math.round(num(hpw) / (40 * (emp.fte || 1)) * 100) : num(hpw); }
+    /* Текст ячейки тепловой карты: % загрузки или часы плана. */
+    function loadLabel(l, unit) {
+        if (l.base === 0) return '–';
+        if (l.cap === 0) return l.plan > 0 ? 'отп!' : 'отп';
+        return String(unit === 'hours' ? round1(l.plan) : Math.round(l.pct));
+    }
+    /* Маршрут согласования: шаги по порядку. */
+    var STEP_LABEL = { pool: 'руководителя пула', pmo: 'PMO', emp: 'сотрудника' };
+    var ROUTES = { pool: ['pool'], pool_emp: ['pool', 'emp'], committee: ['pool', 'pmo'] };
+    function approvalSteps(route) { return (ROUTES[route] || ROUTES.pool).map(function (k) { return { key: k, label: STEP_LABEL[k] }; }); }
+    function signedList(str) { return String(str || '').split(',').map(function (x) { return x.trim(); }).filter(Boolean); }
+    function approvalProgress(route, signedStr) {
+        var steps = approvalSteps(route), got = signedList(signedStr), n = 0;
+        while (n < steps.length && got.indexOf(steps[n].key) >= 0) n++;
+        return { done: n, total: steps.length, text: n >= steps.length ? 'все подписи получены' : n + ' из ' + steps.length + ': ждём ' + steps[n].label };
+    }
+    function signStep(route, signedStr, key) {
+        var steps = approvalSteps(route), got = signedList(signedStr), n = 0;
+        if (got.indexOf(key) >= 0) return { error: 'Подпись уже поставлена' };
+        while (n < steps.length && got.indexOf(steps[n].key) >= 0) n++;
+        if (n >= steps.length) return { error: 'Бронь уже согласована' };
+        if (steps[n].key !== key) return { error: 'Сейчас ждём ' + steps[n].label };
+        got.push(key);
+        return { signed: got.join(','), done: got.length >= steps.length, next: got.length >= steps.length ? null : steps[got.length] };
+    }
+    function roleKey(role) {
+        role = String(role || '');
+        if (/Финансов/i.test(role)) return 'fin';
+        if (/PMO/i.test(role)) return 'pmo';
+        if (/пула/i.test(role)) return 'pool';
+        if (/проекта/i.test(role)) return 'pm';
+        if (/^Директор/i.test(role)) return 'dir';
+        return '';
+    }
+    function canSign(route, key, role) {
+        var rk = roleKey(role);
+        if (key === 'pool') return rk === 'pool' || (route === 'pool' && rk === 'pmo');
+        if (key === 'pmo') return rk === 'pmo';
+        if (key === 'emp') return rk === 'pool' || rk === 'pmo';
+        return false;
+    }
+    /* Видимость: руководитель проекта при pmScope=own видит только проекты со своим логином. */
+    function visibleProjects(projects, role, login, scope) {
+        if (scope !== 'own' || roleKey(role) !== 'pm') return projects;
+        return projects.filter(function (p) { return p.pmLogin === login; });
+    }
+    function visibleBookings(bookings, projects, role, login, scope) {
+        if (scope !== 'own' || roleKey(role) !== 'pm') return bookings;
+        var mine = {}; visibleProjects(projects, role, login, scope).forEach(function (p) { mine[p.name] = 1; });
+        return bookings.filter(function (b) { return mine[b.project]; });
+    }
+    var MONEY_ROLES = { finance: ['dir', 'fin'], fin_pmo: ['dir', 'pmo', 'fin'], leaders: ['dir', 'pmo', 'pool', 'pm', 'fin'] };
+    function canSeeMoney(role, view) {
+        var rk = roleKey(role);
+        if (!rk) return true; /* владелец базы и неизвестные роли не урезаются */
+        return (MONEY_ROLES[view] || MONEY_ROLES.fin_pmo).indexOf(rk) >= 0;
     }
     function gradeRank(g) { var i = GRADES.indexOf(g); return i < 0 ? 0 : i + 1; }
     /* Подбор: кто обладает навыком на уровне >= minLevel, грейд >= minGrade и свободен на период на hpw часов в неделю. */
@@ -226,7 +326,8 @@
         return [cols.map(function (c) { return q(c[1]); }).join(';')].concat(rows.map(function (r) { return cols.map(function (c) { return q(r[c[0]]); }).join(';'); })).join('\n');
     }
     return {
-        DEFAULT_RULES: DEFAULT_RULES, GRADES: GRADES, utc: utc, iso: iso, addDays: addDays, diffDays: diffDays, toIso: toIso, toDmy: toDmy, toShort: toShort, num: num, round1: round1, round2: round2,
+        DEFAULT_RULES: DEFAULT_RULES, SETTING_DEFS: SETTING_DEFS, parseSettings: parseSettings, applySettings: applySettings, fromInput: fromInput, toInput: toInput, loadLabel: loadLabel, fmtOver: fmtOver, fmtLimit: fmtLimit,
+        approvalSteps: approvalSteps, approvalProgress: approvalProgress, signStep: signStep, signedList: signedList, roleKey: roleKey, canSign: canSign, visibleProjects: visibleProjects, visibleBookings: visibleBookings, canSeeMoney: canSeeMoney, GRADES: GRADES, utc: utc, iso: iso, addDays: addDays, diffDays: diffDays, toIso: toIso, toDmy: toDmy, toShort: toShort, num: num, round1: round1, round2: round2,
         dow: dow, weekStart: weekStart, weeksFrom: weeksFrom, weeksBetween: weeksBetween, weekDays: weekDays, dayHours: dayHours, capacityWeek: capacityWeek,
         bookingHoursWeek: bookingHoursWeek, loadWeek: loadWeek, loadClass: loadClass, checkBooking: checkBooking, overloadWeeks: overloadWeeks, gradeRank: gradeRank,
         findCandidates: findCandidates, planFact: planFact, utilization: utilization, bench: bench, projectMargin: projectMargin, sellRate: sellRate, toCsv: toCsv
