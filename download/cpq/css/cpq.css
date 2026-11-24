@@ -172,3 +172,14 @@ a.cpq-primary, a.cpq-primary:hover { color: #fff; }
     .cpq-doc { position: absolute; left: 0; top: 0; width: 100%; border: 0; padding: 0; }
     .cpq-noprint { display: none !important; }
 }
+
+/* Экран «Настройки» */
+.cpq-optgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; margin-bottom: 8px; }
+.cpq-optcard { display: flex; flex-direction: column; gap: 6px; }
+.cpq-optcard p { margin: 0; }
+.cpq-choices { display: flex; flex-direction: column; gap: 6px; }
+.cpq-choice { display: flex; gap: 8px; align-items: flex-start; padding: 8px; border: 1px solid var(--c-line); border-radius: 6px; cursor: pointer; }
+.cpq-choice input { margin-top: 3px; }
+.cpq-choice > span { display: flex; flex-direction: column; gap: 2px; }
+.cpq-choice-on { border-color: var(--c-accent, #2563eb); background: rgba(37, 99, 235, .06); }
+.cpq-choice:focus-within { outline: 2px solid var(--c-accent, #2563eb); outline-offset: 1px; }
