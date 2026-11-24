@@ -494,12 +494,18 @@
 .atex-sl-btn-primary:hover { background: var(--sl-accent-d); }
 .atex-sl-btn-secondary { background: var(--sl-surface); }
 .atex-sl-photo { display: flex; align-items: center; gap: 8px; }
-/* #5575: кнопка «Ввод» — ячейка сетки показаний сразу после «Брак, шт», высотой с поле.
-   Только снимает фокус с поля; погашена, пока ничего не правили, горит при правке. */
-.atex-sl-enter { width: 100%; flex: 1; font-size: 16px; font-weight: 700; }
-.atex-sl-readings .atex-sl-enter { border-radius: 0; }
-.atex-sl-enter:disabled { background: var(--sl-surface); border-color: var(--sl-border); color: var(--sl-muted); cursor: default; }
-.atex-sl-enter.is-dirty { box-shadow: 0 0 0 3px var(--sl-warning-bg); }
+/* #5575/#5706: кнопка «Ввод» — справа вверху, под именем пользователя в шапке (навбар
+   sticky, высота ≈44px). Только снимает фокус с поля; видна лишь при несохранённой правке.
+   В 1.5 раза крупнее прежней (кегль 16→24px, высота ≈38→57px) и ярче акцента пульта. */
+.atex-sl-enter {
+    position: fixed; top: 52px; right: 16px; z-index: 101;
+    min-width: 180px; min-height: 57px; padding: 12px 36px;
+    font-size: 24px; font-weight: 700; border-radius: 8px;
+    background: #2a7de1; border-color: #2a7de1; color: #fff;
+    box-shadow: 0 0 0 4px rgba(250, 204, 21, .55), 0 4px 14px rgba(0, 0, 0, .25);
+}
+.atex-sl-enter:hover { background: #1f6fd0; }
+.atex-sl-enter:not(.is-dirty) { display: none; }
 
 /* Тосты-уведомления (без alert/confirm/prompt) */
 .atex-sl-toast {

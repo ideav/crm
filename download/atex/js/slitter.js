@@ -3601,9 +3601,13 @@
         var enterBtn = el('button', { class: 'atex-sl-btn atex-sl-btn-primary atex-sl-enter', type: 'button', text: 'Ввод' });
         function setEnterLit(on) {
             enterBtn.disabled = !on;
+            enterBtn.hidden = !on; // #5706: без правок кнопки нет вовсе
             if (on) enterBtn.classList.add('is-dirty'); else enterBtn.classList.remove('is-dirty');
         }
         setEnterLit(false);
+        // #5706: кнопка исчезает на blur поля; без этого нажатие сначала уводило бы фокус,
+        // кнопка пряталась, и click доставался тому, что под ней. Фокус снимаем сами в click.
+        enterBtn.addEventListener('mousedown', function(e) { if (e && e.preventDefault) e.preventDefault(); });
         enterBtn.addEventListener('click', function() {
             var active = document.activeElement;
             if (active && active !== enterBtn && typeof active.blur === 'function') active.blur();
@@ -3785,9 +3789,6 @@
         defectQty.addEventListener('input', function() { jumboDraft().defectQtyDraft = defectQty.value; });
         trackEnter(defectQty);
         grid.appendChild(field('Брак, шт', defectQty));
-        // #5575: «Ввод» — ячейка сетки сразу после «Брак, шт», без своей строки; подпись
-        // пустая, чтобы кнопка стояла вровень с полями.
-        grid.appendChild(field(' ', enterBtn, 'atex-sl-field-enter'));
 
         // Фото брака — файловый реквизит записи джамбо (791712)
         var photoInput = el('input', { type: 'file', accept: 'image/*', capture: 'environment', style: 'display:none' });
@@ -3813,6 +3814,8 @@
         grid.appendChild(field('Примечания', notes, 'atex-sl-field-notes'));
 
         section.appendChild(grid);
+        // #5706: «Ввод» — справа вверху под именем пользователя (position: fixed в slitter.css).
+        section.appendChild(enterBtn);
 
         refreshMeterage();
         return wrap;
