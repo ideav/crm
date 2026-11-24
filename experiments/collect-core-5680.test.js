@@ -1,4 +1,4 @@
-// rules: none (demo)
+// rules: none (defect #5680)
 // Взыскание дебиторки (демо-копия, ideav/crm#5680): чистые функции расчёта старения, ступеней, пеней и процентов, стоп-отгрузки, графика реструктуризации.
 const test = require('node:test');
 const assert = require('node:assert');
