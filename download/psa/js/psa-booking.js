@@ -4,14 +4,14 @@
     var P = window.Psa, C = P.core;
     var st = { tab: 'queue', pool: null, status: '', q: '' };
 
-    function canApprove() { return /пула|PMO/.test(P.ctx.role); }
+    function canApprove() { return /пула|PMO/i.test(P.ctx.role); }
     function local(host, M, b, patch, msg, close) { Object.keys(patch).forEach(function (k) { b[k] = patch[k]; }); P.toast(msg); if (close) close(); render(host, M); }
     function dateRange(b) { return C.toShort(b.from) + ' - ' + C.toShort(b.to); }
     function check(M, b) {
         var e = M.empBy[b.emp];
         return C.checkBooking(e, b, M.bookings.filter(function (x) { return x.id !== b.id; }), M.hol, M.abs[e.name] || [], M.rules);
     }
-    function peak(res) { var m = 0; res.weeks.forEach(function (l) { if (l.pct !== null && l.base > 0 && l.pct > m) m = l.pct; }); return Math.round(m); }
+    function peak(res) { var w = null; res.weeks.forEach(function (l) { if (l.pct !== null && l.base > 0 && (!w || l.pct > w.pct)) w = l; }); return !w ? '–' : P.unit() === 'hours' ? C.round1(w.plan) + ' ч' : Math.round(w.pct) + '%'; }
     function expiryBadge(M, b) {
         if (b.kind !== 'Мягкая' || !b.expires || (b.status !== 'Подтверждена' && b.status !== 'Запрошена')) return '';
         var d = C.diffDays(P.TODAY, b.expires);
@@ -22,7 +22,7 @@
     function render(host, M) {
         host.innerHTML = '';
         if (st.pool === null) st.pool = M.me && canApprove() ? M.me.name : '';
-        var pend = M.bookings.filter(function (b) { return b.status === 'Запрошена'; }).length;
+        var pend = M.listBookings.filter(function (b) { return b.status === 'Запрошена'; }).length;
         host.appendChild(P.el('h1', { text: 'Бронирование ресурсов' }));
         host.appendChild(P.el('p', { 'class': 'psa-sub', text: 'Руководитель проекта запрашивает человека на проект, руководитель ресурсного пула видит последствия для загрузки и подтверждает или отклоняет. Мягкая бронь истекает сама, жёсткая держится до конца срока.' }));
         var bar = P.el('div', { 'class': 'psa-bar' }, [P.el('span', { 'class': 'psa-grow' })]);
@@ -38,7 +38,7 @@
         var pools = [['', 'Все пулы']].concat(M.pools.map(function (p) { return [p.name, p.name]; }));
         var s = P.select(pools, st.pool); s.onchange = function () { st.pool = s.value; render(host, M); };
         host.appendChild(P.el('div', { 'class': 'psa-bar' }, [P.field('Ресурсный пул', s)]));
-        var rows = M.bookings.filter(function (b) { return b.status === 'Запрошена' && (!st.pool || M.empBy[b.emp].pool === st.pool); }).map(function (b) {
+        var rows = M.listBookings.filter(function (b) { return b.status === 'Запрошена' && (!st.pool || M.empBy[b.emp].pool === st.pool); }).map(function (b) {
             var r = check(M, b); return { b: b, res: r, peak: peak(r) };
         });
         var cols = [
@@ -47,8 +47,9 @@
             { t: 'Сотрудник', html: function (r) { var e = M.empBy[r.b.emp]; return P.esc(r.b.emp) + '<div class="psa-muted">' + P.esc(e.pool) + ', ' + P.esc(e.grade) + '</div>'; } },
             { t: 'Вид', html: function (r) { return P.badge(r.b.kind, r.b.kind === 'Жёсткая' ? 'info' : 'mute') + ' ' + expiryBadge(M, r.b); } },
             { t: 'Срок', html: function (r) { return dateRange(r.b); } },
-            { t: 'Ч/нед', num: true, html: function (r) { return String(r.b.hpw); } },
-            { t: 'Загрузка с бронью', html: function (r) { return r.res.errors.length ? P.badge('пик ' + r.peak + '%: нельзя', 'crit') : r.res.warnings.length ? P.badge('пик ' + r.peak + '%', 'warn') : P.badge('пик ' + r.peak + '%', 'ok'); } },
+            { t: P.hpwTitle(), num: true, html: function (r) { return P.hpwText(M.empBy[r.b.emp], r.b.hpw); } },
+            { t: 'Загрузка с бронью', html: function (r) { return r.res.errors.length ? P.badge('пик ' + r.peak + ': нельзя', 'crit') : r.res.warnings.length ? P.badge('пик ' + r.peak, 'warn') : P.badge('пик ' + r.peak, 'ok'); } },
+            { t: 'Согласование', html: function (r) { return P.esc(C.approvalProgress(M.rules.route, r.b.signed).text); } },
             { t: '', html: function (r) { return '<span class="psa-av">открыть</span>'; } }
         ];
         host.appendChild(P.table(cols, rows, { empty: 'Очередь пуста: всё согласовано', onrow: function (r) { detail(host, M, r.b); }, rowCls: function (r) { return r.res.errors.length ? 'psa-row-bad' : ''; } }));
@@ -58,7 +59,7 @@
         var s = P.select(sts, st.status), q = P.input('text', st.q, { placeholder: 'Сотрудник или проект' });
         s.onchange = function () { st.status = s.value; render(host, M); }; q.onchange = function () { st.q = q.value; render(host, M); };
         host.appendChild(P.el('div', { 'class': 'psa-bar' }, [P.field('Статус', s), P.field('Поиск', q)]));
-        var rows = M.bookings.filter(function (b) {
+        var rows = M.listBookings.filter(function (b) {
             if (st.status && b.status !== st.status) return false;
             if (st.q && (b.emp + ' ' + b.project).toLowerCase().indexOf(st.q.toLowerCase()) < 0) return false;
             if (M.myProjects.length && !M.myProjects.some(function (p) { return p.name === b.project; }) && !st.q && !st.status) return false;
@@ -67,7 +68,7 @@
         host.appendChild(P.table([
             { t: 'Бронь', html: function (b) { return '<b>' + P.esc(b.id) + '</b>'; } }, { t: 'Проект', k: 'project' }, { t: 'Сотрудник', k: 'emp' },
             { t: 'Вид', html: function (b) { return P.badge(b.kind, b.kind === 'Жёсткая' ? 'info' : 'mute') + ' ' + expiryBadge(M, b); } },
-            { t: 'Статус', html: function (b) { return statusBadge(b.status); } }, { t: 'Срок', html: dateRange }, { t: 'Ч/нед', num: true, html: function (b) { return String(b.hpw); } },
+            { t: 'Статус', html: function (b) { return statusBadge(b.status); } }, { t: 'Срок', html: dateRange }, { t: P.hpwTitle(), num: true, html: function (b) { return P.hpwText(M.empBy[b.emp], b.hpw); } },
             { t: 'Решение', html: function (b) { return P.esc(b.decision || ''); } }
         ], rows, { onrow: function (b) { detail(host, M, b); }, empty: 'Броней нет' }));
         if (M.myProjects.length && !st.q && !st.status) host.appendChild(P.el('p', { 'class': 'psa-muted', text: 'Показаны брони ваших проектов. Чтобы увидеть остальные, выберите статус или введите поиск.' }));
@@ -87,19 +88,25 @@
     function detail(host, M, b) {
         var e = M.empBy[b.emp], res = check(M, b), body = P.el('div', {});
         body.appendChild(P.el('div', { html: '<div class="psa-kv"><span>Проект</span><b>' + P.esc(b.project) + '</b></div><div class="psa-kv"><span>Сотрудник</span><b>' + P.esc(b.emp) + ', ' + P.esc(e.pool) + ', ' + P.esc(e.grade) + '</b></div>' +
-            '<div class="psa-kv"><span>Бронь</span><b>' + P.esc(b.kind) + ', ' + b.hpw + ' ч/нед, ' + dateRange(b) + '</b></div><div class="psa-kv"><span>Статус</span><span>' + statusBadge(b.status) + ' ' + expiryBadge(M, b) + '</span></div>' +
-            '<div class="psa-kv"><span>Заявитель</span><b>' + P.esc(b.requester) + '</b></div>' + (b.decision ? '<div class="psa-kv"><span>Решение</span><b>' + P.esc(b.decision) + '</b></div>' : '') }));
+            '<div class="psa-kv"><span>Бронь</span><b>' + P.esc(b.kind) + ', ' + b.hpw + ' ч/нед (' + C.toInput(e, b.hpw, 'pct') + '% ставки), ' + dateRange(b) + '</b></div><div class="psa-kv"><span>Статус</span><span>' + statusBadge(b.status) + ' ' + expiryBadge(M, b) + '</span></div>' +
+            '<div class="psa-kv"><span>Заявитель</span><b>' + P.esc(b.requester) + '</b></div>' + (b.status === 'Запрошена' ? '<div class="psa-kv"><span>Согласование</span><b>' + P.esc(C.approvalSteps(M.rules.route).map(function (s) { return s.label; }).join(' - ')) + ': ' + P.esc(C.approvalProgress(M.rules.route, b.signed).text) + '</b></div>' : '') + (b.decision ? '<div class="psa-kv"><span>Решение</span><b>' + P.esc(b.decision) + '</b></div>' : '') }));
         var weeks = C.weeksBetween(b.status === 'Запрошена' ? b.from : P.TODAY < b.from ? b.from : P.TODAY, b.to).slice(0, 14);
         body.appendChild(P.el('div', { 'class': 'psa-muted', style: 'margin-top:10px', text: 'Загрузка ' + e.name + ' (с учётом этой брони)' }));
         body.appendChild(P.loadStrip(M, e, M.bookings, weeks));
         if (b.status === 'Запрошена') body.appendChild(P.checkBox(res));
         var btns = [{ text: 'Закрыть' }];
         var wr = P.canWrite('Бронь');
-        if (wr && canApprove() && b.status === 'Запрошена') {
+        var prog = C.approvalProgress(M.rules.route, b.signed), nextStep = C.approvalSteps(M.rules.route)[prog.done];
+        if (wr && b.status === 'Запрошена' && nextStep && C.canSign(M.rules.route, nextStep.key, P.ctx.role)) {
             btns.push({ text: 'Отклонить', cls: 'psa-danger', fn: function (close) { reasonModal(host, M, b, close); return false; } });
-            btns.push({ text: 'Подтвердить', cls: 'psa-primary', fn: function (close) {
+            btns.push({ text: nextStep.key === 'emp' ? 'Сотрудник подтвердил' : prog.total > 1 ? 'Подписать (' + (prog.done + 1) + ' из ' + prog.total + ')' : 'Подтвердить', cls: 'psa-primary', fn: function (close) {
                 if (!res.ok) { P.toast('Подтвердить нельзя: ' + res.errors[0], true); return false; }
-                P.update(b.rid, { 'Статус брони': 'Подтверждена', 'Решение': 'Подтверждено', 'Дата решения': P.TODAY, 'Согласующий': M.me ? M.me.head : P.ctx.user }).then(function () { local(host, M, b, { status: 'Подтверждена', decision: 'Подтверждено', decDate: P.TODAY }, 'Бронь подтверждена', close); }).catch(function (er) { P.toast(er.message, true); });
+                var sg = C.signStep(M.rules.route, b.signed, nextStep.key);
+                if (sg.error) { P.toast(sg.error, true); return false; }
+                var who = M.me ? M.me.head : P.ctx.user, fields, patch;
+                if (sg.done) { fields = { 'Подписи согласования': sg.signed, 'Статус брони': 'Подтверждена', 'Решение': 'Подтверждено', 'Дата решения': P.TODAY, 'Согласующий': who }; patch = { signed: sg.signed, status: 'Подтверждена', decision: 'Подтверждено', decDate: P.TODAY }; }
+                else { fields = { 'Подписи согласования': sg.signed, 'Решение': 'Ждём ' + sg.next.label, 'Согласующий': who }; patch = { signed: sg.signed, decision: 'Ждём ' + sg.next.label }; }
+                P.update(b.rid, fields).then(function () { local(host, M, b, patch, sg.done ? 'Бронь подтверждена' : 'Подпись принята, дальше: ' + sg.next.label, close); }).catch(function (er) { P.toast(er.message, true); });
                 return false; } });
         }
         if (wr && canApprove() && b.status === 'Подтверждена' && b.kind === 'Мягкая') {

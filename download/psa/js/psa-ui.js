@@ -5,18 +5,15 @@
     var CLS_LABEL = { free: 'свободен', ok: 'норма', high: 'почти полная', warn: 'овербукинг', crit: 'перегрузка', away: 'отсутствие', holiday: 'нерабочая неделя' };
     P.CLS_LABEL = CLS_LABEL;
     P.legend = function () {
-        var items = [['free', 'меньше 50%'], ['ok', '50-90%'], ['high', '90-100%'], ['warn', '100-110%'], ['crit', 'больше 110%'], ['away', 'в отпуске'], ['holiday', 'нерабочая неделя']];
-        return P.el('div', { 'class': 'psa-legend' }, items.map(function (i) { return P.el('span', {}, [P.el('i', { 'class': 'psa-h-' + i[0] }), i[1]]); }).concat([P.el('span', {}, [P.el('i', { 'class': 'psa-h-free psa-h-pend' }), 'пунктир: есть бронь на согласовании'])]));
+        var r = P.cur ? P.cur.rules : C.DEFAULT_RULES;
+        var items = [['free', 'меньше 50%'], ['ok', '50-90%'], ['high', '90-' + r.limit + '%'], ['warn', r.limit + '-' + r.overbook + '%'], ['crit', 'больше ' + r.overbook + '%'], ['away', 'в отпуске'], ['holiday', 'нерабочая неделя']];
+        return P.el('div', { 'class': 'psa-legend' }, items.map(function (i) { return P.el('span', {}, [P.el('i', { 'class': 'psa-h-' + i[0] }), i[1]]); }).concat([P.el('span', {}, [P.el('i', { 'class': 'psa-h-free psa-h-pend' }), 'пунктир: есть бронь на согласовании'])], P.unit() === 'hours' ? [P.el('span', {}, ['в ячейке часы плана за неделю, цвет - доля ёмкости'])] : []));
     };
-    P.cellText = function (l) {
-        if (l.base === 0) return '–';
-        if (l.cap === 0) return l.plan > 0 ? 'отп!' : 'отп';
-        return String(Math.round(l.pct));
-    };
+    P.cellText = function (l) { return C.loadLabel(l, P.unit()); };
     P.cellTitle = function (e, l) {
-        var t = e.name + ', неделя с ' + C.toShort(l.week) + ': план ' + C.round1(l.plan) + ' ч из ' + C.round1(l.cap) + ' ч';
+        var t = e.name + ', неделя с ' + C.toShort(l.week) + ': план ' + C.round1(l.plan) + ' ч из ' + C.round1(l.cap) + ' ч' + (l.cap > 0 && l.pct !== null ? ' (' + Math.round(l.pct) + '%)' : '');
         if (l.absent > 0) t += ' (отпуск или больничный: ' + C.round1(l.absent) + ' ч)';
-        l.items.forEach(function (i) { t += '\n' + i.project + ': ' + i.hours + ' ч' + (i.status === 'Запрошена' ? ' (на согласовании)' : ''); });
+        l.items.forEach(function (i) { t += '\n' + P.projLabel(i.project) + ': ' + i.hours + ' ч' + (i.status === 'Запрошена' ? ' (на согласовании)' : ''); });
         return t;
     };
     /* Полоса недель брони с цветом загрузки: node. */
@@ -53,13 +50,14 @@
         var empSel = P.select(M.emps.map(function (e) { return [e.name, e.name + ' (' + e.pool + ', ' + e.grade + ')']; }), o.emp || M.emps[0].name);
         var kind = P.select([['Мягкая', 'Мягкая (с истечением)'], ['Жёсткая', 'Жёсткая']], o.kind || 'Мягкая');
         var from = P.input('date', o.from || C.weekStart(C.addDays(P.TODAY, 14))), to = P.input('date', o.to || C.addDays(C.weekStart(C.addDays(P.TODAY, 14)), 6 * 7 + 4));
-        var hpw = P.input('number', o.hpw || 20, { min: 1, max: 60, step: 1 });
+        var unit = M.rules.unit, e0 = M.empBy[o.emp || M.emps[0].name] || M.emps[0];
+        var hpw = P.input('number', C.toInput(e0, o.hpw || 20, unit), { min: 1, max: unit === 'pct' ? 200 : 60, step: 1 });
         var role = P.input('text', o.role || '', { placeholder: 'например, Java senior' });
         var out = P.el('div', {}), strip = P.el('div', {});
         var cur = { res: null };
         function build() {
             var e = M.empBy[empSel.value]; if (!e || !from.value || !to.value || to.value < from.value) { out.textContent = 'Заполните период'; cur.res = null; return null; }
-            return { id: 'new', emp: e.name, project: projSel.value, kind: kind.value, status: 'Запрошена', from: from.value, to: to.value, hpw: C.num(hpw.value) };
+            return { id: 'new', emp: e.name, project: projSel.value, kind: kind.value, status: 'Запрошена', from: from.value, to: to.value, hpw: C.fromInput(e, hpw.value, unit) };
         }
         function recalc() {
             var b = build(); out.innerHTML = ''; strip.innerHTML = ''; if (!b) return;
@@ -72,9 +70,9 @@
         }
         [projSel, empSel, kind, from, to, hpw].forEach(function (c) { c.addEventListener('input', recalc); c.addEventListener('change', recalc); });
         var body = P.el('div', {}, [
-            P.el('div', { 'class': 'psa-grid2' }, [P.field('Проект', projSel), P.field('Сотрудник', empSel), P.field('С', from), P.field('По', to), P.field('Часов в неделю', hpw), P.field('Вид брони', kind)]),
+            P.el('div', { 'class': 'psa-grid2' }, [P.field('Проект', projSel), P.field('Сотрудник', empSel), P.field('С', from), P.field('По', to), P.field(unit === 'pct' ? 'Доля ставки, %' : 'Часов в неделю', hpw, unit === 'pct' ? '100% = полная ставка сотрудника' : null), P.field('Вид брони', kind)]),
             P.field('Роль на проекте', role), strip, out,
-            P.el('p', { 'class': 'psa-muted', text: 'Бронь уходит руководителю ресурсного пула на согласование. Мягкая бронь истекает через ' + M.rules.softDays + ' дн., если её не подтвердят.' })
+            P.el('p', { 'class': 'psa-muted', text: 'Согласование брони: ' + C.approvalSteps(M.rules.route).map(function (s) { return s.label; }).join(' - затем ') + '. Мягкая бронь истекает через ' + M.rules.softDays + ' дн., если её не подтвердят.' })
         ]);
         var save = P.btn('Отправить на согласование', function () {
             var b = build(); if (!b || !cur.res || !cur.res.ok) return false;

@@ -121,3 +121,14 @@
 .psa-toast-bad { background: #dc2626; }
 .psa-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; }
 @media (max-width: 800px) { .psa { padding: 12px; } .psa-two, .psa-grid2 { grid-template-columns: 1fr; } .psa-heat .psa-name { min-width: 150px; max-width: 150px; } }
+
+/* Настройки демо */
+.psa-opt-group h3 { margin: 0 0 8px; }
+.psa-opt { padding: 12px 0; border-top: 1px solid var(--psa-line, #e3e6ea); display: flex; flex-direction: column; gap: 6px; }
+.psa-opt:first-of-type { border-top: 0; }
+.psa-opt-title { font-weight: 600; }
+.psa-opt-choice { display: flex; flex-wrap: wrap; gap: 8px; }
+.psa-opt-radio { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid var(--psa-line, #cfd4da); border-radius: 8px; cursor: pointer; background: #fff; }
+.psa-opt-radio.psa-opt-on { border-color: #2563eb; background: #eaf1ff; font-weight: 600; }
+.psa-opt-num { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.psa-opt-when { font-size: 13px; color: #4b5563; }
