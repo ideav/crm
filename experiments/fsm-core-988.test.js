@@ -1,4 +1,4 @@
-// rules: none (demo)
+// rules: none (defect #5679)
 // FSM (демо-копия, ideav/crm#5679): чистые функции расчёта времени, SLA, подбора инженера, KPI, акта и склада в машине.
 const test = require('node:test');
 const assert = require('node:assert');
