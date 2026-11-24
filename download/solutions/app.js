@@ -72,6 +72,59 @@
         (sc.caption ? '<figcaption class="sl-scheme-cap">' + e(sc.caption) + '</figcaption>' : '') + '</figure>';
     },
     imgUrl: function (name, size) { return '/download/solutions/img/' + name + (size === 'l' ? '-l.webp' : '-s.webp'); },
+    // строки наборных блоков и идей (backlogram#1016): «Название — пояснение» делится на head/text,
+    // строка с «?» в начале — пункт, который обсуждаем на звонке (ask: ссылка на заявку по решению)
+    items: function (s) {
+      return Core.splitLines(s).map(function (l) {
+        var ask = /^\?\s*/.test(l);
+        if (ask) l = l.replace(/^\?\s*/, '');
+        var i = l.indexOf(' — ');
+        return i > 0 ? { head: l.slice(0, i).trim(), text: l.slice(i + 3).trim(), ask: ask } : { head: '', text: l, ask: ask };
+      }).filter(function (x) { return x.head || x.text; });
+    },
+    // «Цена от»/«Цена до» — тыс. ₽; null, если нет нижней границы
+    price: function (from, to) {
+      var f = Number(String(from == null ? '' : from).replace(',', '.')), t = Number(String(to == null ? '' : to).replace(',', '.'));
+      if (!(f > 0)) return null;
+      return { from: Math.round(f), to: t > f ? Math.round(t) : 0 };
+    },
+    // 150000 → «150 000»
+    rub: function (k) { return String(Math.round(k * 1000)).replace(/\B(?=(\d{3})+(?!\d))/g, ' '); },
+    priceText: function (p) {
+      if (!p) return '';
+      return p.to ? 'от ' + Core.rub(p.from) + ' до ' + Core.rub(p.to) + ' ₽' : 'от ' + Core.rub(p.from) + ' ₽';
+    },
+    // «Продукт — цена | URL» → {text, url}; без цены строку не показываем
+    competitors: function (s) {
+      return Core.splitLines(s).map(function (l) {
+        var p = l.split('|');
+        return { text: p[0].trim(), url: Core.safeUrl(p.slice(1).join('|')) };
+      }).filter(function (x) { return x.text.indexOf(' — ') > 0; });
+    },
+    // разметка списка блоков/идей; askHref — адрес заявки по этому решению
+    itemsHtml: function (arr, askHref) {
+      var e = Core.esc;
+      return '<ul class="sl-list sl-items">' + arr.map(function (x) {
+        return '<li>' + (x.head ? '<b>' + e(x.head) + '</b> — ' : '') + e(x.text) +
+          (x.ask ? ' <a class="sl-ask" href="' + e(askHref) + '">Обсудим на звонке →</a>' : '') + '</li>';
+      }).join('') + '</ul>';
+    },
+    // блок «Сколько стоит»: ориентир цены, срок, кнопка звонка, публичные цены коробок для сравнения
+    priceHtml: function (s, askHref) {
+      if (!s.price && !s.term) return '';
+      var e = Core.esc, h = '<section class="sl-price"><h2 class="sl-h2">Сколько стоит и как быстро</h2><dl class="sl-price-grid">';
+      h += '<div><dt>Демо на ваших данных</dt><dd>бесплатно</dd></div>';
+      if (s.price) h += '<div><dt>Настройка под вашу компанию</dt><dd>' + e(Core.priceText(s.price)) + '</dd></div>';
+      if (s.term) h += '<div><dt>Срок запуска</dt><dd>' + e(s.term) + '</dd></div>';
+      h += '</dl><p class="sl-muted">Это ориентир для типового объёма. Точную сумму и срок назовём после короткого созвона, когда посмотрим ваши процессы и данные.</p>' +
+        '<div class="sl-actions"><a class="sl-btn" href="' + e(askHref) + '">Заказать звонок</a></div>';
+      if (s.competitors.length) {
+        h += '<details class="sl-cmp"><summary>Для сравнения: публичные цены коробочных систем</summary><ul class="sl-list">' + s.competitors.map(function (c) {
+          return '<li>' + e(c.text) + (c.url ? ' (<a href="' + e(c.url) + '" target="_blank" rel="noopener nofollow">источник</a>)' : '') + '</li>';
+        }).join('') + '</ul></details>';
+      }
+      return h + '</section>';
+    },
     refs: function (v) { // null | {id,val} | [{id,val}] → массив
       if (!v) return [];
       return Array.isArray(v) ? v : [v];
@@ -92,6 +145,11 @@
         img: Core.safeImg(row['Картинка']),
         scheme: Core.safeImg(row['Схема']) ? { img: Core.safeImg(row['Схема']), caption: String(row['Подпись схемы'] || '').trim() } : null,
         credit: Core.parseCredit(row['Источник изображения']),
+        blocks: Core.items(row['Наборные блоки']),
+        ideas: Core.items(row['Идеи кастомизации']),
+        price: Core.price(row['Цена от'], row['Цена до']),
+        term: String(row['Срок'] || '').trim(),
+        competitors: Core.competitors(row['Цены конкурентов']),
         demo: Core.safeUrl(row['Демо ссылка']),
         demoSoon: Core.isOn(row['Демо скоро']),
         published: Core.isOn(row['Опубликовано']),
@@ -228,6 +286,7 @@
     h += '<div class="sl-grid">' + items.map(function (s) {
       var pic = s.img ? '<img class="sl-thumb" loading="lazy" width="480" height="320" src="' + esc(Core.imgUrl(s.img, 's')) + '" alt="' + esc(s.title) + '">' : '';
       return '<a class="sl-card" href="' + esc(Core.solutionHref(DB, s)) + '">' + pic + '<h3>' + esc(s.title) + '</h3><p>' + esc(s.short) + '</p>' +
+        (s.price ? '<p class="sl-from">Настройка под вас — ' + esc(Core.priceText({ from: s.price.from, to: 0 })) + '</p>' : '') +
         tags((s.category ? [s.category] : []).concat(s.platforms)) + '</a>';
     }).join('') + '</div>';
     app.innerHTML = h;
@@ -278,6 +337,10 @@
     h += '<div class="sl-actions">' + demo + '<a class="sl-btn' + (demo ? ' alt' : '') + '" href="#/apply/' + s.id + '">' + (s.demo && !s.demoSoon ? 'Оставить заявку' : 'Запросить демо') + '</a></div>';
     h += '<h2 class="sl-h2">Какую боль закрывает</h2><p>' + esc(s.pain).replace(/\n+/g, '</p><p>') + '</p>';
     if (s.features.length) h += '<h2 class="sl-h2">Что умеет</h2><ul class="sl-list">' + s.features.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>';
+    var ask = '#/apply/' + s.id;
+    if (s.blocks.length) h += '<h2 class="sl-h2">Готовые блоки: собираем за 1–2 часа каждый</h2>' + Core.itemsHtml(s.blocks, ask);
+    if (s.ideas.length) h += '<h2 class="sl-h2">Что донастроим под вас</h2>' + Core.itemsHtml(s.ideas, ask);
+    h += Core.priceHtml(s, ask);
     if (s.steps.length) h += '<h2 class="sl-h2">Как переезжаем</h2><ol class="sl-steps">' + s.steps.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ol>';
     h += Core.schemeFigure(s.scheme, s.title);
     app.innerHTML = h;
