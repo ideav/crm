@@ -1,0 +1,45 @@
+/* FSM: дашборд руководителя. Один акцентный цвет (синий), красный только для нарушений и всегда с текстовой пометкой. */
+.fsm-dash-head { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: space-between; align-items: flex-end; margin-bottom: 8px; }
+.fsm-dash-head .fsm-tabs { margin-bottom: 4px; }
+.fsm-dash-per { max-width: 100%; }
+.fsm-dash-time { font-variant-numeric: tabular-nums; color: var(--w-text); font-weight: 600; }
+.fsm-dash-hint { color: var(--w-muted); font-size: 12px; margin: 0 0 8px; }
+.fsm-dash-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin: 8px 0 16px; }
+.fsm-dash-tile { background: var(--w-card); border: 1px solid var(--w-line); border-radius: 8px; padding: 12px 14px; min-width: 0; }
+.fsm-dash-tilebad { border-color: var(--w-red); }
+.fsm-dash-click { cursor: pointer; }
+.fsm-dash-click:hover, .fsm-dash-click:focus-visible { box-shadow: 0 0 0 2px var(--w-blue-soft); outline: none; border-color: var(--w-blue); }
+.fsm-dash-tl { color: var(--w-muted); font-size: 12px; }
+.fsm-dash-tv { font-size: 2rem; line-height: 1.2; font-weight: 700; font-variant-numeric: tabular-nums; margin: 2px 0; }
+.fsm-dash-tv small { font-size: 1rem; font-weight: 600; color: var(--w-muted); }
+.fsm-dash-tilebad .fsm-dash-tv { color: var(--w-red); }
+.fsm-dash-ts { color: var(--w-muted); font-size: 12px; line-height: 1.45; }
+.fsm-dash-d { font-size: 12px; }
+.fsm-dash-d i { font-style: normal; }
+.fsm-dash-dgood { color: var(--w-green); }
+.fsm-dash-dbad { color: var(--w-red); }
+.fsm-dash-grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr)); gap: 12px; align-items: start; }
+.fsm-dash-card { background: var(--w-card); border: 1px solid var(--w-line); border-radius: 8px; padding: 12px 14px; min-width: 0; }
+.fsm-dash-card h2 { margin: 0 0 4px; font-size: 1rem; }
+.fsm-dash-wide { grid-column: 1 / -1; }
+.fsm-dash-full { margin-top: 12px; scroll-margin-top: 12px; }
+.fsm-dash-card .fsm-tablewrap { margin-top: 8px; }
+.fsm-dash-chart { width: 100%; max-width: 560px; }
+.fsm-dash-svg { display: block; width: 100%; height: auto; overflow: visible; }
+.fsm-dash-lbl { font-size: 12px; fill: var(--w-text); }
+.fsm-dash-axis { font-size: 11px; fill: var(--w-muted); }
+.fsm-dash-val { paint-order: stroke; stroke: var(--w-card); stroke-width: 4px; stroke-linejoin: round; font-size: 12px; font-weight: 600; fill: var(--w-text); font-variant-numeric: tabular-nums; }
+.fsm-dash-valbad { fill: var(--w-red); color: var(--w-red); font-weight: 700; }
+.fsm-dash-bar { fill: var(--w-blue); }
+.fsm-dash-bar.fsm-dash-part { opacity: .55; }
+.fsm-dash-bar.fsm-dash-bad { fill: var(--w-red); }
+.fsm-dash-track { fill: var(--w-line); opacity: .55; }
+.fsm-dash-grid { stroke: var(--w-line); stroke-width: 1; }
+.fsm-dash-target { stroke: var(--w-text); stroke-width: 1.5; stroke-dasharray: 5 4; }
+@media (max-width: 700px) {
+    .fsm-dash-tiles { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+    .fsm-dash-tv { font-size: 1.6rem; }
+    .fsm-dash-chart { max-width: none; }
+    .fsm-dash-lbl, .fsm-dash-val { font-size: 13px; }
+    .fsm-dash-tabs, .fsm-dash-head .fsm-tab { padding: 8px 8px; }
+}
