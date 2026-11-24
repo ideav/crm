@@ -220,6 +220,20 @@
     // подпись в шапке движка (.navbar-workspace), backlogram#997: страница решения и заявка по решению — «коробка», остальное — каталог
     workspaceTitle: function (r) {
       return r && (r.view === 'solution' || r.view === 'legacy' || (r.view === 'apply' && r.id)) ? 'Ваша персональная коробка' : 'Копируем любые решения и делаем их под вас';
+    },
+    // Метрика ideav.ru (backlogram#1017): к её цели sol_lead привязаны кампании Директа с оплатой за конверсии
+    METRIKA_ID: 108758829,
+    // Платная цель — только от живого человека. Защита: форма появляется лишь после клика «Оставить заявку»
+    // (sol_apply_open), в сессии был настоящий жест (isTrusted), страница прожила ≥ 2,5 с, форму заполняли ≥ 4 с,
+    // браузер не автоматизирован, скрытое поле пустое. Иначе — sol_lead_blocked (видно в отчётах, Директ за неё не платит).
+    leadGoal: function (sig) {
+      var s = sig || {};
+      var ok = s.trusted === true && s.webdriver === false && s.honeypot === false &&
+        Number(s.aliveMs) >= 2500 && Number(s.formMs) >= 4000;
+      return ok ? 'sol_lead' : 'sol_lead_blocked';
+    },
+    goalParams: function (sol) {
+      return { solution: sol ? (sol.slug || 'id' + sol.id) : 'catalog' };
     }
   };
 
@@ -231,6 +245,23 @@
   var app = document.getElementById('sl-app');
   var CATALOG = '/' + DB + '/catalog';
   var state = { list: null, cats: [], inds: [], plats: [], error: '' };
+
+  // Метрика (backlogram#1017): стандартный тег; hash-маршруты (#/apply) считаются просмотрами
+  var T0 = Date.now(), trusted = false;
+  ['pointerdown', 'pointermove', 'touchstart', 'keydown', 'wheel', 'scroll'].forEach(function (ev) {
+    window.addEventListener(ev, function (e) { if (e.isTrusted) trusted = true; }, { passive: true, capture: true });
+  });
+  (function (m, e, t, r, i) {
+    m[i] = m[i] || function () { (m[i].a = m[i].a || []).push(arguments); };
+    m[i].l = 1 * new Date();
+    var k = e.createElement(t), a = e.getElementsByTagName(t)[0];
+    k.async = 1; k.src = r;
+    if (a && a.parentNode) a.parentNode.insertBefore(k, a); else e.head.appendChild(k);
+  })(window, document, 'script', 'https://mc.yandex.ru/metrika/tag.js', 'ym');
+  window.ym(Core.METRIKA_ID, 'init', { clickmap: true, trackLinks: true, accurateTrackBounce: true, trackHash: true });
+  function goal(name, params) {
+    try { window.ym(Core.METRIKA_ID, 'reachGoal', name, params || {}); } catch (e) { /* Метрика заблокирована — заявка важнее */ }
+  }
 
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -359,7 +390,9 @@
       '<div class="sl-hp" aria-hidden="true"><label>Сайт<input name="website" tabindex="-1" autocomplete="off"></label></div>' +
       '<div><button class="sl-btn" type="submit">Отправить заявку</button></div><p class="sl-err" id="sl-msg" role="alert"></p></form>';
     app.innerHTML = h;
-    var form = app.querySelector('#sl-form'), msg = app.querySelector('#sl-msg'), busy = false;
+    var form = app.querySelector('#sl-form'), msg = app.querySelector('#sl-msg'), busy = false, opened = Date.now();
+    function pickSol(sid) { return (state.list || []).filter(function (s) { return String(s.id) === String(sid); })[0] || null; }
+    goal('sol_apply_open', Core.goalParams(pickSol(id)));
     form.onsubmit = function (e) {
       e.preventDefault();
       if (busy) return;
@@ -367,7 +400,9 @@
       ['name', 'company', 'contact', 'solution', 'comment', 'website'].forEach(function (k) { v[k] = form.elements[k].value; });
       var fields = Core.buildRequest(v);
       if (!fields) { msg.textContent = 'Укажите имя и контакт.'; return; }
-      if (v.website) { form.outerHTML = '<p class="sl-ok">Спасибо, заявка принята.</p>'; return; } // ловушка для ботов
+      var now = Date.now(), leadGoal = Core.leadGoal({ trusted: trusted && e.isTrusted !== false, webdriver: !!navigator.webdriver,
+        honeypot: !!v.website, aliveMs: now - T0, formMs: now - opened });
+      if (v.website) { goal('sol_lead_blocked', Core.goalParams(pickSol(v.solution))); form.outerHTML = '<p class="sl-ok">Спасибо, заявка принята.</p>'; return; } // ловушка для ботов
       busy = true; msg.textContent = '';
       api('xsrf?JSON').then(function (x) {
         var body = new URLSearchParams();
@@ -380,7 +415,8 @@
       }).then(function () {
         // Запись в базе — главное; уведомление в Telegram вдогонку (#5660). Скрипт сайта сам кладёт его в спул
         // и дошлёт cron-ом; капчу не просит при cookie idb_* (её ставит и гостевая сессия). Сбой заявку не отменяет.
-        var sol = (state.list || []).filter(function (s) { return String(s.id) === String(v.solution); })[0] || null;
+        var sol = pickSol(v.solution);
+        goal(leadGoal, Core.goalParams(sol)); // цель — только после записи заявки в базу
         var n = Core.buildNotify(v, sol, location.origin, DB), fd = new FormData();
         Object.keys(n).forEach(function (k) { fd.set(k, n[k]); });
         return fetch('/telegram-notify.php', { method: 'POST', credentials: 'same-origin', body: fd })
