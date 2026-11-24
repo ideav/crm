@@ -7,8 +7,9 @@
 #  - _request_.X в формулах/фильтрах/JOIN/ORDER/GROUP: внутри кавычек шаблона — экранированное
 #              значение, вне кавычек — число как есть, остальное — строка в кавычках.
 #
-# Функции берутся из index.php как есть.
-# Прогон: php experiments/report-sql-request-1140.test.php
+# Функции берутся из ядра как есть: index.php (ideav.ru) или путь из аргумента от корня репо
+# (integram.io/index.php — ядро integram.io, p2n#1420).
+# Прогон: php experiments/report-sql-request-1140.test.php [integram.io/index.php]
 # Отказ — только exit(1): die("…") выходит с кодом 0 и обёртка засчитала бы PASS.
 
 function extract_function_source($source, $name){
@@ -27,7 +28,8 @@ class Refused extends Exception {}
 function t9n($s){ return $s; }
 function die_info($msg){ throw new Refused($msg); }
 
-$source = file_get_contents(__DIR__."/../index.php");
+$core = isset($argv[1]) ? $argv[1] : "index.php";
+$source = file_get_contents(__DIR__."/../".$core);
 $missing = array();
 foreach(array("Sql_escape", "Report_sql_expr", "Report_request_where", "Report_request_subst", "Report_request_func") as $name){
     $fn = extract_function_source($source, $name);
@@ -35,7 +37,7 @@ foreach(array("Sql_escape", "Report_sql_expr", "Report_request_where", "Report_r
     else eval($fn);
 }
 if(count($missing)){
-    fwrite(STDERR, "FAIL: в index.php нет ".implode(", ", $missing)."() — значения из адреса идут в SQL сырыми\n\nFAILED: 1 check(s) failed\n");
+    fwrite(STDERR, "FAIL: в $core нет ".implode(", ", $missing)."() — значения из адреса идут в SQL сырыми\n\nFAILED: 1 check(s) failed\n");
     exit(1);
 }
 
