@@ -3813,9 +3813,9 @@
         trackEnter(notes);
         grid.appendChild(field('Примечания', notes, 'atex-sl-field-notes'));
 
-        section.appendChild(grid);
         // #5706: «Ввод» — справа вверху под именем пользователя (position: fixed в slitter.css).
         section.appendChild(enterBtn);
+        section.appendChild(grid);
 
         refreshMeterage();
         return wrap;
