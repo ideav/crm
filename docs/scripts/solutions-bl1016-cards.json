@@ -692,7 +692,8 @@
    533,
    536
   ],
-  "image": "s1002-c7cd2b63"
+  "image": "s1002-8cbd399f",
+  "credit": "Denny Müller | Unsplash | https://unsplash.com/photos/orange-and-white-analog-gauge-0A7cA6PEjz4"
  },
  {
   "issue": 1003,
@@ -757,7 +758,8 @@
    532,
    533
   ],
-  "image": "s1003-f5e3af08"
+  "image": "s1003-33f0c1b8",
+  "credit": "Lyubomyr Reverchuk | Unsplash | https://unsplash.com/photos/a-group-of-people-sitting-around-a-table-with-laptops-rtD_lcsN6_U"
  },
  {
   "issue": 1004,
@@ -820,7 +822,8 @@
    532,
    533
   ],
-  "image": "s1004-4dc18753"
+  "image": "s1004-80dd6aa2",
+  "credit": "Jakub Żerdzicki | Unsplash | https://unsplash.com/photos/hand-checking-off-items-on-a-to-do-list-fXlL5I0IvK0"
  },
  {
   "issue": 1005,
@@ -879,7 +882,8 @@
    532,
    533
   ],
-  "image": "s1005-7558da6a"
+  "image": "s1005-d95f8131",
+  "credit": "Igor Omilaev | Unsplash | https://unsplash.com/photos/a-room-filled-with-lots-of-desks-and-computers-_VOotpSw5nc"
  },
  {
   "issue": 1006,
@@ -938,7 +942,8 @@
    531,
    536
   ],
-  "image": "s1006-7b0f885e"
+  "image": "s1006-7b4301d4",
+  "credit": "Aalo Lens | Unsplash | https://unsplash.com/photos/modern-lobby-with-reception-desk-and-elevators-tUcVQwXsNck"
  },
  {
   "issue": 1007,
@@ -999,7 +1004,8 @@
    533,
    536
   ],
-  "image": "s1007-acbc9802"
+  "image": "s1007-462c2636",
+  "credit": "TECNIC Bioprocess Solutions | Unsplash | https://unsplash.com/photos/a-man-inspects-machinery-in-a-factory-VFrbWve7eAs"
  },
  {
   "issue": 1008,
@@ -1058,7 +1064,8 @@
    531,
    533
   ],
-  "image": "s1008-1884297e"
+  "image": "s1008-f49e49b7",
+  "credit": "Gabrielle Henderson | Unsplash | https://unsplash.com/photos/woman-signing-on-white-printer-paper-beside-woman-about-to-touch-the-documents-HJckKnwCXxQ"
  },
  {
   "issue": 1009,
@@ -1121,7 +1128,8 @@
    531,
    533
   ],
-  "image": "s1009-976e5e93"
+  "image": "s1009-8688de87",
+  "credit": "Justin Morgan | Unsplash | https://unsplash.com/photos/person-using-macbook-pro-on-brown-wooden-table--q_lg2uUTjk"
  },
  {
   "issue": 1010,
@@ -1180,7 +1188,8 @@
    531,
    533
   ],
-  "image": "s1010-6fe57bfa"
+  "image": "s1010-c5b50acd",
+  "credit": "Towfiqu barbhuiya | Unsplash | https://unsplash.com/photos/person-in-black-suit-jacket-holding-white-tablet-computer-nApaSgkzaxg"
  },
  {
   "issue": 1012,
@@ -1237,7 +1246,8 @@
    531,
    533
   ],
-  "image": "s1012-4510c31d"
+  "image": "s1012-3b291fa3",
+  "credit": "Gorilla ROI Data Connector | Unsplash | https://unsplash.com/photos/hands-typing-on-a-laptop-displaying-a-data-spreadsheet-9fZuqBYlV1w"
  },
  {
   "issue": 1013,
@@ -1292,7 +1302,8 @@
    531,
    533
   ],
-  "image": "s1013-730e58b6"
+  "image": "s1013-8f735f9d",
+  "credit": "Arlington Research | Unsplash | https://unsplash.com/photos/man-sitting-in-front-of-table-Kz8nHVg_tGI"
  },
  {
   "issue": 1014,
@@ -1350,7 +1361,8 @@
   "platform_ids": [
    531
   ],
-  "image": "s1014-b001ddc3"
+  "image": "s1014-06e4c118",
+  "credit": "Annie Spratt | Unsplash | https://unsplash.com/photos/a-close-up-of-a-paper-with-numbers-on-it-tuJ3tXSayco"
  },
  {
   "issue": 1015,
@@ -1408,6 +1420,7 @@
    531,
    533
   ],
-  "image": "s1015-00cec3fc"
+  "image": "s1015-7a06d56c",
+  "credit": "Hans Westbeek | Unsplash | https://unsplash.com/photos/hands-using-a-digital-caliper-to-measure-metal-part-_luiFaaZU6k"
  }
 ]
