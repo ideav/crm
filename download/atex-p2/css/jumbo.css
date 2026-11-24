@@ -127,6 +127,7 @@
 .atex-jb-table .num { text-align: right; white-space: nowrap; }
 .atex-jb-table tr.is-deficit td { background: var(--atex-jb-bad-bg); }
 .atex-jb-table tr.is-late td { background: var(--atex-jb-warn-bg); }
+.atex-jb-table tr.is-fresh td { background: var(--atex-jb-ok-bg); font-weight: 600; }
 .atex-jb-table tr.is-total td { font-weight: 600; }
 .atex-jb-pick { cursor: pointer; }
 .atex-jb-pick:hover td, .atex-jb-pick.is-picked td { background: var(--atex-jb-pick-bg); }

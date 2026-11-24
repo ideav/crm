@@ -86,6 +86,7 @@
         this.variants = [];
         this.picked = -1;
         this.busy = false;
+        this.freshJobId = ''; // #5713: последнее записанное задание — первым в очереди, зелёным
     }
 
     AtexJumboCutting.prototype.$ = function(id) { return document.getElementById(id); };
@@ -168,7 +169,9 @@
     };
 
     AtexJumboCutting.prototype.renderQueue = function() {
-        var jobs = this.state.openJobs;
+        var fresh = this.freshJobId;
+        var jobs = this.state.openJobs.filter(function(j) { return j.id === fresh; })
+            .concat(this.state.openJobs.filter(function(j) { return j.id !== fresh; }));
         var el = this.$('atex-jc-queue');
         if (!jobs.length) { el.innerHTML = '<div class="atex-jb-empty">Очередь пуста: открытых заданий первичной резки нет.</div>'; return; }
         el.innerHTML = '<table class="atex-jb-table"><thead><tr><th>План-старт</th><th>Партия</th><th>Сырьё</th><th class="num">Ширина факт</th><th>Карта раскроя</th>' +
@@ -177,7 +180,7 @@
                 var b = j.batch || {};
                 var W = b.geometry ? b.geometry.width : 0;
                 var canDel = j.status === jc.JOB_STATUS.PLANNED && j.created === 0;
-                return '<tr><td>' + esc(jc.fmtTime(j.start)) + '</td><td>' + esc(b.no || '—') + '</td><td>' + esc(b.material || '') +
+                return '<tr class="' + (j.id === fresh ? 'is-fresh' : '') + '"' + (j.id === fresh ? ' title="Только что записано"' : '') + '><td>' + esc(jc.fmtTime(j.start)) + '</td><td>' + esc(b.no || '—') + '</td><td>' + esc(b.material || '') +
                     '</td><td class="num">' + esc(W ? W + ' мм' : '—') + '</td><td>' + esc(jc.mapLabel(j.strips) || '— полос нет') +
                     '</td><td class="num">' + esc(j.edge + ' мм' + (W ? ' · ' + (Math.round(j.edge / W * 1000) / 10) + ' %' : '')) +
                     '</td><td>' + esc(jc.fmtTime(j.start + j.minutes * 60)) + '</td><td class="num">' + j.created + ' / ' + j.progress.total +
@@ -431,8 +434,12 @@
                 self.message('Задание первичной резки записано: партия ' + b.no + ', ' + jc.mapLabel(v.strips) + '.', 'ok');
                 self.selectedBatchId = '';
                 self.variants = [];
+                self.freshJobId = jobId;
                 pg.step('Обновляю данные', 0);
-                return self.reload();
+                return self.reload().then(function() {
+                    // #5713: форма карты была внизу — вернуть к началу, где сообщение и очередь.
+                    if (self.root.scrollIntoView) self.root.scrollIntoView({ block: 'start', behavior: 'smooth' });
+                });
             }).catch(function(err) {
                 console.error('[jumbo-cutting] ❌ запись задания', err);
                 var undo = jobId ? self.client.post('_m_del/' + encodeURIComponent(jobId) + '?JSON', {}).catch(function() {}) : Promise.resolve();
