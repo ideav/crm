@@ -64,6 +64,11 @@
             this.statusEl = document.getElementById('ai-agent-status');
             // crm#5118: «Применить автоматически» — состояние только в этой странице, нигде не хранится.
             this.autoApply = document.getElementById('ai-agent-auto-apply');
+            // crm#5654: «Страж данных» — виден, только если страж настроен у базы (loadGuard).
+            this.guardBox = document.getElementById('ai-agent-guard');
+            this.guardWrap = document.getElementById('ai-agent-guard-wrap');
+            this.guardOn = false;
+            this.guardLoaded = false;
 
             // Без панели и кнопки вызова работать нечему — тихо выходим.
             if (!this.toggle || !this.panel) return false;
@@ -143,6 +148,7 @@
             if (this.toggle) this.toggle.setAttribute('aria-expanded', 'true');
             if (this.input) this.input.focus();
             this.renderContext();
+            this.loadGuard();
             this.resume();
             this.scrollToBottom();
         },
@@ -621,6 +627,40 @@
             this.renderContext();
         },
 
+        // --- crm#5654: страж чувствительных данных ---
+        // Страж настраивается на сервисе агента. При первом открытии панели спрашиваем
+        // GET /{db}/ai/agent/guard; переключатель показываем, только если страж у базы есть и
+        // включается пользователем. По умолчанию выключен; выбор помнится в браузере для базы.
+        guardPrefKey: function () {
+            return 'aiAgentGuard:' + (this.getCurrentDbName() || 'my');
+        },
+
+        loadGuard: function () {
+            if (this.guardLoaded || !this.guardBox || !this.guardWrap) return;
+            this.guardLoaded = true;
+            var self = this;
+            var dbName = this.getCurrentDbName() || 'my';
+            fetch('/' + encodeURIComponent(dbName) + '/ai/agent/guard?JSON=1', {
+                credentials: 'same-origin',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            }).then(function (response) {
+                return response.json().catch(function () { return null; });
+            }).then(function (data) {
+                self.guardOn = !!(data && data.available === true && data.toggle === true);
+                self.guardWrap.style.display = self.guardOn ? '' : 'none';
+                if (!self.guardOn) return;
+                var saved = null;
+                try { saved = window.localStorage.getItem(self.guardPrefKey()); } catch (e) { saved = null; }
+                self.guardBox.checked = saved === '1';
+                self.guardBox.addEventListener('change', function () {
+                    try { window.localStorage.setItem(self.guardPrefKey(), self.guardBox.checked ? '1' : '0'); } catch (e) { /* не запомнится */ }
+                });
+            }).catch(function () {
+                self.guardOn = false;
+                self.guardWrap.style.display = 'none';
+            });
+        },
+
         getXsrfToken: function () {
             if (typeof xsrf !== 'undefined' && xsrf) return String(xsrf);
             if (typeof window !== 'undefined' && window.xsrf) return String(window.xsrf);
@@ -763,6 +803,7 @@
             var context = this.renderContext();
             if (context) form.append('context', JSON.stringify(context));
             if (this.autoApply && this.autoApply.checked) form.append('auto_apply', '1');
+            if (this.guardOn && this.guardBox && this.guardBox.checked) form.append('guard', '1');
             if (!this.conversationId) this.setConversation(this.newChatId());
             form.append('conversation', this.conversationId);
             if (!fromAction) {

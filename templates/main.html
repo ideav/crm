@@ -371,6 +371,9 @@
             <label class="ai-agent-auto-apply" title="Агент выполнит план сразу, без кнопки «Применить» — и удаления тоже. Действует до перезагрузки страницы.">
                 <input id="ai-agent-auto-apply" type="checkbox" autocomplete="off"> Применить автоматически
             </label>
+            <label class="ai-agent-auto-apply ai-agent-guard" id="ai-agent-guard-wrap" style="display: none" title="Страж данных базы: номера карт, паспорта, ИНН, оклады и другие закрытые сведения уходят ИИ-модели заглушками, а в ответе вы видите настоящие значения.">
+                <input id="ai-agent-guard" type="checkbox" autocomplete="off"> Страж данных
+            </label>
         </div>
     </aside>
 
