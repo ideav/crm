@@ -103,15 +103,20 @@ docker compose -f docker-compose.yml -f jibri.yml up -d
 
 `id` проекта — `GET https://api.kinescope.io/v1/projects` с тем же токеном, поле `id`.
 
-Если Kinescope или портал не ответили, каталог записи остаётся в `$CFG/storage/jibri/recordings`,
-причина — в `finalize.log` там же. Повтор всех оставшихся:
+Записи и журнал `finalize.log` лежат в `$CFG/storage/jibri/recordings`. mp4 удаляется сразу после
+выгрузки в Kinescope; в каталоге остаётся `kinescope.json` с id и ссылкой, пока портал не примет
+сообщение. Если Kinescope или портал не ответили, каталог остаётся, причина — в `finalize.log`.
+Повтор всех оставшихся (раз в час из cron на хосте подбирает хвосты сам):
 
 ```bash
 docker compose -f docker-compose.yml -f jibri.yml exec -T jibri /config/finalize-recording.sh --all
 ```
 
-Тот же вызов раз в час из cron на хосте подбирает хвосты сам. Уже выгруженный файл повторно в
-Kinescope не уходит (`kinescope.json` в каталоге записи), повторяется только сообщение порталу.
+- Выгруженное видео повторно не выгружается: повторяется только сообщение порталу. Если ответ
+  Kinescope потерялся в сети после приёма файла, видео в Kinescope окажется дважды.
+- Портал отказал по существу (400/404: встреча удалена, ссылка не того вида) — каталог помечается
+  `.rejected` и больше не повторяется; ссылка — в `finalize.log` и `kinescope.json`.
+- Запись, которую Jibri ещё пишет, повтор не трогает: `metadata.json` появляется по окончании.
 
 Значок Jitsi в углу записи убирается строкой `interfaceConfig.SHOW_JITSI_WATERMARK = false;` в
 `$CFG/web/custom-interface_config.js`.
