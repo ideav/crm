@@ -190,3 +190,10 @@ html.lms-on,html.lms-on body{overflow:hidden}
 #lms-shell .lms-modal{position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.35);padding:16px}
 #lms-shell .lms-modal form{width:100%;max-width:360px;display:flex;flex-direction:column;gap:10px;margin:0}
 #lms-shell .lms-modal input{font:inherit;padding:9px 11px;border:1px solid var(--bd);border-radius:8px}
+/* видеовстречи (ideav/courses#200) */
+#lms-shell .meet-frame{border-radius:10px;overflow:hidden;background:#111;min-height:200px}
+#lms-shell .meet-frame iframe{display:block;border:0}
+#lms-shell .meet .input,#lms-shell .card .input{font:inherit;padding:9px 11px;border:1px solid var(--bd);border-radius:8px;min-width:0;flex:1 1 220px}
+#lms-shell .meet-people{margin:6px 0 12px;padding-left:18px}
+#lms-shell .meet-people li{margin:4px 0}
+#lms-shell .meet-host{border-top:1px solid var(--bd);margin-top:10px;padding-top:10px}

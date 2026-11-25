@@ -41,6 +41,7 @@
       var doneN = ls.filter(function (l) { return D.isDone(c.code, l.id); }).length;
       var card = E('section', { class: 'card course' + (access ? '' : ' locked') }, [
         E('div', { class: 'course-head' }, [E('h2', {}, [E('a', { href: '#/course/' + encodeURIComponent(c.code), class: 'course-link', text: c.title })]),
+          access && !A.isGuest() ? E('a', { class: 'btn btn-sm', href: '#/meet/' + encodeURIComponent(c.code), text: 'Встречи' }) : null,
           E('span', { class: 'badge', text: access ? 'Пройдено: ' + doneN + ' из ' + ls.length : (c.price ? 'Закрыт · ' + c.price + ' ₽' : 'Закрыт') })])]);
       if (!access) {
         if (A.isGuest()) { card.appendChild(E('p', { class: 'muted', text: 'Войдите, чтобы получить доступ к курсу.' })); card.appendChild(E('div', { class: 'row' }, A.loginButtons())); }

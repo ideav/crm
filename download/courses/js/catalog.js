@@ -111,6 +111,8 @@
         if (A.promoForm) promo = A.promoForm(c);
       }
     }
+    // видеовстречи курса (ideav/courses#200): ученику с доступом и ведущему; кто ведущий — решает сервер
+    if (!guest && (access || A.isCurator())) cta.appendChild(E('a', { class: 'btn', href: '#/meet/' + encodeURIComponent(c.code), text: 'Встречи' }));
     var head = E('section', { class: 'course-hero card' }, [
       cover(full, 'course-cover'),
       E('div', { class: 'course-info' }, [

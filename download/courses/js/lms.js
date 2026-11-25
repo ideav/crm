@@ -1,4 +1,4 @@
-/* LMS ideav.ru/courses: оболочка и hash-роутер (#/c/<курс>/<урок>, #/map, #/me, #/curator). */
+/* LMS ideav.ru/courses: оболочка и hash-роутер (#/c/<курс>/<урок>, #/map, #/me, #/curator, #/meet/<курс>). */
 (function () {
   'use strict';
   var A = window.LMSApp, E = A.el, D = A.data, L = window.LMS || {};
@@ -33,6 +33,8 @@
     else if (h === '/map') A.views.map(root);
     else if (h === '/me') A.views.me(root);
     else if (h === '/curator') A.views.curator(root);
+    else if (h === '/meet') A.views.meetGuest(root);
+    else if ((m = /^\/meet\/([^/]+)$/.exec(h))) A.views.meet(root, decodeURIComponent(m[1]));
     else root.appendChild(E('p', { class: 'lms-empty', text: 'Страница не найдена.' }));
     if (!/^\/c\//.test(h)) { var sh = document.getElementById('lms-shell'); if (sh) sh.scrollTop = 0; else window.scrollTo(0, 0); }
   }
