@@ -109,6 +109,14 @@
           (x.ask ? ' <a class="sl-ask" href="' + e(askHref) + '">Обсудим на звонке →</a>' : '') + '</li>';
       }).join('') + '</ul>';
     },
+    // «Что ещё можно добавить» (backlogram#1011): первые WISH_VISIBLE пунктов видны, остальные — под «Показать ещё N»
+    WISH_VISIBLE: 5,
+    wishesHtml: function (arr, askHref) {
+      if (!arr.length) return '';
+      var n = Core.WISH_VISIBLE, h = Core.itemsHtml(arr.slice(0, n), askHref);
+      if (arr.length > n) h += '<details class="sl-more"><summary>Показать ещё ' + (arr.length - n) + '</summary>' + Core.itemsHtml(arr.slice(n), askHref) + '</details>';
+      return h;
+    },
     // блок «Сколько стоит»: ориентир цены, срок, кнопка звонка, публичные цены коробок для сравнения
     priceHtml: function (s, askHref) {
       if (!s.price && !s.term) return '';
@@ -147,6 +155,7 @@
         credit: Core.parseCredit(row['Источник изображения']),
         blocks: Core.items(row['Наборные блоки']),
         ideas: Core.items(row['Идеи кастомизации']),
+        wishes: Core.items(row['Хотелки']),
         price: Core.price(row['Цена от'], row['Цена до']),
         term: String(row['Срок'] || '').trim(),
         competitors: Core.competitors(row['Цены конкурентов']),
@@ -375,6 +384,7 @@
     var ask = '#/apply/' + s.id;
     if (s.blocks.length) h += '<h2 class="sl-h2">Готовые блоки: собираем за 1–2 часа каждый</h2>' + Core.itemsHtml(s.blocks, ask);
     if (s.ideas.length) h += '<h2 class="sl-h2">Что донастроим под вас</h2>' + Core.itemsHtml(s.ideas, ask);
+    if (s.wishes.length) h += '<h2 class="sl-h2">Что ещё можно добавить</h2>' + Core.wishesHtml(s.wishes, ask);
     h += Core.priceHtml(s, ask);
     if (s.steps.length) h += '<h2 class="sl-h2">Как переезжаем</h2><ol class="sl-steps">' + s.steps.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ol>';
     h += Core.schemeFigure(s.scheme, s.title);
