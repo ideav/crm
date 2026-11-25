@@ -12508,6 +12508,8 @@ function handleAiAgentRequest($com){
     $method = isset($_SERVER["REQUEST_METHOD"]) ? strtoupper((string)$_SERVER["REQUEST_METHOD"]) : "GET";
     if((isset($com[4]) ? $com[4] : "") === "settings")
         return aiAgentSettingsRequest();
+    if((isset($com[4]) ? $com[4] : "") === "guard")
+        return aiAgentGuardRequest();
     if($method === "GET")
         return aiAgentStatusRequest($com);
     if($method !== "POST")
@@ -12552,6 +12554,61 @@ function aiAgentSettingsRequest(){
     if($canRead)
         $out = array_merge($out, aiAgentSettingsFromRows(aiAgentSettingRows()));
     api_dump(json_encode($out, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "ai-agent-settings.json");
+}
+# crm#5654: страж чувствительных данных ИИ-чата. Настраивается на сервисе агента (python2node
+# agent-chat, settings/<база>.json); чат показывает переключатель «Страж данных», только если у базы
+# страж есть и он включается пользователем (toggle). GET /{db}/ai/agent/guard спрашивает сервис
+# (GET <адрес агента без /chat>/guard?db=, Bearer агента) и отдаёт наружу только
+# {available, toggle, topics, action}. Ответ кешируется на 5 минут; сбой — available=false без кеша.
+function aiAgentGuardRequest(){
+    global $z;
+    aiAgentRequireUser();
+    api_dump(json_encode(aiAgentGuardStatus($z), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "ai-agent-guard.json");
+}
+function aiAgentGuardStatus($db){
+    $off = array("available" => false);
+    $safeDb = preg_replace('/[^a-z0-9_]/i', '', (string)$db);
+    $endpoint = aiConfigValue(array("INTEGRAM_AGENT_ENDPOINT", "AI_AGENT_ENDPOINT"));
+    if($safeDb === "" || $endpoint === "" || !preg_match('#^(https?://.+)/chat/?$#', $endpoint, $m))
+        return $off;
+    # Ключ — база и адрес агента: другая установка CRM на этом хосте с той же базой не прочтёт чужой статус.
+    $cache = sys_get_temp_dir()."/ai_agent_guard_".$safeDb."_".substr(md5($endpoint), 0, 12).".json";
+    $cached = @json_decode((string)@file_get_contents($cache), true);
+    if(is_array($cached) && isset($cached["at"], $cached["status"]) && time() - (int)$cached["at"] < 300)
+        return $cached["status"];
+    $headers = array("Accept: application/json", "User-Agent: Integram AI Agent");
+    $token = aiConfigValue(array("INTEGRAM_AGENT_TOKEN", "AI_AGENT_TOKEN"));
+    if($token !== "")
+        $headers[] = "Authorization: Bearer ".$token;
+    $raw = aiAgentGuardFetch($m[1]."/guard?db=".rawurlencode($safeDb), $headers);
+    $in = is_string($raw) ? json_decode($raw, true) : null;
+    if(!is_array($in) || !isset($in["available"]))
+        return $off;
+    $status = $off;
+    if($in["available"] === true){
+        $topics = array();
+        foreach((isset($in["topics"]) && is_array($in["topics"])) ? $in["topics"] : array() as $t)
+            if(is_string($t) && preg_match('/^[a-z]{1,20}$/', $t))
+                $topics[] = $t;
+        $action = isset($in["action"]) && in_array($in["action"], array("mask", "block", "audit"), true) ? $in["action"] : "mask";
+        $status = array("available" => true, "toggle" => !empty($in["toggle"]), "topics" => $topics, "action" => $action);
+    }
+    @file_put_contents($cache, json_encode(array("at" => time(), "status" => $status)));
+    return $status;
+}
+# GET сервиса агента: тело ответа или FALSE (нет cURL, сбой, не 200). Короткий таймаут — чат открывается сразу.
+function aiAgentGuardFetch($url, $headers){
+    if(!function_exists("curl_init"))
+        return FALSE;
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 3);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 5);
+    $raw = curl_exec($ch);
+    $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    return ($raw !== FALSE && $code === 200) ? $raw : FALSE;
 }
 # Строки «Настройки» с «Тип» = AI_LLM_*: [{id, val, k}].
 function aiAgentSettingRows(){
@@ -12648,6 +12705,9 @@ function aiAgentSubmitRequest($com){
         # (python2node#869). Только для вопроса; галку CRM не хранит.
         if($action === "" && isset($_POST["auto_apply"]) && $_POST["auto_apply"] === "1")
             $extra["auto_apply"] = true;
+        # crm#5654: переключатель «Страж данных» — агент пропускает вопрос через стража базы.
+        if($action === "" && isset($_POST["guard"]) && $_POST["guard"] === "1")
+            $extra["guard"] = true;
         $context = aiAgentScreenContext(isset($_POST["context"]) ? (string)$_POST["context"] : "");
         $response = callIntegramAgent($z, $message, $attachments, $payment, $jobId, $callbackUrl, $callbackSecret, $context, $extra);
         if(!empty($response["pending"])){
@@ -14712,12 +14772,23 @@ function billingAddRequest($connection, $db, $method, $headers, $body){
         return array("code" => 503, "body" => array("error" => t9n("[RU]Не заданы типы счётчиков биллинга[EN]Billing counter types are not set")));
     $in = json_decode((string)$body, true);
     $bad = !is_array($in);
-    foreach(array("tokens", "runs") as $k)
+    foreach(array("tokens", "runs", "guard") as $k)
         if(!$bad && isset($in[$k]) && (!is_int($in[$k]) || $in[$k] < 0))
             $bad = TRUE;
     $units = $bad ? array() : billingUnits(isset($in["tokens"]) ? $in["tokens"] : 0, isset($in["runs"]) ? $in["runs"] : 0);
-    if($bad || $units["ai_tokens"] + $units["agent_runs"] === 0)
-        return array("code" => 400, "body" => array("error" => t9n("[RU]Нужны целые tokens и/или runs больше нуля[EN]Positive integer tokens and/or runs required")));
+    # #5654: страж данных ИИ-чата — своя статья, запросы через стража. BILLING_GUARD_TYPE не задан —
+    # страж не считается (и не ошибка: агент шлёт guard, даже если CRM его ещё не тарифицирует).
+    $guard = (!$bad && isset($in["guard"])) ? $in["guard"] : 0;
+    $guardType = (int)aiConfigValue(array("BILLING_GUARD_TYPE"));
+    $guardUnits = (int)aiConfigValue(array("BILLING_GUARD_RUN_UNITS"));
+    if($guardUnits <= 0)
+        $guardUnits = 1;
+    if($bad || $units["ai_tokens"] + $units["agent_runs"] + $guard === 0)
+        return array("code" => 400, "body" => array("error" => t9n("[RU]Нужны целые tokens, runs и/или guard больше нуля[EN]Positive integer tokens, runs and/or guard required")));
+    if($guard > 0 && $guardType > 0){
+        $units["guard_runs"] = $guard * $guardUnits;
+        $types["guard_runs"] = $guardType;
+    }
     foreach($units as $code => $n)
         if($n > 0 && !billingCounterAdd($connection, $db, $types[$code], $code, $n))
             return array("code" => 404, "body" => array("error" => t9n("[RU]Нет записи базы[EN]No database record")));

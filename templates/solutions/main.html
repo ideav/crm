@@ -388,6 +388,9 @@
             <label class="ai-agent-auto-apply" title="Агент выполнит план сразу, без кнопки «Применить» — и удаления тоже. Действует до перезагрузки страницы.">
                 <input id="ai-agent-auto-apply" type="checkbox" autocomplete="off"> Применить автоматически
             </label>
+            <label class="ai-agent-auto-apply ai-agent-guard" id="ai-agent-guard-wrap" style="display: none" title="Страж данных базы: номера карт, паспорта, ИНН, оклады и другие закрытые сведения уходят ИИ-модели заглушками, а в ответе вы видите настоящие значения.">
+                <input id="ai-agent-guard" type="checkbox" autocomplete="off"> Страж данных
+            </label>
         </div>
     </aside>
 
@@ -422,7 +425,7 @@
 
     <script src="/js/app.js?v=20261022-1043"></script>
     <script src="/js/ws-client.js?v=5269"></script>
-    <script src="/js/ai-agent-chat.js?v=5637"></script>
+    <script src="/js/ai-agent-chat.js?v=5654"></script>
     <script src="/js/main-app.js?v=5508"></script>
     <script src="/js/form-submit.js" defer></script>
     <script>
