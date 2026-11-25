@@ -146,8 +146,31 @@ function Cm_view($m, $host){
     # ведущий, заведший встречу, в списке вошедших не показывается: блокировать себя нечего
     $seen = $m['seen'];
     unset($seen[$m['host']]);
-    if ($host) $v += array('code' => $m['code'], 'bans' => array_values($m['bans']), 'seen' => (object)$seen);
+    if ($host) $v += array('code' => $m['code'], 'bans' => array_values($m['bans']), 'seen' => (object)$seen,
+        'records' => isset($m['records']) ? $m['records'] : array());
     return $v;
+}
+
+# Запись на сервере Jitsi: скрипт после выгрузки в Kinescope сообщает ссылку.
+# Подпись — HMAC-SHA256 секретом meet.record_secret от "room|video|link|ts", не старше часа.
+function Cm_recorded($cfg, $str){
+    $secret = isset($cfg['meet']['record_secret']) ? (string)$cfg['meet']['record_secret'] : '';
+    if ($secret === '') return Cm_fail(503, 'record_off');
+    $room = $str('room'); $video = $str('video'); $link = $str('link'); $ts = $str('ts');
+    $now = isset($cfg['now']) ? (int)$cfg['now'] : time();
+    $good = hash_hmac('sha256', "$room|$video|$link|$ts", $secret);
+    if (!preg_match('/^\d{1,12}$/', $ts) || abs($now - (int)$ts) > 3600 || !hash_equals($good, $str('sig'))) return Cm_fail(403, 'sig');
+    if (!preg_match('~^https://kinescope\.io/[A-Za-z0-9_-]{1,64}$~', $link) || !preg_match('/^[A-Za-z0-9-]{1,64}$/', $video)) return Cm_fail(400, 'link');
+    if (!preg_match('/^c-[a-z0-9_-]{1,32}-([a-f0-9]{16})$/', $room, $mm)) return Cm_fail(404, 'meeting');
+    $m = Cm_load($cfg, $mm[1]);
+    if (!$m || $m['room'] !== $room) return Cm_fail(404, 'meeting');
+    return Cm_update($cfg, $m['id'], function (&$m) use ($video, $link, $now) {
+        $recs = isset($m['records']) ? $m['records'] : array();
+        foreach ($recs as $r) if ($r['video'] === $video) return array(200, array('ok' => true));
+        $recs[] = array('video' => $video, 'link' => $link, 'at' => date('Y-m-d H:i:s', $now));
+        $m['records'] = array_slice($recs, -50);
+        return array(200, array('ok' => true));
+    });
 }
 
 # Вход гостей с одного адреса: не больше 30 попыток за 10 минут (каждая читает все встречи)
@@ -192,6 +215,8 @@ function Cm_handle($cfg, $cookie, $in, $ip = ''){
         }
         return Cm_fail(404, 'code');
     }
+
+    if ($act === 'recorded') return Cm_recorded($cfg, $str);
 
     $me = Cm_me($cfg, $cookie);
     if (!$me) return Cm_fail(401, 'login');

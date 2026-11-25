@@ -11,14 +11,18 @@ Jitsi в комнату не пускает. Модератор — тот, у �
 работает модерация звука и видео Jitsi: слушатель поднимает руку, ведущий в панели «Эфир» жмёт
 «Дать слово», у предыдущего выступающего слово забирается.
 
-| | Беседа до 5 | Лекция до 100 |
-|---|---|---|
-| CPU / RAM | 2 vCPU, 4 ГБ | 4 vCPU, 8 ГБ |
-| Канал | 50 Мбит/с | **1 Гбит/с, безлимитный трафик** (~100 Мбит/с при 360p, ~300 при 720p; 45–135 ГБ за час) |
+| | Беседа до 5 | Лекция до 100 | Лекция до 100 + запись на сервере |
+|---|---|---|---|
+| CPU / RAM | 2 vCPU, 4 ГБ | 4 vCPU, 8 ГБ | **8 vCPU, 16 ГБ** |
+| Диск | 20 ГБ | 40 ГБ | **100–160 ГБ SSD** (система ~20 ГБ, записи до выгрузки) |
+| Канал | 50 Мбит/с | **от 300 Мбит/с, безлимитный трафик** (~100 Мбит/с при 360p, ~300 при 720p; 45–135 ГБ за час) | то же |
 
-- 15–20 ГБ диска, Ubuntu 22.04/24.04 или AlmaLinux 8 с Docker.
-- Порты: TCP 443 (и 80 для сертификата), **UDP 10000** (медиа). Канал — по таблице выше.
+- Ubuntu 24.04 с Docker, виртуализация KVM или выделенный сервер. Сервер — в РФ: через него идут
+  имена, IP-адреса, чат, звук и видео участников, на нём лежат записи (152-ФЗ).
+- Порты: TCP 443 (и 80 для сертификата), **UDP 10000** (медиа).
 - DNS: поддомен, например `meet.ideav.ru`.
+- Запись (Jibri) берёт звук через PulseAudio внутри контейнера: модуль ядра `snd-aloop` не нужен.
+- Одновременно пишется одна встреча на один контейнер Jibri (~4 vCPU, 4 ГБ на каждый следующий).
 - Встреча вдвоём идёт напрямую между браузерами (P2P), на 3–5 человек — через видеомост сервера.
 
 ## Установка
@@ -65,13 +69,65 @@ ENABLE_AUTO_OWNER=0
 
 Секрет: `head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n'`.
 
+## Запись на сервере
+
+Ведущий включает запись кнопкой Jitsi «Начать запись» (участникам она недоступна: jicofo
+принимает запрос только от модератора). Контейнер Jibri входит в комнату невидимым участником и
+пишет её в mp4 1280×720. После остановки Jibri вызывает `finalize-recording.sh`: файл уходит в
+Kinescope, ссылка — порталу (у ведущего в «Управлении встречей» появляется «Записи встречи»),
+каталог записи удаляется. Выгрузка идёт в фоне, Jibri сразу готов к следующей записи.
+
+В `env.meet` добавить:
+
+```ini
+ENABLE_RECORDING=1
+JIBRI_FINALIZE_RECORDING_SCRIPT_PATH=/config/finalize-recording.sh
+```
+
+Файлы и права (контейнеры работают от uid 1000):
+
+```bash
+CFG=~/.jitsi-meet-cfg
+mkdir -p $CFG/storage/jibri
+cp finalize-recording.sh $CFG/jibri/ && chmod +x $CFG/jibri/finalize-recording.sh
+cat > $CFG/jibri/record.env <<EOF
+KINESCOPE_TOKEN=<токен API Kinescope: Настройки → API-токены>
+KINESCOPE_PARENT_ID=<id проекта или папки Kinescope для записей>
+PORTAL_URL=https://ideav.ru/courses-meet.php
+RECORD_SECRET=<64 hex, тот же, что meet.record_secret в courses-pay.json>
+EOF
+chmod 600 $CFG/jibri/record.env
+sudo chown -R 1000:1000 $CFG/storage $CFG/jibri
+docker compose -f docker-compose.yml -f jibri.yml up -d
+```
+
+`id` проекта — `GET https://api.kinescope.io/v1/projects` с тем же токеном, поле `id`.
+
+Если Kinescope или портал не ответили, каталог записи остаётся в `$CFG/storage/jibri/recordings`,
+причина — в `finalize.log` там же. Повтор всех оставшихся:
+
+```bash
+docker compose -f docker-compose.yml -f jibri.yml exec -T jibri /config/finalize-recording.sh --all
+```
+
+Тот же вызов раз в час из cron на хосте подбирает хвосты сам. Уже выгруженный файл повторно в
+Kinescope не уходит (`kinescope.json` в каталоге записи), повторяется только сообщение порталу.
+
+Значок Jitsi в углу записи убирается строкой `interfaceConfig.SHOW_JITSI_WATERMARK = false;` в
+`$CFG/web/custom-interface_config.js`.
+
 ## Портал
 
 В `/var/www/www-root/data/courses-pay.json` (конфиг оплаты курсов, `COURSES_PAY_CONFIG`) — раздел:
 
 ```json
-"meet": {"domain": "meet.ideav.ru", "sub": "meet.jitsi", "app_id": "ideav-courses", "secret": "<секрет>", "ttl": 120}
+"meet": {"domain": "meet.ideav.ru", "sub": "meet.jitsi", "app_id": "ideav-courses", "secret": "<секрет>", "ttl": 120,
+         "record_secret": "<секрет записи>"}
 ```
+
+- `record_secret` — подпись сообщений о готовой записи (HMAC-SHA256 от `room|video|link|ts`, не
+  старше часа); без него сообщения отклоняются (503 `record_off`). Принимаются только ссылки
+  `https://kinescope.io/…` и только для существующей встречи; записи видит ведущий.
 
 - `domain` — адрес, с которого браузер грузит `external_api.js` и комнату;
 - `sub` — XMPP-домен Jitsi (`XMPP_DOMAIN`, по умолчанию в docker-jitsi-meet `meet.jitsi`);
@@ -95,3 +151,7 @@ ENABLE_AUTO_OWNER=0
   исходящий трафик и CPU видеомоста (на локальном стенде в WSL медиа до видеомоста не доходит).
 - Ведущий жмёт «Заблокировать» — ученика выбрасывает из комнаты, повторный вход: «Ведущий закрыл вам
   вход на эту встречу».
+- Запись: ведущий включает, говорит минуту с камерой, останавливает. Через минуту-две в
+  «Управлении встречей» — «Запись от …», по ссылке в Kinescope есть картинка и звук; в
+  `finalize.log` — «выгружено» и «портал получил ссылку». Размер файла за час записи — замерить
+  (`ls -l` до выгрузки) и при необходимости поправить объём диска.

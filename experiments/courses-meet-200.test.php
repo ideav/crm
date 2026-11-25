@@ -201,6 +201,38 @@ list($c, $r) = call('CUR', array('action' => 'create', 'course' => 'adept', 'tit
 list($c2, $t) = call('CUR', array('action' => 'token', 'id' => $r['meeting']['id'] ?? ''));
 expect(($r['meeting']['mode'] ?? '') === 'talk' && ($t['mode'] ?? '') === 'talk' && ($M['mode'] ?? '') === 'talk', 'без режима или с неизвестным — беседа');
 
+# 8) запись на сервере: Jitsi после выгрузки в Kinescope сообщает порталу ссылку (подпись HMAC общим секретом записи)
+$RSEC = 'record-secret-abcdef';
+$cfgR = $cfg; $cfgR['meet']['record_secret'] = $RSEC;
+function rec($cfgR, $room, $video, $link, $ts, $secret){
+    $sig = hash_hmac('sha256', "$room|$video|$link|$ts", $secret);
+    return Cm_handle($cfgR, '', array('action' => 'recorded', 'room' => $room, 'video' => $video, 'link' => $link, 'ts' => (string)$ts, 'sig' => $sig));
+}
+$room = $L['id'] ? 'c-adept-' . $L['id'] : '';
+list($c, ) = rec($cfg, $room, 'v-1', 'https://kinescope.io/abc123', $NOW, $RSEC);
+expect($c === 503, 'без record_secret в конфиге запись не принимается — 503');
+list($c, ) = rec($cfgR, $room, 'v-1', 'https://kinescope.io/abc123', $NOW, 'wrong-secret');
+expect($c === 403, 'чужая подпись — 403');
+list($c, ) = rec($cfgR, $room, 'v-1', 'https://kinescope.io/abc123', $NOW - 3601, $RSEC);
+expect($c === 403, 'подпись старше часа — 403');
+list($c, ) = rec($cfgR, $room, 'v-1', 'https://evil.example/abc', $NOW, $RSEC);
+expect($c === 400, 'ссылка не на kinescope.io — 400');
+list($c, ) = rec($cfgR, 'c-adept-0123456789abcdef', 'v-1', 'https://kinescope.io/abc123', $NOW, $RSEC);
+expect($c === 404, 'комната несуществующей встречи — 404');
+list($c, ) = rec($cfgR, 'c-a77-' . $L['id'], 'v-1', 'https://kinescope.io/abc123', $NOW, $RSEC);
+expect($c === 404, 'комната с чужим курсом — 404');
+list($c, ) = rec($cfgR, $room, 'v-1', 'https://kinescope.io/abc123', $NOW, $RSEC);
+list($c2, ) = rec($cfgR, $room, 'v-1', 'https://kinescope.io/abc123', $NOW + 5, $RSEC);
+list($c3, ) = rec($cfgR, $room, 'v-2', 'https://kinescope.io/def456', $NOW + 60, $RSEC);
+list($cl, $r) = Cm_handle($cfgR, 'idb_courses=CUR', array('action' => 'list', 'course' => 'adept'));
+$recs = array();
+foreach ($r['meetings'] as $mm) if ($mm['id'] === $L['id']) $recs = $mm['records'] ?? null;
+expect($c === 200 && $c2 === 200 && $c3 === 200 && is_array($recs) && count($recs) === 2 && ($recs[0]['link'] ?? '') === 'https://kinescope.io/abc123', 'ведущий видит записи встречи; повтор той же записи не дублирует');
+list($cl, $r) = Cm_handle($cfgR, 'idb_courses=STU', array('action' => 'list', 'course' => 'adept'));
+$leak = false;
+foreach ($r['meetings'] as $mm) if (isset($mm['records'])) $leak = true;
+expect(!$leak, 'ученику список записей не отдаётся');
+
 rrmdir($root);
 echo $failures ? "\n$failures FAILED\n" : "\nALL PASSED\n";
 exit($failures ? 1 : 0);

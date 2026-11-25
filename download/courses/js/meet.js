@@ -175,6 +175,10 @@
           E('button', { class: 'btn btn-sm', type: 'button', text: 'Скопировать ссылку', onclick: function () { A.copy(guestLink(m.code)); } }), ' ',
           E('button', { class: 'btn btn-sm', type: 'button', text: 'Новый код', onclick: function () { act('code', { id: m.id }, function (r) { A.toast('Старый код больше не действует'); redraw(r.meeting); }); } })]),
         people.length ? E('div', {}, [E('p', { class: 'muted', text: 'Входили на встречу:' }), E('ul', { class: 'meet-people' }, people)]) : E('p', { class: 'muted', text: 'На встречу ещё никто не входил.' }),
+        // записи на сервере Jitsi появляются здесь после выгрузки в Kinescope
+        (m.records || []).length ? E('div', {}, [E('p', { class: 'muted', text: 'Записи встречи:' }), E('ul', { class: 'meet-people' }, m.records.map(function (rec) {
+          return E('li', {}, [E('a', { href: rec.link, target: '_blank', rel: 'noopener', text: 'Запись от ' + rec.at })]);
+        }))]) : null,
         m.closed ? null : E('button', { class: 'btn', type: 'button', text: 'Закончить встречу', onclick: function () {
           act('close', { id: m.id }, function (r) { A.toast('Встреча закрыта, ключи больше не выдаются'); redraw(r.meeting); });
         } })
