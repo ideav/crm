@@ -174,6 +174,24 @@ expect($c === 200 && count($r['meetings']) === 0, 'закрытая встреч
 list($c, ) = call('CUR', array('action' => 'drop', 'id' => $A['id']));
 expect($c === 400, 'неизвестное действие — 400');
 
+# 6) замечания ревью PR #5719: логин не уходит в комнату, гостей не больше 50, вход гостей с адреса ограничен
+list($c, $r) = call('CUR', array('action' => 'token', 'id' => $A['id']));
+$p = jwt_payload($r['jwt'] ?? '', $SECRET);
+expect($c === 200 && ($p['context']['user']['name'] ?? '') === 'Ведущий' && strpos(base64_decode(strtr(explode('.', $r['jwt'])[1], '-_', '+/')), 'curator1') === false, 'без «Имени» в «Профиле» в ключе не логин: у ведущего «Ведущий»');
+list($c, $r) = call('STU', array('action' => 'token', 'id' => $A['id']));
+expect($c === 200, 'ключ ученику после блока на другой встрече');
+for ($i = 0; $i < 60; $i++) Cm_handle($cfg, '', array('action' => 'guest', 'code' => $A['code'], 'name' => 'Г' . $i), '10.0.0.' . $i);
+list($c, $r) = call('AUT', array('action' => 'list', 'course' => 'a77'));
+$gs = array_filter((array)$r['meetings'][0]['seen'], function ($s) { return !empty($s['guest']); });
+expect(count($gs) === 50 && isset(array_values($gs)[49]['name']) && array_values($gs)[49]['name'] === 'Г59 (гость)', 'в «Входили» не больше 50 последних гостей');
+$codes = array();
+for ($i = 0; $i < 31; $i++) { list($c, ) = Cm_handle($cfg, '', array('action' => 'guest', 'code' => 'ZZZZ-ZZZ' . ($i % 10), 'name' => 'x'), '192.0.2.7'); $codes[] = $c; }
+list($cOther, ) = Cm_handle($cfg, '', array('action' => 'guest', 'code' => $A['code'], 'name' => 'Анна'), '192.0.2.8');
+expect(count(array_filter($codes, function ($x) { return $x === 404; })) === 30 && end($codes) === 429 && $cOther === 200, 'гость: 30 попыток за 10 минут с адреса, дальше 429; другой адрес пускает');
+$cfg2 = $cfg; $cfg2['now'] = $NOW + 601;
+list($c, ) = Cm_handle($cfg2, '', array('action' => 'guest', 'code' => $A['code'], 'name' => 'Анна'), '192.0.2.7');
+expect($c === 200, 'через 10 минут адрес снова пускают');
+
 rrmdir($root);
 echo $failures ? "\n$failures FAILED\n" : "\nALL PASSED\n";
 exit($failures ? 1 : 0);

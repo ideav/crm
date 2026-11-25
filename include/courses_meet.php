@@ -45,7 +45,7 @@ function Cm_update($cfg, $id, $fn){
         $m = Cm_load($cfg, $id);
         if (!$m) return Cm_fail(404, 'meeting');
         $res = $fn($m);
-        Cm_save($cfg, $m);
+        if ($res[0] === 200) Cm_save($cfg, $m);
         return $res;
     } finally {
         if ($lock) { flock($lock, LOCK_UN); fclose($lock); }
@@ -74,10 +74,11 @@ function Cm_me($cfg, $cookie){
     $role = isset($me['role']) && is_string($me['role']) ? $me['role'] : '';
     if (!preg_match('/^\d+$/', $uid) || $uid === '0' || $role === 'guest') return null;
     $login = isset($me['user']) && is_string($me['user']) ? $me['user'] : '';
-    return array('id' => $uid, 'login' => $login, 'name' => $login !== '' ? $login : 'Ученик ' . $uid, 'role' => $role);
+    # логин (почта, телефон) в комнату не уходит: без «Имени» в «Профиле» — «Ученик <id>»
+    return array('id' => $uid, 'login' => $login, 'name' => 'Ученик ' . $uid, 'role' => $role);
 }
 
-# Имя из «Профиля» (поле «Имя»), иначе логин
+# Имя из «Профиля» (поле «Имя»), иначе «Ученик <id>»
 function Cm_name($cfg, $tables, $me){
     if (!isset($tables['Профиль']['req']['Пользователь'], $tables['Профиль']['req']['Имя']) || $me['login'] === '') return $me['name'];
     foreach (Cp_rows($cfg, $tables['Профиль'], array('Пользователь' => $me['login'])) as $r)
@@ -85,7 +86,7 @@ function Cm_name($cfg, $tables, $me){
     return $me['name'];
 }
 function Cm_clean_name($s){
-    $s = trim(preg_replace('/[\x00-\x1F\x7F<>]+/u', ' ', (string)$s));
+    $s = trim((string)preg_replace('/[\x00-\x1F\x7F<>]+/u', ' ', (string)$s));
     return mb_substr($s, 0, 60, 'UTF-8');
 }
 
@@ -126,6 +127,11 @@ function Cm_jwt($cfg, $room, $user, $moderator){
 }
 
 function Cm_ticket($cfg, &$m, $user, $moderator){
+    if (!empty($user['guest'])) {
+        # гостей в «Входили» — не больше 50 последних: код может уйти по рукам, файл встречи не растёт без конца
+        $g = array_keys(array_filter($m['seen'], function ($s) { return !empty($s['guest']); }));
+        foreach (array_slice($g, 0, max(0, count($g) - 49)) as $old) unset($m['seen'][$old]);
+    }
     $m['seen'][$user['id']] = array('name' => $user['name'], 'guest' => !empty($user['guest']), 't' => date('Y-m-d H:i:s', isset($cfg['now']) ? (int)$cfg['now'] : time()));
     return array(200, array('ok' => true, 'domain' => $cfg['meet']['domain'], 'room' => $m['room'], 'jwt' => Cm_jwt($cfg, $m['room'], $user, $moderator),
         'moderator' => (bool)$moderator, 'name' => $user['name'], 'title' => $m['title']));
@@ -141,9 +147,25 @@ function Cm_view($m, $host){
     return $v;
 }
 
+# Вход гостей с одного адреса: не больше 30 попыток за 10 минут (каждая читает все встречи)
+function Cm_guest_rate_ok($cfg, $ip){
+    if (!is_dir(Cm_dir($cfg))) @mkdir(Cm_dir($cfg), 0770, true);
+    $now = isset($cfg['now']) ? (int)$cfg['now'] : time();
+    $f = Cm_dir($cfg) . '/rate-' . sha1((string)$ip) . '.txt';
+    $h = @fopen($f, 'c+');
+    if (!$h) return true;
+    flock($h, LOCK_EX);
+    $t = array_filter(array_map('intval', explode(',', (string)stream_get_contents($h))), function ($x) use ($now) { return $x > $now - 600; });
+    $ok = count($t) < 30;
+    if ($ok) $t[] = $now;
+    ftruncate($h, 0); rewind($h); fwrite($h, implode(',', $t));
+    flock($h, LOCK_UN); fclose($h);
+    return $ok;
+}
+
 # ---- обработчик ----
 # [HTTP-код, массив ответа]
-function Cm_handle($cfg, $cookie, $in){
+function Cm_handle($cfg, $cookie, $in, $ip = ''){
     if (empty($cfg['meet']['secret']) || empty($cfg['meet']['domain']) || empty($cfg['meet']['app_id'])) return Cm_fail(503, 'meet_off');
     $cfg['meet'] += array('ttl' => 120);
     $act = isset($in['action']) && is_string($in['action']) ? $in['action'] : '';
@@ -152,6 +174,7 @@ function Cm_handle($cfg, $cookie, $in){
     if ($act === 'guest') {
         $code = Cm_norm_code($str('code'));
         $name = Cm_clean_name($str('name'));
+        if (!Cm_guest_rate_ok($cfg, $ip)) return Cm_fail(429, 'too_many');
         if (strlen($code) !== 8) return Cm_fail(404, 'code');
         if ($name === '') return Cm_fail(400, 'name');
         foreach (glob(Cm_dir($cfg) . '/*.json') ?: array() as $f) {
@@ -182,6 +205,7 @@ function Cm_handle($cfg, $cookie, $in){
         $host = Cm_is_host($cfg, $tables, $me, $course);
         if (!$host && !Cm_has_access($cfg, $tables, $me, $course)) return Cm_fail(403, 'access');
         $me['name'] = Cm_name($cfg, $tables, $me);
+        if ($host && $me['name'] === 'Ученик ' . $me['id']) $me['name'] = 'Ведущий';
     } catch (Exception $e) {
         Cp_log($cfg, 'meet_failed', array('user' => $me['id'], 'action' => $act, 'error' => $e->getMessage()));
         return Cm_fail(502, 'base');

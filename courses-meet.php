@@ -17,5 +17,6 @@ try {
     Cm_out(500, array('ok' => false, 'error' => 'server'));
 }
 $in = json_decode(file_get_contents('php://input'), true);
-list($http, $res) = Cm_handle($cfg, isset($_SERVER['HTTP_COOKIE']) ? $_SERVER['HTTP_COOKIE'] : '', is_array($in) ? $in : array());
+list($http, $res) = Cm_handle($cfg, isset($_SERVER['HTTP_COOKIE']) ? $_SERVER['HTTP_COOKIE'] : '', is_array($in) ? $in : array(),
+    isset($_SERVER['REMOTE_ADDR']) ? $_SERVER['REMOTE_ADDR'] : '');
 Cm_out($http, $res);
