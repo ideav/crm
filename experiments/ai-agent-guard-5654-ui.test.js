@@ -239,6 +239,33 @@ function g4(){
     });
 }
 
+// Ревью: выбор «включён» сохранён, вопрос отправлен до ответа сервера — guard всё равно уходит;
+// сбой запроса статуса — при следующем открытии панели спрашиваем снова.
+function g6(){
+    var store = fakeStorage([]);
+    store.setItem('aiAgentGuard:acme', '1');
+    var ctx = fresh(handler(ON), store);
+    ctx.agent.openPanel();          // fetch статуса ещё не разрешился
+    ctx.els['ai-agent-input'].value = 'сразу вопрос';
+    ctx.agent.send();
+    return settle().then(function(){
+        expect(ctx.posts[0] && ctx.posts[0].get('guard') === '1', 'G6: вопрос до ответа сервера — guard по сохранённому выбору');
+        var fails = 0;
+        var c2 = fresh(function(url, opts, n){
+            if((opts.method || 'GET') !== 'POST' && url.indexOf('/ai/agent/guard') !== -1){ fails++; return undefined; }
+            return handler(ON)(url, opts, n);
+        });
+        c2.agent.openPanel();
+        return settle().then(function(){
+            c2.agent.closePanel();
+            c2.agent.openPanel();
+            return settle();
+        }).then(function(){
+            expect(fails === 2, 'G6: после сбоя статус спрашивается снова (' + fails + ')');
+        });
+    });
+}
+
 function g5(){
     ['../templates/main.html', '../templates/solutions/main.html'].forEach(function(t){
         var html = fs.readFileSync(require.resolve(t), 'utf8');
@@ -251,7 +278,7 @@ function g5(){
     });
 }
 
-g1().then(g2).then(g3).then(g4).then(g5).then(function(){
+g1().then(g2).then(g3).then(g4).then(g6).then(g5).then(function(){
     console.log('');
     if(failures){ console.log('FAILED: ' + failures); process.exitCode = 1; }
     else console.log('ALL TESTS PASSED');

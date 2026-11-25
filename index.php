@@ -12571,7 +12571,8 @@ function aiAgentGuardStatus($db){
     $endpoint = aiConfigValue(array("INTEGRAM_AGENT_ENDPOINT", "AI_AGENT_ENDPOINT"));
     if($safeDb === "" || $endpoint === "" || !preg_match('#^(https?://.+)/chat/?$#', $endpoint, $m))
         return $off;
-    $cache = sys_get_temp_dir()."/ai_agent_guard_".$safeDb.".json";
+    # Ключ — база и адрес агента: другая установка CRM на этом хосте с той же базой не прочтёт чужой статус.
+    $cache = sys_get_temp_dir()."/ai_agent_guard_".$safeDb."_".substr(md5($endpoint), 0, 12).".json";
     $cached = @json_decode((string)@file_get_contents($cache), true);
     if(is_array($cached) && isset($cached["at"], $cached["status"]) && time() - (int)$cached["at"] < 300)
         return $cached["status"];

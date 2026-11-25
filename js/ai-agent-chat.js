@@ -69,6 +69,8 @@
             this.guardWrap = document.getElementById('ai-agent-guard-wrap');
             this.guardOn = false;
             this.guardLoaded = false;
+            this.guardResolved = false;
+            this.guardListening = false;
 
             // Без панели и кнопки вызова работать нечему — тихо выходим.
             if (!this.toggle || !this.panel) return false;
@@ -635,27 +637,43 @@
             return 'aiAgentGuard:' + (this.getCurrentDbName() || 'my');
         },
 
+        guardSaved: function () {
+            try { return window.localStorage.getItem(this.guardPrefKey()) === '1'; } catch (e) { return false; }
+        },
+
+        // Слать ли guard=1. Пока ответ сервера не пришёл (или не удался), решает сохранённый
+        // выбор: «включён» не должен теряться на первом вопросе. Лишний guard безвреден — у базы
+        // без стража сервис агента его не применяет.
+        guardWanted: function () {
+            if (!this.guardBox) return false;
+            if (!this.guardResolved) return this.guardSaved();
+            return this.guardOn && this.guardBox.checked;
+        },
+
         loadGuard: function () {
             if (this.guardLoaded || !this.guardBox || !this.guardWrap) return;
             this.guardLoaded = true;
             var self = this;
+            if (!this.guardListening) {
+                this.guardListening = true;
+                this.guardBox.addEventListener('change', function () {
+                    try { window.localStorage.setItem(self.guardPrefKey(), self.guardBox.checked ? '1' : '0'); } catch (e) { /* не запомнится */ }
+                });
+            }
             var dbName = this.getCurrentDbName() || 'my';
             fetch('/' + encodeURIComponent(dbName) + '/ai/agent/guard?JSON=1', {
                 credentials: 'same-origin',
                 headers: { 'X-Requested-With': 'XMLHttpRequest' }
             }).then(function (response) {
-                return response.json().catch(function () { return null; });
+                return response.json();
             }).then(function (data) {
+                self.guardResolved = true;
                 self.guardOn = !!(data && data.available === true && data.toggle === true);
                 self.guardWrap.style.display = self.guardOn ? '' : 'none';
-                if (!self.guardOn) return;
-                var saved = null;
-                try { saved = window.localStorage.getItem(self.guardPrefKey()); } catch (e) { saved = null; }
-                self.guardBox.checked = saved === '1';
-                self.guardBox.addEventListener('change', function () {
-                    try { window.localStorage.setItem(self.guardPrefKey(), self.guardBox.checked ? '1' : '0'); } catch (e) { /* не запомнится */ }
-                });
+                if (self.guardOn) self.guardBox.checked = self.guardSaved();
             }).catch(function () {
+                // Сервер не ответил — переключатель скрыт, при следующем открытии панели спросим снова.
+                self.guardLoaded = false;
                 self.guardOn = false;
                 self.guardWrap.style.display = 'none';
             });
@@ -803,7 +821,7 @@
             var context = this.renderContext();
             if (context) form.append('context', JSON.stringify(context));
             if (this.autoApply && this.autoApply.checked) form.append('auto_apply', '1');
-            if (this.guardOn && this.guardBox && this.guardBox.checked) form.append('guard', '1');
+            if (this.guardWanted()) form.append('guard', '1');
             if (!this.conversationId) this.setConversation(this.newChatId());
             form.append('conversation', this.conversationId);
             if (!fromAction) {

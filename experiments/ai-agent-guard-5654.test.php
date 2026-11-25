@@ -79,7 +79,7 @@ $db = "acme5654_".getmypid();
 $GLOBALS["z"] = $db;
 $GLOBALS["GLOBAL_VARS"] = array("user"=>"petrov", "token"=>"tok-petrov");
 @unlink(aiAgentJobsFile($db));
-@unlink(sys_get_temp_dir()."/ai_agent_guard_".$db.".json");
+array_map("unlink", glob(sys_get_temp_dir()."/ai_agent_guard_".$db."_*.json"));
 
 function run($method, $com, $post=array()){
     $_SERVER["REQUEST_METHOD"] = $method;
@@ -109,7 +109,7 @@ $r = run("GET", $guardCom);
 expect($r["ok"] && $r["data"]["available"] === true && count($GLOBALS["__guard_calls"]) === 1, "#5654: ответ кешируется");
 
 # 3. Сбой сервиса — available=false (переключателя нет), сбой не кешируется.
-@unlink(sys_get_temp_dir()."/ai_agent_guard_".$db.".json");
+array_map("unlink", glob(sys_get_temp_dir()."/ai_agent_guard_".$db."_*.json"));
 $GLOBALS["__guard_reply"] = false;
 $r = run("GET", $guardCom);
 expect($r["ok"] && $r["data"] === array("available"=>false), "#5654: сервис не ответил — available=false");
@@ -150,7 +150,7 @@ expect($r["ok"] && is_array($cap) && $cap["action"] === "cancel" && !array_key_e
     "#5654: действие над планом идёт без guard");
 
 @unlink(aiAgentJobsFile($db));
-@unlink(sys_get_temp_dir()."/ai_agent_guard_".$db.".json");
+array_map("unlink", glob(sys_get_temp_dir()."/ai_agent_guard_".$db."_*.json"));
 
 echo "\n";
 if($failures){ echo "FAILED: $failures check(s) failed\n"; exit(1); }
