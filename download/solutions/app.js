@@ -86,7 +86,7 @@
     price: function (from, to) {
       var f = Number(String(from == null ? '' : from).replace(',', '.')), t = Number(String(to == null ? '' : to).replace(',', '.'));
       if (!(f > 0)) return null;
-      return { from: Math.round(f), to: t > f ? Math.round(t) : 0 };
+      return { from: f, to: t > f ? t : 0 };
     },
     // 150000 → «150 000»
     rub: function (k) { return String(Math.round(k * 1000)).replace(/\B(?=(\d{3})+(?!\d))/g, ' '); },
