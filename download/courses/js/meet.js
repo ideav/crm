@@ -33,20 +33,22 @@
   // Возвращает {api, kickByName(name)}; при уходе со страницы комната закрывается (A.cleanup).
   A.meetRoom = function (box, t, onLeave) {
     box.innerHTML = '';
-    var frame = E('div', { class: 'meet-frame' });
+    var frame = E('div', { class: 'meet-frame' }), stageBox = E('div');
     var status = E('p', { class: 'muted', text: 'Подключаемся…' });
-    box.appendChild(E('div', { class: 'meet-room' }, [E('h2', { text: t.title || 'Встреча' }), status, frame]));
+    box.appendChild(E('div', { class: 'meet-room' }, [E('h2', { text: t.title || 'Встреча' }), status, frame, stageBox]));
     var room = { api: null, kickByName: function () { return Promise.resolve(false); } };
     loadApi(t.domain).then(function () {
       var api = new window.JitsiMeetExternalAPI(t.domain, {
         roomName: t.room, jwt: t.jwt, parentNode: frame, width: '100%', height: 620, lang: 'ru',
         userInfo: { displayName: t.name },
         configOverwrite: { readOnlyName: true, disableDeepLinking: true, prejoinConfig: { enabled: true },
-          localRecording: { disable: !t.moderator, notifyAllParticipants: true }, startWithVideoMuted: false },
+          localRecording: { disable: !t.moderator, notifyAllParticipants: true }, startWithAudioMuted: t.mode === 'lecture' && !t.moderator, startWithVideoMuted: t.mode === 'lecture' && !t.moderator },
         interfaceConfigOverwrite: { SHOW_JITSI_WATERMARK: false, MOBILE_APP_PROMO: false }
       });
       room.api = api;
-      status.textContent = t.moderator ? 'Вы ведущий: можете выключить звук участнику, выгнать его, записать встречу на свой компьютер (меню «…» → «Запись»).' : '';
+      if (t.mode === 'lecture' && t.moderator) room.stage = A.meetStage(api, stageBox);
+      status.textContent = t.moderator ? 'Вы ведущий: можете выключить звук участнику, выгнать его, записать встречу на свой компьютер (меню «…» → «Запись»).'
+        : t.mode === 'lecture' ? 'Лекция: говорит ведущий. Чтобы попросить слово, поднимите руку ✋ — ведущий включит вам микрофон.' : '';
       api.addListener('readyToClose', function () { leave(); });
       room.kickByName = function (name) {
         return Promise.resolve(api.getRoomsInfo ? api.getRoomsInfo() : { rooms: [] }).then(function (info) {
@@ -66,7 +68,68 @@
     }
     var prev = A.cleanup;
     A.cleanup = function () { A.cleanup = prev; if (room.api) { left = true; try { room.api.dispose(); } catch (e) { /* уже закрыта */ } } if (prev) prev(); };
+    A.meetCurrent = room;
     return room;
+  };
+
+  // Режим «Лекция» (courses#200): говорят ведущий и ОДИН вызванный участник. Модерация звука и видео Jitsi
+  // не даёт остальным включить микрофон и камеру; панель «Эфир» у ведущего — очередь поднятых рук,
+  // «Дать слово» сначала забирает слово у предыдущего. Разрешение из меню самого Jitsi держится тем же правилом.
+  A.meetStage = function (api, box) {
+    var people = {}, speaker = null;
+    function who(id) { return people[id] || (people[id] = { name: 'Участник', hand: 0 }); }
+    // Забрать слово: rejectParticipant в Jitsi отклоняет только ещё не одобренный запрос, выданное разрешение
+    // им не снять. Поэтому — выключить выступающему микрофон и камеру и перезапустить модерацию: при включении
+    // сервер Jitsi начинает список одобренных заново. Включать — только после события «выключена»: пока его
+    // нет, Jitsi считает модерацию включённой и повторное включение молча пропускает.
+    var restart = null; // {audio: ждём выключения, video: …, next: кому дать слово после}
+    function moderation(on) { api.executeCommand('toggleModeration', on, 'audio'); api.executeCommand('toggleModeration', on, 'video'); }
+    function approve(id) { api.executeCommand('askToUnmute', id); api.executeCommand('approveVideo', id); }
+    function revoke(id, next) {
+      api.executeCommand('muteRemoteParticipant', id, 'audio'); api.executeCommand('muteRemoteParticipant', id, 'video');
+      if (restart) { restart.next = next; return; }
+      restart = { audio: 'off', video: 'off', next: next };
+      moderation(false);
+    }
+    api.addListener('moderationStatusChanged', function (e) {
+      if (!restart || !restart[e.mediaType]) return;
+      if (!e.enabled && restart[e.mediaType] === 'off') { restart[e.mediaType] = 'on'; api.executeCommand('toggleModeration', true, e.mediaType); return; }
+      if (e.enabled && restart[e.mediaType] === 'on') restart[e.mediaType] = null;
+      if (!restart.audio && !restart.video) { var n = restart.next; restart = null; if (n && n === speaker) approve(n); }
+    });
+    function give(id) {
+      var prev = speaker;
+      speaker = id; who(id).hand = 0;
+      if (prev && prev !== id) revoke(prev, id); else if (!restart) approve(id); else restart.next = id;
+      draw();
+    }
+    function take() { var prev = speaker; speaker = null; if (prev) revoke(prev, null); draw(); }
+    function draw() {
+      box.innerHTML = '';
+      var queue = Object.keys(people).filter(function (id) { return people[id].hand && id !== speaker; })
+        .sort(function (a, b) { return people[a].hand - people[b].hand; });
+      box.appendChild(E('div', { class: 'card meet-stage' }, [E('h3', { text: 'Эфир' }),
+        speaker ? E('p', {}, ['Сейчас говорит: ', E('b', { text: who(speaker).name }), ' ',
+          E('button', { class: 'btn btn-sm', type: 'button', text: 'Забрать слово', onclick: take })]) : E('p', { class: 'muted', text: 'Говорите только вы. Слово получает тот, кто поднял руку.' }),
+        queue.length ? E('ol', { class: 'meet-people' }, queue.map(function (id) {
+          return E('li', {}, [E('span', { text: who(id).name }), ' ', E('button', { class: 'btn btn-sm btn-primary', type: 'button', text: 'Дать слово', onclick: function () { give(id); } })]);
+        })) : E('p', { class: 'muted', text: 'Рук не поднято.' })]));
+    }
+    api.addListener('videoConferenceJoined', function () {
+      moderation(true);
+      (api.getParticipantsInfo ? api.getParticipantsInfo() : []).forEach(function (p) { if (p.participantId) who(p.participantId).name = p.displayName || p.formattedDisplayName || 'Участник'; });
+      draw();
+    });
+    api.addListener('participantJoined', function (e) { who(e.id).name = e.displayName || 'Участник'; draw(); });
+    api.addListener('displayNameChange', function (e) { if (people[e.id]) { people[e.id].name = e.displayname || e.displayName || people[e.id].name; draw(); } });
+    api.addListener('participantLeft', function (e) { if (e.id === speaker) speaker = null; delete people[e.id]; draw(); });
+    api.addListener('raiseHandUpdated', function (e) { if (e.id) { who(e.id).hand = e.handRaised ? Number(e.handRaised) || Date.now() : 0; draw(); } });
+    // разрешили говорить из меню Jitsi в обход панели — то же правило: слово переходит, у прежнего забирается
+    api.addListener('moderationParticipantApproved', function (e) {
+      if (e.mediaType === 'audio' && e.id && e.id !== speaker && !restart) give(e.id);
+    });
+    draw();
+    return { give: give, take: take, state: function () { return { speaker: speaker, people: people }; } };
   };
 
   function guestLink(code) { return location.origin + location.pathname + '#/meet?code=' + encodeURIComponent(code); }
@@ -137,7 +200,7 @@
         m = mm || m;
         slot.innerHTML = '';
         slot.appendChild(E('section', { class: 'card meet' + (m.closed ? ' locked' : '') }, [
-          E('div', { class: 'course-head' }, [E('h2', { text: m.title }), E('span', { class: 'badge', text: m.closed ? 'Закончилась' : 'Идёт' })]),
+          E('div', { class: 'course-head' }, [E('h2', { text: m.title }), E('span', { class: 'badge', text: (m.mode === 'lecture' ? 'Лекция · ' : '') + (m.closed ? 'Закончилась' : 'Идёт') })]),
           E('p', { class: 'muted', text: 'Ведущий: ' + m.host + ' · создана ' + m.created }),
           m.closed ? null : E('div', { class: 'row' }, [E('button', { class: 'btn btn-primary', type: 'button', text: 'Войти на встречу', onclick: function () { join(m); } })]),
           host ? hostBlock(m, draw) : null
@@ -154,9 +217,10 @@
         box.appendChild(E('h1', { text: 'Встречи курса' }));
         if (r.host) {
           var title = E('input', { type: 'text', class: 'input', maxlength: '60', placeholder: 'Название, например «Разбор домашних заданий»' });
-          box.appendChild(E('div', { class: 'card' }, [E('h3', { text: 'Новая встреча' }), E('div', { class: 'row' }, [title,
+          var mode = E('select', { class: 'input' }, [E('option', { value: 'talk', text: 'Беседа — говорят все' }), E('option', { value: 'lecture', text: 'Лекция — говорите вы и один вызванный' })]);
+          box.appendChild(E('div', { class: 'card' }, [E('h3', { text: 'Новая встреча' }), E('div', { class: 'row' }, [title, mode,
             E('button', { class: 'btn btn-primary', type: 'button', text: 'Создать', onclick: function () {
-              act('create', { course: course, title: title.value }, function () { load(); });
+              act('create', { course: course, title: title.value, mode: mode.value }, function () { load(); });
             } })]), E('p', { class: 'muted', text: 'Ученики курса входят из портала. Гостям — код или ссылка, которые появятся у встречи.' })]));
         }
         var list = r.meetings || [];

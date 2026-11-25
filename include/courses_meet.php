@@ -3,7 +3,8 @@
 #
 # courses-meet.php (POST JSON, заголовок X-Requested-With) → Cm_handle($cfg, $cookie, $in):
 #   list   {course}            — встречи курса: ученику с «Доступом» и ведущему;
-#   create {course, title}     — ведущий заводит встречу, получает код для гостей;
+#   create {course, title, mode} — ведущий заводит встречу, получает код для гостей; mode: talk — говорят все,
+#                                lecture — говорят ведущий и один вызванный им участник (модерация звука в Jitsi);
 #   token  {id}                — ключ входа ученику/ведущему (ведущий — модератор комнаты);
 #   guest  {code, name}        — ключ гостю по коду встречи, вход в портал не нужен;
 #   ban / unban {id, who}      — блок-лист встречи; блок гостя меняет код (гостя по имени не узнать);
@@ -134,12 +135,14 @@ function Cm_ticket($cfg, &$m, $user, $moderator){
     }
     $m['seen'][$user['id']] = array('name' => $user['name'], 'guest' => !empty($user['guest']), 't' => date('Y-m-d H:i:s', isset($cfg['now']) ? (int)$cfg['now'] : time()));
     return array(200, array('ok' => true, 'domain' => $cfg['meet']['domain'], 'room' => $m['room'], 'jwt' => Cm_jwt($cfg, $m['room'], $user, $moderator),
-        'moderator' => (bool)$moderator, 'name' => $user['name'], 'title' => $m['title']));
+        'moderator' => (bool)$moderator, 'name' => $user['name'], 'title' => $m['title'], 'mode' => Cm_mode($m)));
 }
+
+function Cm_mode($m){ return isset($m['mode']) && $m['mode'] === 'lecture' ? 'lecture' : 'talk'; }
 
 # Встреча для ведущего — с кодом, блок-листом и списком вошедших; для ученика — без них
 function Cm_view($m, $host){
-    $v = array('id' => $m['id'], 'course' => $m['course'], 'title' => $m['title'], 'host' => $m['host_name'], 'created' => $m['created'], 'closed' => !empty($m['closed']));
+    $v = array('id' => $m['id'], 'course' => $m['course'], 'title' => $m['title'], 'host' => $m['host_name'], 'created' => $m['created'], 'closed' => !empty($m['closed']), 'mode' => Cm_mode($m));
     # ведущий, заведший встречу, в списке вошедших не показывается: блокировать себя нечего
     $seen = $m['seen'];
     unset($seen[$m['host']]);
@@ -225,7 +228,7 @@ function Cm_handle($cfg, $cookie, $in, $ip = ''){
         $title = Cm_clean_name($str('title'));
         $id = bin2hex(random_bytes(8));
         $m = array('id' => $id, 'room' => 'c-' . $course . '-' . $id, 'course' => $course, 'title' => $title !== '' ? $title : 'Встреча',
-            'host' => $me['id'], 'host_name' => $me['name'], 'code' => Cm_new_code(),
+            'host' => $me['id'], 'host_name' => $me['name'], 'code' => Cm_new_code(), 'mode' => $str('mode') === 'lecture' ? 'lecture' : 'talk',
             'created' => date('Y-m-d H:i:s', isset($cfg['now']) ? (int)$cfg['now'] : time()), 'closed' => false, 'bans' => array(), 'seen' => array());
         Cm_save($cfg, $m);
         return array(200, array('ok' => true, 'meeting' => Cm_view($m, true)));

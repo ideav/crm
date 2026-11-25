@@ -192,6 +192,15 @@ $cfg2 = $cfg; $cfg2['now'] = $NOW + 601;
 list($c, ) = Cm_handle($cfg2, '', array('action' => 'guest', 'code' => $A['code'], 'name' => 'Анна'), '192.0.2.7');
 expect($c === 200, 'через 10 минут адрес снова пускают');
 
+# 7) режим встречи: talk (говорят все) по умолчанию, lecture — говорят ведущий и один вызванный
+list($c, $r) = call('CUR', array('action' => 'create', 'course' => 'adept', 'title' => 'Лекция', 'mode' => 'lecture'));
+$L = $r['meeting'] ?? array();
+list($c2, $t) = call('STU', array('action' => 'token', 'id' => $L['id'] ?? ''));
+expect($c === 200 && ($L['mode'] ?? '') === 'lecture' && $c2 === 200 && ($t['mode'] ?? '') === 'lecture', 'встреча-лекция: режим в списке и в ответе с ключом');
+list($c, $r) = call('CUR', array('action' => 'create', 'course' => 'adept', 'title' => 'Беседа', 'mode' => 'other'));
+list($c2, $t) = call('CUR', array('action' => 'token', 'id' => $r['meeting']['id'] ?? ''));
+expect(($r['meeting']['mode'] ?? '') === 'talk' && ($t['mode'] ?? '') === 'talk' && ($M['mode'] ?? '') === 'talk', 'без режима или с неизвестным — беседа');
+
 rrmdir($root);
 echo $failures ? "\n$failures FAILED\n" : "\nALL PASSED\n";
 exit($failures ? 1 : 0);
