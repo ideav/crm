@@ -65,10 +65,23 @@ function Exec_sql($sql, $msg, $log=true, $fatal=true){
         }
         return true;
     }
-    if(strpos($sql, "SELECT") === 0 && strpos($sql, "'bal2guard'") !== false && preg_match('/p\.up=(\d+)/', $sql, $m)){
+    if(preg_match("/^SELECT 1 x FROM my WHERE t=1075 AND val LIKE '(.*)' LIMIT 1$/u", $sql, $m)){
+        $re = "/^".str_replace(array("%", "_"), array(".*", "."), preg_quote(stripslashes($m[1]), "/"))."$/u";
+        foreach($db["pay"] as $p)
+            if($p["notes"] !== null && preg_match($re, $p["notes"]))
+                return new Res(array(array("x" => "1")));
+        return new Res(array());
+    }
+    if(preg_match("/^SELECT id, up FROM my WHERE t=271 AND val='([^']*)' ORDER BY id DESC LIMIT 1$/", $sql, $m)){
+        foreach($db["dbs"] as $u => $list)
+            if(isset($list[$m[1]]))
+                return new Res(array(array("id" => (string)$list[$m[1]], "up" => (string)$u)));
+        return new Res(array());
+    }
+    if(strpos($sql, "SELECT") === 0 && preg_match("/ty\.val='(bal2guardx?)'/", $sql, $ty) && preg_match('/p\.up=(\d+)/', $sql, $m)){
         $rows = array();
         foreach($db["pay"] as $id => $p)
-            if($p["user"] === (int)$m[1] && $p["type"] === "bal2guard" && $p["paid"] !== null && $p["notes"] !== null)
+            if($p["user"] === (int)$m[1] && $p["type"] === $ty[1] && $p["paid"] !== null && $p["notes"] !== null)
                 $rows[] = array("id" => $id, "amount" => $p["amount"], "paid" => $p["paid"], "notes" => $p["notes"]);
         return new Res($rows);
     }
@@ -84,6 +97,7 @@ $GLOBALS["connection"] = null;
 # соединения, база возвращается к снимку (rollback()).
 function mysqli_begin_transaction($c){ $GLOBALS["TX"] = $GLOBALS["DB"]; return true; }
 function mysqli_commit($c){ unset($GLOBALS["TX"]); return true; }
+function mysqli_rollback($c){ rollback(); return true; }
 function rollback(){ if(isset($GLOBALS["TX"])){ $GLOBALS["DB"] = $GLOBALS["TX"]; unset($GLOBALS["TX"]); } }
 function dies_tx($fn){ $e = dies($fn); rollback(); return $e; }
 function mysqli_affected_rows($c){ return $GLOBALS["DB"]["affected"]; }
@@ -221,7 +235,7 @@ $before = time();
 $st = Gd_action_pay("acme", "start", "month");
 $pay = payments();
 expect(balance() === 100000.0 - 1490, "D2 списано 1490 с баланса", (string)balance());
-expect(count($pay) === 1 && $pay[0]["amount"] === "1490" && $pay[0]["type"] === "bal2guard" && $pay[0]["notes"] === "страж start month (acme)"
+expect(count($pay) === 1 && $pay[0]["amount"] === "1490" && $pay[0]["type"] === "bal2guard" && $pay[0]["notes"] === "страж start month (acme) r501"
     && (int)$pay[0]["paid"] >= $before, "D3 платёж 957: сумма, Type bal2guard, Notes", json_encode($pay, JSON_UNESCAPED_UNICODE));
 $paid1 = (int)$pay[0]["paid"];
 expect($st["state"] === "active" && $st["plan"] === "start" && $st["until"] === $paid1 + $M, "D4 после оплаты активен Старт на месяц", json_encode($st, JSON_UNESCAPED_UNICODE));
@@ -326,10 +340,163 @@ $p = last_post();
 expect($p && $p["body"]["until"] === $c["until"] && $p["body"]["action"] === "audit" && $p["body"]["user_toggle"] === false && $p["body"]["enabled"] === true,
     "I5 статус досылает отставший срок", json_encode($p ? $p["body"] : null));
 $GLOBALS["__get_reply"] = json_encode(array("available" => true, "settings" => array("enabled" => true, "topics" => array(), "action" => "audit",
-    "user_toggle" => false, "until" => $c["until"])));
+    "user_toggle" => false, "until" => $c["until"], "rec" => 501, "limit" => 5000)));
 $GLOBALS["__post"] = array();
 Gd_status("acme");
-expect(!$GLOBALS["__post"], "I6 срок совпадает — статус ничего не шлёт");
+expect(!$GLOBALS["__post"], "I6 срок, запись и лимит совпадают — статус ничего не шлёт");
+
+# --- J: сверхлимитный пакет — служебный POST /my/billing/guard_pack от сервиса агента ------------
+# Сервис сам считает вопросы; исчерпал лимит тарифа — покупает пакет: 150 ₽ с баланса ВЛАДЕЛЬЦА базы,
+# платёж 957 bal2guardx, Notes «страж +1000 (база) YYYY-MM #n r<id записи>»; повтор #n не списывает.
+reset_db(100000);
+$GLOBALS["__get_reply"] = null;
+$GLOBALS["__post_reply"] = json_encode(array("available" => true));
+$GLOBALS["__cfg"]["BILLING_SERVICE_TOKEN"] = "bill-secret";
+$H = array("x-billing-token" => "bill-secret");
+$MON = date("Y-m");
+$pk = function($body, $headers=null, $method="POST") use ($H){
+    return Gd_pack_request($method, $headers === null ? $H : $headers, is_string($body) ? $body : json_encode($body));
+};
+$ok = function($n, $rec=501, $db="acme") use ($MON){ return array("db" => $db, "month" => $MON, "n" => $n, "rec" => $rec); };
+$r = $pk($ok(1), array("x-billing-token" => "wrong"));
+expect($r["code"] === 403, "J1 неверный токен — 403", json_encode($r));
+expect($pk($ok(1), null, "GET")["code"] === 405, "J2 не POST — 405");
+$bad = array(array("month" => "2026-13"), array("n" => 0), array("n" => "1"), array("db" => "../x"), array("rec" => null), array("month" => "1999-01"));
+$allBad = true;
+foreach($bad as $b){ $rr = $pk(array_merge($ok(1), $b)); if($rr["code"] !== 400) $allBad = false; }
+expect($allBad && $pk("not json")["code"] === 400, "J3 неверное тело (месяц, номер, база, rec, далёкий месяц) — 400");
+$r = $pk($ok(1));
+expect($r["code"] === 200 && $r["body"]["ok"] === false && $r["body"]["reason"] === "inactive" && balance() === 100000.0 && !payments(),
+    "J4 страж не оплачен — пакет не продаётся", json_encode($r, JSON_UNESCAPED_UNICODE));
+as_user(10);
+Gd_action_pay("acme", "start", "month");
+$bal = balance();
+$GLOBALS["LOCKS"] = array();
+$r = $pk($ok(1, 777));
+expect($r["code"] === 409 && $r["body"]["reason"] === "stale" && balance() === $bal, "J5 чужой rec (база пересоздана) — 409 без списания", json_encode($r));
+expect($pk($ok(1, 501, "nobase"))["code"] === 404 && balance() === $bal, "J6 нет такой базы — 404");
+as_user(20, "ivanov");      # сервис зовёт без сессии; кто вошёл в ЛК — неважно
+$r = $pk($ok(1));
+$pay = payments();
+$last = end($pay);
+expect($r["code"] === 200 && $r["body"]["ok"] === true && $r["body"]["packs"] === 1 && $r["body"]["charged"] === 150 && balance() === $bal - 150,
+    "J7 пакет: 150 ₽ с баланса владельца базы", json_encode($r, JSON_UNESCAPED_UNICODE));
+expect($last["user"] === 10 && $last["type"] === "bal2guardx" && $last["amount"] === "150" && $last["notes"] === "страж +1000 (acme) $MON #1 r501",
+    "J8 платёж 957 bal2guardx у владельца, Notes с базой, месяцем, номером и записью", json_encode($last, JSON_UNESCAPED_UNICODE));
+expect($GLOBALS["DB"]["balance"][20] === 100000.0, "J9 баланс вошедшего пользователя не тронут");
+expect(in_array("acme", $GLOBALS["LOCKS"], true), "J10 пакет покупается под замком базы");
+$r = $pk($ok(1));
+expect($r["code"] === 200 && $r["body"]["ok"] === true && $r["body"]["charged"] === 0 && balance() === $bal - 150 && count(payments()) === 2,
+    "J11 повтор того же пакета — ok без второго списания", json_encode($r));
+$r = $pk($ok(3));
+expect($r["code"] === 409 && $r["body"]["reason"] === "order" && count(payments()) === 2, "J12 пакет через номер — 409", json_encode($r));
+$GLOBALS["DB"]["balance"][10] = 100.0;
+$r = $pk($ok(2));
+expect($r["code"] === 200 && $r["body"]["ok"] === false && $r["body"]["reason"] === "insufficient" && balance() === 100.0 && count(payments()) === 2,
+    "J13 нет денег — insufficient, без списания и платежа", json_encode($r, JSON_UNESCAPED_UNICODE));
+$GLOBALS["DB"]["balance"][10] = 1000.0;
+$GLOBALS["INSERT_FAIL"] = 1075;
+$e = dies_tx(function() use ($pk, $ok){ return $pk($ok(2)); });
+unset($GLOBALS["INSERT_FAIL"]);
+expect(balance() === 1000.0 && count(payments()) === 2, "J14 сбой записи платежа откатывает списание пакета");
+$r = $pk($ok(2));
+expect($r["body"]["ok"] === true && $r["body"]["packs"] === 2 && balance() === 850.0, "J15 после пополнения — второй пакет", json_encode($r));
+as_user(10);
+$c = Gd_compute(Gd_user_payments(10), "acme", 501);
+$st = Gd_status("acme");
+expect($st["state"] === "active" && $st["until"] === $c["until"], "J16 пакеты не меняют срок тарифа");
+unset($GLOBALS["__cfg"]["BILLING_SERVICE_TOKEN"]);
+expect($pk($ok(3))["code"] === 404, "J17 без BILLING_SERVICE_TOKEN — выключено (404)");
+
+# --- K: привязка к записи базы (rec) --------------------------------------------------------------
+$c = Gd_compute(array(
+    array("id" => 100, "amount" => "1", "paid" => (string)$t, "notes" => "страж pro month (acme) r501"),
+    array("id" => 101, "amount" => "1", "paid" => (string)($t + 10), "notes" => "страж pro month (acme) r777")), "acme", 501);
+expect($c["plan"] === "pro" && $c["until"] === $t + $M, "K1 платёж другой записи базы не считается", json_encode($c));
+$c = Gd_compute(array(array("id" => 400, "amount" => "1", "paid" => (string)$t, "notes" => "страж start month (acme)")), "acme", 501);
+expect($c["until"] === 0, "K2 старый платёж без id записи, сделанный до создания записи, не считается");
+$c = Gd_compute(array(array("id" => 600, "amount" => "1", "paid" => (string)$t, "notes" => "страж start month (acme)")), "acme", 501);
+expect($c["until"] === $t + $M, "K3 старый платёж без id записи, сделанный после создания записи, считается");
+reset_db(100000);
+as_user(10);
+$GLOBALS["__post"] = array();
+$st = Gd_action_pay("acme", "start", "month");
+$p = last_post();
+expect(payments()[0]["notes"] === "страж start month (acme) r501", "K4 новый платёж — с id записи базы", payments()[0]["notes"]);
+expect($p && $p["body"]["rec"] === 501 && $p["body"]["limit"] === 5000, "K5 сервису уходят rec и лимит тарифа", json_encode($p ? $p["body"] : null));
+Gd_action_pay("acme", "pro", "month");
+$p = last_post();
+expect($p && $p["body"]["limit"] === 20000, "K6 Профи — лимит 20000", json_encode($p ? $p["body"] : null));
+# база пересоздана под тем же именем: у сервиса rec прежней записи и её оплаченный срок
+$GLOBALS["DB"]["dbs"][10]["acme"] = 99999;
+$GLOBALS["__get_reply"] = json_encode(array("available" => true, "settings" => array("enabled" => true, "topics" => array("bank"), "action" => "block",
+    "user_toggle" => true, "until" => time() + 9 * 86400, "limit" => 20000, "rec" => 501)));
+$GLOBALS["__post"] = array();
+$st = Gd_status("acme");
+$p = last_post();
+expect($st["state"] === "none" && $st["until"] === 0, "K7 оплаты прежней записи не засчитываются новой", json_encode($st, JSON_UNESCAPED_UNICODE));
+expect($p && $p["body"]["enabled"] === false && $p["body"]["rec"] === 99999 && !isset($p["body"]["until"]) && $p["body"]["limit"] === null,
+    "K8 статус сбрасывает настройку прежней записи на сервисе (enabled=false, новый rec, без until и лимита)", json_encode($p ? $p["body"] : null));
+expect($st["settings"]["enabled"] === false && $st["settings"]["until"] === null && $st["settings"]["topics"] === array(), "K9 ЛК показывает стража не настроенным", json_encode($st["settings"]));
+# прежний стражник без rec (настроен до привязки) с until, а у записи оплаты нет — тоже сброс
+$GLOBALS["__get_reply"] = json_encode(array("available" => true, "settings" => array("enabled" => true, "topics" => array(), "action" => "mask",
+    "user_toggle" => true, "until" => time() + 86400)));
+$GLOBALS["__post"] = array();
+Gd_status("acme");
+$p = last_post();
+expect($p && $p["body"]["enabled"] === false && $p["body"]["rec"] === 99999, "K10 срок без rec и без оплаты у записи — сброс", json_encode($p ? $p["body"] : null));
+# страж настроен администратором вручную (ни rec, ни until) — ЛК его не трогает
+$GLOBALS["__get_reply"] = json_encode(array("available" => true, "settings" => array("enabled" => true, "topics" => array("hr"), "action" => "mask",
+    "user_toggle" => true, "until" => null)));
+$GLOBALS["__post"] = array();
+Gd_status("acme");
+expect(!$GLOBALS["__post"], "K11 ручная настройка администратора не сбрасывается");
+# расход за месяц — из сервиса
+$GLOBALS["DB"]["dbs"][10]["acme"] = 501;
+$c = Gd_compute(Gd_user_payments(10), "acme", 501);
+$GLOBALS["__get_reply"] = json_encode(array("available" => true, "settings" => array("enabled" => true, "topics" => array(), "action" => "mask",
+    "user_toggle" => true, "until" => $c["until"], "limit" => 20000, "rec" => 501), "usage" => array("month" => $MON, "used" => 21500, "packs" => 2, "pack_size" => 1000)));
+$GLOBALS["__post"] = array();
+$st = Gd_status("acme");
+expect($st["used"] === 21500 && $st["packs"] === 2 && $st["limit"] === 20000 && !$GLOBALS["__post"], "K12 статус: использовано, пакеты и лимит из сервиса", json_encode($st, JSON_UNESCAPED_UNICODE));
+
+# --- L: ревью PR #5765 — сброс пересозданной базы без ЛК, перенос выбора, ручная настройка -------
+$GLOBALS["__cfg"]["BILLING_SERVICE_TOKEN"] = "bill-secret";
+$GLOBALS["__post"] = array();
+$r = $pk($ok(1, 400));
+$p = last_post();
+expect($r["code"] === 409 && $p && $p["body"]["enabled"] === false && $p["body"]["rec"] === 501 && !empty($p["body"]["reset"]),
+    "L1 пакет для прежней записи (stale) — CRM сама сбрасывает настройку сервиса на текущую запись", json_encode($p ? $p["body"] : null));
+unset($GLOBALS["__cfg"]["BILLING_SERVICE_TOKEN"]);
+# создание базы под именем, за которое раньше платили, — сброс сразу
+$GLOBALS["__post"] = array();
+Gd_db_created("acme", 777);
+$p = last_post();
+expect($p && $p["body"]["rec"] === 777 && $p["body"]["enabled"] === false && !empty($p["body"]["reset"]), "L2 новая запись базы с оплаченным раньше именем — сброс на сервисе", json_encode($p ? $p["body"] : null));
+$GLOBALS["__post"] = array();
+Gd_db_created("fresh", 778);
+expect(!$GLOBALS["__post"], "L3 новое имя без оплат стража — сервис не трогаем");
+# настроено до привязки, срок этой записи истёк — это её собственный выбор, не сброс
+reset_db(100000);
+as_user(10);
+$GLOBALS["DB"]["pay"][9500] = array("user" => 10, "amount" => "1490", "type" => "bal2guard", "paid" => (string)(time() - 40 * 86400), "notes" => "страж start month (acme)");
+$GLOBALS["DB"]["dbs"][10]["acme"] = 501;
+$GLOBALS["__get_reply"] = json_encode(array("available" => false, "settings" => array("enabled" => true, "topics" => array(), "action" => "audit",
+    "user_toggle" => false, "until" => time() - 9 * 86400)));
+$GLOBALS["__post"] = array();
+$st = Gd_status("acme");
+expect($st["state"] === "expired" && !$GLOBALS["__post"] && $st["settings"]["action"] === "audit", "L4 срок без привязки истёк у той же записи — выбор не сбрасывается", json_encode($st["settings"]));
+# ручная настройка администратора переносится в первую оплату
+reset_db(100000);
+$GLOBALS["__get_reply"] = json_encode(array("available" => true, "settings" => array("enabled" => true, "topics" => array("hr"), "action" => "block",
+    "user_toggle" => false, "until" => null)));
+$GLOBALS["__post"] = array();
+Gd_action_pay("acme", "pro", "month");
+$p = $GLOBALS["__post"][0];
+expect($p["body"]["topics"] === array("hr") && $p["body"]["action"] === "block" && $p["body"]["user_toggle"] === false && $p["body"]["rec"] === 501,
+    "L5 первая оплата сохраняет ручную настройку администратора", json_encode($p["body"]));
+$GLOBALS["__get_reply"] = null;
+
 expect(empty($GLOBALS["UNKNOWN_SQL"]), "I7 все запросы к базе узнаны заглушкой", json_encode(isset($GLOBALS["UNKNOWN_SQL"]) ? $GLOBALS["UNKNOWN_SQL"] : null));
 
 echo $GLOBALS["failures"] ?$GLOBALS["failures"]." FAILED\n" : "All passed\n";

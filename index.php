@@ -330,6 +330,9 @@ if(!$billing && ($z !== "auth.asp")){
 # Служебный вызов биллинга (#5206): POST /{db}/billing/add, без сессии, по X-Billing-Token.
 if((isset($com[2]) ? $com[2] : "") === "billing" && (isset($com[3]) ? $com[3] : "") === "add")
     handleBillingAdd($z);
+# #5654: сверхлимитный пакет стража данных ИИ-чата — POST /my/billing/guard_pack, тоже по X-Billing-Token.
+if($z === "my" && (isset($com[2]) ? $com[2] : "") === "billing" && (isset($com[3]) ? $com[3] : "") === "guard_pack")
+    handleGuardPack();
 																									
 # TRACE_IT включается после Validate_Token() и только администратору — Trace_start()
 $row = mysqli_fetch_assoc($billing);
@@ -897,6 +900,8 @@ function createDb($id, $name, $email, $pwd=""){
         Insert($id, 1, 275, date("Ymd"), "Insert new DB date");
         Insert($id, 1, 283, $template, "Insert new DB template");
         Insert($id, 1, 276, t9n("[RU]Тестовая база, создана при регистрации[EN]Test one, created upon registration"), "Insert new DB notes");
+        if(function_exists("Gd_db_created"))  # #5654: страж прежней записи с тем же именем не наследуется
+            Gd_db_created($db, $id);
         $z = $db;
     }
 }
@@ -12607,6 +12612,7 @@ function aiChatHttpStatusText($code){
         403 => "Forbidden",
         404 => "Not Found",
         405 => "Method Not Allowed",
+        409 => "Conflict",
         429 => "Too Many Requests",
         502 => "Bad Gateway",
         503 => "Service Unavailable"
@@ -14974,6 +14980,14 @@ function handleBillingAdd($db){
     if($r["code"] !== 200)
         header("HTTP/1.0 ".$r["code"]." ".aiChatHttpStatusText($r["code"]));
     api_dump(json_encode($r["body"], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "billing.json");
+}
+# POST /my/billing/guard_pack — пакет вопросов стража сверх лимита тарифа (include/ai_guard_lk.php).
+function handleGuardPack(){
+    $headers = array_change_key_case(function_exists("getallheaders") ? (array)getallheaders() : array(), CASE_LOWER);
+    $r = Gd_pack_request(isset($_SERVER["REQUEST_METHOD"]) ? $_SERVER["REQUEST_METHOD"] : "", $headers, file_get_contents("php://input"));
+    if($r["code"] !== 200)
+        header("HTTP/1.0 ".$r["code"]." ".aiChatHttpStatusText($r["code"]));
+    api_dump(json_encode($r["body"], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "guard_pack.json");
 }
 # <m-batch-4981> Пакетная запись: _m_save, _m_set, _m_new и _m_del одним запросом (issue #4981, #4988)
 # Ошибка одной операции пакета.
@@ -17747,6 +17761,8 @@ if(Validate_Token())
             Insert($id, 1, 275, date("Ymd"), "Insert new DB date");
             Insert($id, 1, 283, $template, "Insert new DB template");
             Insert($id, 1, 276, $_POST["descr"], "Insert new DB notes");
+            if(function_exists("Gd_db_created"))  # #5654: страж прежней записи с тем же именем не наследуется
+                Gd_db_created($db, $id);
 			api_dump(json_encode(array("status"=>"Ok","id"=>$id)), "_new_db.json");
 			break;
 
