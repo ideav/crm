@@ -282,10 +282,17 @@ table.xlsx-grid td:hover { background: rgba(13, 110, 253, .22); }
     <div id="errors" class="upload-errors-bg p-2 mt-1" style="display:none"></div>
     <div class="pb-3" id="refresh" style="display:none"><button onclick="importParse();" class="btn btn-outline-secondary">Обновить</button></div>
     <div id="upload" style="display:none">
+        <div class="mb-2 d-flex align-items-center" style="gap:.5rem 1.5rem;flex-wrap:wrap">
+            <label class="mb-0" title="По какой колонке искать запись, которую обновить, — табельный номер, ИНН, артикул">Ключ обновления:
+                <select id="import-key" class="form-control form-control-sm d-inline-block" style="width:auto;max-width:20rem"><option value="">по настройке таблицы</option></select></label>
+            <label class="mb-0" title="Ячейка с пробелом и пустое «да/нет» оставляют значение записи как есть"><input type="checkbox" id="keep-filled">&nbsp;Пробелы не стирают значения</label>
+        </div>
+        <button onclick="doDryRun()" class="btn btn-outline-primary" id="dry-run" title="Те же поиски записей без записи в базу: сколько будет создано, обновлено, удалено">Пробный прогон</button>
         <button onclick="$('#do-upload,.confirm').toggle()" class="btn btn-warning" id="do-upload">Загрузить</button>
         <button onclick="$('#do-upload,.confirm').toggle()" class="btn btn-outline-secondary confirm" style="display:none">Отменить</button>
         <button onclick="$('#do-upload,.confirm').toggle();$('#upload').hide();doImport()" class="btn btn-warning confirm" style="display:none">Да, грузим</button>
         <button onclick="$('#stats').toggle()" class="btn btn-outline-secondary" id="show-stats">Статистика</button>
+        <div id="dry-result" class="small mt-2" style="display:none"></div>
     </div>
     <div id="stats" class="pl-1 pr-1 pt-3 pb-1 mt-3 mb-4 shadow" style="display:none"></div>
     <div id="up" class="mt-4" style="display:none">
@@ -743,10 +750,37 @@ function doImport(count){
     if(chosenType===undefined)
         return;
     count=count||1;
-    if(count===1)
+    if(count===1){
         $('#progress').html('Отправка по'+' '+chunkSize+' записей'+ajax).show();
+        importTotals=null;
+    }
+    var file=importText(count,count+chunkSize);
+    if(file!=='')
+        intApi('POST','object/'+chosenType+'?JSON&import=1','upload',importForm(file),Math.min(count+chunkSize,toImport.length));
+    else
+        showImportTotals();
+}
+// issue #5673: ключ обновления и «пробелы не стирают» — параметры каждого запроса загрузки
+function importForm(file){
+    var fd = new FormData();
+    fd.append('bki_file',new File(['DATA\r\n'+file],'import.bki'));
+    fd.append('import','1');
+    if($('#searchParent').attr('up-id'))
+        fd.append('F_U',$('#searchParent').attr('up-id'));
+    if($('#createParent').prop('checked'))
+        fd.append('createParent',1);
+    if(autoParent)
+        fd.append('autoParent',getUpType(chosenType));
+    if($('#import-key').val())
+        fd.append('importKey',$('#import-key').val());
+    if($('#keep-filled').prop('checked'))
+        fd.append('keepFilled',1);
+    return fd;
+}
+// Строки toImport[from..to) в формате DATA (без заголовка)
+function importText(from,to){
     var file='',i,j,k;
-    for(i=count;i<count+chunkSize;i++){
+    for(i=from;i<to;i++){
         if(toImport[i]===undefined)
             break;
         if(newType===undefined){
@@ -766,19 +800,54 @@ function doImport(count){
         }
         file+='\r\n';
     }
-    if(file!==''){
-        file='DATA\r\n'+file;
-        var fd = new FormData();
-        fd.append('bki_file',new File([file],'import.bki'));
-        fd.append('import','1');
-        if($('#searchParent').attr('up-id'))
-            fd.append('F_U',$('#searchParent').attr('up-id'));
-        if($('#createParent').prop('checked'))
-            fd.append('createParent',1);
-        if(autoParent)
-            fd.append('autoParent',getUpType(chosenType));
-        intApi('POST','object/'+chosenType+'?JSON&import=1','upload',fd,i);
+    return file;
+}
+// issue #5673: пробный прогон — весь файл одним запросом (повторы ключа ищутся по всему файлу),
+// сервер ничего не пишет и отвечает счётчиками
+function doDryRun(){
+    if(chosenType===undefined)
+        return;
+    var file=importText(1,toImport.length);
+    if(file===''){
+        showNotification('Нет строк для загрузки', 'error');
+        return;
     }
+    var fd=importForm(file);
+    fd.append('dryRun',1);
+    $('#dry-result').html('Пробный прогон'+ajax).show();
+    intApi('POST','object/'+chosenType+'?JSON&import=1&dryRun=1','dry',fd);
+}
+var importTotals=null,importReqNames={};
+function importStatText(s,future){
+    var parts=[],names=future
+        ?[['created','будет создано'],['updated','обновлено'],['unchanged','без изменений'],['deleted','удалено'],['skipped','пропущено строк'],['parents','создано родителей']]
+        :[['created','создано'],['updated','обновлено'],['unchanged','без изменений'],['deleted','удалено'],['skipped','пропущено строк'],['parents','создано родителей']];
+    for(var i=0;i<names.length;i++)
+        if(s[names[i][0]]||i<3)
+            parts.push(names[i][1]+': <b>'+(s[names[i][0]]||0)+'</b>');
+    var h=parts.join(', ');
+    var refs=[];
+    for(var k in (s.refs||{}))
+        refs.push(escape(importReqNames[k]||('#'+k))+': '+s.refs[k].map(escape).join(', '));
+    if(refs.length)
+        h+='<br>Новые значения справочников'+(future?' (будут созданы)':'')+':<br>'+refs.join('<br>');
+    return h;
+}
+function addImportTotals(s){
+    if(!s)
+        return;
+    importTotals=importTotals||{refs:{}};
+    for(var k in s)
+        if(k==='refs'){
+            for(var r in s.refs)
+                importTotals.refs[r]=(importTotals.refs[r]||[]).concat(s.refs[r]);
+        }
+        else
+            importTotals[k]=(importTotals[k]||0)+s[k];
+}
+function showImportTotals(){
+    if(importTotals)
+        $('#progress').html('Загрузка завершена. '+importStatText(importTotals,false));
 }
 function doSaveFormula(){
     if($('#fields').val()===''||$('#fields').val()===null){
@@ -1020,6 +1089,19 @@ function intApi(m,u,b,vars,index){ // Параметры: метод, адрес
                     setAutoParent(uploadSets[chosenSet].autoParent);
                 }
                 $('#createParent').prop('checked',!!(uploadSets[chosenSet]&&uploadSets[chosenSet].createParent));
+                // issue #5673: ключ обновления — первая колонка или реквизит таблицы; у настройки без
+                // поля importKey остаётся «по настройке таблицы»
+                importReqNames={};
+                importReqNames[json.type.id]=json.type.val;
+                h='<option value="">по настройке таблицы</option><option value="'+json.type.id+'">'+escape(json.type.val)+' (первая колонка)</option>';
+                for(i in json.req_order){
+                    importReqNames[json.req_order[i]]=json.req_type[json.req_order[i]];
+                    h+='<option value="'+json.req_order[i]+'">'+escape(json.req_type[json.req_order[i]])+'</option>';
+                }
+                $('#import-key').html(h).val((uploadSets[chosenSet]&&uploadSets[chosenSet].importKey)?String(uploadSets[chosenSet].importKey):'');
+                if($('#import-key').val()===null)	// реквизит из настройки удалён из таблицы
+                    $('#import-key').val('');
+                $('#keep-filled').prop('checked',!!(uploadSets[chosenSet]&&uploadSets[chosenSet].keepFilled));
                 if(uploadSets[chosenSet]&&uploadSets[chosenSet].searchParent)
                     selectItem(uploadSets[chosenSet].searchParent,'#'+uploadSets[chosenSet].searchParent);
                 // issue #3384: запоминаем сохранённый выбор листа/диапазона Excel, чтобы
@@ -1062,6 +1144,10 @@ function intApi(m,u,b,vars,index){ // Параметры: метод, адрес
                         ,delimiter:$('#delim').val(),newline:$('#caret').val(),importMap:importMap,formulas:formulas,createParent:($('#createParent').prop('checked')?1:0)};
                 if(autoParent)
                     saveSet['autoParent']=autoParent;
+                if($('#import-key').val())	// issue #5673
+                    saveSet['importKey']=$('#import-key').val();
+                if($('#keep-filled').prop('checked'))
+                    saveSet['keepFilled']=1;
                 if($('#searchParent').val().length>0)
                     saveSet['searchParent']=$('#searchParent').attr('up-id');
                 // issue #3384: сохраняем настройку импорта из Excel — лист, старт и
@@ -1088,8 +1174,19 @@ function intApi(m,u,b,vars,index){ // Параметры: метод, адрес
                 $('#progress').html('Отправка по 1000 записей, обработано'+' '+(index-1)+' ('+Math.round(index/toImport.length*100)+'%) '+(index<toImport.length?ajax:''));
                 if(json===undefined)
                     $('#errors').html(h).show();
-                else
+                else{
+                    addImportTotals(json.import);	// issue #5673: счётчики порции
                     doImport(index);
+                }
+                break;
+
+            case 'dry':	// issue #5673: ответ пробного прогона
+                if(json===undefined||!json.import)
+                    $('#dry-result').html('<span class="text-danger">Пробный прогон не выполнен: '+escape(h||'нет ответа')+'</span>');
+                else
+                    $('#dry-result').html('Пробный прогон, в базу ничего не записано. '+importStatText(json.import,true)
+                        +(json.warning?'<div class="mt-1" style="color:var(--text-secondary);max-height:6rem;overflow:auto;white-space:pre-line">'
+                            +escape(String(json.warning).replace(/<br\s*\/?>/gi,'\n'))+'</div>':''));
                 break;
                 
             case 'save-set':

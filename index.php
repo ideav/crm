@@ -4051,6 +4051,10 @@ function Asset_versions($html){
 function Delete($id, $root=TRUE)  # Delete Obj and its children recursively
 {
 	global $z;
+	if($root && isset($GLOBALS["IMPORT_WRITES"]))	# issue #5673: импорт DATA считает записи строки
+		$GLOBALS["IMPORT_WRITES"]++;
+	if($root && !empty($GLOBALS["IMPORT_DRY"]))	# issue #5673: пробный прогон импорта — не писать
+		return;
 	$children = exec_sql("SELECT id FROM $z WHERE up=$id", "Get children");
 	if($child=mysqli_fetch_array($children))
 	{
@@ -8644,6 +8648,10 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 				else
 					die(t9n("[RU]Недопустимый тип метаданных $i [EN]Invalid metadata type $i"));
 				$count = 1;
+				# issue #5673: пробный прогон — только для строк DATA: схема файла и JSON-архив
+				# создают колонки раньше, чем начинается разбор строк
+				if(!empty($_REQUEST["dryRun"]) && (!$plain_data || $json_import))
+					my_die(t9n("[RU]Пробный прогон доступен только для файла данных (DATA)[EN]Dry run is available for a DATA file only"));
 				if(!$plain_data){
 #				print_r($GLOBALS);die($i);
     				# Check Typ's independence
@@ -8828,6 +8836,8 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 				trace("Data");
 #print_r($GLOBALS);my_die();
 				$GLOBALS["cur_parent"][0] = $up;
+				if(!empty($_REQUEST["dryRun"]))	# issue #5673: дальше функции записи ничего не пишут
+					$GLOBALS["IMPORT_DRY"] = TRUE;
 				if($json_import){	# issue #4968: свести колонки архива со структурой таблицы, недостающие создать
 					$jsonColumns = JsonArchiveReconcile($archive, $id);
 					$jsonRow = 0;
@@ -8868,6 +8878,26 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 					    $typesCount++;
 					$isUnique = $GLOBALS["uniq"][$id] === "1";
 					$keyReqsForDelete = UniqueKeyReqs($id);
+					# issue #5673: ключ обновления, выбранный при загрузке, — один реквизит таблицы
+					# (importKey = его id) или первая колонка (importKey = id таблицы). Он заменяет
+					# ключ из настроек таблицы только в этом импорте. Строка с пустым ключом
+					# ни с чем не сопоставляется: она пропускается.
+					$importKey = isset($_REQUEST["importKey"]) ? (int)$_REQUEST["importKey"] : 0;
+					if($importKey){
+						if($importKey == $id){
+							$isUnique = TRUE;
+							$keyReqsForDelete = array();
+						}
+						elseif(isset($GLOBALS["local_struct"][$id][$importKey]) && count($keyReqsForDelete = UniqueKeyReqs($id, $importKey)))
+							$isUnique = FALSE;
+						else
+							my_die(t9n("[RU]Ключ обновления $importKey не является колонкой таблицы $id[EN]Update key $importKey is not a column of the table $id"));
+					}
+					# issue #5673: пробелы и пустое «да/нет» не стирают значения записи
+					$keepFilled = !empty($_REQUEST["keepFilled"]);
+					$stat = array("created" => 0, "updated" => 0, "unchanged" => 0, "deleted" => 0, "skipped" => 0
+					            , "parents" => 0, "refs" => array());
+					$GLOBALS["IMPORT_WRITES"] = 0;
 				    trace("$id is ".($isUnique?"":"not ")."unique");
     				while($json_import ? ($jsonRow < count($archive["rows"])) : !feof($handle)){
     					if($json_import){	# issue #4968: строка архива — тот же позиционный массив, что и строка файла
@@ -8925,12 +8955,14 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                                 if($existingRow = FindUniqueRecordDuplicate($id, 0, $parentForDelete, "", $keyValuesForDelete, false)){
                                     trace(" issue-2522: empty first column, deleting existing #".$existingRow["id"]." by composite key");
                                     Delete($existingRow["id"]);
+                                    $stat["deleted"]++;
                                     $GLOBALS["warning"] .= t9n("[RU]Удалена запись типа $id с пустым значением (строка $count)[EN]Deleted record of type $id with empty value (string #$count)");
                                     $count++;
                                     continue;
                                 }
                             }
                             $GLOBALS["warning"] .= t9n("[RU]Пропущен пустой объект типа $id (строка $count)[EN]Empty object of type $id skipped (string #$count)");
+                            $stat["skipped"]++;
                             #my_die(t9n("[RU]Пустой объект типа $id (строка $count)[EN]Empty object of type $id (string $count)"));
                             continue;
                         }
@@ -8948,20 +8980,31 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
     					}
     					unset($existing);
         				trace("(".$count++.") Buffer: $buffer");
+    					$writes = $GLOBALS["IMPORT_WRITES"];	# issue #5673: записи этой строки — «обновлено» или «без изменений»
     					if($getParent){
     					    $orid = is_numeric($object[0]) ? "OR par.id=".(int)$object[0] : "";
+    					    $parentVal = Format_Val($parentBase, ImportField($object, 0, $json_import));
     					    $sql = "SELECT par.id, max(reqs.ord) ord FROM $z par LEFT JOIN $z reqs ON reqs.up=par.id AND reqs.t=$id "
-    					                ."WHERE par.t=$parentType AND (par.val='".addcslashes(Format_Val($parentBase, ImportField($object, 0, $json_import)), "\\\'")."' $orid)  HAVING par.id IS NOT NULL";
-							if($row = mysqli_fetch_array(Exec_sql($sql, "Get the parent and order for this rec"))){
+    					                ."WHERE par.t=$parentType AND (par.val='".addcslashes($parentVal, "\\\'")."' $orid)  HAVING par.id IS NOT NULL";
+    					    # issue #5673: родитель, «созданный» пробным прогоном, есть только в этом наборе
+							if(!empty($GLOBALS["IMPORT_DRY"]) && isset($GLOBALS["IMPORT_DRY_PARENTS"][$parentVal])){
+							    $parent = $GLOBALS["IMPORT_DRY_PARENTS"][$parentVal];
+							    $cur_order = 1;
+							}
+							elseif($row = mysqli_fetch_array(Exec_sql($sql, "Get the parent and order for this rec"))){
 							    $parent = $row["id"];
 							    $cur_order = 1+$row["ord"];
 							}
 						    elseif(isset($_POST["createParent"])){
-						        $parent = Insert(1, 1, $parentType, addcslashes(Format_Val($parentBase, ImportField($object, 0, $json_import)), "\\\'"), "Auto create parent");
+						        $parent = Insert(1, 1, $parentType, addcslashes($parentVal, "\\\'"), "Auto create parent");
 						        $cur_order = 1;
+						        $stat["parents"]++;
+						        if(!empty($GLOBALS["IMPORT_DRY"]))
+						            $GLOBALS["IMPORT_DRY_PARENTS"][$parentVal] = $parent;
 						    }
 						    else{
                                 $GLOBALS["warning"] .= t9n("[RU]Пропущен объект с ненайденным родителем (строка $count)[EN]The object skipped for no parent found (string #$count)");
+                                $stat["skipped"]++;
                                 continue;
 						    }
 						    array_shift($object);
@@ -8991,19 +9034,26 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 						            if($existingRow = FindUniqueRecordDuplicate($id, 0, $parent, "", $keyValuesForDelete, false)){
 						                trace(" issue-2524: empty value under getParent, deleting existing #".$existingRow["id"]." by composite key (parent=$parent)");
 						                Delete($existingRow["id"]);
+						                $stat["deleted"]++;
 						                $GLOBALS["warning"] .= t9n("[RU]Удалена запись типа $id с пустым значением (строка $count)[EN]Deleted record of type $id with empty value (string #$count)");
 						                $count++;
 						            }
-						        } elseif($isUnique){
+						            else
+						                $stat["skipped"]++;
+						        } elseif($isUnique && !$importKey){	# issue #5673: пустой ключ-колонка ничего не удаляет
 						            // issue #2530: simple uniqueness — find the existing child record under the resolved parent and delete it
 						            if($existingRow = mysqli_fetch_array(Exec_sql("SELECT id FROM $z WHERE up=$parent AND t=$id LIMIT 1", "Find child for empty-value delete (issue #2530)"))){
 						                trace(" issue-2530: empty value under getParent with simple uniqueness, deleting existing #".$existingRow["id"]." (parent=$parent)");
 						                Delete($existingRow["id"]);
+						                $stat["deleted"]++;
 						                $GLOBALS["warning"] .= t9n("[RU]Удалена запись типа $id с пустым значением (строка $count)[EN]Deleted record of type $id with empty value (string #$count)");
 						                $count++;
 						            }
+						            else
+						                $stat["skipped"]++;
 						        } else {
 						            $GLOBALS["warning"] .= t9n("[RU]Пропущен пустой объект типа $id (строка $count)[EN]Empty object of type $id skipped (string #$count)");
+						            $stat["skipped"]++;
 						        }
 						        continue;
 						    }
@@ -9037,18 +9087,39 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
     					                    ? array("kind" => "ref", "ref_id" => (int)$req["ref_id"], "values" => array(), "multi" => $req["multi"], "has_missing_ref" => false)
     					                    : array("kind" => "value", "value" => "");
     					        }
+    					        if($importKey){	# issue #5673: строку без значения ключа сопоставить не с чем
+    					            $kv = reset($keyValues);
+    					            if($kv["kind"] === "ref" ? (!count($kv["values"]) && !$kv["has_missing_ref"]) : ((string)$kv["value"] === "")){
+    					                $GLOBALS["warning"] .= t9n("[RU]Пропущена строка $count: пустой ключ обновления[EN]Line $count skipped: the update key is empty")."<br>";
+    					                $stat["skipped"]++;
+    					                continue;
+    					            }
+    					        }
     					        // issue #4140: a record met earlier in this very file keeps its key requisites in the
     					        // batch, where FindUniqueRecordDuplicate cannot see them - it would miss the record and
     					        // create a second one. We inserted it ourselves, so look the key up in our own index
     					        // first. Flush_batch() drops the index: once the requisites are stored, the query finds
     					        // them on its own. Maybe_flush_batch() keeps a record from being flushed in halves.
-    					        $dupKey = $parent."\0".($isUnique ? $object[0] : "")."\0".serialize($keyValues);
+    					        # issue #5673: у ссылки на ещё не созданное значение values пуст — без самого
+    					        # значения в индексе две строки с разными новыми значениями сливались в одну запись
+    					        $missingRefs = array();
+    					        $ord = 0;
+    					        foreach($GLOBALS["local_struct"][$id] as $reqId => $reqName){
+    					            if($reqId == 0) continue;
+    					            $ord++;
+    					            if(isset($keyValues[$reqId]) && ($keyValues[$reqId]["kind"] === "ref") && $keyValues[$reqId]["has_missing_ref"])
+    					                $missingRefs[$reqId] = ImportField($object, $ord, $json_import);
+    					        }
+    					        $dupKey = $parent."\0".($isUnique ? $object[0] : "")."\0".serialize($keyValues).(count($missingRefs) ? "\0".serialize($missingRefs) : "");
     					        if(isset($GLOBALS["SQLbatchKeys"][$dupKey])){
     					            $existing = $GLOBALS["SQLbatchKeys"][$dupKey];
     					            trace(" found existing $existing ".$object[0]." (composite key, still in the batch)");
     					        }
     					        elseif($existingRow = FindUniqueRecordDuplicate($id, 0, $parent, $object[0], $keyValues, (bool)$isUnique)){
     					            $existing = $existingRow["id"];
+    					            # issue #5673: первая колонка обновляется ниже, только если она другая
+    					            if(!$isUnique && ($vrow = mysqli_fetch_array(Exec_sql("SELECT val FROM $z WHERE id=$existing", "Get the value of existing Obj for import"))))
+    					                $existingVal = $vrow["val"];
     					            trace(" found existing $existing ".$object[0]." (composite key)");
     					            $reqs_data = Exec_sql("SELECT reqs.t, reqs.val, reqs.id reqid FROM $z reqs WHERE reqs.up=$existing AND reqs.t!=0", "Load reqs of existing Obj for import");
     					            while($row = mysqli_fetch_array($reqs_data)){
@@ -9057,6 +9128,13 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
     					            }
     					        } else
     					            trace(" not found ".$object[0]);
+    					    } elseif($importKey && ((string)$object[0] === "")){	# issue #5673: ключ — первая колонка, она пуста
+    					        $GLOBALS["warning"] .= t9n("[RU]Пропущена строка $count: пустой ключ обновления[EN]Line $count skipped: the update key is empty")."<br>";
+    					        $stat["skipped"]++;
+    					        continue;
+    					    } elseif(!empty($GLOBALS["IMPORT_DRY"]) && isset($GLOBALS["IMPORT_DRY_VALS"][$parent."\0".$object[0]])){
+    					        # issue #5673: запись, «созданная» пробным прогоном выше по файлу, в базе не видна
+    					        $existing = $GLOBALS["IMPORT_DRY_VALS"][$parent."\0".$object[0]];
     					    } else {
     					        $result = Exec_sql("SELECT obj.id, reqs.t, reqs.val, reqs.id reqid
     					                                FROM $z obj LEFT JOIN $z reqs ON reqs.up=obj.id AND reqs.t!=0
@@ -9087,14 +9165,17 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
         					// (FindUniqueRecordDuplicate, $includeVal=false), so the first column in the DB may
         					// differ from the incoming BKI row. Refresh it so re-import overwrites the first
         					// column on update, not just the secondary requisites.
-        					if(count($keyReqs) && !$isUnique)
+        					if(count($keyReqs) && !$isUnique && (!isset($existingVal) || ((string)$existingVal !== (string)$object[0])))
         					    Update_Val($existing, $object[0]);
     					}
     					else{
 							$new_id = Insert($parent, (isset($cur_order) ? $cur_order++ : 1), $id, $object[0], "Plain import #$count");
 							if($dupKey !== NULL) // issue #4140: its key requisites are about to go into the batch
 							    $GLOBALS["SQLbatchKeys"][$dupKey] = $new_id;
+							elseif(!empty($GLOBALS["IMPORT_DRY"]) && $isUnique)
+							    $GLOBALS["IMPORT_DRY_VALS"][$parent."\0".$object[0]] = $new_id;
     					}
+    					unset($existingVal);
     					#array_pop($object); 	# Cut off the empty item after the last semi-colon
     					$order = 0;
     					foreach($GLOBALS["local_struct"][$id] as $key => $value){
@@ -9111,6 +9192,8 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                 				    trace(" Reference object $key");
     							    $refType = $GLOBALS["refs"][$key];
             						if($object[$order] === " "){
+            						    if($keepFilled)	# issue #5673: пробел ссылку не снимает
+            						        continue;
                     				    trace("  Delete Reference object $key");
         								$data_set = Exec_sql("SELECT req.id FROM $z req, $z ref"
         								                    ."   WHERE req.up=$new_id AND req.val='$key' AND ref.id=req.t AND ref.t=$refType"
@@ -9141,8 +9224,12 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
                 							    $refObjID = $GLOBALS["refs"][$refType][$ref];
             								elseif($row = mysqli_fetch_array(Exec_sql("SELECT id FROM $z WHERE t=$refType AND val='".addslashes($ref)."'", "Check plain ref Obj Value")))
             								    $refObjID = $row["id"];
-            								else
+            								else{
             								    $refObjID = Insert(1, 1, $refType, $ref, "Import plain ref Object");
+            								    # issue #5673: новые значения справочника — в ответ, по колонке
+            								    if(!isset($stat["refs"][$key]) || (count($stat["refs"][$key]) < 50))
+            								        $stat["refs"][$key][] = $ref;
+            								}
             								$GLOBALS["refs"][$refType][$ref] = $refObjID;
             								# issue #4140: у ссылки без мультивыбора цель всего одна — перенацеливаем
             								# существующий реквизит, а не дописываем второй. Раньше эта проверка стояла
@@ -9170,31 +9257,54 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
     						    }
     						    elseif(isset($existing) && isset($reqs[$key])){
     						         # issue #5442: BOOLEAN "-1"/false - хранимое «нет»; пробел (пусто) - удалить
-    						        if($GLOBALS["base"][$key] === "11" /* BOOLEAN */ && ($val === ""))
-    						            Delete($ids[$key]);
+    						        # issue #5673: keepFilled — пробел и пустое «да/нет» значение не стирают
+    						        if($GLOBALS["base"][$key] === "11" /* BOOLEAN */ && ($val === "")){
+    						            if(!$keepFilled)
+    						                Delete($ids[$key]);
+    						        }
     						        elseif($reqs[$key] !== $val)
-    						            if($val === " ")
-        						            Delete($ids[$key]);
+    						            if($val === " "){
+    						                if(!$keepFilled)
+        						                Delete($ids[$key]);
+    						            }
     						            else
         						            Update_Val($ids[$key], $val);
     						    }
     							else{ // Ordinary attribute of some base type
     							    # issue #5442: BOOLEAN "-1"/false пишется как «нет»; пробел (пусто) - не писать
-						            if($GLOBALS["base"][$key] === "11" /* BOOLEAN */ && ($val === ""))
+						            if($GLOBALS["base"][$key] === "11" /* BOOLEAN */ && ($val === "")){
 						                # issue #4140: an earlier line of this file may have queued a value for this column
-						                Drop_batch_column($new_id, BATCH_SCALAR, $key);
+						                if(!$keepFilled)
+						                    Drop_batch_column($new_id, BATCH_SCALAR, $key);
+						            }
 						            elseif($val !== " ")
         							    // Insert($new_id, 1, $key, $val, "Import plain req");
     								    Insert_batch($new_id, 1, $key, $val, "Import plain req", BATCH_SCALAR);
-    								else
+    								elseif(!$keepFilled)
     								    Drop_batch_column($new_id, BATCH_SCALAR, $key);
     							}
     						}
     				    }
     					# issue #4140: the batch is flushed between records only, so the requisites of a record
     					# are either wholly pending or wholly stored - never half of its unique key
+    					if(!isset($existing))
+    					    $stat["created"]++;
+    					elseif($GLOBALS["IMPORT_WRITES"] > $writes)
+    					    $stat["updated"]++;
+    					else
+    					    $stat["unchanged"]++;
     					Maybe_flush_batch("Plain import #$count");
     				}
+    				# issue #5673: счётчики строк — в ответ. Пробный прогон на этом заканчивается:
+    				# в базу ничего не записано, сводки в журнале нет.
+    				if(!empty($GLOBALS["IMPORT_DRY"])){
+    				    unset($GLOBALS["LOG_IMPORT"]);
+    				    fclose($handle);
+    				    Json_die(json_encode(array("dryRun" => 1, "import" => $stat
+    				                            , "warning" => isset($GLOBALS["warning"]) ? $GLOBALS["warning"] : "")
+    				                        , JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE));
+    				}
+    				$GLOBALS["GLOBAL_VARS"]["api"]["import"] = $stat;
 				}
 				else
 				while(!feof($handle)){
@@ -11211,6 +11321,8 @@ function Insert_batch($up, $ord, $t, $val, $message, $multi=BATCH_ASIS){
 	}
 	if(!isset($GLOBALS["SQLbatchLen"]))
 		$GLOBALS["SQLbatchLen"] = 0;
+	if(isset($GLOBALS["IMPORT_WRITES"]))	# issue #5673: импорт DATA считает записи строки
+		$GLOBALS["IMPORT_WRITES"]++;
 	switch($multi){
 		case BATCH_SCALAR: $col = $t;   $slot = 0;  break;
 		case BATCH_REF:    $col = $val; $slot = 0;  break;
@@ -11253,6 +11365,11 @@ function Maybe_flush_batch($message){
 # Glues the batch into a single INSERT and runs it
 function Flush_batch($message){
 	global $z;
+	if(!empty($GLOBALS["IMPORT_DRY"])){	# issue #5673: в пробном прогоне батч не пишется, а индекс ключей файла остаётся
+		unset($GLOBALS["SQLbatch"]);
+		$GLOBALS["SQLbatchLen"] = 0;
+		return;
+	}
 	$values = "";
 	foreach($GLOBALS["SQLbatch"] as $up => $byMulti)
 		foreach($byMulti as $byCol)
@@ -11266,9 +11383,20 @@ function Flush_batch($message){
     	exec_sql("INSERT INTO $z (up, ord, t, val) VALUES ".$values, "Close batch: $message");
 }
 # Inserts a new value and returns the ID it got
+# issue #5673: пробный прогон импорта. Флаг ставит только ветка импорта DATA (dryRun), и запрос
+# заканчивается ответом со счётчиками. Пока флаг стоит, функции записи ничего не пишут: Insert
+# отдаёт отрицательный id-заглушку, остальные выходят сразу. IMPORT_WRITES считает записи, которые
+# были бы сделаны: по нему строка файла относится к «обновлено» или «без изменений». Проверка флага
+# стоит в каждой функции записи — так они не зависят от других функций ядра.
 function Insert($up, $ord, $t, $val, $message)
 {
 	global $connection, $z;
+	if(isset($GLOBALS["IMPORT_WRITES"]))	# issue #5673: импорт DATA считает записи строки
+		$GLOBALS["IMPORT_WRITES"]++;
+	if(!empty($GLOBALS["IMPORT_DRY"])){	# issue #5673: пробный прогон импорта — id-заглушка
+		$GLOBALS["IMPORT_DRY_ID"] = isset($GLOBALS["IMPORT_DRY_ID"]) ? $GLOBALS["IMPORT_DRY_ID"] - 1 : -1;
+		return $GLOBALS["IMPORT_DRY_ID"];
+	}
 	exec_sql("INSERT INTO $z (up, ord, t, val) VALUES ($up, $ord, $t, '".addcslashes($val, "\\\'")."')", "Insert: $message");
 	return $GLOBALS["insert_id"];  # снят в Exec_sql до SELECT журнала
 }
@@ -11276,11 +11404,19 @@ function Insert($up, $ord, $t, $val, $message)
 function UpdateTyp($id, $t)
 {
 	global $z;
+	if(isset($GLOBALS["IMPORT_WRITES"]))	# issue #5673: импорт DATA считает записи строки
+		$GLOBALS["IMPORT_WRITES"]++;
+	if(!empty($GLOBALS["IMPORT_DRY"]))	# issue #5673: пробный прогон импорта — не писать
+		return;
 	Exec_sql("UPDATE $z SET t=$t WHERE id=$id", "Update Typ");
 }
 # Update the value
 function Update_Val($id, $val){
 	global $z;
+	if(isset($GLOBALS["IMPORT_WRITES"]))	# issue #5673: импорт DATA считает записи строки
+		$GLOBALS["IMPORT_WRITES"]++;
+	if(!empty($GLOBALS["IMPORT_DRY"]))	# issue #5673: пробный прогон импорта — не писать
+		return;
 	Exec_sql("UPDATE $z SET val='".addslashes($val)."' WHERE id=$id", "Update Val");
 }
 
@@ -14372,9 +14508,12 @@ function checkDuplicatedReqs($id, $t){
     while($row = mysqli_fetch_array($data_set))
         Delete($row["id"]);
 }
-function UniqueKeyReqs($typ){
+# $onlyReq — один реквизит таблицы как ключ, независимо от его отметки «ключ» (issue #5673: ключ
+# обновления, выбранный при загрузке файла).
+function UniqueKeyReqs($typ, $onlyReq=0){
 	global $z;
 	$typ = (int)$typ;
+	$onlyReq = (int)$onlyReq;
 	$reqs = array();
 	$sql = "SELECT req.id, req.t, req.val attrs"
 			.", CASE WHEN req.t=1 THEN 1 ELSE refs.id END ref_id"
@@ -14382,10 +14521,10 @@ function UniqueKeyReqs($typ){
 			." FROM $z req"
 			." LEFT JOIN $z typs ON typs.id=req.t AND req.t!=1"
 			." LEFT JOIN $z refs ON refs.id=typs.t AND refs.t!=refs.id"
-			." WHERE req.up=$typ ORDER BY req.ord";
+			." WHERE req.up=$typ".($onlyReq ? " AND req.id=$onlyReq" : "")." ORDER BY req.ord";
 	$data_set = Exec_sql($sql, "Get unique key reqs");
 	while($row = mysqli_fetch_array($data_set))
-		if(FieldAttrsHasKey($row["attrs"])){
+		if($onlyReq || FieldAttrsHasKey($row["attrs"])){
 			$row["id"] = (int)$row["id"];
 			$row["ref_id"] = is_null($row["ref_id"]) ? 0 : (int)$row["ref_id"];
 			$row["multi"] = FieldAttrsHasMulti($row["attrs"]);
