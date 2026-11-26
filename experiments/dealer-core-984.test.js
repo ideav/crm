@@ -1,4 +1,4 @@
-// rules: none (demo #5733)
+// rules: none (defect #5733)
 // B2B-портал дилера (демо-копия, ideav/backlogram#984): персональная цена, маржа, остатки, дебиторка, проверка заказа, статусы, отчёт дилера.
 const test = require('node:test');
 const assert = require('node:assert');
