@@ -163,6 +163,9 @@
         var machineTable = meta.filter(function(x) { return String(x.id) === String(t.machine.id); })[0];
         var jobTable = meta.filter(function(x) { return String(x.id) === String(t.dieJob.id); })[0];
         var fixedReq = extra.sreq(jobTable, 'Зафиксировано');
+        // сколько валов одного номера в цехе — необязательный реквизит «Количество» у «Вала»; нет — по одному (#5720)
+        var cylTable = meta.filter(function(x) { return String(x.id) === String(t.cylinder.id); })[0];
+        var shaftCount = C.shaftCounts(r[3], extra.sreq(cylTable, 'Количество, шт') || extra.sreq(cylTable, 'Количество'));
         var machines = C.machinesFromRecords(r[6], t, { turretReq: extra.sreq(machineTable, 'Туррель'),
             minCylinderReq: extra.sreq(machineTable, 'Мин. вал'), maxCylinderReq: extra.sreq(machineTable, 'Макс. вал'),
             stopBasesReq: extra.sreq(machineTable, 'Стоп-лист основы'), minSeriesReq: extra.sreq(machineTable, 'Мин. метраж серии, м'),
@@ -192,15 +195,33 @@
         this.state = {
             tables: t, settings: settings, rows: rows, jobs: jobs, machines: machines, dies: dies, dieInfo: diInfo, mr: mr, rolls: rolls, queue: queue,
             cover: cover, groups: groups, positions: positions, cutters: cutters, sleeveTasks: sleeveTasks, sleeveTable: st,
-            sleeveReport: Array.isArray(r[11]), now: r[14], jobById: {}, fixedReq: fixedReq
+            sleeveReport: Array.isArray(r[11]), now: r[14], jobById: {}, fixedReq: fixedReq, shaftCount: shaftCount,
+            posById: {}, dieById: dieById, series: C.seriesFootage(openJobs)
         };
         var s = this.state;
         jobs.forEach(function(j) { s.jobById[j.id] = j; });
+        positions.forEach(function(p) { if (p.id) s.posById[p.id] = p; });
         s.openRevs = C.openRevsByDie(jobs);
         s.flags = {};
         jobs.forEach(function(j) { if (!C.isFinal(j)) s.flags[j.id] = C.jobFlags(j, { dies: diInfo, openRevs: s.openRevs, cover: cover }); });
         this.plan = null;
+        this.planTrace = [];
         this.cur = null;
+    };
+
+    // Размер ножа и этикетки, сырьё, втулка, намотка задания (#5720).
+    AtexDiePlanningApp.prototype.facts = function(j) {
+        var s = this.state;
+        return C.jobFacts(j, s.posById[j.positionId], s.dieById[j.dieId]);
+    };
+    AtexDiePlanningApp.prototype.factsLine = function(j) {
+        var f = this.facts(j), parts = [];
+        if (f.dieSize) parts.push('нож ' + esc(f.dieSize));
+        if (f.labelSize) parts.push('этикетка ' + esc(f.labelSize));
+        if (f.material) parts.push(esc(f.material));
+        if (f.sleeve) parts.push('втулка ' + esc(f.sleeve));
+        return '<div class="atex-dp-cut-line atex-dp-facts">' + parts.join(' · ') +
+            (f.windingIn ? ' <span class="atex-dp-badge is-bad atex-dp-wind-in">НАМОТКА ВНУТРЬ</span>' : '') + '</div>';
     };
 
     AtexDiePlanningApp.prototype.blockedMap = function() {
@@ -355,7 +376,7 @@
                 '<span class="atex-pp-cut-name">' + (it.setupKind === 'cylinder' ? '🔩 ' : it.setupKind === 'sleeve' ? '🧻 ' : '🔪 ') + esc(prevCyl) + '</span></div></div>';
         }
         var changed = this.plan && it && !it.continuation && (String(it.start) !== String(j.start) || String(this.planMachineOf(j.id)) !== String(j.machineId || ''));
-        var cls = 'atex-pp-cut' + (it && it.fixed ? ' is-fixed' : '') + (f.blocks.length ? ' is-unreserved' : '') + (this.selected === j.id ? ' is-active' : '') + (changed ? ' atex-dp-changed' : '');
+        var cls = 'atex-pp-cut' + (this.facts(j).windingIn ? ' atex-dp-is-wind-in' : '') + (it && it.fixed ? ' is-fixed' : '') + (f.blocks.length ? ' is-unreserved' : '') + (this.selected === j.id ? ' is-active' : '') + (changed ? ' atex-dp-changed' : '');
         var runFrom = it ? it.from + it.setup : 0;
         var time = it ? '⏱ ' + clock(runFrom) + ' – ' + clock(runFrom + it.run) + ' · ' + it.run + ' мин' : '⏱ ' + fmtNum(j.duration) + ' мин';
         out += '<div class="' + cls + '" data-job-id="' + esc(j.id) + '"><div class="atex-pp-cut-info">' +
@@ -368,6 +389,8 @@
             '<span class="atex-pp-cut-runs">вал ' + esc(j.cylinder || '—') + ' · ' + fmtNum(j.footage) + ' м · ' + esc(j.material || '') + '</span></div>' +
             '<div class="atex-dp-cut-line">' + (j.pullsPlan ? 'съёмов ' + fmtNum(j.pullsPlan) + ' · ' : '') + (j.rolls ? fmtNum(j.rolls) + ' рул. · ' : '') +
             'формат ' + fmtNum(j.usedFormat || j.minFormat || 0) + ' мм' + (j.due > 0 ? ' · срок ' + esc(j.dueText) : '') + (j.masterRoll ? ' · МР ' + esc(j.masterRoll) : '') + '</div>' +
+            this.factsLine(j) +
+            (it && it.shaftWait ? '<div class="atex-dp-cut-line"><span class="atex-dp-badge is-warn">ждёт вал ' + esc(it.shaftWait.cylinder) + ' со станка «' + esc(this.machineName(it.shaftWait.machineId)) + '»</span></div>' : '') +
             ((it && it.late) || /работ/i.test(j.status) || f.blocks.length || f.warnings.length ? '<div class="atex-dp-cut-line">' + (it && it.late ? '<span class="atex-dp-badge is-bad">просрочка</span> ' : '') +
                 (/работ/i.test(j.status) ? '<span class="atex-dp-badge is-info">в работе</span> ' : '') + this.badges(j) + '</div>' : '') +
             (it && it.continuation ? '<div class="atex-dp-cut-line atex-dp-muted">ℹ продолжение задания, начатого ' + esc(fmtDate(j.start || it.start)) + '</div>' : '') +
@@ -386,7 +409,7 @@
         Object.keys(pm).forEach(function(mid) { pm[mid].items.forEach(function(i) { if (i.jobId === j.id) it = i; }); });
         var after = (di.mileage || 0) + C.jobRevs(j), res = di.resource;
         var row = function(k, v) { return '<tr><th>' + esc(k) + '</th><td>' + v + '</td></tr>'; };
-        var m = s.machines.filter(function(x) { return x.id === (it ? it.machineId : j.machineId); })[0];
+        var m = s.machines.filter(function(x) { return x.id === (it ? it.machineId : j.machineId); })[0], fx = this.facts(j);
         el.innerHTML = '<h3 class="atex-dp-h" style="margin-top:0">Задание ' + esc(j.id) + (j.orderNo ? ' · заказ ' + esc(j.orderNo) : '') + '</h3>' +
             '<table class="atex-dp-table atex-dp-side-table">' +
             row('Станок', esc(m ? m.name : '—')) + row('План-старт', esc(fmtTime(it ? it.start : j.start))) +
@@ -397,10 +420,29 @@
             row('Сырьё', esc(j.material || '—')) + row('Формат', esc(fmtNum(j.usedFormat || j.minFormat || 0)) + ' мм') +
             row('Нож', esc(j.dieNo || '—') + (di.state ? ' · ' + esc(di.state) : '') + (j.streams ? ' · ' + esc(j.streams) + ' руч.' : '')) +
             row('Пробег ножа', esc(fmtNum(di.mileage || 0)) + ' → ' + esc(fmtNum(after)) + ' об' + (res ? ' из ' + esc(fmtNum(res)) : '')) +
-            row('Вал', esc(j.cylinder || '—')) + row('Втулка', esc(j.sleeve || '—') + (j.sleeveWidth ? ' · ' + esc(fmtNum(j.sleeveWidth)) + ' мм' : '')) +
+            row('Вал', esc(j.cylinder || '—') + (it && it.shaftWait ? ' · <span class="atex-dp-badge is-warn">ждёт до ' + esc(fmtTime(it.shaftWait.until)) + ': вал на «' + esc(this.machineName(it.shaftWait.machineId)) + '»</span>' : '')) +
+            row('Втулка', esc(j.sleeve || '—') + (j.sleeveWidth ? ' · ' + esc(fmtNum(j.sleeveWidth)) + ' мм' : '')) +
+            row('Размер ножа', esc(fx.dieSize || '—')) + row('Размер этикетки', esc(fx.labelSize || '—')) +
+            row('Намотка', fx.windingIn ? '<span class="atex-dp-badge is-bad">НАМОТКА ВНУТРЬ</span>' : esc(fx.winding || '—')) +
+            C.turretVerdicts(j, s.machines, s.settings, s.series[j.id]).map(function(v) {
+                return row('Туррель «' + v.name + '»', v.ok ? 'подходит' : '<span class="atex-dp-badge is-warn">не подходит</span> ' + esc(v.reason));
+            }).join('') +
             row('Мастер-рулон', esc(j.masterRoll || '—')) + row('Статус', esc(j.status || '—')) + '</table>' +
+            this.whyHtml(j) +
             (f.blocks.length || f.warnings.length ? '<div style="margin-top:8px">' + this.badges(j) + '</div>' : '') +
             '<p class="atex-dp-muted">Пробег пишет только пульт высечки движениями; здесь — прогноз.</p>';
+    };
+
+    AtexDiePlanningApp.prototype.machineName = function(id) {
+        var m = this.state.machines.filter(function(x) { return String(x.id) === String(id); })[0];
+        return m ? m.name || m.id : String(id || '');
+    };
+    // Почему задание там, где стоит: решения «Упорядочить» по этому заданию (#5720).
+    AtexDiePlanningApp.prototype.whyHtml = function(j) {
+        var lines = (this.planTrace || []).filter(function(r) { return r.jobId === j.id; });
+        if (!lines.length) return '';
+        return '<details class="atex-dp-why"><summary>Почему так поставлено (' + lines.length + ')</summary><ul>' +
+            lines.map(function(r) { return '<li>' + esc(r.text) + '</li>'; }).join('') + '</ul></details>';
     };
 
     // Подсказка к станку: валы, стоп-листы, правила серии/ролика/втулки, туррель (#5428).
@@ -736,7 +778,11 @@
     // Упорядочить: показать план.
     AtexDiePlanningApp.prototype.doOrder = function() {
         var s = this.state;
-        this.plan = C.orderQueue({ jobs: s.jobs, machines: s.machines, from: s.now, settings: s.settings, blocked: this.blockedMap() });
+        var log = [];
+        this.plan = C.orderQueue({ jobs: s.jobs, machines: s.machines, from: s.now, settings: s.settings, blocked: this.blockedMap(),
+            shaftCount: s.shaftCount, trace: function(rec) { log.push(rec); } });
+        this.planTrace = log;
+        this.printTrace(log);
         var cal = C.createCalendar(s.settings), first = null;
         Object.keys(this.plan.machines).forEach(function(id) {
             this.plan.machines[id].items.forEach(function(i) { if (!i.done && !i.fixed && (first == null || i.start < first)) first = i.start; });
@@ -747,6 +793,23 @@
         this.message('План построен: заданий ' + this.plan.summary.jobs + ', изменится ' + n + ', не размещено ' + this.plan.unplaced.length + ', просрочек ' + this.plan.summary.late + '. ' +
             (n ? 'Проверьте и нажмите «Применить».' : 'Записанный план совпадает с расчётным — записывать нечего.'), this.plan.unplaced.length || this.plan.summary.late ? 'warn' : 'ok');
         this.render();
+    };
+
+    // Логика «Упорядочить» в консоли браузера (#5720): каждое решение — строкой; по заданию или заказу —
+    // atexDieWhy('3515') в консоли.
+    AtexDiePlanningApp.prototype.printTrace = function(log) {
+        if (typeof console === 'undefined' || !console.log) return;
+        var group = console.groupCollapsed || console.log, end = console.groupEnd || function() {};
+        group.call(console, '[die-planning] «Упорядочить»: логика плана — ' + log.length + ' решений. По заданию или заказу: atexDieWhy("3515")');
+        log.forEach(function(r) { console.log(r.text); });
+        end.call(console);
+        var root = typeof window !== 'undefined' ? window : null;
+        if (root) root.atexDieWhy = function(q) {
+            q = String(q == null ? '' : q).trim();
+            var hits = log.filter(function(r) { return r.jobId === q || r.text.indexOf('заказ ' + q + ')') >= 0 || r.text.indexOf('задание ' + q + ' ') >= 0; });
+            hits.forEach(function(r) { console.log(r.text); });
+            return hits.length;
+        };
     };
 
     AtexDiePlanningApp.prototype.changedItems = function() {

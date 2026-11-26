@@ -309,14 +309,65 @@
         return a.materialId && a.materialId === b.materialId ? 3 : 2;
     }
 
+    // Ключ вала задания: id записи «Вал» (номер вала = число зубьев), без id — номер.
+    function shaftKey(job) {
+        if (job && job.cylinderId) return 'id:' + job.cylinderId;
+        return job && num(job.cylinder) > 0 ? 'n:' + num(job.cylinder) : '';
+    }
+    // Время для журнала планирования: «дд.мм чч:мм» по часовому поясу настроек.
+    function traceTime(ts, s) {
+        if (!(ts > 0)) return '—';
+        var d = new Date((ts + s.tzOffsetMin * 60) * 1000), p = function(n) { return (n < 10 ? '0' : '') + n; };
+        return p(d.getUTCDate()) + '.' + p(d.getUTCMonth() + 1) + ' ' + p(d.getUTCHours()) + ':' + p(d.getUTCMinutes());
+    }
+    function traceLabel(j) {
+        return 'задание ' + j.id + (j.orderNo ? ' (заказ ' + j.orderNo + ')' : '') + ' вал ' + (j.cylinder || '—') + ' нож ' + (j.dieNo || '—') +
+            (j.due > 0 ? ' срок ' + (j.dueText || '') : '');
+    }
+
+    // inp.trace(rec) — журнал решений (#5720): rec = { jobId, machineId, text }; без функции журнал не ведётся.
+    // inp.shaftCount — { id вала: сколько таких валов в цехе }; не указано — один. Один вал не стоит
+    // на двух станках одновременно: задание ждёт, пока вал освободится на другом станке (#5720).
     function orderQueue(inp) {
         var s = withDefaults(inp.settings), cal = createCalendar(s);
         var from = inp.from, blocked = inp.blocked || {}, jobs = inp.jobs || [], machines = inp.machines || [];
-        var st = {}, order = [];
+        var trace = typeof inp.trace === 'function' ? inp.trace : null, shaftCount = inp.shaftCount || {};
+        var st = {}, order = [], jobById = {};
         machines.forEach(function(m) {
             st[m.id] = { machine: m, cursor0: cal.cursorAt(from), prev0: null, fixed: [], seq: [], cursor: null, prev: null };
             order.push(m.id);
         });
+        jobs.forEach(function(j) { jobById[j.id] = j; });
+        function say(j, machineId, text) { if (trace) trace({ jobId: j ? String(j.id) : '', machineId: machineId ? String(machineId) : '', text: text }); }
+        function mName(id) { return (st[id] && st[id].machine.name) || String(id); }
+        function tt(ts) { return traceTime(ts, s); }
+        function curTs(c) { c = cal.normalize(c); return cal.dayTs(c.day, s.dayStartMin + c.used); }
+
+        // Занятость валов: { ключ вала: [{ start, end, machineId, jobId }] }; null — валы не проверяются
+        // (перестановки внутри станка в improve), иначе place() ждёт свободный вал.
+        var shafts = null;
+        function shaftAdd(j, item, machineId) {
+            var k = shaftKey(j);
+            if (!k || !shafts) return;
+            (shafts[k] = shafts[k] || []).push({ start: item.start, end: item.end, machineId: String(machineId), jobId: String(j.id) });
+        }
+        function shaftReset() {
+            shafts = {};
+            order.forEach(function(id) { st[id].fixed.forEach(function(it) { if (jobById[it.jobId]) shaftAdd(jobById[it.jobId], it, id); }); });
+        }
+        function shaftCap(j) { var c = num(shaftCount[j.cylinderId]); return c > 0 ? c : 1; }
+        // Вал занят на других станках в [a, b): валов этого номера не хватает — самый ранний освобождающийся.
+        function shaftBlock(j, machineId, a, b) {
+            var list = (shafts[shaftKey(j)] || []).filter(function(i) {
+                return i.machineId !== String(machineId) && i.jobId !== String(j.id) && i.start < b && i.end > a;
+            });
+            if (list.length < shaftCap(j)) return null;
+            return list.sort(function(x, y) { return x.end - y.end; })[0];
+        }
+        function shaftUsedBetween(j, machineId, a, b) {
+            if (!(b > a)) return false;
+            return (shafts[shaftKey(j)] || []).some(function(i) { return i.machineId !== String(machineId) && i.start < b && i.end > a; });
+        }
 
         function buildItem(job, segs, setup, kind, run, fixed) {
             var last = segs[segs.length - 1];
@@ -325,9 +376,27 @@
         }
         function tagSegs(segs, jobId) { segs.forEach(function(g) { g.jobId = jobId; }); return segs; }
 
-        // Размещение задания после prev с курсора cur.
+        // Размещение задания после prev с курсора cur. Валы проверяются — задание ждёт, пока вал
+        // освободится на другом станке; вал побывал на другом станке после prev — снова смена вала.
         function place(cur, prev, job, machine) {
-            var kind = setupKind(prev, job), setup = setupMinutesOfKind(kind, s, machine), run = jobRunMinutes(job, s), segs = [], c = cur;
+            var r = placeRaw(cur, prev, job, machine, false);
+            if (!shafts || !shaftKey(job)) return r;
+            var t0 = curTs(cur), wait = null, remount = false;
+            for (var g = 0; g < 2000; g++) {
+                if (!remount && prev && r.item.setupKind !== 'cylinder' && shaftUsedBetween(job, machine.id, t0, r.item.start)) {
+                    remount = true; r = placeRaw(cur, prev, job, machine, true); continue;
+                }
+                var b = shaftBlock(job, machine.id, r.item.start, r.item.end);
+                if (!b) break;
+                wait = b; cur = floorCur(cur, cal.cursorAt(b.end));
+                r = placeRaw(cur, prev, job, machine, remount);
+            }
+            if (wait) r.item.shaftWait = { until: wait.end, machineId: wait.machineId, jobId: wait.jobId, cylinder: String(job.cylinder || '') };
+            if (remount) r.item.remount = true;
+            return r;
+        }
+        function placeRaw(cur, prev, job, machine, forceCylinder) {
+            var kind = forceCylinder ? 'cylinder' : setupKind(prev, job), setup = setupMinutesOfKind(kind, s, machine), run = jobRunMinutes(job, s), segs = [], c = cur;
             if (setup > 0) { var a = cal.advance(c, setup, 'setup-' + kind); segs = segs.concat(a.segments); c = a.cursor; }
             if (run > 0 || !segs.length) { var b = cal.advance(c, run, 'run'); segs = segs.concat(b.segments); c = b.cursor; }
             tagSegs(segs, job.id);
@@ -427,6 +496,7 @@
         function settle(x) {
             while (x.pend.length && curKey(x.cursor) >= curKey(anchorDay[x.pend[0].id])) {
                 var j = x.pend.shift(), t = place(floorCur(x.cursor, anchorDay[j.id]), x.prev, j, x.machine);
+                shaftAdd(j, t.item, x.machine.id);
                 x.seq.push(j); x.cursor = t.cursor; x.prev = j;
             }
         }
@@ -448,16 +518,19 @@
         function commitOn(x, j, r) {
             for (var i = 0; i < r.flush; i++) {
                 var a = x.pend.shift(), ta = place(floorCur(x.cursor, anchorDay[a.id]), x.prev, a, x.machine);
+                shaftAdd(a, ta.item, x.machine.id);
                 x.seq.push(a); x.cursor = ta.cursor; x.prev = a;
             }
+            shaftAdd(j, r.t.item, x.machine.id);
             x.seq.push(j); x.cursor = r.t.cursor; x.prev = j;
             settle(x);
         }
+        shaftReset();
         order.forEach(function(id) { settle(st[id]); });
 
         // open — { id туррели: курсор, с которого она берёт неподходящие задания } (проход 2) или null.
         function assignOne(j, open, sink) {
-            var best = null, turret = null, reasons = [], fits = turrets.some(function(id) { return turretFits(j, st[id].machine, series[j.id]); });
+            var best = null, turret = null, reasons = [], tried = [], fits = turrets.some(function(id) { return turretFits(j, st[id].machine, series[j.id]); });
             // записанное на туррель неподходящее задание остаётся на ней, если туррель свободна сразу
             var pinned = open ? turrets.filter(function(id) {
                 return !fits && String(j.machineId || '') === String(id) && curKey(open[id]) <= curKey(st[id].cursor);
@@ -471,16 +544,25 @@
                     chk = machineAllows(m, Object.assign({}, j, { machineId: open ? m.id : '' }), s, series[j.id]);
                     if (open && chk.ok) cur = floorCur(cur, open[id]);
                 } else chk = machineAllows(m, j, s, series[j.id]);
-                if (!chk.ok) { reasons.push((m.name || id) + ': ' + chk.reason); return; }
+                if (!chk.ok) { reasons.push((m.name || id) + ': ' + chk.reason); tried.push({ name: m.name || id, reason: chk.reason }); return; }
                 var r = tryOn(x, j, cur), t = r.t;
+                tried.push({ name: m.name || id, end: t.item.end, setup: t.item.setup, wait: t.item.shaftWait });
                 var better = !best || t.item.end < best.r.t.item.end || (t.item.end === best.r.t.item.end && t.item.setup < best.r.t.item.setup);
                 if (better) best = { id: id, r: r };
                 if (m.turret && (!turret || t.item.end < turret.r.t.item.end)) turret = { id: id, r: r };
             });
             // подходящее туррели — на туррель, если там оно не уходит в просрочку (или и так опаздывает везде)
+            var why = 'раньше всех заканчивается';
             if (turret && best && turret.id !== best.id && fits) {
                 var due = num(j.due);
-                if (!(due > 0) || turret.r.t.item.end <= due || best.r.t.item.end > due) best = turret;
+                if (!(due > 0) || turret.r.t.item.end <= due || best.r.t.item.end > due) { best = turret; why = 'подходит туррели и не уходит на ней в просрочку'; }
+            }
+            if (trace) {
+                var head = traceLabel(j) + (open ? ' [проход 2]' : '') + (fits ? ' — подходит туррели' : '') + (pinned ? ' — записано на туррель, она свободна' : '');
+                say(j, best ? best.id : '', head + ': ' + tried.map(function(c) {
+                    return c.reason ? c.name + ' — нельзя: ' + c.reason : c.name + ' — конец ' + tt(c.end) + ' (наладка ' + c.setup + ' мин' +
+                        (c.wait ? ', ждёт вал ' + c.wait.cylinder + ' до ' + tt(c.wait.until) + ' с «' + mName(c.wait.machineId) + '»' : '') + ')';
+                }).join('; ') + (best ? ' → «' + mName(best.id) + '»: ' + why : ' → не размещено'));
             }
             if (!best) { sink.push({ jobId: j.id, reasons: reasons.length ? reasons : ['нет станков'] }); return; }
             commitOn(st[best.id], j, best.r);
@@ -504,6 +586,7 @@
                 x.queueIds = {};
                 x.queue.forEach(function(j) { queued[j.id] = true; x.queueIds[j.id] = true; });
             });
+            shaftReset();
             order.forEach(function(id) { var x = st[id]; x.seq = []; x.cursor = x.cursor0; x.prev = x.prev0; x.pend = byMachineAnchored[id].slice(); settle(x); });
             turrets.forEach(function(id) {
                 var x = st[id];
@@ -516,6 +599,7 @@
             var x = st[id];
             while (x.pend.length) {
                 var a = x.pend.shift(), ta = place(floorCur(x.cursor, anchorDay[a.id]), x.prev, a, x.machine);
+                shaftAdd(a, ta.item, x.machine.id);
                 x.seq.push(a); x.cursor = ta.cursor; x.prev = a;
             }
         });
@@ -551,25 +635,64 @@
                 var trial = seq.slice(), moved = trial.splice(bestQ, 1)[0];
                 trial.splice(p + 1, 0, moved);
                 var t = runSeq(x, trial);
-                if (t.setupTotal >= base.setupTotal) continue;
-                var ends = {};
+                var what = 'группировка: после ' + traceLabel(cur) + ' поставить ' + traceLabel(moved) + ' вместо ' + traceLabel(seq[p + 1]);
+                if (t.setupTotal >= base.setupTotal) { say(moved, x.machine.id, what + ' — нет: наладка не уменьшается (' + t.setupTotal + ' ≥ ' + base.setupTotal + ' мин)'); continue; }
+                var ends = {}, worse = null;
                 base.items.forEach(function(i) { ends[i.jobId] = i.end; });
                 var ok = t.items.every(function(i) {
                     if (!(i.due > 0)) return true;
-                    return i.end <= Math.max(ends[i.jobId], i.due);
+                    if (i.end <= Math.max(ends[i.jobId], i.due)) return true;
+                    worse = i; return false;
                 });
-                var days = dayOfItems(t);
-                if (ok) ok = Object.keys(days).every(function(k) { return days[k] <= baseDays[k]; });
-                if (ok) { seq = trial; base = t; baseDays = days; }
+                var days = dayOfItems(t), shifted = null;
+                if (ok) ok = Object.keys(days).every(function(k) { if (days[k] <= baseDays[k]) return true; shifted = k; return false; });
+                if (ok) { say(moved, x.machine.id, what + ' — да: наладка ' + base.setupTotal + ' → ' + t.setupTotal + ' мин'); seq = trial; base = t; baseDays = days; }
+                else if (worse) say(moved, x.machine.id, what + ' — нет: ' + traceLabel(jobById[worse.jobId] || { id: worse.jobId }) + ' закончится ' + tt(worse.end) +
+                    ' вместо ' + tt(ends[worse.jobId]) + (ends[worse.jobId] > worse.due ? ' — оно уже просрочено, а просроченное задание группировка не задерживает' : ' — позже срока ' + tt(worse.due)) +
+                    ' (наладка сэкономила бы ' + (base.setupTotal - t.setupTotal) + ' мин)');
+                else say(moved, x.machine.id, what + ' — нет: 🔒 задание ' + shifted + ' сдвинется на другой день');
             }
             x.seq = seq;
             return base;
         }
 
+        // Порядок на станке — improve без учёта валов; затем раскладка всех станков сразу по времени:
+        // очередное задание того станка, что начинает раньше, ждёт свой вал, если он на другом станке.
+        function layoutAll() {
+            shaftReset();
+            var lanes = order.map(function(id) { var x = st[id]; return { x: x, i: 0, cur: x.cursor0, prev: x.prev0, items: [] }; });
+            for (;;) {
+                var pick = null;
+                lanes.forEach(function(L) {
+                    if (L.i >= L.x.seq.length) return;
+                    var j = L.x.seq[L.i], cur = L.cur;
+                    if (isAnchored(j)) cur = floorCur(cur, anchorDay[j.id]);
+                    else if (L.x.openAt && L.x.queueIds && !L.x.queueIds[j.id]) cur = floorCur(cur, L.x.openAt);
+                    var t = place(cur, L.prev, j, L.x.machine);
+                    if (!pick || t.item.start < pick.t.item.start) pick = { L: L, j: j, t: t };
+                });
+                if (!pick) break;
+                var L = pick.L, it = pick.t.item;
+                it.machineId = L.x.machine.id;
+                if (lockedSet[pick.j.id] === 'fixed') it.locked = true;
+                if (it.shaftWait) say(pick.j, it.machineId, traceLabel(pick.j) + ' на «' + mName(it.machineId) + '» ждёт вал ' + it.shaftWait.cylinder + ' до ' + tt(it.shaftWait.until) +
+                    ': он на «' + mName(it.shaftWait.machineId) + '» (задание ' + it.shaftWait.jobId + ')');
+                if (it.remount) say(pick.j, it.machineId, traceLabel(pick.j) + ' на «' + mName(it.machineId) + '»: вал побывал на другом станке — снова смена вала');
+                shaftAdd(pick.j, it, it.machineId);
+                L.items.push(it); L.cur = pick.t.cursor; L.prev = pick.j; L.i++;
+            }
+            var res = {};
+            lanes.forEach(function(L) { res[L.x.machine.id] = L.items; });
+            return res;
+        }
+        shafts = null;
+        order.forEach(function(id) { improve(st[id]); });
+        var laid = layoutAll();
+
         var out = {}, summary = { jobs: 0, late: 0, setupMinutes: 0, cylinderChanges: 0 };
         order.forEach(function(id) {
-            var x = st[id], planned = improve(x);
-            var items = x.fixed.concat(planned.items).sort(function(a, b) { return a.start - b.start; });
+            var x = st[id];
+            var items = x.fixed.concat(laid[id]).sort(function(a, b) { return a.start - b.start; });
             out[id] = { items: items };
             items.forEach(function(i) {
                 if (i.done) return;
@@ -1018,6 +1141,42 @@
         if (m) return Math.floor(num(m[1]) * 25.4 + 1e-9);
         return 0;
     }
+    // Карточка задания (#5720): размер ножа и этикетки, сырьё, втулка, намотка внутрь.
+    // pos — позиция (label-orders positionFromRow), die — нож (buildDieIndex). Круглый — тип с «D»
+    // в начале: «D 52 (80)», «D х 40 (76)», «D51».
+    function jobFacts(job, pos, die) {
+        var size = function(w, l, round) {
+            w = num(w); l = num(l);
+            if (!(w > 0)) return '';
+            return round ? 'D' + round1(w) : l > 0 ? round1(w) + '×' + round1(l) : String(round1(w));
+        };
+        var isRound = function(text) { return /^\s*[DdДд]\s*(?:[хХxX×*]\s*)?\d/.test(String(text || '')); };
+        var winding = String((pos && pos.winding) || '').trim();
+        var d = sleeveDiameterMm(job && job.sleeve), w = num(job && job.sleeveWidth);
+        return {
+            dieSize: die ? size(die.width, die.length, isRound(die.typeName)) : '',
+            labelSize: pos ? size(pos.width, pos.length, isRound(pos.knifeType)) : '',
+            material: String((job && job.material) || (pos && pos.material) || ''),
+            sleeve: d > 0 ? 'Ø' + d + (w > 0 ? ' · ' + round1(w) + ' мм' : '') : w > 0 ? round1(w) + ' мм' : '',
+            winding: winding,
+            windingIn: /внутр/i.test(winding)
+        };
+    }
+    // Туррели и задание: [{ machineId, name, ok, reason }] — проходит ли задание правила туррели
+    // без записи диспетчера (что «Упорядочить» решает само).
+    function turretVerdicts(job, machines, settings, seriesM) {
+        return (machines || []).filter(function(m) { return m.turret; }).map(function(m) {
+            var chk = machineAllows(m, Object.assign({}, job, { machineId: '' }), withDefaults(settings), seriesM);
+            return { machineId: m.id, name: m.name || m.id, ok: chk.ok, reason: chk.ok ? '' : String(chk.reason || '').replace(/^туррель: /, '') };
+        });
+    }
+    // Сколько валов каждого номера: записи «Вал» и id реквизита количества → { id вала: шт }; пусто — по одному.
+    function shaftCounts(cylinderRecs, countReq) {
+        var out = {};
+        if (!countReq) return out;
+        (cylinderRecs || []).forEach(function(c) { var n = num(c && c.reqs ? c.reqs[countReq] : 0); if (n > 0) out[String(c.id)] = Math.floor(n); });
+        return out;
+    }
     function pickCutter(cutters, diameter) {
         var d = num(diameter);
         if (!(d > 0)) return null;
@@ -1137,6 +1296,7 @@
             jobFlags: jobFlags, jobRevs: jobRevs, openRevsByDie: openRevsByDie, coverJobs: coverJobs, coverOrder: coverOrder, planReservations: planReservations,
             toolLoad: toolLoad, ganttDay: ganttDay, recordedPlan: recordedPlan, inScope: inScope, coverGroups: coverGroups, positionPickFields: positionPickFields, queueGrid: queueGrid, turretFits: turretFits, seriesFootage: seriesFootage, cylinderInRange: cylinderInRange, cylinderRangeText: cylinderRangeText, formJobs: formJobs, jobCreateFields: jobCreateFields, jobPlanFields: jobPlanFields,
             sleeveDiameterMm: sleeveDiameterMm, pickCutter: pickCutter, sleevePlan: sleevePlan,
+            jobFacts: jobFacts, turretVerdicts: turretVerdicts, shaftCounts: shaftCounts, shaftKey: shaftKey,
             sleeveCreateFields: sleeveCreateFields, sleeveUpdateFields: sleeveUpdateFields,
             refIds: refIds, machinesFromRecords: machinesFromRecords, buildDieIndex: buildDieIndex, dieInfo: dieInfo, resolveSleeveTask: resolveSleeveTask
         }
