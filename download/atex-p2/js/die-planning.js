@@ -108,6 +108,8 @@
             // реквизит-ссылка носит имя типа («Основа сырья»), а своё имя — в псевдониме («Стоп-лист основы»): ищем и по нему (#5553)
             var sreq = function(tb, name) { var r = ((tb && tb.reqs) || []).filter(function(x) { return String(x.val).trim() === name || String((x.field_attrs && x.field_attrs.alias) || '').trim() === name; })[0]; return r ? String(r.id) : ''; };
             var cutterTable = meta.filter(function(x) { return String(x.val).trim() === 'Втулкорез'; })[0] || null;
+            // физические валы — «Серийный номер вала» (ссылка «Вал»), #5720; нет таблицы — по одному валу на типоразмер
+            var serialTable = meta.filter(function(x) { return String(x.val).trim() === 'Серийный номер вала'; })[0] || null;
             var kv = function(tid) { return tid ? c.getJson('object/' + tid + '/?JSON_KV&LIMIT=0,100000').then(LO.kvRecords) : Promise.resolve([]); };
             return Promise.all([
                 c.getJson('report/die_planning?JSON_KV&LIMIT=0,100000'),
@@ -121,9 +123,10 @@
                 MRA.loadState(c),
                 optional(JCA.loadState(c, LP, {})),
                 c.serverNow(),
-                t.dieType ? kv(t.dieType.id) : Promise.resolve([])
+                t.dieType ? kv(t.dieType.id) : Promise.resolve([]),
+                serialTable ? kv(serialTable.id) : Promise.resolve([])
             ]).then(function(r) {
-                self.build(meta, res, { settingsTable: settingsTable, cutterTable: cutterTable, sreq: sreq }, r);
+                self.build(meta, res, { settingsTable: settingsTable, cutterTable: cutterTable, serialTable: serialTable, sreq: sreq }, r);
                 var missing = res.missing.filter(function(m) { return /^(Задание высечки|Нож|Станок высечки|Вал)/.test(m); });
                 if (missing.length) self.message('Не найдено в базе: ' + missing.join('; ') + '. Часть данных не показана.', 'warn');
                 else self.message(note || '', note ? 'ok' : '');
@@ -163,9 +166,13 @@
         var machineTable = meta.filter(function(x) { return String(x.id) === String(t.machine.id); })[0];
         var jobTable = meta.filter(function(x) { return String(x.id) === String(t.dieJob.id); })[0];
         var fixedReq = extra.sreq(jobTable, 'Зафиксировано');
-        // сколько валов одного номера в цехе — необязательный реквизит «Количество» у «Вала»; нет — по одному (#5720)
-        var cylTable = meta.filter(function(x) { return String(x.id) === String(t.cylinder.id); })[0];
-        var shaftCount = C.shaftCounts(r[3], extra.sreq(cylTable, 'Количество, шт') || extra.sreq(cylTable, 'Количество'));
+        // физические валы (#5720): { id, no, cylinderId }; «Применить» пишет выбранный вал в задание
+        var shaftCylReq = extra.sreq(extra.serialTable, 'Вал');
+        var shafts = (r[16] || []).map(function(x) {
+            return { id: String(x.id), no: String(x.val == null ? '' : x.val).trim(), cylinderId: shaftCylReq ? String(C.refIds(x, shaftCylReq)[0] || '') : '' };
+        }).filter(function(x) { return x.cylinderId; });
+        var shaftReq = extra.sreq(jobTable, 'Серийный номер вала');
+        if (shaftReq) t.dieJob.reqs.shaft = shaftReq;
         var machines = C.machinesFromRecords(r[6], t, { turretReq: extra.sreq(machineTable, 'Туррель'),
             minCylinderReq: extra.sreq(machineTable, 'Мин. вал'), maxCylinderReq: extra.sreq(machineTable, 'Макс. вал'),
             stopBasesReq: extra.sreq(machineTable, 'Стоп-лист основы'), minSeriesReq: extra.sreq(machineTable, 'Мин. метраж серии, м'),
@@ -195,7 +202,7 @@
         this.state = {
             tables: t, settings: settings, rows: rows, jobs: jobs, machines: machines, dies: dies, dieInfo: diInfo, mr: mr, rolls: rolls, queue: queue,
             cover: cover, groups: groups, positions: positions, cutters: cutters, sleeveTasks: sleeveTasks, sleeveTable: st,
-            sleeveReport: Array.isArray(r[11]), now: r[14], jobById: {}, fixedReq: fixedReq, shaftCount: shaftCount,
+            sleeveReport: Array.isArray(r[11]), now: r[14], jobById: {}, fixedReq: fixedReq, shafts: shafts,
             posById: {}, dieById: dieById, series: C.seriesFootage(openJobs)
         };
         var s = this.state;
@@ -420,7 +427,7 @@
             row('Сырьё', esc(j.material || '—')) + row('Формат', esc(fmtNum(j.usedFormat || j.minFormat || 0)) + ' мм') +
             row('Нож', esc(j.dieNo || '—') + (di.state ? ' · ' + esc(di.state) : '') + (j.streams ? ' · ' + esc(j.streams) + ' руч.' : '')) +
             row('Пробег ножа', esc(fmtNum(di.mileage || 0)) + ' → ' + esc(fmtNum(after)) + ' об' + (res ? ' из ' + esc(fmtNum(res)) : '')) +
-            row('Вал', esc(j.cylinder || '—') + (it && it.shaftWait ? ' · <span class="atex-dp-badge is-warn">ждёт до ' + esc(fmtTime(it.shaftWait.until)) + ': вал на «' + esc(this.machineName(it.shaftWait.machineId)) + '»</span>' : '')) +
+            row('Вал', esc(j.cylinder || '—') + ((it && it.shaftNo) || j.shaftNo ? ' · <span class="atex-dp-muted">№ ' + esc((it && it.shaftNo) || j.shaftNo) + '</span>' : '') + (it && it.shaftWait ? ' · <span class="atex-dp-badge is-warn">ждёт до ' + esc(fmtTime(it.shaftWait.until)) + ': вал на «' + esc(this.machineName(it.shaftWait.machineId)) + '»</span>' : '')) +
             row('Втулка', esc(j.sleeve || '—') + (j.sleeveWidth ? ' · ' + esc(fmtNum(j.sleeveWidth)) + ' мм' : '')) +
             row('Размер ножа', esc(fx.dieSize || '—')) + row('Размер этикетки', esc(fx.labelSize || '—')) +
             row('Намотка', fx.windingIn ? '<span class="atex-dp-badge is-bad">НАМОТКА ВНУТРЬ</span>' : esc(fx.winding || '—')) +
@@ -780,7 +787,7 @@
         var s = this.state;
         var log = [];
         this.plan = C.orderQueue({ jobs: s.jobs, machines: s.machines, from: s.now, settings: s.settings, blocked: this.blockedMap(),
-            shaftCount: s.shaftCount, trace: function(rec) { log.push(rec); } });
+            shafts: s.shafts, trace: function(rec) { log.push(rec); } });
         this.planTrace = log;
         this.printTrace(log);
         var cal = C.createCalendar(s.settings), first = null;
@@ -819,7 +826,8 @@
             this.plan.machines[mid].items.forEach(function(i) {
                 if (i.fixed || i.done) return;
                 var j = s.jobById[i.jobId], m = s.machines.filter(function(x) { return x.id === mid; })[0];
-                if (j.start !== i.start || j.machineId !== mid || C.num(j.setup) !== i.setup || C.num(j.duration) !== i.run || j.cylinderMissing) out.push({ item: i, job: j, machine: m });
+                if (j.start !== i.start || j.machineId !== mid || C.num(j.setup) !== i.setup || C.num(j.duration) !== i.run || j.cylinderMissing ||
+                    (s.tables.dieJob.reqs.shaft && i.shaftId && String(j.shaftId || '') !== String(i.shaftId))) out.push({ item: i, job: j, machine: m });
             });
         }, this);
         return out;
@@ -841,7 +849,7 @@
                 var t = s.tables;
                 self.run(sub.map(function(i) {
                     var x = i.x;
-                    return function() { return self.client.post('_m_save/' + encodeURIComponent(x.job.id) + '?JSON', C.jobPlanFields(t, { start: x.item.start, machineId: x.machine.id, cylinderId: x.job.cylinderId, setup: x.item.setup, duration: x.item.run })); };
+                    return function() { return self.client.post('_m_save/' + encodeURIComponent(x.job.id) + '?JSON', C.jobPlanFields(t, { start: x.item.start, machineId: x.machine.id, cylinderId: x.job.cylinderId, shaftId: x.item.shaftId, setup: x.item.setup, duration: x.item.run })); };
                 }), 'План записан: ' + sub.length + ' заданий.');
             }
         });

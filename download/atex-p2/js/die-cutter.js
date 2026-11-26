@@ -172,6 +172,7 @@
                 streams: num(r.die_streams),
                 cylinderId: String(r.cylinder_id || ''),
                 cylinder: String(r.cylinder || ''),
+                shaftNo: String(r.shaft_no || '').trim(),   // физический вал, выбранный планированием (#5720)
                 rollId: String(r.master_roll_id || ''),
                 roll: String(r.master_roll || ''),
                 rollLength: num(r.roll_length),
@@ -968,7 +969,7 @@
             var tag = j === q.next ? ' <span class="atex-dc-badge is-info">следующее</span>' : (norm(j.status) === norm(JOB_STATUS.RUNNING) ? ' <span class="atex-dc-badge is-ok">в работе</span>' : '');
             return '<div class="atex-dc-job' + (j.id === self.selectedId ? ' is-picked' : '') + (isDone(j.status) ? ' is-done' : '') + '" data-job-id="' + esc(j.id) + '">' +
                 '<div class="atex-dc-job-top"><span class="atex-dc-job-no">' + esc(j.order ? 'Заказ ' + j.order : 'Задание ' + j.id) + '</span><span class="atex-dc-muted">' + esc(fmtTime(j.start, true)) + '</span></div>' +
-                '<div class="atex-dc-muted">' + esc(j.labelWidth + '×' + j.labelLength + ' мм · нож ' + (j.dieNo || '—') + ' · вал ' + (j.cylinder || '—')) + '</div>' +
+                '<div class="atex-dc-muted">' + esc(j.labelWidth + '×' + j.labelLength + ' мм · нож ' + (j.dieNo || '—') + ' · вал ' + (j.cylinder || '—') + (j.shaftNo ? ' №' + j.shaftNo : '')) + '</div>' +
                 '<div class="atex-dc-muted">' + pullsCount(pr) + tag + '</div></div>';
         };
         el.innerHTML = (q.open.length ? q.open.map(card).join('') : '<div class="atex-dc-empty">Открытых заданий нет.</div>') +
@@ -995,7 +996,7 @@
         html += '<div class="atex-dc-grid">' +
             cell('Этикетка', j.labelWidth + ' × ' + j.labelLength + ' мм' + (j.labelsPerRoll ? ' · ' + fmtNum(j.labelsPerRoll) + ' в рулоне' : '')) +
             cell('Нож', (j.dieNo || '—') + (j.streams ? ' · ' + j.streams + ' руч.' : '')) +
-            cell('Вал', j.cylinder || '—') +
+            cell('Вал', (j.cylinder || '—') + (j.shaftNo ? ' · возьмите вал №' + j.shaftNo : '')) +
             cell('Сырьё', j.material || '—') +
             cell('Мастер-рулон', needsRoll(j) ? 'не выбран' : (j.roll || '—') + (j.rollFormat ? ' · ' + j.rollFormat + ' мм' : '') + (j.rollSource === 'reserve' ? ' · резерв' : '')) +
             cell('Остаток рулона', rest == null ? (String(j.rollRest).trim() === '' ? '—' : fmtM(j.rollRest) + ' м') : fmtM(rest) + ' м') +

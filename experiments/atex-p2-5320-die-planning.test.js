@@ -166,8 +166,8 @@ if (C) (function() {
     var reversed = stable0.map(function(j, i) { return Object.assign({}, j, { start: MON + (10 - i) * 3600 }); });
     assert(sig(order(reversed, [M1, M2])) === sig(st1), 'записанный старт на порядок не влияет: при равных сроках — по номеру задания', sig(order(reversed, [M1, M2])));
     // станки
-    // в цехе два вала 96 (c1) — иначе одному валу на двух станках одновременно не бывать (#5720)
-    var two2 = order([J(1), J(2)], [M1, M2], { shaftCount: { c1: 2 } });
+    // в цехе два вала 96 (c1, серийные 1 и 2) — иначе одному валу на двух станках одновременно не бывать (#5720)
+    var two2 = order([J(1), J(2)], [M1, M2], { shafts: [{ id: 's1', no: '1', cylinderId: 'c1' }, { id: 's2', no: '2', cylinderId: 'c1' }] });
     assert(two2.machines.M1.items.length === 1 && two2.machines.M2.items.length === 1, 'два задания на два станка — по одному на станок (раньше заканчиваем)');
     assert(two2.machines.M2.items[0].start === MON, 'оба стартуют в 08:00');
     var picky = order([J(1)], [{ id: 'M1', maxCylinder: 90, stopMaterials: [] }, M2]);

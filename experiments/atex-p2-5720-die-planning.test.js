@@ -1,7 +1,8 @@
 // ideav/crm#5720 — «Планирование высечки» и вход на рабочее место по итогам встречи 25.11:
 //
-//   1. один вал (номер) не стоит на двух станках одновременно: задание ждёт, пока вал освободится;
-//      количество валов номера — необязательный реквизит «Количество» у «Вала» (shaftCount);
+//   1. физический вал («Серийный номер вала» → «Вал») не стоит на двух станках одновременно:
+//      планировщик сам берёт свободный в это время вал типоразмера и пишет его в задание;
+//      все валы типоразмера заняты — задание ждёт; серийных нет — один вал на типоразмер;
 //   2. журнал «Упорядочить» (inp.trace) объясняет выбор станка и отказ группировки — так видно,
 //      почему между заданиями вала 96 встаёт задание вала 98;
 //   3. почему задание не на туррели — причина правил туррели (turretVerdicts);
@@ -55,9 +56,27 @@ var full = [J(1, { footage: 44 * 455 }), J(2, { footage: 44 * 455, dieId: 'k2' }
 var one = C.orderQueue({ jobs: full, machines: [M1, M2], from: MON, settings: S });
 assert(shaftOverlaps(one, full) === 0, 'один вал 96 — задания этого вала на разных станках не пересекаются по времени',
     JSON.stringify(itemsOf(one).map(function(i) { return [i.mid, i.jobId, i.start, i.end]; })));
-var two = C.orderQueue({ jobs: full, machines: [M1, M2], from: MON, settings: S, shaftCount: { c1: 2 } });
-assert(itemsOf(two).every(function(i) { return i.start === MON; }) && itemsOf(two).length === 2, 'два вала 96 — оба задания стартуют сразу на двух станках',
-    JSON.stringify(itemsOf(two).map(function(i) { return [i.mid, i.jobId, i.start]; })));
+var SH = [{ id: 's7', no: '7', cylinderId: 'c1' }, { id: 's8', no: '8', cylinderId: 'c1' }, { id: 's9', no: '9', cylinderId: 'c2' }];
+var two = C.orderQueue({ jobs: full, machines: [M1, M2], from: MON, settings: S, shafts: SH });
+var twoIt = itemsOf(two);
+assert(twoIt.every(function(i) { return i.start === MON; }) && twoIt.length === 2, 'два вала 96 (серийные 7 и 8) — оба задания стартуют сразу на двух станках',
+    JSON.stringify(twoIt.map(function(i) { return [i.mid, i.jobId, i.start]; })));
+assert(twoIt.map(function(i) { return i.shaftId; }).sort().join() === 's7,s8' && twoIt.every(function(i) { return i.shaftNo === (i.shaftId === 's7' ? '7' : '8'); }),
+    'каждому заданию — свой физический вал с серийным номером', JSON.stringify(twoIt.map(function(i) { return [i.jobId, i.shaftId, i.shaftNo]; })));
+var oneSh = itemsOf(C.orderQueue({ jobs: full, machines: [M1, M2], from: MON, settings: S, shafts: [SH[0]] }));
+assert(oneSh.every(function(i) { return i.shaftId === 's7'; }) && shaftOverlaps({ machines: { a: { items: oneSh.filter(function(i) { return i.mid === 'M1'; }) }, b: { items: oneSh.filter(function(i) { return i.mid === 'M2'; }) } } }, full) === 0,
+    'один серийный вал 96 — оба задания на нём, по времени не пересекаются', JSON.stringify(oneSh.map(function(i) { return [i.mid, i.jobId, i.shaftId, i.start]; })));
+assert(itemsOf(one).every(function(i) { return i.shaftId === ''; }), 'серийных нет — вал не записывается (типоразмер считается одним валом)');
+// подряд на станке — тот же физический вал без новой смены вала
+var row = C.orderQueue({ jobs: [J(1), J(2, { dieId: 'k1' })], machines: [M1], from: MON, settings: S, shafts: SH });
+assert(row.machines.M1.items.map(function(i) { return i.shaftId; }).join() === 's7,s7' && row.machines.M1.items[1].setupKind === 'none',
+    'два задания одного ножа подряд — на одном физическом валу, без смены вала', JSON.stringify(row.machines.M1.items.map(function(i) { return [i.jobId, i.shaftId, i.setupKind]; })));
+// записанный в задании вал у начатого держится
+var rec = C.orderQueue({ jobs: [J(1, { status: 'В работе', machineId: 'M1', start: MON, duration: 120, shaftId: 's8' }), J(2, { dieId: 'k2', footage: 44 * 60 })], machines: [M1, M2], from: MON, settings: S, shafts: SH });
+var r2 = itemsOf(rec).filter(function(i) { return i.jobId === '2'; })[0];
+assert(r2 && r2.shaftId === 's7' && r2.start === MON, 'начатое задание держит записанный вал 8 — другому заданию тут же достаётся свободный вал 7', JSON.stringify(r2));
+var fields = C.jobPlanFields({ dieJob: { id: 'J', reqs: { machine: 'rm', cylinder: 'rc', shaft: 'rs' } } }, { start: 1, machineId: 'M1', cylinderId: 'c1', shaftId: 's7' });
+assert(fields.trs === 's7' && fields.trc === 'c1', '«Применить» пишет физический вал в «Серийный номер вала» задания', JSON.stringify(fields));
 var other = [J(1, { footage: 44 * 455 }), J(2, { footage: 44 * 455, cylinderId: 'c2', cylinder: '98' })];
 assert(itemsOf(C.orderQueue({ jobs: other, machines: [M1, M2], from: MON, settings: S })).every(function(i) { return i.start === MON; }),
     'разные валы — станки работают одновременно');
@@ -67,9 +86,6 @@ var busy = C.orderQueue({ jobs: busyJobs, machines: [M1, M2], from: MON, setting
 var w = itemsOf(busy).filter(function(i) { return i.jobId === '2'; })[0], j1 = itemsOf(busy).filter(function(i) { return i.jobId === '1'; })[0];
 assert(w && j1 && w.start >= j1.end && w.shaftWait && w.shaftWait.machineId === 'M1' && w.shaftWait.cylinder === '96',
     'вал на другом станке — задание ждёт его конца, у задания — отметка «ждёт вал» с номером и станком', JSON.stringify(w));
-var counts = C.shaftCounts([{ id: 'c1', reqs: { q: '2' } }, { id: 'c2', reqs: { q: '' } }, { id: 'c3', reqs: {} }], 'q');
-assert(JSON.stringify(counts) === '{"c1":2}' && JSON.stringify(C.shaftCounts([{ id: 'c1', reqs: { q: '2' } }], '')) === '{}',
-    'количество валов — из реквизита «Вала»; реквизита нет или пусто — по одному', JSON.stringify(counts));
 
 // 2. Группировка задерживает просроченное, если суммарная просрочка не растёт (решение владельца в #5720):
 //    96 → 98 → 96 (все просрочены) становится 96 → 96 → 98; журнал объясняет каждое решение.
