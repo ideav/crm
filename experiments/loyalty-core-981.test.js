@@ -1,4 +1,4 @@
-// rules: none (demo #5734)
+// rules: none (defect #5734)
 // Программа лояльности (демо-копия, ideav/backlogram#981): партии бонусов и сгорание, расчёт чека, конфликт акций, RFM, кампании, обязательства, ручные операции.
 const test = require('node:test');
 const assert = require('node:assert');
