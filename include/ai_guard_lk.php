@@ -153,6 +153,14 @@ function Gd_service_set($db, $cfg){
     $in = is_string($raw) ? json_decode($raw, true) : null;
     return is_array($in) && isset($in["available"]);
 }
+# Действия ЛК над стражем базы идут по одному: расчёт срока и отправка сервису под замком базы,
+# чтобы параллельная оплата или сохранение не отправили сервису устаревший until.
+# Замок снимается сам с концом запроса (соединения).
+function Gd_lock($db){
+    $row = mysqli_fetch_assoc(Exec_sql("SELECT GET_LOCK('guard_".$db."', 20) ok", "Guard lock"));
+    if(!$row || (string)$row["ok"] !== "1")
+        my_die(t9n("[RU]Страж этой базы сейчас настраивается в другом окне — повторите через минуту[EN]The guard is busy, try again in a minute"));
+}
 function Gd_not_applied(){
     return t9n("[RU]Оплата учтена, но сервис ИИ-агента сейчас не ответил — настройка стража не применилась. Нажмите «Сохранить» ещё раз чуть позже.[EN]Saved, but the AI agent service did not respond. Press Save again later.");
 }
@@ -161,6 +169,7 @@ function Gd_not_applied(){
 function Gd_status($db){
     $user = Gd_require_user();
     $own = Cd_own_db($db);
+    Gd_lock($own["db"]);
     $c = Gd_compute(Gd_user_payments($user), $own["db"]);
     $state = $c["until"] === 0 ? "none" : ($c["until"] > time() ? "active" : "expired");
     $agent = aiAgentGuardService() !== null;
@@ -173,6 +182,16 @@ function Gd_status($db){
             "action" => isset($s["action"]) && in_array($s["action"], Gd_actions(), true) ? $s["action"] : "mask",
             "user_toggle" => !array_key_exists("user_toggle", $s) || !empty($s["user_toggle"]),
             "until" => isset($s["until"]) && is_numeric($s["until"]) ? (int)$s["until"] : null);
+        # Срок на сервисе отстал от оплаченного (продление, когда сервис не отвечал) — дослать.
+        if($state === "active" && $settings["until"] !== $c["until"]){
+            list($t, $act) = Gd_fit_plan($c["plan"], $settings["topics"], $settings["action"]);
+            if(Gd_service_set($own["db"], array("enabled" => $settings["enabled"], "topics" => $t, "action" => $act,
+                    "user_toggle" => $settings["user_toggle"], "until" => $c["until"]))){
+                $settings["until"] = $c["until"];
+                $settings["topics"] = $t;
+                $settings["action"] = $act;
+            }
+        }
     }
     $prices = $limits = $rules = array();
     foreach(Gd_plans() as $k => $p){
@@ -208,6 +227,7 @@ function Gd_action_set($db, $req){
     if(!in_array($action, Gd_actions(), true))
         my_die(t9n("[RU]Неизвестный режим стража[EN]Unknown guard mode"));
     $userToggle = !isset($req["user_toggle"]) || (string)$req["user_toggle"] !== "0";
+    Gd_lock($own["db"]);
     $c = Gd_compute(Gd_user_payments($user), $own["db"]);
     $active = $c["until"] > time();
     if($enabled && !$active)
@@ -237,11 +257,16 @@ function Gd_action_pay($db, $plan, $period){
         my_die(t9n("[RU]Неизвестный тариф стража[EN]Unknown guard plan"));
     if($period !== "month" && $period !== "year")
         my_die(t9n("[RU]Неизвестный период оплаты[EN]Unknown period"));
+    Gd_lock($own["db"]);
     $c = Gd_compute(Gd_user_payments($user), $own["db"]);
     if($plan === "start" && $c["plan"] === "pro" && $c["until"] > time())
         my_die(t9n("[RU]Идёт оплаченный период «Профи» до ".date("d.m.Y", $c["until"])
             .". Продлите «Профи» или оплатите «Старт» после окончания периода.[EN]The Pro period is active; extend Pro or pay Start after it ends"));
     $amount = (int)$plans[$plan][$period];
+    # Списание и запись платежа — одной транзакцией: сбой посреди записи (my_die, обрыв) откатывает
+    # и списание, деньги без платежа не пропадают.
+    if(!mysqli_begin_transaction($GLOBALS["connection"]))
+        my_die(t9n("[RU]Не удалось начать оплату, повторите[EN]Could not start the payment"));
     Exec_sql("UPDATE my SET val=CAST(val AS DECIMAL(15,2))-$amount WHERE up=$user AND t=285 AND CAST(val AS DECIMAL(15,2))>=$amount LIMIT 1", "Guard pay debit");
     if(mysqli_affected_rows($GLOBALS["connection"]) !== 1)
         my_die(t9n("[RU]Недостаточно средств на балансе: нужно $amount ₽. Пополните баланс в разделе «Баланс».[EN]Not enough balance: $amount RUB needed"));
@@ -249,14 +274,21 @@ function Gd_action_pay($db, $plan, $period){
     Insert($id, 1, 1085, GD_PAY_TYPE, "Guard payment type");
     Insert($id, 1, 967, (string)time(), "Guard payment date");
     Insert($id, 1, 1075, "страж $plan $period (".$own["db"].")", "Guard payment notes");
+    if(!mysqli_commit($GLOBALS["connection"]))
+        my_die(t9n("[RU]Оплата не прошла, деньги не списаны. Повторите.[EN]Payment failed, nothing was charged"));
     $c = Gd_compute(Gd_user_payments($user), $own["db"]);
     # Выбор владельца берётся с сервиса и урезается до тарифа; после оплаты страж включён.
+    # Сервис не ответил на чтение — не затираем выбор владельца: настройку дошлёт «Сохранить» или
+    # открытие панели (Gd_status досылает отставший срок).
     $svc = Gd_service_get($own["db"]);
-    $s = ($svc && isset($svc["settings"]) && is_array($svc["settings"])) ? $svc["settings"] : array();
-    list($topics, $action) = Gd_fit_plan($c["plan"], isset($s["topics"]) && is_array($s["topics"]) ? $s["topics"] : array(),
-        isset($s["action"]) ? (string)$s["action"] : "mask");
-    $applied = Gd_service_set($own["db"], array("enabled" => true, "topics" => $topics, "action" => $action,
-        "user_toggle" => !array_key_exists("user_toggle", $s) || !empty($s["user_toggle"]), "until" => $c["until"]));
+    $applied = false;
+    if($svc){
+        $s = (isset($svc["settings"]) && is_array($svc["settings"])) ? $svc["settings"] : array();
+        list($topics, $action) = Gd_fit_plan($c["plan"], isset($s["topics"]) && is_array($s["topics"]) ? $s["topics"] : array(),
+            isset($s["action"]) ? (string)$s["action"] : "mask");
+        $applied = Gd_service_set($own["db"], array("enabled" => true, "topics" => $topics, "action" => $action,
+            "user_toggle" => !array_key_exists("user_toggle", $s) || !empty($s["user_toggle"]), "until" => $c["until"]));
+    }
     $st = Gd_status($own["db"]);
     $st["paid"] = $amount;
     $st["applied"] = $applied;

@@ -122,6 +122,12 @@ test('#5654: Профи — всё доступно, выбор из настр�
     assert.ok(h.includes('Выключить'), 'страж включён — есть «Выключить»');
 });
 
+test('#5654: сервис не ответил — настройки не показываются, включить вслепую нельзя', () => {
+    const h = render(st({ state: 'active', plan: 'pro', until: 1900000000, settings: null, service_ok: false }));
+    assert.ok(!h.includes('data-act="set"') && !h.includes('data-act="power"'), 'нет кнопок сохранения');
+    assert.ok(h.includes('не отвечает'));
+});
+
 test('#5654: «использовано N из лимита» — только когда есть GuardRuns', () => {
     const active = st({ state: 'active', plan: 'start', until: 1900000000 });
     assert.ok(plain(render(active, { GuardRuns: '1234' })).includes('1234 из 5 000'));

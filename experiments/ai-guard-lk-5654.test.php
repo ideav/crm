@@ -49,6 +49,10 @@ function reset_db($balance){
 function Exec_sql($sql, $msg, $log=true, $fatal=true){
     $db =& $GLOBALS["DB"];
     $db["affected"] = 0;
+    if(preg_match("/^SELECT GET_LOCK\('guard_([a-z0-9_]+)', \d+\) ok$/", $sql, $m)){
+        $GLOBALS["LOCKS"][] = $m[1];
+        return new Res(array(array("ok" => "1")));
+    }
     if(preg_match("/^SELECT id FROM my WHERE up=(\d+) AND t=271 AND val='([^']*)' LIMIT 1$/", $sql, $m)){
         $u = (int)$m[1];
         return new Res(isset($db["dbs"][$u][$m[2]]) ? array(array("id" => $db["dbs"][$u][$m[2]])) : array());
@@ -76,8 +80,16 @@ function mysqli_fetch_assoc($r){
     return $r->rows[$r->i++];
 }
 $GLOBALS["connection"] = null;
+# Транзакция: begin снимает снимок базы, commit его отпускает. Отказ (Died) до commit — обрыв
+# соединения, база возвращается к снимку (rollback()).
+function mysqli_begin_transaction($c){ $GLOBALS["TX"] = $GLOBALS["DB"]; return true; }
+function mysqli_commit($c){ unset($GLOBALS["TX"]); return true; }
+function rollback(){ if(isset($GLOBALS["TX"])){ $GLOBALS["DB"] = $GLOBALS["TX"]; unset($GLOBALS["TX"]); } }
+function dies_tx($fn){ $e = dies($fn); rollback(); return $e; }
 function mysqli_affected_rows($c){ return $GLOBALS["DB"]["affected"]; }
 function Insert($up, $ord, $t, $val, $msg){
+    if(isset($GLOBALS["INSERT_FAIL"]) && $GLOBALS["INSERT_FAIL"] === $t)
+        my_die("Insert failed");
     $db =& $GLOBALS["DB"];
     $id = ++$db["next"];
     if($t === 957)
@@ -101,15 +113,24 @@ function aiConfigValue($names){
     return "";
 }
 $GLOBALS["__get"] = array(); $GLOBALS["__post"] = array();
-$GLOBALS["__get_reply"] = json_encode(array("available" => true, "toggle" => true, "topics" => array(), "action" => "mask",
-    "settings" => array("enabled" => false, "topics" => array("bank"), "action" => "block", "user_toggle" => true, "until" => null)));
+# __get_reply === null — сервис с состоянием: GET отдаёт то, что принял последний успешный POST
+# (вначале — выбор Профи, сохранённый раньше). Иначе GET отдаёт __get_reply как есть.
+$GLOBALS["__svc"] = array("enabled" => false, "topics" => array("bank"), "action" => "block", "user_toggle" => true, "until" => null);
+$GLOBALS["__get_reply"] = null;
 $GLOBALS["__post_reply"] = json_encode(array("available" => true, "toggle" => true, "topics" => array(), "action" => "mask"));
 function aiAgentGuardFetch($url, $headers){
     $GLOBALS["__get"][] = array("url" => $url, "headers" => $headers);
+    if($GLOBALS["__get_reply"] === null)
+        return json_encode(array("available" => true, "toggle" => true, "topics" => array(), "action" => "mask", "settings" => $GLOBALS["__svc"]));
     return $GLOBALS["__get_reply"];
 }
 function aiAgentGuardPost($url, $headers, $body){
-    $GLOBALS["__post"][] = array("url" => $url, "headers" => $headers, "body" => json_decode($body, true));
+    $b = json_decode($body, true);
+    $GLOBALS["__post"][] = array("url" => $url, "headers" => $headers, "body" => $b);
+    if($GLOBALS["__post_reply"] !== false){
+        unset($b["db"]);
+        $GLOBALS["__svc"] = array_merge(array("until" => null), $b);
+    }
     return $GLOBALS["__post_reply"];
 }
 function last_post(){ $p = $GLOBALS["__post"]; return $p ? $p[count($p) - 1] : null; }
@@ -232,7 +253,7 @@ $st = Gd_action_pay("acme", "start", "year");
 expect($st["until"] === $paid1 + $M + $Y && balance() === 100000.0 - 1490 - 15190, "F1 год Старта стыкуется к сроку", json_encode($st));
 reset_db(1000);
 $GLOBALS["__post"] = array();
-$e = dies(function(){ Gd_action_pay("acme", "pro", "month"); });
+$e = dies_tx(function(){ Gd_action_pay("acme", "pro", "month"); });
 expect($e !== null && balance() === 1000.0 && !payments() && !$GLOBALS["__post"], "F2 нехватка средств: отказ, без списания и платежа", (string)$e);
 reset_db(100000);
 Gd_action_pay("acme", "start", "month");
@@ -274,5 +295,42 @@ $st = Gd_status("acme");
 expect($st["agent"] === false && $st["state"] === "active", "H4 без адреса агента: статус с флагом agent=false");
 expect(dies(function(){ Gd_action_pay("acme", "start", "month"); }) !== null && count(payments()) === 1, "H5 без адреса агента оплата закрыта");
 
-echo $GLOBALS["failures"] ? $GLOBALS["failures"]." FAILED\n" : "All passed\n";
+# --- I: ревью PR #5746 — транзакция, замок, чтение сервиса при оплате, досылка срока --------------
+$GLOBALS["__cfg"]["INTEGRAM_AGENT_ENDPOINT"] = "https://agent.example/agent/chat";
+reset_db(100000);
+$GLOBALS["__post_reply"] = json_encode(array("available" => true));
+$GLOBALS["__get_reply"] = json_encode(array("available" => true, "settings" => array("enabled" => true, "topics" => array(), "action" => "audit", "user_toggle" => false)));
+$GLOBALS["INSERT_FAIL"] = 1075;
+$e = dies_tx(function(){ Gd_action_pay("acme", "start", "month"); });
+unset($GLOBALS["INSERT_FAIL"]);
+expect($e !== null && balance() === 100000.0 && !payments(), "I1 сбой записи платежа откатывает списание", (string)$e);
+$GLOBALS["LOCKS"] = array();
+Gd_action_pay("acme", "start", "month");
+expect(in_array("acme", $GLOBALS["LOCKS"], true), "I2 оплата идёт под замком базы");
+$GLOBALS["LOCKS"] = array();
+Gd_action_set("acme", array("enabled" => "1", "topics" => "", "action" => "mask"));
+expect(in_array("acme", $GLOBALS["LOCKS"], true), "I3 сохранение идёт под замком базы");
+# сервис не ответил на чтение при продлении — выбор владельца не затирается, настройка не отправляется
+$GLOBALS["__get_reply"] = false;
+$GLOBALS["__post"] = array();
+$st = Gd_action_pay("acme", "start", "month");
+expect(!$GLOBALS["__post"] && empty($st["applied"]) && !empty($st["notice"]) && count(payments()) === 2,
+    "I4 чтение сервиса не удалось — оплата есть, сервису ничего не отправлено");
+# сервис ожил, а срок у него старый — открытие панели досылает оплаченный срок с выбором владельца
+$c = Gd_compute(\T\Gd_user_payments(10), "acme");
+$GLOBALS["__get_reply"] = json_encode(array("available" => true, "settings" => array("enabled" => true, "topics" => array(), "action" => "audit",
+    "user_toggle" => false, "until" => $c["until"] - GD_MONTH)));
+$GLOBALS["__post"] = array();
+$st = Gd_status("acme");
+$p = last_post();
+expect($p && $p["body"]["until"] === $c["until"] && $p["body"]["action"] === "audit" && $p["body"]["user_toggle"] === false && $p["body"]["enabled"] === true,
+    "I5 статус досылает отставший срок", json_encode($p ? $p["body"] : null));
+$GLOBALS["__get_reply"] = json_encode(array("available" => true, "settings" => array("enabled" => true, "topics" => array(), "action" => "audit",
+    "user_toggle" => false, "until" => $c["until"])));
+$GLOBALS["__post"] = array();
+Gd_status("acme");
+expect(!$GLOBALS["__post"], "I6 срок совпадает — статус ничего не шлёт");
+expect(empty($GLOBALS["UNKNOWN_SQL"]), "I7 все запросы к базе узнаны заглушкой", json_encode(isset($GLOBALS["UNKNOWN_SQL"]) ? $GLOBALS["UNKNOWN_SQL"] : null));
+
+echo $GLOBALS["failures"] ?$GLOBALS["failures"]." FAILED\n" : "All passed\n";
 exit($GLOBALS["failures"] ? 1 : 0);

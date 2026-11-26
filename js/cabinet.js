@@ -1218,7 +1218,9 @@ class CabinetController {
         });
         html += '</div><p class="database-domain-note">Оплата списывается с баланса личного кабинета. '
             + 'Переход со «Старт» на «Профи» — сразу, остаток «Старта» пересчитывается в дни «Профи» по цене.</p>';
-        if (active) {
+        if (active && st.service_ok === false) {
+            html += '<p class="database-domain-note">Сервис ИИ-агента сейчас не отвечает — настройки стража недоступны. Откройте панель позже: оплаченный срок применится сам.</p>';
+        } else if (active) {
             const rules = plans[st.plan] || { actions: ['mask'], topics: false };
             const proHint = ' disabled title="Доступно на тарифе «Профи»"';
             const names = { bank: 'Банк', finance: 'Финансы', realtor: 'Риелтор', hr: 'HR', medical: 'Медицина' };
