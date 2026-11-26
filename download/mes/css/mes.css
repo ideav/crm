@@ -1,0 +1,101 @@
+/* MES: стили рабочих мест цеха. Тема из переменных платформы (светлая и тёмная), запасные значения — светлая. */
+.mes {
+    --m-bg: var(--bg-primary, #f6f8fb);
+    --m-card: var(--bg-secondary, #ffffff);
+    --m-text: var(--text-primary, #0f172a);
+    --m-muted: var(--text-secondary, #64748b);
+    --m-line: var(--border-color, #dbe1ea);
+    --m-blue: #2563eb; --m-red: #dc2626; --m-amber: #b45309; --m-green: #15803d;
+    --m-blue-soft: rgba(37, 99, 235, .12); --m-red-soft: rgba(220, 38, 38, .13); --m-amber-soft: rgba(217, 119, 6, .16); --m-green-soft: rgba(22, 163, 74, .14);
+    padding: 20px 24px 32px; background: var(--m-bg); color: var(--m-text); min-height: 100%; box-sizing: border-box; font-size: 14px; line-height: 1.4;
+}
+.mes *, .mes *::before, .mes *::after { box-sizing: border-box; }
+.mes h1 { margin: 0 0 2px; font-size: 1.5rem; font-weight: 700; letter-spacing: -.01em; }
+.mes h2 { margin: 22px 0 10px; font-size: 1.05rem; font-weight: 650; }
+.mes h3 { margin: 0 0 8px; font-size: 1rem; }
+.mes small { color: var(--m-muted); font-size: 12px; }
+.mes-sub { color: var(--m-muted); margin: 0 0 14px; max-width: 920px; }
+.mes-muted { color: var(--m-muted); }
+.mes-red { color: var(--m-red); font-weight: 600; }
+.mes-bar { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: end; margin: 10px 0 14px; }
+.mes-grow { flex: 1; }
+.mes-field { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--m-muted); margin-bottom: 8px; }
+.mes-field input, .mes-field select, .mes-cell {
+    min-height: 36px; padding: 5px 10px; border: 1px solid var(--m-line); border-radius: 8px; background: var(--m-card); color: var(--m-text); font: inherit; font-size: 14px;
+}
+.mes-cell { width: 100px; min-height: 30px; }
+.mes-cell-wide { width: 240px; }
+.mes-cell:disabled { opacity: .75; }
+.mes-btn { min-height: 36px; padding: 5px 14px; border: 1px solid var(--m-line); border-radius: 8px; background: var(--m-card); color: var(--m-text); cursor: pointer; font: inherit; transition: border-color .12s, box-shadow .12s; }
+.mes-btn:hover { border-color: var(--m-blue); }
+.mes-btn:disabled { opacity: .45; cursor: not-allowed; }
+.mes-btn:focus-visible, .mes-tab:focus-visible { outline: 2px solid var(--m-blue); outline-offset: 2px; }
+.mes-primary { background: var(--m-blue); border-color: var(--m-blue); color: #fff; font-weight: 600; }
+.mes-primary:hover { box-shadow: 0 2px 10px rgba(37, 99, 235, .35); }
+.mes-small { min-height: 28px; padding: 2px 10px; font-size: 12px; }
+.mes-xl { min-height: 52px; padding: 8px 18px; font-size: 16px; font-weight: 600; border-radius: 12px; flex: 1; }
+.mes-acts { display: inline-flex; gap: 4px; flex-wrap: nowrap; }
+.mes-tabs { display: flex; gap: 2px; flex-wrap: wrap; border-bottom: 1px solid var(--m-line); margin-bottom: 14px; }
+.mes-tab { border: 0; background: none; color: var(--m-muted); padding: 9px 14px; cursor: pointer; font: inherit; border-bottom: 2px solid transparent; }
+.mes-tab-on { color: var(--m-text); border-bottom-color: var(--m-blue); font-weight: 650; }
+.mes-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin: 8px 0 16px; }
+.mes-kpi { background: var(--m-card); border: 1px solid var(--m-line); border-radius: 12px; padding: 12px 14px; }
+.mes-kpi-v { font-size: 1.6rem; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.mes-kpi-l { color: var(--m-muted); font-size: 12px; margin-top: 2px; }
+.mes-kpi-s { font-size: 12px; margin-top: 4px; color: var(--m-muted); }
+.mes-kpi-bad { border-color: var(--m-red); } .mes-kpi-bad .mes-kpi-v { color: var(--m-red); }
+.mes-kpi-warn .mes-kpi-v { color: var(--m-amber); } .mes-kpi-good .mes-kpi-v { color: var(--m-green); }
+.mes-badge { display: inline-block; padding: 1px 9px; border-radius: 10px; font-size: 12px; white-space: nowrap; }
+.mes-info { background: var(--m-blue-soft); color: var(--m-blue); }
+.mes-ok { background: var(--m-green-soft); color: var(--m-green); }
+.mes-warn { background: var(--m-amber-soft); color: var(--m-amber); }
+.mes-crit { background: var(--m-red-soft); color: var(--m-red); }
+.mes-mute { background: rgba(100, 116, 139, .15); color: var(--m-muted); }
+.mes-note { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 10px 14px; border-radius: 10px; margin: 8px 0; border: 1px solid var(--m-line); background: var(--m-card); }
+.mes-note-info { border-left: 4px solid var(--m-blue); }
+.mes-note-ok { border-left: 4px solid var(--m-green); background: var(--m-green-soft); }
+.mes-note-bad { border-left: 4px solid var(--m-red); background: var(--m-red-soft); }
+.mes-note-warn { border-left: 4px solid var(--m-amber); background: var(--m-amber-soft); }
+.mes-tablewrap { overflow: auto; max-width: 100%; border: 1px solid var(--m-line); border-radius: 12px; background: var(--m-card); }
+.mes-table { border-collapse: collapse; width: 100%; }
+.mes-table th, .mes-table td { padding: 7px 10px; border-bottom: 1px solid var(--m-line); text-align: left; vertical-align: middle; }
+.mes-table tr:last-child td { border-bottom: 0; }
+.mes-table th { position: sticky; top: 0; background: var(--m-card); color: var(--m-muted); font-weight: 600; font-size: 12px; white-space: nowrap; }
+.mes-num { text-align: right !important; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mes-click { cursor: pointer; } .mes-click:hover td { background: var(--m-blue-soft); }
+.mes-row-hot td { background: var(--m-red-soft); }
+.mes-row-hot td:first-child { box-shadow: inset 4px 0 0 var(--m-red); }
+.mes-row-warn td { background: var(--m-amber-soft); }
+.mes-empty { text-align: center !important; color: var(--m-muted); padding: 18px !important; }
+.mes-route { display: flex; gap: 3px; flex-wrap: wrap; }
+.mes-step { display: inline-flex; flex-direction: column; padding: 3px 8px; border-radius: 6px; font-size: 12px; line-height: 1.2; border: 1px solid var(--m-line); }
+.mes-step small { font-size: 11px; }
+.mes-step-done { background: var(--m-green-soft); border-color: transparent; }
+.mes-step-run { background: var(--m-blue-soft); border-color: var(--m-blue); font-weight: 600; }
+.mes-step-wait { opacity: .8; }
+.mes-step-none { opacity: .5; border-style: dashed; }
+.mes-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+.mes-error { color: var(--m-red); padding: 16px; }
+.mes-toast { position: fixed; right: 20px; bottom: 20px; z-index: 10001; background: #0f172a; color: #fff; padding: 10px 16px; border-radius: 10px; box-shadow: 0 6px 24px rgba(0, 0, 0, .25); max-width: 420px; }
+.mes-toast-bad { background: #b91c1c; }
+.mes-modal-back { position: fixed; inset: 0; background: rgba(15, 23, 42, .45); z-index: 10000; display: flex; align-items: center; justify-content: center; padding: 16px; }
+.mes-modal { background: var(--bg-secondary, #fff); color: var(--text-primary, #0f172a); border-radius: 14px; padding: 18px 20px; width: 460px; max-width: 100%; max-height: 92vh; overflow: auto; box-shadow: 0 12px 40px rgba(0, 0, 0, .3); font-size: 14px; }
+.mes-modal-wide { width: 820px; }
+.mes-modal .mes-field input, .mes-modal .mes-field select { min-height: 40px; padding: 6px 10px; border: 1px solid var(--border-color, #dbe1ea); border-radius: 8px; background: var(--bg-primary, #fff); color: inherit; font: inherit; }
+.mes-modal-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.mes-big { font-size: 22px !important; min-height: 52px !important; text-align: center; }
+/* терминал: телефон и планшет, крупные кнопки */
+.mes-term { max-width: 720px; margin: 0 auto; }
+.mes-term-top { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; align-items: end; margin-bottom: 6px; }
+.mes-term-name { font-size: 1.3rem; font-weight: 700; }
+.mes-kpis-term { grid-template-columns: 1fr 1fr; }
+.mes-tcard { background: var(--m-card); border: 1px solid var(--m-line); border-radius: 14px; padding: 12px 14px; margin: 8px 0; }
+.mes-tcard-on { border: 2px solid var(--m-blue); }
+.mes-tcard-h { font-size: 16px; margin-bottom: 3px; }
+.mes-tcard-b { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+@media (max-width: 640px) {
+    .mes { padding: 12px 10px 24px; }
+    .mes-kpi-v { font-size: 1.25rem; }
+    .mes-kpis-term { grid-template-columns: 1fr 1fr; gap: 8px; }
+    .mes-grid2 { grid-template-columns: 1fr 1fr; }
+}
