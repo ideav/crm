@@ -138,6 +138,7 @@
                 state: reqVal(rec, r.state),
                 typeName: rec.typeName == null ? '' : String(rec.typeName),
                 selectable: !!(stateId && selectableStates && selectableStates[stateId]),
+                writtenOff: /^s*списан/i.test(reqVal(rec, r.state)),
                 revs: mileage ? (mileage[rec.id] || 0) : 0
             };
         });
@@ -170,6 +171,25 @@
         return out;
     }
 
+    // Номенклатура 1С строки заказа (5-я колонка Excel) — из «Примечания» позиции (#5720): колонка
+    // отчёта «Примечание» или «Номенклатура 1С», если отчёт её отдаёт; иначе её дочитывает reload().
+    function orderNomenclatureOf(row) {
+        var raw = row && (row['Номенклатура 1С'] != null ? row['Номенклатура 1С'] : row['Примечание']);
+        return lp.orderNomenclatureFromNote(raw) || (row && row['Номенклатура 1С'] != null ? String(raw).trim() : '');
+    }
+
+    // Сырьё из заказа 1С → { text, material, glue, differs }: «differs» — токен не совпал ни с основой,
+    // ни с названием сырья позиции (подсветка для сравнения глазами).
+    function orderMaterialInfo(pos) {
+        var text = String((pos && pos.orderNomenclature) || '').trim();
+        var m = lp.orderMaterial(text);
+        var shown = [m.material, m.glue].filter(Boolean).join(' ');
+        var n = function(v) { return String(v == null ? '' : v).replace(/^s*d+:/, '').replace(/ё/gi, 'е').replace(/s+/g, '').toLowerCase(); };
+        var tok = n(m.material), name = n(pos && pos.material), base = n(pos && pos.base);
+        var same = !tok || tok === base || tok === name || (name && name.indexOf(tok) !== -1);
+        return { text: text, material: m.material, glue: m.glue, shown: shown, differs: !!tok && !same };
+    }
+
     // Строка отчёта label_positions → позиция для подбора.
     function positionFromRow(row, materials) {
         var x = row || {};
@@ -190,6 +210,8 @@
             material: x['Сырьё'] || '',
             base: mat ? mat.base : '',
             knifeType: kt,
+            shape: lp.knifeShape(kt),
+            orderNomenclature: orderNomenclatureOf(x),
             knifeStreams: parsed && parsed.ok ? parsed.streams : null,
             pick: String(x['Подбор ножа'] || '').trim(),
             dieId: String(x['НожID'] || ''),
@@ -247,9 +269,11 @@
 
     var NEAREST_DIES = 6;
 
-    // Ближайшие по размеру ножи для ручного выбора в карточке (#5667): состояние «Нож
-    // подбирается», основа сырья позиции (не задана — любая); по сумме отклонений сторон, дальше
-    // меньший пробег и номер. Допуск LABEL_DIE_SIZE_TOLERANCE_MM список не ограничивает.
+    // Ближайшие по размеру ножи для ручного выбора в карточке (#5667, #5720): не списанные (Резерв и
+    // «На экспертизе» допустимы — состояние показывается), основа сырья позиции (не задана — любая),
+    // каждая сторона в допуске по размеру этикетки (lp.dieSizeTolerance: <20 → ±0,1; 20…<33 → ±0,5;
+    // от 33 → ±0,9), форма та же (круглый D… только к круглой). Нет подходящих — пустой список
+    // («нет ножа»). По сумме отклонений сторон, дальше меньший пробег и номер.
     // → [{ ...нож, deviation: мм }], не больше limit (по умолчанию 6).
     function nearestDies(pos, dies, limit) {
         var w = num(pos && pos.width), l = num(pos && pos.length);
@@ -257,7 +281,8 @@
         var baseOf = function(v) { return String(v == null ? '' : v).replace(/^\s*\d+:/, '').replace(/\s+/g, ' ').trim().toLowerCase(); };
         var base = baseOf(pos && pos.base);
         return (dies || []).filter(function(d) {
-            return d.selectable === true && num(d.width) > 0 && num(d.length) > 0 &&
+            return d.writtenOff !== true && num(d.width) > 0 && num(d.length) > 0 &&
+                lp.dieWithinLadder(pos, d) && !lp.shapeMismatch(pos, d) &&
                 (base === '' || baseOf(d.base) === base);
         }).map(function(d) {
             var out = Object.assign({}, d);
@@ -287,6 +312,8 @@
             out.exact = dw <= 0.05 + 1e-9 && dl <= 0.05 + 1e-9;
             out.deviation = out.exact ? 0 : Math.round((dw + dl) * 100) / 100;
             out.otherBase = base !== '' && baseOf(d.base) !== base;
+            out.outOfTolerance = !lp.dieWithinLadder(pos, d);
+            out.shapeMismatch = lp.shapeMismatch(pos, d);
             return out;
         }).sort(function(a, b) {
             if (a.deviation !== b.deviation) return a.deviation - b.deviation;
@@ -296,6 +323,42 @@
         });
         var exact = all.filter(function(d) { return d.exact; });
         return exact.length >= n ? exact : all.slice(0, n);
+    }
+
+    // Свойства альтернативного ножа, отличающиеся от позиции / текущего ножа (#5720): ручьёв,
+    // этикеток на раппорте, вал / раппорт, основа, состояние, исп. формат, ширина втулки, форма.
+    // ref — текущий нож (null — сравниваем с позицией там, где в ней есть значение).
+    // → [{ key, label, ref, alt }] только по различающимся; пустое значение показывается «—».
+    var SHAPE_RU = { round: 'круг', rect: 'прямоуг.' };
+    function dieDiffs(pos, ref, alt) {
+        var norm = function(v) { return String(v == null ? '' : v).replace(/^s*d+:/, '').replace(/s+/g, ' ').trim().toLowerCase(); };
+        var numOr = function(v) { var n = num(v); return isNaN(n) ? norm(v) : String(n); };
+        var p = pos || {};
+        var refShape = lp.positionShape(p) || (ref ? lp.knifeShape(ref.typeName) : '');
+        var props = [
+            ['streams', 'ручьёв', ref ? ref.streams : (p.knifeStreams != null ? p.knifeStreams : p.orderStreams), alt.streams, numOr],
+            ['perRepeat', 'этикеток на раппорте', ref ? ref.labelsPerRepeat : '', alt.labelsPerRepeat, numOr],
+            ['cylinder', 'вал / раппорт', ref ? (ref.cylinder || '') + (ref.repeatMm ? ' / ' + ref.repeatMm + ' мм' : '') : '',
+                (alt.cylinder || '') + (alt.repeatMm ? ' / ' + alt.repeatMm + ' мм' : ''), norm],
+            ['base', 'основа', ref ? ref.base : p.base, alt.base, norm],
+            ['state', 'состояние', ref ? ref.state : '', alt.state, norm],
+            ['usedFormat', 'исп. формат', ref ? ref.usedFormat : '', alt.usedFormat, numOr],
+            ['sleeve', 'ширина втулки', ref ? ref.sleeveWidth : p.sleeveWidth, alt.sleeveWidth, numOr],
+            ['shape', 'форма', SHAPE_RU[refShape] || '', SHAPE_RU[lp.knifeShape(alt.typeName)] || '', norm]
+        ];
+        var out = [];
+        props.forEach(function(x) {
+            var a = x[2], b = x[3], f = x[4];
+            if (String(a == null ? '' : a).trim() === '' && ref == null) return;   // у позиции этого значения нет — сравнивать не с чем
+            if (String(a == null ? '' : a).trim() === '' && String(b == null ? '' : b).trim() === '') return;
+            if (f(a) === f(b)) return;
+            out.push({ key: x[0], label: x[1], ref: String(a == null ? '' : a).trim() || '—', alt: String(b == null ? '' : b).trim() || '—' });
+        });
+        // Не рабочее состояние показываем всегда: Резерв / «На экспертизе» не подбираются сами.
+        if (alt.selectable !== true && alt.state && !out.some(function(o) { return o.key === 'state'; })) {
+            out.push({ key: 'state', label: 'состояние', ref: ref && ref.state ? ref.state : '—', alt: alt.state });
+        }
+        return out;
     }
 
     // «Тип ножей» позиции по ножу: имя его «Типа ножа», если оно разбирается как тип 1С, иначе
@@ -447,6 +510,8 @@
     var core = {
         REPORT: REPORT,
         gridFilterQuery: gridFilterQuery,
+        dieDiffs: dieDiffs,
+        orderMaterialInfo: orderMaterialInfo,
         SETTINGS: SETTINGS,
         kvRecords: kvRecords,
         bool: bool,
@@ -648,7 +713,9 @@
             clientTable ? optional(this.getJson('object/' + clientTable + '/?JSON_KV&LIMIT=0,5000')) : Promise.resolve(null),
             sleeveTable ? optional(this.getJson('object/' + sleeveTable + '/?JSON_KV&LIMIT=0,500')) : Promise.resolve(null),
             this.loadSettings(),
-            t.dieType ? this.getJson('object/' + t.dieType.id + '/?JSON_KV&LIMIT=0,10000') : Promise.resolve(null)
+            t.dieType ? this.getJson('object/' + t.dieType.id + '/?JSON_KV&LIMIT=0,10000') : Promise.resolve(null),
+            // «Примечание» позиций — номенклатура 1С (#5720): отчёт label_positions её не отдаёт.
+            this.cols.notes && t.position ? optional(this.getJson('object/' + t.position.id + '/?JSON_KV&LIMIT=0,10000')) : Promise.resolve(null)
         ]).then(function(res) {
             self.settings = res[10];
             self.mileageOk = Array.isArray(res[2]);
@@ -664,7 +731,13 @@
             self.clients = res[8] ? kvRecords(res[8]) : [];
             self.sleeves = res[9] ? kvRecords(res[9]) : [];
             var rows = Array.isArray(res[0]) ? res[0] : [];
-            self.rows = rows.map(function(r) { return positionFromRow(r, self.materials); });
+            var noteById = {};
+            if (res[12] && self.cols.notes) kvRecords(res[12]).forEach(function(r) { noteById[r.id] = lp.orderNomenclatureFromNote(reqVal(r, self.cols.notes.id)); });
+            self.rows = rows.map(function(r) {
+                var pos = positionFromRow(r, self.materials);
+                if (!pos.orderNomenclature && noteById[pos.id]) pos.orderNomenclature = noteById[pos.id];
+                return pos;
+            });
             if (!self.mileageOk) self.message('Отчёт «' + RUNS_REPORT + '» не прочитан — пробег ножей не учтён, из подходящих выбирается меньший номер.', 'warn');
             self.renderKpi();
             if (self.selectedId) self.renderCard();
@@ -716,6 +789,25 @@
         this.renderCard();
     };
 
+    // Таблица отличий альтернативных ножей от текущего (#5720): значение — только там, где оно
+    // отличается от текущего ножа (или от позиции, если ножа нет); «=» — совпадает.
+    function nearDiffTable(pos, cur, near) {
+        var alts = near.filter(function(x) { return !cur || String(x.id) !== String(cur.id); });
+        if (!alts.length) return '';
+        var keys = [['streams', 'ручьёв'], ['perRepeat', 'этикеток на раппорте'], ['cylinder', 'вал / раппорт'], ['base', 'основа'],
+            ['state', 'состояние'], ['usedFormat', 'исп. формат'], ['sleeve', 'ширина втулки'], ['shape', 'форма']];
+        var head = '<tr><th>Нож</th>' + keys.map(function(k) { return '<th>' + esc(k[1]) + '</th>'; }).join('') + '</tr>';
+        var body = alts.map(function(x) {
+            var diffs = {};
+            dieDiffs(pos, cur, x).forEach(function(o) { diffs[o.key] = o; });
+            return '<tr><td>' + esc(x.no) + '</td>' + keys.map(function(k) {
+                var o = diffs[k[0]];
+                return o ? '<td class="is-diff" title="' + esc(cur ? 'у текущего ножа: ' + o.ref : 'в позиции: ' + o.ref) + '">' + esc(o.alt) + '</td>' : '<td class="atex-lo-muted">=</td>';
+            }).join('') + '</tr>';
+        }).join('');
+        return '<table class="atex-lo-table atex-lo-diff"><caption>Чем альтернативные ножи отличаются от ' + (cur ? 'текущего (№ ' + esc(cur.no) + ')' : 'позиции') + '</caption><thead>' + head + '</thead><tbody>' + body + '</tbody></table>';
+    }
+
     AtexLabelOrders.prototype.renderCard = function() {
         var el = this.$('atex-lo-card');
         var p = this.current();
@@ -724,6 +816,7 @@
         var mat = this.materials[p.materialId] || null;
         var d = plan.die.ok ? plan.die.die : null;
         var row = function(label, value) { return '<div class="atex-lo-kv"><span>' + esc(label) + '</span><b>' + value + '</b></div>'; };
+        var om = orderMaterialInfo(p);
         var labelsPerStream = num(p.labelsPerRoll) / (num(p.orderStreams) > 0 ? num(p.orderStreams) : 1);
         var html = '<h2 class="atex-lo-panel-title">Заказ ' + esc(p.orderNo) + (p.client ? ' · ' + esc(p.client) : '') + '</h2>' +
             '<div class="atex-lo-flags">' +
@@ -739,6 +832,10 @@
             row('Рулонов / этикеток всего', esc(fmtInt(num(p.rolls)) + ' / ' + fmtInt(plan.demand.labels))) +
             row('Сырьё', esc(p.material || '—') + (mat ? '<small>' + esc([mat.base, mat.glue && 'клей ' + mat.glue, mat.linerType && 'подложка ' + mat.linerType,
                 mat.linerThickness && mat.linerThickness + ' мкм'].filter(Boolean).join(', ')) + '</small>' : '')) +
+            row('Сырьё из заказа', (om.text
+                ? '<span class="atex-lo-ordmat' + (om.differs ? ' is-diff' : '') + '" title="' + esc(om.text) + '">' + esc(om.shown || '—') + '</span>' +
+                  (om.differs ? '<small>отличается от сырья позиции</small>' : '') + '<small>' + esc(om.text) + '</small>'
+                : '<span class="atex-lo-muted">нет номенклатуры 1С</span>')) +
             row('Тип ножей (1С)', esc(p.knifeType || '—')) +
             row('Срок', esc(p.due || '—'));
 
@@ -762,13 +859,18 @@
         if (near.length) {
             var optLabel = function(x) {
                 var dv = x.deviation != null ? x.deviation : Math.round((Math.abs(num(x.width) - num(p.width)) + Math.abs(num(x.length) - num(p.length))) * 100) / 100;
-                return '№ ' + x.no + ' / ' + (x.typeName || dieKnifeType(x) || (x.width + ' × ' + x.length)) + (dv > 0 ? ' (±' + String(dv).replace('.', ',') + ')' : ' (точно)');
+                return '№ ' + x.no + ' / ' + (x.typeName || dieKnifeType(x) || (x.width + ' × ' + x.length)) + (dv > 0 ? ' (±' + String(dv).replace('.', ',') + ')' : ' (точно)') +
+                    (x.selectable !== true && x.state ? ' [' + x.state + ']' : '');
             };
             html += '<label class="atex-lo-kv atex-lo-die-near"><span>Нож / Тип ножа</span><select data-lo-change="die-near"' + (this.busy ? ' disabled' : '') + '>' +
                 (d ? '' : '<option value="" selected>— выберите нож —</option>') +
                 near.map(function(x) {
                     return '<option value="' + esc(x.id) + '"' + (d && String(x.id) === String(d.id) ? ' selected' : '') + '>' + esc(optLabel(x)) + '</option>';
                 }).join('') + '</select></label>';
+            html += nearDiffTable(p, d, near);
+        } else {
+            html += '<div class="atex-lo-message is-error">Ближайших ножей нет: нет ножа в допуске по размеру этикетки (' +
+                esc(lp.dieSizeTolerance(p.width) + ' / ' + lp.dieSizeTolerance(p.length)).replace(/./g, ',') + ' мм по ширине / длине), не списанного и той же формы.</div>';
         }
         var rec = recordedNote(p, plan, this.picking);
         if (rec.show) html += '<div class="atex-lo-note is-warn">' + esc(rec.text) + '</div>';
@@ -1027,11 +1129,11 @@
         var exactCount = list.filter(function(d) { return d.exact; }).length;
         var html = '<h2 class="atex-lo-panel-title">Нож для ' + esc(p.width + ' × ' + p.length) + ' мм</h2>';
         if (list.length && !exactCount) html += '<div class="atex-lo-note is-warn">Ножей этого размера нет — ближайшие по размеру.</div>';
-        html += list.length ? '<table class="atex-lo-table"><thead><tr><th>Нож</th><th>Тип ножа</th><th class="num">Отклонение, мм</th><th>Основа</th><th>Состояние</th><th class="num">Ручьёв</th><th>Вал</th><th class="num">Пробег, об</th><th></th></tr></thead><tbody>' +
+        html += list.length ? '<table class="atex-lo-table"><thead><tr><th>Нож</th><th>Тип ножа</th><th class="num">Отклонение, мм</th><th>Основа</th><th>Состояние</th><th>Замечания</th><th class="num">Ручьёв</th><th>Вал</th><th class="num">Пробег, об</th><th></th></tr></thead><tbody>' +
             list.map(function(d) {
-                return '<tr' + (d.selectable && !d.otherBase ? '' : ' class="is-muted"') + '><td>' + esc(d.no) + '</td><td>' + esc(d.typeName || (d.width + ' × ' + d.length)) +
+                return '<tr' + (d.selectable && !d.otherBase && !d.writtenOff && !d.outOfTolerance && !d.shapeMismatch ? '' : ' class="is-muted"') + '><td>' + esc(d.no) + '</td><td>' + esc(d.typeName || (d.width + ' × ' + d.length)) +
                     '</td><td class="num">' + (d.exact ? 'точно' : '±' + esc(String(d.deviation).replace('.', ','))) +
-                    '</td><td>' + esc(d.base || '—') + (d.otherBase ? ' <small>(не та основа)</small>' : '') + '</td><td>' + esc(d.state || '—') +
+                    '</td><td>' + esc(d.base || '—') + (d.otherBase ? ' <small>(не та основа)</small>' : '') + '</td><td>' + esc(d.state || '—') + '</td><td>' + esc([d.writtenOff ? 'списан' : '', d.outOfTolerance ? 'вне допуска размера' : '', d.shapeMismatch ? 'другая форма (круг/прямоуг.)' : ''].filter(Boolean).join(', ')) +
                     '</td><td class="num">' + esc(d.streams || '—') + '</td><td>' + esc(d.cylinder || '—') + '</td><td class="num">' + esc(fmtInt(d.revs)) +
                     '</td><td><button class="atex-lo-btn" type="button" data-lo-action="manual-choose" data-die="' + esc(d.id) + '">Выбрать</button></td></tr>';
             }).join('') + '</tbody></table>'
