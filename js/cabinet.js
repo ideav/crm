@@ -897,10 +897,12 @@ class CabinetController {
                         </div>
                         <div class="database-card-actions">
                             <button type="button" class="btn-secondary btn-small database-domain-toggle" title="Открывать базу по своему адресу, например crm.company.ru">Свой домен</button>
+                            <button type="button" class="btn-secondary btn-small database-guard-toggle" title="Проверка вопросов ИИ-чату на персональные и чувствительные данные">Страж данных</button>
                             <button type="button" class="btn-secondary btn-small database-restore-admin-btn" title="Если вы смогли удалить администратора или сменили ему роль, восстановите её здесь">Восстановить админа</button>
                         </div>
                     </div>
                     <div class="database-domain-body" hidden></div>
+                    <div class="database-guard-body" hidden></div>
                 </div>
             `;
 
@@ -950,6 +952,17 @@ class CabinetController {
                 domainToggle.addEventListener('click', () => {
                     domainBody.hidden = !domainBody.hidden;
                     if (!domainBody.hidden) this.domainCall(db.DB, '_domain_status', domainBody);
+                });
+            }
+
+            // #5654: страж данных ИИ-чата
+            const guardToggle = card.querySelector('.database-guard-toggle');
+            const guardBody = card.querySelector('.database-guard-body');
+            if (guardToggle && guardBody) {
+                guardBody._guardDb = db;
+                guardToggle.addEventListener('click', () => {
+                    guardBody.hidden = !guardBody.hidden;
+                    if (!guardBody.hidden) this.guardCall(db.DB, '_guard_status', guardBody);
                 });
             }
 
@@ -1120,6 +1133,120 @@ class CabinetController {
                     }
                     this.domainCall(dbName, '_domain_del', body);
                 }
+            });
+        });
+    }
+
+    // #5654: страж данных ИИ-чата. action — _guard_status | _guard_set | _guard_pay
+    async guardCall(dbName, action, body, extra) {
+        body.querySelectorAll('button').forEach(b => { b.disabled = true; });
+        try {
+            const url = 'https://' + this.apiConfig.host + '/my/' + action + '?JSON&db=' + encodeURIComponent(dbName);
+            const fd = new FormData();
+            fd.append('_xsrf', xsrf);
+            Object.keys(extra || {}).forEach(k => fd.append(k, extra[k]));
+            const resp = await fetch(url, { method: 'POST', credentials: 'include', body: fd });
+            const data = await resp.json().catch(() => null);
+            const err = Array.isArray(data) && data[0] && data[0].error ? data[0].error : (!resp.ok ? 'HTTP ' + resp.status : '');
+            if (err || !data || !data.state) {
+                showToast(err || 'Ошибка запроса', 'error');
+                if (action === '_guard_status') body.innerHTML = '<p class="database-domain-note">' + this.escapeHtml(err || 'Ошибка запроса') + '</p>';
+                return;
+            }
+            if (data.applied === false && data.notice) showToast(data.notice, 'error');
+            else if (action === '_guard_pay') showToast('Страж данных оплачен и включён', 'success');
+            else if (action === '_guard_set') showToast('Настройки стража сохранены', 'success');
+            this.renderGuard(dbName, body, data, body._guardDb || {});
+        } catch (e) {
+            console.error('[cabinet] guard error:', e);
+            showToast('Ошибка запроса', 'error');
+        } finally {
+            body.querySelectorAll('button').forEach(b => { b.disabled = false; });
+        }
+    }
+
+    // Выбор из панели стража → поля запроса _guard_set.
+    guardCollect(body, enabled) {
+        const topics = Array.from(body.querySelectorAll('input.database-guard-topic')).filter(i => i.checked).map(i => i.value);
+        const action = body.querySelector('select.database-guard-action');
+        const userToggle = body.querySelector('input.database-guard-usertoggle');
+        return {
+            enabled: enabled ? '1' : '0',
+            topics: topics.join(','),
+            action: action ? action.value : 'mask',
+            user_toggle: userToggle && !userToggle.checked ? '0' : '1'
+        };
+    }
+
+    renderGuard(dbName, body, st, db) {
+        const esc = s => this.escapeHtml(String(s == null ? '' : s));
+        const num = n => String(n == null ? '' : n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+        const plans = st.plans || {};
+        const prices = st.prices || {};
+        const limits = st.limits || {};
+        const title = p => (plans[p] && plans[p].title) || (p === 'pro' ? 'Профи' : 'Старт');
+        const until = st.until ? new Date(st.until * 1000).toLocaleDateString('ru-RU') : '';
+        const active = st.state === 'active';
+        const s = st.settings || {};
+        const help = '<a href="https://ideav.ru/help.html#api-ai-data-guard" target="_blank" rel="noopener">Как работает страж</a>';
+        let html = '<p class="database-domain-note">Страж данных проверяет вопросы ИИ-чату: почту, телефоны, пароли и ключи — всегда, '
+            + 'отраслевые данные (банк, финансы, риелтор, HR, медицина) — на тарифе «Профи». ' + help + '.</p>';
+        if (st.state === 'none') html += '<p class="database-domain-note">Страж не оплачен.</p>';
+        else if (active) html += '<p class="database-domain-note">Тариф «' + esc(title(st.plan)) + '», оплачено до ' + esc(until) + '. Страж '
+            + (s.enabled ? 'включён' : 'выключен') + '.</p>';
+        else html += '<p class="database-domain-note">Оплата закончилась ' + esc(until) + ' — страж выключен. Продлите оплату.</p>';
+        const used = db && db.GuardRuns != null && String(db.GuardRuns).trim() !== '' ? Math.floor(Number(db.GuardRuns)) : null;
+        if (active && used !== null && Number.isFinite(used) && limits[st.plan]) {
+            html += '<p class="database-domain-note">Использовано ' + esc(used) + ' из ' + esc(num(limits[st.plan])) + ' вопросов в месяц.</p>';
+        }
+        html += '<p class="database-domain-note">«Старт» — до ' + esc(num(limits.start)) + ' вопросов в месяц, режимы «маскировать» и «только журнал»; '
+            + '«Профи» — до ' + esc(num(limits.pro)) + ', все режимы и отраслевые тематики. Сверх лимита — '
+            + esc(num(st.over_price)) + ' ₽ за ' + esc(num(st.over_unit)) + ' вопросов.</p>';
+        if (!st.agent) {
+            html += '<p class="database-domain-note">Сервис ИИ-агента не подключён — страж данных пока недоступен.</p>';
+            body.innerHTML = html;
+            return;
+        }
+        const proActive = active && st.plan === 'pro';
+        html += '<div class="database-domain-row">';
+        ['start', 'pro'].forEach(p => {
+            if (!prices[p]) return;
+            const off = p === 'start' && proActive ? ' disabled title="Идёт период «Профи» — «Старт» можно оплатить после него"' : '';
+            html += '<span class="database-domain-note">' + esc(title(p)) + ':</span>'
+                + '<button type="button" class="btn-primary btn-small" data-act="pay" data-plan="' + p + '" data-period="month"' + off + '>месяц ' + esc(num(prices[p].month)) + ' ₽</button>'
+                + '<button type="button" class="btn-secondary btn-small" data-act="pay" data-plan="' + p + '" data-period="year"' + off + '>год ' + esc(num(prices[p].year)) + ' ₽</button>';
+        });
+        html += '</div><p class="database-domain-note">Оплата списывается с баланса личного кабинета. '
+            + 'Переход со «Старт» на «Профи» — сразу, остаток «Старта» пересчитывается в дни «Профи» по цене.</p>';
+        if (active) {
+            const rules = plans[st.plan] || { actions: ['mask'], topics: false };
+            const proHint = ' disabled title="Доступно на тарифе «Профи»"';
+            const names = { bank: 'Банк', finance: 'Финансы', realtor: 'Риелтор', hr: 'HR', medical: 'Медицина' };
+            const chosen = Array.isArray(s.topics) ? s.topics : [];
+            html += '<div class="database-domain-row database-guard-topics"><span class="database-domain-note">Тематики:</span>';
+            (st.topics || Object.keys(names)).forEach(t => {
+                html += '<label class="database-checkbox-label"><input type="checkbox" class="database-guard-topic" value="' + esc(t) + '"'
+                    + (chosen.includes(t) && rules.topics ? ' checked' : '') + (rules.topics ? '' : proHint) + '> ' + esc(names[t] || t) + '</label>';
+            });
+            html += '</div>';
+            const modes = [['mask', 'маскировать данные'], ['block', 'запрещать вопрос'], ['audit', 'только журнал']];
+            const cur = rules.actions.includes(s.action) ? s.action : 'mask';
+            html += '<div class="database-domain-row"><label class="database-domain-note">Режим: <select class="database-field-input database-guard-action">'
+                + modes.map(m => '<option value="' + m[0] + '"' + (m[0] === cur ? ' selected' : '') + (rules.actions.includes(m[0]) ? '' : proHint) + '>' + m[1] + '</option>').join('')
+                + '</select></label></div>';
+            html += '<div class="database-domain-row"><label class="database-checkbox-label"><input type="checkbox" class="database-guard-usertoggle"'
+                + (s.user_toggle === false ? '' : ' checked') + '> Переключатель в чате: пользователь сам включает стража в ИИ-чате (выключено — страж проверяет все вопросы)</label></div>';
+            html += '<div class="database-domain-row">'
+                + '<button type="button" class="btn-primary btn-small" data-act="set">Сохранить</button>'
+                + '<button type="button" class="btn-secondary btn-small" data-act="power">' + (s.enabled ? 'Выключить' : 'Включить') + '</button></div>';
+        }
+        body.innerHTML = html;
+        body.querySelectorAll('button[data-act]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const act = btn.dataset.act;
+                if (act === 'pay') this.guardCall(dbName, '_guard_pay', body, { plan: btn.dataset.plan, period: btn.dataset.period });
+                else if (act === 'set') this.guardCall(dbName, '_guard_set', body, this.guardCollect(body, s.enabled !== false));
+                else if (act === 'power') this.guardCall(dbName, '_guard_set', body, this.guardCollect(body, !s.enabled));
             });
         });
     }

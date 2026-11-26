@@ -229,6 +229,8 @@ define("VAL_LIM", 127);  # Maximum length of the value (val) field on UI
 # своего домена в /<база>/… — до разбора REQUEST_URI.
 require_once __DIR__."/include/custom_domain.php";
 Cd_route();
+# Страж данных ИИ-чата из ЛК (#5654): оплата с баланса и настройка на сервисе агента.
+require_once __DIR__."/include/ai_guard_lk.php";
 
 $com = explode("?", strtolower($_SERVER["REQUEST_URI"]));
 $com = explode("/", $com[0]);
@@ -12701,22 +12703,38 @@ function aiAgentGuardRequest(){
     aiAgentRequireUser();
     api_dump(json_encode(aiAgentGuardStatus($z), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "ai-agent-guard.json");
 }
-function aiAgentGuardStatus($db){
-    $off = array("available" => false);
-    $safeDb = preg_replace('/[^a-z0-9_]/i', '', (string)$db);
+# Сервис стража: адрес агента без /chat и заголовки с Bearer агента; null — агент не настроен.
+# Им же пользуется ЛК (include/ai_guard_lk.php, #5654).
+function aiAgentGuardService(){
     $endpoint = aiConfigValue(array("INTEGRAM_AGENT_ENDPOINT", "AI_AGENT_ENDPOINT"));
-    if($safeDb === "" || $endpoint === "" || !preg_match('#^(https?://.+)/chat/?$#', $endpoint, $m))
-        return $off;
-    # Ключ — база и адрес агента: другая установка CRM на этом хосте с той же базой не прочтёт чужой статус.
-    $cache = sys_get_temp_dir()."/ai_agent_guard_".$safeDb."_".substr(md5($endpoint), 0, 12).".json";
-    $cached = @json_decode((string)@file_get_contents($cache), true);
-    if(is_array($cached) && isset($cached["at"], $cached["status"]) && time() - (int)$cached["at"] < 300)
-        return $cached["status"];
+    if($endpoint === "" || !preg_match('#^(https?://.+)/chat/?$#', $endpoint, $m))
+        return null;
     $headers = array("Accept: application/json", "User-Agent: Integram AI Agent");
     $token = aiConfigValue(array("INTEGRAM_AGENT_TOKEN", "AI_AGENT_TOKEN"));
     if($token !== "")
         $headers[] = "Authorization: Bearer ".$token;
-    $raw = aiAgentGuardFetch($m[1]."/guard?db=".rawurlencode($safeDb), $headers);
+    return array("base" => $m[1], "headers" => $headers, "endpoint" => $endpoint);
+}
+# Файл кеша статуса стража для чата ("" — агент не настроен). Ключ — база и адрес агента: другая
+# установка CRM на этом хосте с той же базой не прочтёт чужой статус. ЛК удаляет его после оплаты и настройки.
+function aiAgentGuardCacheFile($db){
+    $safeDb = preg_replace('/[^a-z0-9_]/i', '', (string)$db);
+    $svc = aiAgentGuardService();
+    if($safeDb === "" || !$svc)
+        return "";
+    return sys_get_temp_dir()."/ai_agent_guard_".$safeDb."_".substr(md5($svc["endpoint"]), 0, 12).".json";
+}
+function aiAgentGuardStatus($db){
+    $off = array("available" => false);
+    $safeDb = preg_replace('/[^a-z0-9_]/i', '', (string)$db);
+    $svc = aiAgentGuardService();
+    if($safeDb === "" || !$svc)
+        return $off;
+    $cache = aiAgentGuardCacheFile($safeDb);
+    $cached = @json_decode((string)@file_get_contents($cache), true);
+    if(is_array($cached) && isset($cached["at"], $cached["status"]) && time() - (int)$cached["at"] < 300)
+        return $cached["status"];
+    $raw = aiAgentGuardFetch($svc["base"]."/guard?db=".rawurlencode($safeDb), $svc["headers"]);
     $in = is_string($raw) ? json_decode($raw, true) : null;
     if(!is_array($in) || !isset($in["available"]))
         return $off;
@@ -12741,6 +12759,22 @@ function aiAgentGuardFetch($url, $headers){
     curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
     curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 3);
     curl_setopt($ch, CURLOPT_TIMEOUT, 5);
+    $raw = curl_exec($ch);
+    $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    return ($raw !== FALSE && $code === 200) ? $raw : FALSE;
+}
+# POST JSON сервису агента (настройка стража из ЛК, #5654): тело ответа или FALSE.
+function aiAgentGuardPost($url, $headers, $body){
+    if(!function_exists("curl_init"))
+        return FALSE;
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, array_merge($headers, array("Content-Type: application/json")));
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 10);
     $raw = curl_exec($ch);
     $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
@@ -17746,6 +17780,27 @@ if(Validate_Token())
 			else
 				$cdRes = Cd_status($cdDb);
 			api_dump(json_encode($cdRes, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "_domain.json");
+			break;
+
+		# #5654: страж данных ИИ-чата базы — состояние, настройка, оплата с баланса
+		case "_guard_status":
+		case "_guard_set":
+		case "_guard_pay":
+			if($z !== "my")
+				my_die(t9n("[RU]Страж данных настраивается в Личном кабинете[EN]The data guard is managed in your private space"));
+			$gdDb = isset($_REQUEST["db"]) ? (string)$_REQUEST["db"] : "";
+			if($a !== "_guard_status"){
+				if($_SERVER["REQUEST_METHOD"] !== "POST")
+					my_die(t9n("[RU]Используйте POST[EN]Use POST"));
+				check();
+			}
+			if($a === "_guard_set")
+				$gdRes = Gd_action_set($gdDb, $_REQUEST);
+			elseif($a === "_guard_pay")
+				$gdRes = Gd_action_pay($gdDb, isset($_REQUEST["plan"]) ? (string)$_REQUEST["plan"] : "", isset($_REQUEST["period"]) ? (string)$_REQUEST["period"] : "");
+			else
+				$gdRes = Gd_status($gdDb);
+			api_dump(json_encode($gdRes, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "_guard.json");
 			break;
 
 		# #5364: шаблоны баз — список (в my — для выбора при создании базы и модерации; в своей базе — её шаблон)
