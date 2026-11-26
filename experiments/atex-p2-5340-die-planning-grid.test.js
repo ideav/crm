@@ -79,7 +79,7 @@ assert(C.machineAllows(M1, N(1)).ok, 'обычный станок туррель
 var pt = C.orderQueue({ jobs: [W(1), N(2)], machines: [M1, T4], from: MON, settings: S0 });
 var on = function(p, mid) { return ((p.machines[mid] || { items: [] }).items).map(function(i) { return i.jobId; }); };
 assert(on(pt, 'M4').join() === '1' && on(pt, 'M1').join() === '2', 'подходящее туррели — на туррель, узкая втулка — на обычный станок', JSON.stringify([on(pt, 'M1'), on(pt, 'M4')]));
-var busy = C.orderQueue({ jobs: [W(1, { footage: 44 * 455 * 3, status: 'В работе', machineId: 'M4', start: MON }), W(2, { due: MON + 6 * 3600 })], machines: [M1, T4], from: MON, settings: S0 });
+var busy = C.orderQueue({ jobs: [W(1, { footage: 44 * 455 * 3, status: 'В работе', machineId: 'M4', start: MON }), W(2, { due: MON + 6 * 3600 })], machines: [M1, T4], from: MON, settings: S0, shafts: [{ id: 's1', no: '1', cylinderId: 'c1' }, { id: 's2', no: '2', cylinderId: 'c1' }] });   // два вала 96 (#5720)
 assert(on(busy, 'M1').indexOf('2') >= 0, 'туррель занята, на ней задание уйдёт в просрочку — ставится на обычный станок', JSON.stringify([on(busy, 'M1'), on(busy, 'M4')]));
 var pin = C.orderQueue({ jobs: [N(1, { machineId: 'M4' })], machines: [M1, T4], from: MON, settings: S0 });
 assert(on(pin, 'M4').join() === '1', 'узкая втулка, записанная диспетчером на туррель, после «Упорядочить» остаётся там', JSON.stringify([on(pin, 'M1'), on(pin, 'M4')]));
