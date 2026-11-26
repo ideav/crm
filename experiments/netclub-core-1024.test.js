@@ -1,4 +1,4 @@
-// rules: none (demo #1024)
+// rules: none (defect #5753)
 // Бизнес-клуб (демо-копия, ideav/backlogram#1024): взносы и продления, должники, приём заявки, места и лист ожидания, явка, сегменты, поиск по каталогу.
 const test = require('node:test');
 const assert = require('node:assert');
