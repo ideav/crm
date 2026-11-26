@@ -130,7 +130,10 @@ def main():
             cur = next((x for x in rows if x['cyl'] == cid and x['no'].isdigit() and x['id'] not in used), None)
             if cur:
                 print(f'  {no}: номер БЫЛО «{cur["no"]}» → СТАЛО «{no}» (id {cur["id"]})')
-                post(f'_m_set/{cur["id"]}?JSON', {f't{ser_id}': no})
+                # первая колонка — только _m_save: _m_set на ядре ideav.ru отвечает "id":"" и не меняет (docs/kb/crud.md)
+                res = post(f'_m_save/{cur["id"]}?JSON', {f't{ser_id}': no})
+                if not DRY and not str((res or {}).get('id') or (res or {}).get('obj') or ''):
+                    raise SystemExit(f'вал {no}: _m_save не переименовал запись {cur["id"]}: {res}')
         if not cur:
             print(f'  {no}: БЫЛО нет → СТАЛО есть' + (', не ставить в работу' if off else '') + (f', примечание «{note[:40]}…»' if note else ''))
             f = {f't{ser_id}': no, f't{rq[CYL]}': cid}
