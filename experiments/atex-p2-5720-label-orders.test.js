@@ -102,4 +102,20 @@ assert(row.orderNomenclature.indexOf('П/Гл') !== -1 && row.shape === 'round',
 var info = lo.orderMaterialInfo({ orderNomenclature: '1 х 1 5 шт. П/Гл', material: '0043 SG/HM/YG', base: 'Бумага' });
 assert(info.differs === true && info.shown === 'П/Гл', 'подсветка: не совпало с сырьём позиции');
 assert(lo.orderMaterialInfo({ orderNomenclature: '1 х 1 5 шт. SG/HM', material: '0043 SG/HM/YG' }).differs === false, 'совпало с названием сырья - без подсветки');
+// 8. Живые «Тип ножей» ateh1 без «х» (parseKnifeType их не разбирает)
+var LIVE_ROUND = ['D 52 (80)', 'D 20 (70)', 'D 15 (80)', 'D 20 (80) (13 ручьёв)', 'D 20 (70 13/3/3.446)', 'D 20 (70| 3,02/8/6)'];
+LIVE_ROUND.forEach(function(t) {
+    assert(lp.parseKnifeType(t).ok === false, 'parseKnifeType не разбирает «' + t + '»');
+    assert(lp.isRoundKnifeType(t) === true && lp.knifeShape(t) === 'round', 'круглый: «' + t + '»');
+});
+['85 х 38 (80)', '10 х 10 (70)', '100 х 100', '18 х 18 (80)15 ручъев'].forEach(function(t) { assert(lp.isRoundKnifeType(t) === false && lp.knifeShape(t) === 'rect', 'прямоугольный: «' + t + '»'); });
+var d52 = die({ no: 'D52', width: 52, length: 52, typeName: 'D 52 (80)' });
+var r52 = die({ no: 'R52', width: 52, length: 52, typeName: '52 х 52 (80)' });
+var sqPos = { width: 52, length: 52, base: 'Бумага', knifeType: '52 х 52 (80)' };
+assert(lo.nearestDies(sqPos, [d52, r52]).map(function(d) { return d.no; }).join() === 'R52', 'живой D 52 (80) не предлагается квадратной этикетке');
+assert(lp.pickDie(sqPos, [d52], {}).ok === false, 'pickDie: D 52 (80) не берётся для квадратной');
+var rdPos = lo.positionFromRow({ 'РулоновID': '9', 'Ширина, мм': '20', 'Длина, мм': '20', 'Тип ножей': 'D 20 (80) (13 ручьёв)' }, {});
+assert(rdPos.shape === 'round', 'позиция с «D 20 (80) (13 ручьёв)» круглая');
+var d20 = die({ no: 'D20', width: 20, length: 20, typeName: 'D 20 (80)' }), r20 = die({ no: 'R20', width: 20, length: 20, typeName: '20 х 20 (80)' });
+assert(lo.nearestDies(rdPos, [d20, r20]).map(function(d) { return d.no; }).join() === 'D20', 'круглой позиции живого вида — только круглый нож');
 console.log('\n' + passed + '/' + total);

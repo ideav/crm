@@ -595,10 +595,17 @@
 
     // Форма по «Типу ножа»/«Типу ножей»: 'round' («D х 40 (76)», «D-20»), 'rect' («Ш х Д …»),
     // '' — по имени не определить (#5720).
+    // Круглый тип по имени: «D х 40 (76)» и живые «D 52 (80)», «D 20 (80) (13 ручьёв)»,
+    // «D 20 (70 13/3/3.446)» — буква D (лат./кир.), необязательный «х», число. parseKnifeType
+    // формы без «х» не разбирает (ok:false), поэтому форму определяет этот признак.
+    function isRoundKnifeType(name) {
+        return /^\s*[DДдd]\s*(?:[хХxX×*\-–—]\s*)?\d/.test(String(name == null ? '' : name));
+    }
+
     function knifeShape(name) {
         var src = String(name == null ? '' : name).trim();
         if (!src) return '';
-        if (/^[DДдd]\s*[хХxX×*\-–—]?\s*\d/.test(src)) return 'round';
+        if (isRoundKnifeType(src)) return 'round';
         if (/^\d+(?:[.,]\d+)?\s*[хХxX×*]\s*\d/.test(src)) return 'rect';
         return '';
     }
@@ -866,6 +873,7 @@
             filterPositionRows: filterPositionRows,
             parseKnifeType: parseKnifeType,
             dieSizeTolerance: dieSizeTolerance,
+            isRoundKnifeType: isRoundKnifeType,
             knifeShape: knifeShape,
             positionShape: positionShape,
             shapeMismatch: shapeMismatch,
