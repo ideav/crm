@@ -71,16 +71,34 @@ var counts = C.shaftCounts([{ id: 'c1', reqs: { q: '2' } }, { id: 'c2', reqs: { 
 assert(JSON.stringify(counts) === '{"c1":2}' && JSON.stringify(C.shaftCounts([{ id: 'c1', reqs: { q: '2' } }], '')) === '{}',
     'количество валов — из реквизита «Вала»; реквизита нет или пусто — по одному', JSON.stringify(counts));
 
-// 2. Журнал: группировка не задерживает просроченное — так задание вала 98 остаётся между заданиями вала 96
+// 2. Группировка задерживает просроченное, если суммарная просрочка не растёт (решение владельца в #5720):
+//    96 → 98 → 96 (все просрочены) становится 96 → 96 → 98; журнал объясняет каждое решение.
 var late = MON - 30 * 86400;
 var seqJobs = [J(1, { due: late }), J(2, { due: late, cylinderId: 'c2', cylinder: '98' }), J(3, { due: late, dieId: 'k1' })];
 var log = [];
 var sq = C.orderQueue({ jobs: seqJobs, machines: [M1], from: MON, settings: S, trace: function(r) { log.push(r); } });
 var order = sq.machines.M1.items.map(function(i) { return i.jobId; }).join();
-assert(order === '1,2,3', 'просроченное задание вала 98 группировкой не задерживается: 96 → 98 → 96', order);
-var refused = log.filter(function(r) { return /группировка/.test(r.text) && /уже просрочено/.test(r.text); });
-assert(refused.length === 1 && /задание 2 /.test(refused[0].text) && /вал 98/.test(refused[0].text) && /сэкономила бы \d+ мин/.test(refused[0].text) && refused[0].machineId === 'M1',
-    'журнал называет отказ группировки: какое просроченное задание задержалось бы и сколько наладки сэкономили бы', refused.map(function(r) { return r.text; }).join(' | '));
+assert(order === '1,3,2', 'все просрочены — задания вала 96 подряд, вал 98 после них: 96 → 96 → 98', order);
+var taken = log.filter(function(r) { return /группировка/.test(r.text) && / — да:/.test(r.text); });
+assert(taken.length === 1 && /просроченные позже: задание 2 на \d+ мин/.test(taken[0].text) && /суммарная просрочка \d+ → \d+ мин/.test(taken[0].text) && taken[0].machineId === 'M1',
+    'журнал: группировка принята — какое просроченное задание закончится позже и суммарная просрочка до/после', taken.map(function(r) { return r.text; }).join(' | '));
+var lateOf = function(p) { return itemsOf(p).reduce(function(a, i) { return a + Math.max(0, i.end - i.due); }, 0); };
+var asBefore = C.orderQueue({ jobs: seqJobs.map(function(j) { return Object.assign({}, j, { cylinderId: 'c' + j.id }); }), machines: [M1], from: MON, settings: S });
+assert(lateOf(sq) < lateOf(asBefore), 'суммарная просрочка с группировкой меньше, чем без неё', lateOf(sq) + ' < ' + lateOf(asBefore));
+// задание 3 в срок (его раннее окончание просрочку не уменьшает), просроченное 2 задержится — просрочка растёт: отказ
+var grow = [J(1, { due: late }), J(2, { due: late, cylinderId: 'c2', cylinder: '98' }), J(3, { due: MON + 30 * 86400, dieId: 'k1' })];
+var log2 = [];
+var g2 = C.orderQueue({ jobs: grow, machines: [M1], from: MON, settings: S, trace: function(r) { log2.push(r); } });
+var refused = log2.filter(function(r) { return /группировка/.test(r.text) && / — нет:/.test(r.text); });
+assert(g2.machines.M1.items.map(function(i) { return i.jobId; }).join() === '1,2,3' && refused.length === 1 &&
+    /просроченное задание 2 .* закончится позже на \d+ мин, а суммарная просрочка \d+ → \d+ мин/.test(refused[0].text),
+    'просрочка выросла бы — группировка отклонена, журнал называет задание и суммарную просрочку', refused.map(function(r) { return r.text; }).join(' | '));
+// задание в срок за срок не уходит ни ради какой экономии наладки
+var tight = [J(1), J(2, { cylinderId: 'c2', cylinder: '98', due: MON + 2 * 3600 }), J(3, { dieId: 'k1' })];
+var log3 = [];
+var g3 = C.orderQueue({ jobs: tight, machines: [M1], from: MON, settings: S, trace: function(r) { log3.push(r); } });
+assert(itemsOf(g3).filter(function(i) { return i.jobId === '2'; })[0].late === false, 'задание в срок группировкой за срок не уходит',
+    log3.filter(function(r) { return /группировка/.test(r.text); }).map(function(r) { return r.text; }).join(' | '));
 var pick = log.filter(function(r) { return r.jobId === '1' && /→ «1 высечка»/.test(r.text); });
 assert(pick.length === 1 && /1 высечка — конец/.test(pick[0].text), 'журнал выбора станка: кандидаты с концом и выбранный станок', pick[0] && pick[0].text);
 var noTrace = C.orderQueue({ jobs: seqJobs, machines: [M1], from: MON, settings: S });

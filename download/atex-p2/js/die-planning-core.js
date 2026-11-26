@@ -617,6 +617,10 @@
             });
             return { items: items, setupTotal: setupTotal };
         }
+        // Минуты просрочки заданий со сроком: Σ max(0, конец − срок).
+        function lateMinutes(items) {
+            return Math.round(items.reduce(function(a, i) { return a + (i.due > 0 && i.end > i.due ? i.end - i.due : 0); }, 0) / 60);
+        }
         // Группировка вал → нож → сырьё без новой просрочки. Переставляются только свободные задания
         // внутри участков между закреплёнными; у туррели — только её очередь. 🔒 не меняет день.
         function improve(x) {
@@ -637,20 +641,30 @@
                 var t = runSeq(x, trial);
                 var what = 'группировка: после ' + traceLabel(cur) + ' поставить ' + traceLabel(moved) + ' вместо ' + traceLabel(seq[p + 1]);
                 if (t.setupTotal >= base.setupTotal) { say(moved, x.machine.id, what + ' — нет: наладка не уменьшается (' + t.setupTotal + ' ≥ ' + base.setupTotal + ' мин)'); continue; }
-                var ends = {}, worse = null;
+                // Задание в срок не уходит за срок. Просроченное группировка задерживать может, если
+                // суммарная просрочка участка не растёт (#5720).
+                var ends = {}, worse = null, delayed = [];
                 base.items.forEach(function(i) { ends[i.jobId] = i.end; });
                 var ok = t.items.every(function(i) {
-                    if (!(i.due > 0)) return true;
-                    if (i.end <= Math.max(ends[i.jobId], i.due)) return true;
+                    if (!(i.due > 0) || i.end <= ends[i.jobId]) return true;
+                    if (ends[i.jobId] > i.due) { delayed.push(i); return true; }
+                    if (i.end <= i.due) return true;
                     worse = i; return false;
                 });
+                var lateBase = lateMinutes(base.items), lateTrial = lateMinutes(t.items);
+                if (ok && delayed.length && lateTrial > lateBase) ok = false;
                 var days = dayOfItems(t), shifted = null;
                 if (ok) ok = Object.keys(days).every(function(k) { if (days[k] <= baseDays[k]) return true; shifted = k; return false; });
-                if (ok) { say(moved, x.machine.id, what + ' — да: наладка ' + base.setupTotal + ' → ' + t.setupTotal + ' мин'); seq = trial; base = t; baseDays = days; }
-                else if (worse) say(moved, x.machine.id, what + ' — нет: ' + traceLabel(jobById[worse.jobId] || { id: worse.jobId }) + ' закончится ' + tt(worse.end) +
-                    ' вместо ' + tt(ends[worse.jobId]) + (ends[worse.jobId] > worse.due ? ' — оно уже просрочено, а просроченное задание группировка не задерживает' : ' — позже срока ' + tt(worse.due)) +
-                    ' (наладка сэкономила бы ' + (base.setupTotal - t.setupTotal) + ' мин)');
-                else say(moved, x.machine.id, what + ' — нет: 🔒 задание ' + shifted + ' сдвинется на другой день');
+                var lateText = ' суммарная просрочка ' + lateBase + ' → ' + lateTrial + ' мин';
+                if (ok) {
+                    say(moved, x.machine.id, what + ' — да: наладка ' + base.setupTotal + ' → ' + t.setupTotal + ' мин' +
+                        (delayed.length ? '; просроченные позже: ' + delayed.map(function(i) { return 'задание ' + i.jobId + ' на ' + Math.round((i.end - ends[i.jobId]) / 60) + ' мин'; }).join(', ') + ',' + lateText : ''));
+                    seq = trial; base = t; baseDays = days;
+                } else if (worse) say(moved, x.machine.id, what + ' — нет: ' + traceLabel(jobById[worse.jobId] || { id: worse.jobId }) + ' уйдёт за срок: закончится ' + tt(worse.end) +
+                    ', срок ' + tt(worse.due) + ' (наладка сэкономила бы ' + (base.setupTotal - t.setupTotal) + ' мин)');
+                else if (shifted) say(moved, x.machine.id, what + ' — нет: 🔒 задание ' + shifted + ' сдвинется на другой день');
+                else say(moved, x.machine.id, what + ' — нет: просроченное ' + traceLabel(jobById[delayed[0].jobId] || { id: delayed[0].jobId }) + ' закончится позже на ' +
+                    Math.round((delayed[0].end - ends[delayed[0].jobId]) / 60) + ' мин, а' + lateText + ' (наладка сэкономила бы ' + (base.setupTotal - t.setupTotal) + ' мин)');
             }
             x.seq = seq;
             return base;
