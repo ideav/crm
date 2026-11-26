@@ -65,7 +65,14 @@ function Exec_sql($sql, $msg, $log=true, $fatal=true){
         }
         return true;
     }
-    if(preg_match("/^SELECT id, up FROM my WHERE t=271 AND val='([^']*)' LIMIT 1$/", $sql, $m)){
+    if(preg_match("/^SELECT 1 x FROM my WHERE t=1075 AND val LIKE '(.*)' LIMIT 1$/u", $sql, $m)){
+        $re = "/^".str_replace(array("%", "_"), array(".*", "."), preg_quote(stripslashes($m[1]), "/"))."$/u";
+        foreach($db["pay"] as $p)
+            if($p["notes"] !== null && preg_match($re, $p["notes"]))
+                return new Res(array(array("x" => "1")));
+        return new Res(array());
+    }
+    if(preg_match("/^SELECT id, up FROM my WHERE t=271 AND val='([^']*)' ORDER BY id DESC LIMIT 1$/", $sql, $m)){
         foreach($db["dbs"] as $u => $list)
             if(isset($list[$m[1]]))
                 return new Res(array(array("id" => (string)$list[$m[1]], "up" => (string)$u)));
@@ -452,6 +459,43 @@ $GLOBALS["__get_reply"] = json_encode(array("available" => true, "settings" => a
 $GLOBALS["__post"] = array();
 $st = Gd_status("acme");
 expect($st["used"] === 21500 && $st["packs"] === 2 && $st["limit"] === 20000 && !$GLOBALS["__post"], "K12 статус: использовано, пакеты и лимит из сервиса", json_encode($st, JSON_UNESCAPED_UNICODE));
+
+# --- L: ревью PR #5765 — сброс пересозданной базы без ЛК, перенос выбора, ручная настройка -------
+$GLOBALS["__cfg"]["BILLING_SERVICE_TOKEN"] = "bill-secret";
+$GLOBALS["__post"] = array();
+$r = $pk($ok(1, 400));
+$p = last_post();
+expect($r["code"] === 409 && $p && $p["body"]["enabled"] === false && $p["body"]["rec"] === 501 && !empty($p["body"]["reset"]),
+    "L1 пакет для прежней записи (stale) — CRM сама сбрасывает настройку сервиса на текущую запись", json_encode($p ? $p["body"] : null));
+unset($GLOBALS["__cfg"]["BILLING_SERVICE_TOKEN"]);
+# создание базы под именем, за которое раньше платили, — сброс сразу
+$GLOBALS["__post"] = array();
+Gd_db_created("acme", 777);
+$p = last_post();
+expect($p && $p["body"]["rec"] === 777 && $p["body"]["enabled"] === false && !empty($p["body"]["reset"]), "L2 новая запись базы с оплаченным раньше именем — сброс на сервисе", json_encode($p ? $p["body"] : null));
+$GLOBALS["__post"] = array();
+Gd_db_created("fresh", 778);
+expect(!$GLOBALS["__post"], "L3 новое имя без оплат стража — сервис не трогаем");
+# настроено до привязки, срок этой записи истёк — это её собственный выбор, не сброс
+reset_db(100000);
+as_user(10);
+$GLOBALS["DB"]["pay"][9500] = array("user" => 10, "amount" => "1490", "type" => "bal2guard", "paid" => (string)(time() - 40 * 86400), "notes" => "страж start month (acme)");
+$GLOBALS["DB"]["dbs"][10]["acme"] = 501;
+$GLOBALS["__get_reply"] = json_encode(array("available" => false, "settings" => array("enabled" => true, "topics" => array(), "action" => "audit",
+    "user_toggle" => false, "until" => time() - 9 * 86400)));
+$GLOBALS["__post"] = array();
+$st = Gd_status("acme");
+expect($st["state"] === "expired" && !$GLOBALS["__post"] && $st["settings"]["action"] === "audit", "L4 срок без привязки истёк у той же записи — выбор не сбрасывается", json_encode($st["settings"]));
+# ручная настройка администратора переносится в первую оплату
+reset_db(100000);
+$GLOBALS["__get_reply"] = json_encode(array("available" => true, "settings" => array("enabled" => true, "topics" => array("hr"), "action" => "block",
+    "user_toggle" => false, "until" => null)));
+$GLOBALS["__post"] = array();
+Gd_action_pay("acme", "pro", "month");
+$p = $GLOBALS["__post"][0];
+expect($p["body"]["topics"] === array("hr") && $p["body"]["action"] === "block" && $p["body"]["user_toggle"] === false && $p["body"]["rec"] === 501,
+    "L5 первая оплата сохраняет ручную настройку администратора", json_encode($p["body"]));
+$GLOBALS["__get_reply"] = null;
 
 expect(empty($GLOBALS["UNKNOWN_SQL"]), "I7 все запросы к базе узнаны заглушкой", json_encode(isset($GLOBALS["UNKNOWN_SQL"]) ? $GLOBALS["UNKNOWN_SQL"] : null));
 

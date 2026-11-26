@@ -169,6 +169,8 @@ function Gd_service_set($db, $cfg){
         $body["rec"] = (int)$cfg["rec"];
     if(array_key_exists("limit", $cfg))
         $body["limit"] = $cfg["limit"] === null ? null : (int)$cfg["limit"];
+    if(!empty($cfg["reset"]))
+        $body["reset"] = true;     # забыть срок, лимит и выбор (настройка другой записи базы)
     $raw = aiAgentGuardPost($svc["base"]."/guard", $svc["headers"], json_encode($body, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
     $cache = aiAgentGuardCacheFile($db);
     if($cache !== "")
@@ -186,6 +188,22 @@ function Gd_lock($db){
 }
 function Gd_not_applied(){
     return t9n("[RU]Оплата учтена, но сервис ИИ-агента сейчас не ответил — настройка стража не применилась. Нажмите «Сохранить» ещё раз чуть позже.[EN]Saved, but the AI agent service did not respond. Press Save again later.");
+}
+
+# Сервису — «для записи $rec страж не настроен»: срок, лимит, выбор и счётчик прежней записи забыты.
+function Gd_service_reset($db, $rec){
+    return Gd_service_set($db, array("enabled" => false, "topics" => array(), "action" => "mask",
+        "user_toggle" => true, "until" => 0, "rec" => (int)$rec, "limit" => null, "reset" => true));
+}
+# Новая запись базы (#5654): если под этим именем раньше оплачивали стража, у сервиса может остаться
+# настройка прежней записи — сбросить сразу при создании, не дожидаясь панели стража в ЛК.
+# Без таких платежей сервис не трогаем (лишний HTTP при каждой регистрации не нужен).
+function Gd_db_created($db, $rec){
+    if(!aiAgentGuardService())
+        return false;
+    $like = "страж % (".$db.")%";
+    $row = mysqli_fetch_assoc(Exec_sql("SELECT 1 x FROM my WHERE t=1075 AND val LIKE '".addslashes($like)."' LIMIT 1", "Guard: paid before"));
+    return $row ? Gd_service_reset($db, $rec) : false;
 }
 
 # --- действия ЛК ----------------------------------------------------------------------------------
@@ -210,15 +228,15 @@ function Gd_status($db){
         $svcRec = isset($s["rec"]) && is_numeric($s["rec"]) ? (int)$s["rec"] : 0;
         $svcLimit = isset($s["limit"]) && is_numeric($s["limit"]) ? (int)$s["limit"] : null;
         # Настройка сервиса — от другой записи базы (база удалена и создана заново под тем же именем)
-        # или оплаченный срок без привязки, которого у этой записи нет: для этой записи страж не
-        # настроен, срок и лимит прежнего владельца сбрасываются.
+        # или оплаченный срок без привязки, а у этой записи платежей стража нет совсем: для этой
+        # записи страж не настроен, срок и лимит прежнего владельца сбрасываются. Срок без привязки
+        # при истёкшей оплате этой записи — её собственный (настроен до привязки), выбор сохраняется.
         $foreign = ($svcRec > 0 && $svcRec !== $own["id"])
-            || ($svcRec === 0 && $settings["until"] !== null && $state !== "active");
+            || ($svcRec === 0 && $settings["until"] !== null && $state === "none");
         if($foreign)    # выбор прежнего владельца не показывается и не переносится
             $settings = array("enabled" => $state === "active", "topics" => array(), "action" => "mask", "user_toggle" => true, "until" => null);
         if($foreign && $state !== "active"){
-            Gd_service_set($own["db"], array("enabled" => false, "topics" => array(), "action" => "mask",
-                "user_toggle" => true, "until" => 0, "rec" => $own["id"], "limit" => null));
+            Gd_service_reset($own["db"], $own["id"]);
             $svc["available"] = false;
         }elseif($state === "active" && ($settings["until"] !== $c["until"] || $svcRec !== $own["id"] || $svcLimit !== $limit)){
             # У этой записи оплачен срок, а сервис о нём не знает (оплата, когда сервис не отвечал) —
@@ -339,7 +357,9 @@ function Gd_action_pay($db, $plan, $period){
         # Выбор другой записи базы не переносится; без привязки (настроено до неё) — только если у этой
         # записи уже шёл оплаченный срок.
         $sRec = isset($s["rec"]) && is_numeric($s["rec"]) ? (int)$s["rec"] : 0;
-        if($sRec !== $own["id"] && !($sRec === 0 && $wasActive))
+        # Ручная настройка администратора (ни привязки, ни срока из ЛК) переносится.
+        $sUntil = isset($s["until"]) && is_numeric($s["until"]) ? (int)$s["until"] : 0;
+        if($sRec !== $own["id"] && !($sRec === 0 && ($wasActive || $sUntil === 0)))
             $s = array();
         list($topics, $action) = Gd_fit_plan($c["plan"], isset($s["topics"]) && is_array($s["topics"]) ? $s["topics"] : array(),
             isset($s["action"]) ? (string)$s["action"] : "mask");
@@ -365,7 +385,7 @@ function Gd_action_pay($db, $plan, $period){
 # Списание — с баланса владельца базы (up записи 271), атомарно и одной транзакцией с платежом,
 # под замком базы: два параллельных запроса одного номера второй раз не спишут.
 function Gd_db_record($db){
-    $row = mysqli_fetch_assoc(Exec_sql("SELECT id, up FROM my WHERE t=".DATABASE." AND val='$db' LIMIT 1", "Guard pack DB"));
+    $row = mysqli_fetch_assoc(Exec_sql("SELECT id, up FROM my WHERE t=".DATABASE." AND val='$db' ORDER BY id DESC LIMIT 1", "Guard pack DB"));
     return $row ? array("id" => (int)$row["id"], "user" => (int)$row["up"]) : null;
 }
 function Gd_pack_notes($db, $month, $n, $rec){
@@ -409,8 +429,12 @@ function Gd_pack_request($method, $headers, $body){
     $r = Gd_db_record($db);
     if(!$r)
         return Gd_pack_reply(404, array("ok" => false, "reason" => "no_db"));
-    if($r["id"] !== $rec)
+    if($r["id"] !== $rec){
+        # У сервиса настройка прежней записи (база пересоздана, панель стража ещё не открывали) —
+        # сбросить её сейчас: дальше вопросы новой базы идут без чужого стража и лимита.
+        Gd_service_reset($db, $r["id"]);
         return Gd_pack_reply(409, array("ok" => false, "reason" => "stale"));
+    }
     $user = $r["user"];
     $c = Gd_compute(Gd_user_payments($user), $db, $rec);
     if($c["until"] <= time())
@@ -418,11 +442,13 @@ function Gd_pack_request($method, $headers, $body){
     $have = Gd_pack_numbers($user, $db, $month, $rec);
     if(isset($have[$n]))
         return Gd_pack_reply(200, array("ok" => true, "packs" => max(array_keys($have)), "charged" => 0));
-    if($n !== count($have) + 1)
+    if($n !== count($have) + 1)     # сервис сверит число пакетов и попросит следующий номер
         return Gd_pack_reply(409, array("ok" => false, "reason" => "order", "packs" => count($have)));
     $amount = (int)GD_OVER_PRICE;
     if(!mysqli_begin_transaction($GLOBALS["connection"]))
         return Gd_pack_reply(503, array("ok" => false, "reason" => "busy"));
+    # LIMIT 1 не убирать: с ним журнал (#5104) не делает SELECT между UPDATE и affected_rows,
+    # и affected_rows — число списаний именно этого UPDATE.
     Exec_sql("UPDATE my SET val=CAST(val AS DECIMAL(15,2))-$amount WHERE up=$user AND t=285 AND CAST(val AS DECIMAL(15,2))>=$amount LIMIT 1", "Guard pack debit");
     if(mysqli_affected_rows($GLOBALS["connection"]) !== 1){
         mysqli_rollback($GLOBALS["connection"]);

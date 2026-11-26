@@ -900,6 +900,7 @@ function createDb($id, $name, $email, $pwd=""){
         Insert($id, 1, 275, date("Ymd"), "Insert new DB date");
         Insert($id, 1, 283, $template, "Insert new DB template");
         Insert($id, 1, 276, t9n("[RU]Тестовая база, создана при регистрации[EN]Test one, created upon registration"), "Insert new DB notes");
+        Gd_db_created($db, $id);  # #5654: страж прежней записи с тем же именем не наследуется
         $z = $db;
     }
 }
@@ -17759,6 +17760,7 @@ if(Validate_Token())
             Insert($id, 1, 275, date("Ymd"), "Insert new DB date");
             Insert($id, 1, 283, $template, "Insert new DB template");
             Insert($id, 1, 276, $_POST["descr"], "Insert new DB notes");
+            Gd_db_created($db, $id);  # #5654: страж прежней записи с тем же именем не наследуется
 			api_dump(json_encode(array("status"=>"Ok","id"=>$id)), "_new_db.json");
 			break;
 
