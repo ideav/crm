@@ -1,4 +1,4 @@
-// rules: none (demo)
+// rules: none (defect #5738)
 // SRM (демо-копия, ideav/backlogram#983): приведение КП, история цен, маршрут по порогам, допуск, экономия, дробление, поставки, разбор КП.
 const test = require('node:test');
 const assert = require('node:assert');
