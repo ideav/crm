@@ -1,0 +1,114 @@
+/* КЭДО: стили рабочих мест (реестр, очередь, маршруты, сверка). Тема берётся из переменных платформы, запасные значения - светлая тема. */
+.kedo {
+    --p-bg: var(--bg-primary, #f6f8fb);
+    --p-card: var(--bg-secondary, #ffffff);
+    --p-text: var(--text-primary, #0f172a);
+    --p-muted: var(--text-secondary, #64748b);
+    --p-line: var(--border-color, #dbe1ea);
+    --p-blue: #2563eb;
+    --p-red: #dc2626;
+    --p-amber: #b45309;
+    --p-green: #15803d;
+    --p-teal: #0f766e;
+    --p-violet: #6d28d9;
+    --p-blue-soft: rgba(37, 99, 235, .12);
+    --p-red-soft: rgba(220, 38, 38, .13);
+    --p-amber-soft: rgba(217, 119, 6, .16);
+    --p-green-soft: rgba(22, 163, 74, .14);
+    padding: 20px 24px 32px; background: var(--p-bg); color: var(--p-text); min-height: 100%; box-sizing: border-box; font-size: 14px; line-height: 1.4;
+}
+.kedo *, .kedo *::before, .kedo *::after { box-sizing: border-box; }
+.kedo h1 { margin: 0 0 2px; font-size: 1.5rem; font-weight: 700; letter-spacing: -.01em; }
+.kedo h2 { margin: 22px 0 10px; font-size: 1.05rem; font-weight: 650; }
+.kedo h3 { margin: 0 0 6px; font-size: 1rem; }
+.kedo-sub { color: var(--p-muted); margin: 0 0 14px; max-width: 920px; }
+.kedo-bar { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: end; margin: 10px 0 14px; }
+.kedo-bar .kedo-grow { flex: 1; }
+.kedo-field { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--p-muted); }
+.kedo-field small { color: var(--p-muted); font-size: 11px; }
+.kedo-field input, .kedo-field select, .kedo-field textarea, .kedo-bar select, .kedo-bar input[type=text], .kedo-bar input[type=number], .kedo-bar input[type=date] {
+    min-height: 36px; padding: 5px 10px; border: 1px solid var(--p-line); border-radius: 8px; background: var(--p-card); color: var(--p-text); font: inherit;
+}
+.kedo-btn { min-height: 36px; padding: 5px 14px; border: 1px solid var(--p-line); border-radius: 8px; background: var(--p-card); color: var(--p-text); cursor: pointer; font: inherit; transition: border-color .12s, box-shadow .12s; }
+.kedo-btn:hover { border-color: var(--p-blue); }
+.kedo-btn:disabled { opacity: .5; cursor: not-allowed; }
+.kedo-primary { background: var(--p-blue); border-color: var(--p-blue); color: #fff; font-weight: 600; }
+.kedo-primary:hover { box-shadow: 0 2px 10px rgba(37, 99, 235, .35); }
+.kedo-danger { color: var(--p-red); border-color: var(--p-red); }
+.kedo-small { min-height: 28px; padding: 2px 10px; font-size: 12px; }
+.kedo-btn:focus-visible, .kedo-tab:focus-visible, .kedo-hc:focus-visible { outline: 2px solid var(--p-blue); outline-offset: 2px; }
+.kedo-tabs { display: flex; gap: 2px; flex-wrap: wrap; border-bottom: 1px solid var(--p-line); margin-bottom: 14px; }
+.kedo-tab { border: 0; background: none; color: var(--p-muted); padding: 9px 14px; cursor: pointer; font: inherit; border-bottom: 2px solid transparent; }
+.kedo-tab-on { color: var(--p-text); border-bottom-color: var(--p-blue); font-weight: 650; }
+.kedo-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin: 8px 0 16px; }
+.kedo-kpi { background: var(--p-card); border: 1px solid var(--p-line); border-radius: 12px; padding: 12px 14px; }
+.kedo-kpi-v { font-size: 1.7rem; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.kedo-kpi-l { color: var(--p-muted); font-size: 12px; margin-top: 2px; }
+.kedo-kpi-s { font-size: 12px; margin-top: 4px; color: var(--p-muted); }
+.kedo-kpi-bad { border-color: var(--p-red); } .kedo-kpi-bad .kedo-kpi-v { color: var(--p-red); }
+.kedo-kpi-warn .kedo-kpi-v { color: var(--p-amber); } .kedo-kpi-good .kedo-kpi-v { color: var(--p-green); }
+.kedo-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+.kedo-card { background: var(--p-card); border: 1px solid var(--p-line); border-radius: 12px; padding: 14px; }
+.kedo-card.kedo-bad { border-color: var(--p-red); }
+.kedo-kv { display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; }
+.kedo-kv span:first-child { color: var(--p-muted); }
+.kedo-badge { display: inline-block; padding: 1px 9px; border-radius: 10px; font-size: 12px; white-space: nowrap; }
+.kedo-info { background: var(--p-blue-soft); color: var(--p-blue); }
+.kedo-ok { background: var(--p-green-soft); color: var(--p-green); }
+.kedo-warn { background: var(--p-amber-soft); color: var(--p-amber); }
+.kedo-crit { background: var(--p-red-soft); color: var(--p-red); }
+.kedo-mute { background: rgba(100, 116, 139, .15); color: var(--p-muted); }
+.kedo-tablewrap { overflow: auto; max-width: 100%; border: 1px solid var(--p-line); border-radius: 12px; background: var(--p-card); }
+.kedo-table { border-collapse: collapse; width: 100%; }
+.kedo-table th, .kedo-table td { padding: 8px 12px; border-bottom: 1px solid var(--p-line); text-align: left; vertical-align: middle; }
+.kedo-table tr:last-child td { border-bottom: 0; }
+.kedo-table th { position: sticky; top: 0; background: var(--p-card); font-weight: 600; font-size: 12px; color: var(--p-muted); white-space: nowrap; }
+.kedo-num { text-align: right !important; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.kedo-click { cursor: pointer; }
+.kedo-click:hover td { background: var(--p-blue-soft); }
+.kedo-row-bad td { background: var(--p-red-soft); }
+.kedo-row-warn td { background: var(--p-amber-soft); }
+.kedo-empty { color: var(--p-muted); text-align: center !important; padding: 20px !important; }
+.kedo-error { color: var(--p-red); padding: 12px; border: 1px solid var(--p-red); border-radius: 10px; }
+.kedo-muted { color: var(--p-muted); }
+.kedo-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 6px 0 10px; color: var(--p-muted); font-size: 12px; align-items: center; }
+.kedo-legend i { display: inline-block; width: 14px; height: 14px; border-radius: 4px; vertical-align: -3px; margin-right: 4px; }
+.kedo-two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.kedo-chip { display: inline-block; padding: 1px 8px; border-radius: 6px; background: var(--p-blue-soft); font-size: 12px; margin: 1px 3px 1px 0; }
+.kedo-warnbox { padding: 8px 12px; border-radius: 8px; margin: 6px 0; font-size: 13px; }
+.kedo-warnbox.kedo-w { background: var(--p-amber-soft); color: var(--p-amber); }
+.kedo-warnbox.kedo-e { background: var(--p-red-soft); color: var(--p-red); }
+.kedo-warnbox.kedo-g { background: var(--p-green-soft); color: var(--p-green); }
+.kedo-modal-back { position: fixed; inset: 0; background: rgba(15, 23, 42, .5); display: flex; align-items: center; justify-content: center; z-index: 9999; padding: 12px; }
+.kedo-modal { background: var(--bg-secondary, #fff); color: var(--text-primary, #0f172a); opacity: 1; border: 1px solid var(--border-color, #dbe1ea); border-radius: 14px; padding: 18px; width: min(560px, 100%); max-height: 92vh; overflow: auto; box-shadow: 0 20px 50px rgba(0, 0, 0, .25); }
+.kedo-modal-wide { width: min(820px, 100%); }
+.kedo-modal h3 { margin: 0 0 12px; font-size: 1.1rem; }
+.kedo-modal .kedo-field { margin-bottom: 10px; }
+.kedo-modal-foot { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; flex-wrap: wrap; }
+.kedo-toast { position: fixed; right: 18px; bottom: 18px; background: #0f172a; color: #fff; padding: 10px 16px; border-radius: 10px; z-index: 10000; box-shadow: 0 6px 20px rgba(0, 0, 0, .3); }
+.kedo-toast-bad { background: #dc2626; }
+.kedo-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; }
+@media (max-width: 800px) { .kedo { padding: 12px; } .kedo-two, .kedo-grid2 { grid-template-columns: 1fr; } .kedo-heat .kedo-name { min-width: 150px; max-width: 150px; } }
+/* светофор и карточка документа */
+.kedo-kpi.kedo-click { cursor: pointer; transition: border-color .12s, box-shadow .12s; }
+.kedo-kpi.kedo-click:hover { border-color: var(--p-blue); box-shadow: 0 2px 10px rgba(37, 99, 235, .15); }
+.kedo-kpi.kedo-kpi-on { outline: 2px solid var(--p-blue); outline-offset: 1px; }
+.kedo-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: 0; }
+.kedo-dot-ok { background: var(--p-green); } .kedo-dot-bad { background: var(--p-red); } .kedo-dot-warn { background: #d97706; } .kedo-dot-mute { background: var(--p-muted); }
+.kedo-timeline { list-style: none; margin: 6px 0 0; padding: 0 0 0 14px; border-left: 2px solid var(--p-line); }
+.kedo-timeline li { position: relative; padding: 4px 0 8px 10px; }
+.kedo-timeline li::before { content: ''; position: absolute; left: -21px; top: 9px; width: 10px; height: 10px; border-radius: 50%; background: var(--p-card); border: 2px solid var(--p-blue); }
+.kedo-timeline li.kedo-ev-bad::before { border-color: var(--p-red); }
+.kedo-timeline li.kedo-ev-ok::before { border-color: var(--p-green); }
+.kedo-timeline small { display: block; color: var(--p-muted); font-size: 12px; }
+.kedo-steps { display: flex; flex-wrap: wrap; gap: 8px; align-items: stretch; }
+.kedo-step { background: var(--p-bg); border: 1px solid var(--p-line); border-radius: 10px; padding: 8px 10px; min-width: 180px; flex: 1; }
+.kedo-step b { display: block; margin-bottom: 4px; }
+.kedo-step select { width: 100%; margin: 3px 0; min-height: 32px; border: 1px solid var(--p-line); border-radius: 6px; background: var(--p-card); color: var(--p-text); font: inherit; }
+.kedo-arrow { align-self: center; color: var(--p-muted); font-size: 18px; }
+.kedo-border { margin: 8px 0 14px; padding: 8px 12px; border-left: 3px solid var(--p-blue); background: var(--p-blue-soft); border-radius: 0 8px 8px 0; font-size: 13px; }
+.kedo-doc { background: var(--p-card); border: 1px solid var(--p-line); border-radius: 12px; padding: 12px 14px; margin-bottom: 10px; }
+.kedo-doc.kedo-bad { border-color: var(--p-red); }
+.kedo-doc-h { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; align-items: baseline; }
+.kedo-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.kedo-table td:first-child { white-space: nowrap; }
