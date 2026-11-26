@@ -581,6 +581,85 @@
         return { ok: true, width: width, length: length, sleeveWidth: sleeveWidth, streams: streams, round: round };
     }
 
+    // Допуск размера ножа по размеру этикетки (ideav/crm#5720): «До 19 – 0,1; от 20 до 32 – 0,5;
+    // от 33 и далее – 0,9; иначе — нет ножа». Размер — ширина, длина или диаметр, мм; допуск
+    // ± на каждую сторону. Дробные между 19 и 20 относятся к нижней ступени (< 20 → 0,1).
+    // Размер не задан или не больше нуля → NaN (ножа не подобрать).
+    function dieSizeTolerance(mm) {
+        var v = typeof mm === 'number' ? mm : Number(String(mm == null ? '' : mm).replace(',', '.').trim());
+        if (!(v > 0) || !isFinite(v)) return NaN;
+        if (v < 20) return 0.1;
+        if (v < 33) return 0.5;
+        return 0.9;
+    }
+
+    // Форма по «Типу ножа»/«Типу ножей»: 'round' («D х 40 (76)», «D-20»), 'rect' («Ш х Д …»),
+    // '' — по имени не определить (#5720).
+    // Круглый тип по имени: «D х 40 (76)» и живые «D 52 (80)», «D 20 (80) (13 ручьёв)»,
+    // «D 20 (70 13/3/3.446)» — буква D (лат./кир.), необязательный «х», число. parseKnifeType
+    // формы без «х» не разбирает (ok:false), поэтому форму определяет этот признак.
+    function isRoundKnifeType(name) {
+        return /^\s*[DДдd]\s*(?:[хХxX×*\-–—]\s*)?\d/.test(String(name == null ? '' : name));
+    }
+
+    function knifeShape(name) {
+        var src = String(name == null ? '' : name).trim();
+        if (!src) return '';
+        if (isRoundKnifeType(src)) return 'round';
+        if (/^\d+(?:[.,]\d+)?\s*[хХxX×*]\s*\d/.test(src)) return 'rect';
+        return '';
+    }
+
+    // Форма позиции: из «Типа ножей» (1С); без него — прямоугольная, если ширина ≠ длине
+    // (круглая этикетка квадратная по размеру); иначе '' (неизвестно).
+    function positionShape(pos) {
+        var p = pos || {};
+        var s = p.shape === 'round' || p.shape === 'rect' ? p.shape : knifeShape(p.knifeType);
+        if (s) return s;
+        var w = numOrNaN(p.width), l = numOrNaN(p.length);
+        return w > 0 && l > 0 && Math.abs(w - l) > SIZE_TOLERANCE_MM ? 'rect' : '';
+    }
+
+    // Нож не годится по форме: круглый («D…») к прямоугольной этикетке и наоборот. Форма ножа
+    // или позиции неизвестна — не отсекаем.
+    function shapeMismatch(pos, die) {
+        var ps = positionShape(pos), ds = knifeShape(die && die.typeName);
+        return !!(ps && ds && ps !== ds);
+    }
+
+    // Размер ножа в допуске по ступеням от размера этикетки: каждая сторона ±dieSizeTolerance
+    // от своего размера (ширина — по ширине, длина — по длине; круглая — диаметр). Точный
+    // размер (±0,05) годится всегда. cap — необязательный верхний предел допуска, мм
+    // (настройка LABEL_DIE_SIZE_TOLERANCE_MM; не меньше 0,05).
+    function dieWithinLadder(pos, die, cap) {
+        var w = numOrNaN(pos && pos.width), l = numOrNaN(pos && pos.length);
+        var dw = numOrNaN(die && die.width), dl = numOrNaN(die && die.length);
+        if (!(w > 0) || !(l > 0) || !(dw > 0) || !(dl > 0)) return false;
+        var c = numOrNaN(cap);
+        var side = function(label, dieSide) {
+            var t = dieSizeTolerance(label);
+            if (c >= 0) t = Math.min(t, c);
+            return Math.abs(dieSide - label) <= Math.max(t, SIZE_TOLERANCE_MM) + 1e-9;
+        };
+        return side(w, dw) && side(l, dl);
+    }
+
+    // Сырьё из строки заказа 1С («Номенклатура»): слово сразу за «шт.» и клей — как в импорте
+    // (parseNomenclature в label-import-core.js; тест сверяет оба). → { material, glue }.
+    function orderMaterial(nomenclature) {
+        var s = String(nomenclature == null ? '' : nomenclature);
+        var mat = /шт\.?\s+(\S+)/i.exec(s);
+        var material = mat && !/^(намотка|вт\.?|каучук|акрил)/i.test(mat[1]) ? mat[1] : '';
+        var gl = /(каучук|акрил\S*|hot\s*melt)/i.exec(s);
+        return { material: material, glue: gl ? gl[1] : '' };
+    }
+
+    // «Номенклатура 1С: <текст>; …» из «Примечания» позиции → текст номенклатуры или ''.
+    function orderNomenclatureFromNote(note) {
+        var m = /(?:^|;\s*)Номенклатура 1С:\s*([^;]*)/.exec(String(note == null ? '' : note));
+        return m ? m[1].trim() : '';
+    }
+
     // ── Позиция заказа этикетки: подбор ножа, минимальная партия, ИТС (ideav/crm#5324) ──
 
     // Как у позиции выбран нож — значение реквизита «Подбор ножа».
@@ -644,8 +723,16 @@
         var within = function(d, t) { return Math.abs(numOrNaN(d.width) - w) <= t + 1e-9 && Math.abs(numOrNaN(d.length) - l) <= t + 1e-9; };
         var dev = function(d) { return Math.abs(numOrNaN(d.width) - w) + Math.abs(numOrNaN(d.length) - l); };
 
-        var bySize = (dies || []).filter(function(d) { return within(d, tol); });
-        if (!bySize.length) return none('нет ножа ' + size + (tol > SIZE_TOLERANCE_MM ? ' (допуск ±' + fmtMm(tol) + ' мм)' : ''));
+        // Близкие — и в допуске настройки, и в ступенях допуска по размеру этикетки (#5720).
+        var bySize = (dies || []).filter(function(d) { return within(d, tol) && dieWithinLadder(p, d, tol); });
+        if (!bySize.length) {
+            return none('нет ножа ' + size + ' (допуск ±' + fmtMm(Math.min(tol, Math.max(dieSizeTolerance(w), dieSizeTolerance(l)))) + ' мм)');
+        }
+        var byShape = bySize.filter(function(d) { return !shapeMismatch(p, d); });
+        if (!byShape.length) {
+            return none('нож ' + size + ' есть только ' + (positionShape(p) === 'round' ? 'прямоугольный' : 'круглый') + ' — форма этикетки не совпадает');
+        }
+        bySize = byShape;
         if (base === '') return none('у сырья позиции не задана основа — нож ' + size + ' не подобрать');
         var byBase = bySize.filter(function(d) { return refLabel(d.base) === base; });
         if (!byBase.length) return none('нож ' + size + ' есть только на другой основе (нужна «' + base + '»)');
@@ -785,6 +872,14 @@
             rowProductKind: rowProductKind,
             filterPositionRows: filterPositionRows,
             parseKnifeType: parseKnifeType,
+            dieSizeTolerance: dieSizeTolerance,
+            isRoundKnifeType: isRoundKnifeType,
+            knifeShape: knifeShape,
+            positionShape: positionShape,
+            shapeMismatch: shapeMismatch,
+            dieWithinLadder: dieWithinLadder,
+            orderMaterial: orderMaterial,
+            orderNomenclatureFromNote: orderNomenclatureFromNote,
             DIE_PICK: DIE_PICK,
             pickDie: pickDie,
             positionDie: positionDie,

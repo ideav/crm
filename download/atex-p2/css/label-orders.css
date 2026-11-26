@@ -111,3 +111,7 @@
     .atex-lo-layout { grid-template-columns: 1fr; }
     .atex-lo-form { grid-template-columns: 1fr; }
 }
+.atex-lo-ordmat.is-diff { background: #fff3cd; color: #7a5200; padding: 0 4px; border-radius: 3px; }
+.atex-lo-diff { margin-top: 6px; font-size: 12px; }
+.atex-lo-diff caption { text-align: left; color: var(--atex-lo-muted); padding-bottom: 2px; }
+.atex-lo-diff td.is-diff { background: #fff3cd; color: #7a5200; font-weight: 600; }

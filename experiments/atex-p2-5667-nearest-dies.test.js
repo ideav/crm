@@ -36,21 +36,21 @@ var POS = { id: 'p1', width: 100, length: 72, base: 'ПП', orderStreams: 1, kni
     if (typeof LO.nearestDies !== 'function') return;
     var dies = [
         die('1', 100, 71.5),                 // 0,5
-        die('2', 100, 75),                   // 3
-        die('3', 98, 72, { revs: 500 }),     // 2
-        die('4', 98, 72, { revs: 10 }),      // 2, меньший пробег
+        die('2', 100, 72.9),                 // 0,9
+        die('3', 99.6, 72.4, { revs: 500 }), // 0,8
+        die('4', 99.6, 72.4, { revs: 10 }),  // 0,8, меньший пробег
         die('5', 100, 72.2, { base: 'Бумага' }),      // другая основа
-        die('6', 100, 72.1, { selectable: false }),   // не подбирается
+        die('6', 100, 72.1, { selectable: false, state: 'Списан', writtenOff: true }),   // списан
         die('7', 110, 80),                   // 18
-        die('8', 101, 73),                   // 2
-        die('9', 95, 70),                    // 7
+        die('8', 100.3, 72.3),               // 0,6
+        die('9', 99.1, 72.9),                // 1,8
         die('10', 120, 90),                  // 38
         die('11', 'x', 72)                   // без размера
     ];
     var list = LO.nearestDies(POS, dies);
     assert(list.length === 6, 'не больше 6', ids(list));
     assert(ids(list) === '1,8,4,3,2,9', 'по близости, при равной — меньший пробег, затем номер', ids(list));
-    assert(list.every(function(d) { return d.base === 'ПП' && d.selectable; }), 'только основа позиции и «Нож подбирается»');
+    assert(list.every(function(d) { return d.base === 'ПП' && !d.writtenOff; }), 'только основа позиции, не списанные (#5720)');
     assert(list[0].deviation === 0.5, 'у варианта — отклонение размера, мм', String(list[0].deviation));
     var three = LO.nearestDies(POS, dies, 3);
     assert(ids(three) === '1,8,4', 'лимит задаётся', ids(three));

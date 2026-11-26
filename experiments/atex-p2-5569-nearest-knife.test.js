@@ -41,14 +41,14 @@ var POS = { width: 58, length: 40, base: 'Бумага', orderStreams: 1 };
     var near = LP.pickDie(POS, dies, { sizeTolerance: 1.65 });
     assert(near.ok && near.die.id === '2', 'ближайший по размеру (0,7 мм), а не меньший пробег (1 мм)', JSON.stringify(near.die && near.die.id));
     assert(near.ok && near.near === true, 'результат помечен как близкий');
-    assert(ids(near) === '2,1', 'кандидаты — в пределах допуска, по близости; 42 (2 мм) вне допуска', ids(near));
+    assert(ids(near) === '2', 'кандидаты — в пределах допуска; 41 (1 мм) и 42 вне ступени ±0,9 для длины 40 (#5720)', ids(near));
 
     var withExact = LP.pickDie(POS, dies.concat([die('4', 58, 40, { revs: 900000 })]), { sizeTolerance: 1.65 });
     assert(withExact.ok && withExact.die.id === '4' && !withExact.near, 'точный нож важнее близкого, даже с большим пробегом', JSON.stringify(withExact.die && withExact.die.id));
     assert(ids(withExact) === '4', 'при точном кандидаты — только точные', ids(withExact));
 
     var width = LP.pickDie(POS, [die('5', 59.7, 40)], { sizeTolerance: 1.65 });
-    assert(!width.ok && /нет ножа 58×40 \(допуск ±1,65 мм\)/.test(width.reason), 'допуск по каждой стороне; причина называет допуск', JSON.stringify(width.reason));
+    assert(!width.ok && /нет ножа 58×40 \(допуск ±0,9 мм\)/.test(width.reason), 'допуск по каждой стороне; причина называет допуск', JSON.stringify(width.reason));
 
     var base = LP.pickDie(POS, [die('6', 58, 39.5, { base: 'ПП' })], { sizeTolerance: 1.65 });
     assert(!base.ok && /другой основе/.test(base.reason), 'близкий нож проходит те же проверки (основа)', JSON.stringify(base.reason));
