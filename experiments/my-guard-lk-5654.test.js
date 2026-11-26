@@ -2,7 +2,7 @@
 // базы, панель с тарифами, оплатой с баланса, тематиками, режимом и переключателем в чате.
 // Проверяется отрисованная разметка renderGuard() по ответу /my/_guard_status, сбор выбора из панели
 // и запрос guardCall() к /my/_guard_* (POST, _xsrf).
-// rules: none (feature #5654)
+// rules: none (defect #5654)
 const test = require('node:test');
 const assert = require('assert');
 const fs = require('fs');
