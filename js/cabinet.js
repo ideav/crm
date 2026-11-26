@@ -1195,13 +1195,21 @@ class CabinetController {
         else if (active) html += '<p class="database-domain-note">Тариф «' + esc(title(st.plan)) + '», оплачено до ' + esc(until) + '. Страж '
             + (s.enabled ? 'включён' : 'выключен') + '.</p>';
         else html += '<p class="database-domain-note">Оплата закончилась ' + esc(until) + ' — страж выключен. Продлите оплату.</p>';
-        const used = db && db.GuardRuns != null && String(db.GuardRuns).trim() !== '' ? Math.floor(Number(db.GuardRuns)) : null;
-        if (active && used !== null && Number.isFinite(used) && limits[st.plan]) {
-            html += '<p class="database-domain-note">Использовано ' + esc(used) + ' из ' + esc(num(limits[st.plan])) + ' вопросов в месяц.</p>';
+        // Вопросы под стражем за календарный месяц и купленные пакеты считает сервис агента (#5654).
+        const used = Number.isFinite(st.used) ? st.used : null;
+        const limit = Number.isFinite(st.limit) ? st.limit : null;
+        if (active && used !== null && limit !== null) {
+            const packs = Number.isFinite(st.packs) && st.packs > 0 ? st.packs : 0;
+            const packSize = Number.isFinite(st.pack_size) ? st.pack_size : st.over_unit;
+            html += '<p class="database-domain-note">Использовано ' + esc(num(used)) + ' из ' + esc(num(limit))
+                + (packs ? ' + ' + esc(num(packs * packSize)) : '') + ' вопросов в этом месяце'
+                + (packs ? ' (куплено пакетов: ' + esc(packs) + ', ' + esc(num(st.over_price)) + ' ₽ за пакет списываются с баланса автоматически)' : '')
+                + '.</p>';
         }
         html += '<p class="database-domain-note">«Старт» — до ' + esc(num(limits.start)) + ' вопросов в месяц, режимы «маскировать» и «только журнал»; '
             + '«Профи» — до ' + esc(num(limits.pro)) + ', все режимы и отраслевые тематики. Сверх лимита — '
-            + esc(num(st.over_price)) + ' ₽ за ' + esc(num(st.over_unit)) + ' вопросов.</p>';
+            + esc(num(st.over_price)) + ' ₽ за ' + esc(num(st.over_unit)) + ' вопросов: пакет докупается с баланса автоматически, '
+            + 'а если денег не хватает, ИИ-чат отказывает в вопросах под стражем до пополнения.</p>';
         if (!st.agent) {
             html += '<p class="database-domain-note">Сервис ИИ-агента не подключён — страж данных пока недоступен.</p>';
             body.innerHTML = html;
