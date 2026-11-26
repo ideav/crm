@@ -1,4 +1,4 @@
-// rules: none (demo #5732)
+// rules: none (defect #5732)
 // CPM (демо-копия, ideav/backlogram#982): форма ЦФО, правила ввода, свод с элиминацией, версии, план-факт, лимиты, кампания.
 const test = require('node:test');
 const assert = require('node:assert');
