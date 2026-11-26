@@ -73,13 +73,19 @@
         return !!target && target.ok === true && trimText(action) === trimText(target.action);
     }
 
+    // #5720: куда копировать код устройства — подсказка из pad-guard.js (он грузится раньше).
+    function padHint() {
+        var g = root.AtexPadGuard;
+        return g && typeof g.padCodeHint === 'function' ? g.padCodeHint('pad') : '';
+    }
+
     // Чего не хватает для однозначного выбора — человеческим языком.
     function reasonText(reason) {
         if (reason === 'ambiguous')
             return 'В записи планшета заполнено несколько объектов сразу (станок, втулкорез, упаковочное место). '
                 + 'Оставьте один или назовите рабочее место в колонке «Рабочее место».';
         if (reason === 'no-pad')
-            return 'Это устройство не значится в таблице «' + TABLE_NAME + '».';
+            return ('Это устройство не значится в таблице «' + TABLE_NAME + '». ' + padHint()).trim();
         return 'В записи планшета не заполнены ни станок, ни втулкорез, ни упаковочное место.';
     }
 

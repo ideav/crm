@@ -78,6 +78,17 @@
     var DEVICE_DENIED_TEXT = 'Устройство не найдено среди разрешенных для этого рабочего места';
     var DEVICE_TOKEN_LABEL = 'Код этого устройства (его вписывают в «Планшеты» пользователя)';
     var TOKEN_BYTES = 16;   // 32 hex-символа
+    // #5720: куда диспетчеру копировать код устройства. 'pad' — устройства нет в таблице «Планшет»;
+    // 'user' — устройства нет в «Планшетах» вошедшего сотрудника.
+    function padCodeHint(kind) {
+        if (kind === 'user')
+            return 'Куда скопировать код: Таблицы → «Пользователь» → строка сотрудника, под которым вошли → колонка «Планшеты» '
+                + '(несколько кодов — через пробел или запятую). Если устройства нет и в таблице «' + TABLE_NAME + '», заведите его и там. '
+                + 'После записи обновите страницу.';
+        return 'Куда скопировать код: Таблицы → «' + TABLE_NAME + '» → новая запись, код — в первую колонку; в ней же укажите станок, '
+            + 'втулкорез или упаковочное место. Если у сотрудника заполнена колонка «Планшеты» в таблице «Пользователь», '
+            + 'допишите код и туда. После записи обновите страницу.';
+    }
     // #4789: колонки настройки планшета. Имена — как в таблице «Планшет» (ateh).
     var CONFIG_REQS = {
         slitter: 'Слиттер',
@@ -577,6 +588,7 @@
         } else {
             card.appendChild(el('div', { class: 'atex-pad-error', text: 'Код устройства не сгенерировать: браузер не умеет crypto.getRandomValues' }));
         }
+        if (padToken && opts && opts.hint) card.appendChild(el('p', { class: 'atex-pad-text atex-pad-hint', text: padCodeHint(opts.hint) }));
         if (opts && opts.publishCode) showCandidate(ctx, card, padToken);
         if (opts && typeof opts.retry === 'function') {   // #5339 D1
             var retryBtn = el('button', { class: 'atex-pad-btn', type: 'button', text: 'Повторить' });
@@ -836,7 +848,7 @@
             .then(function(metadata) { ctx.metadata = metadata; }, function() { ctx.metadata = null; })
             .then(function() {
                 showBlocked(ctx, 'Устройство не разрешено', DEVICE_DENIED_TEXT,
-                    { noRegister: true, publishCode: true, tokenLabel: DEVICE_TOKEN_LABEL });
+                    { noRegister: true, publishCode: true, tokenLabel: DEVICE_TOKEN_LABEL, hint: 'user' });
             });
     }
 
@@ -952,7 +964,7 @@
                     canRegister(ctx.table, ctx)
                         ? 'Этот планшет не значится в таблице «' + TABLE_NAME + '». Дайте ему название и зарегистрируйте — рабочее место откроется сразу после этого.'
                         : 'Этот планшет не значится в таблице «' + TABLE_NAME + '». Зарегистрировать его может сотрудник с правом записи в эту таблицу.',
-                    { publishCode: true });   // #4944: код уходит администратору сам
+                    { publishCode: true, hint: 'pad' });   // #4944: код уходит администратору сам
                 return;
             }
             // #4868: планшету назначен объект ЭТОГО рабочего места? Не назначен -
@@ -975,6 +987,7 @@
         TABLE_NAME: TABLE_NAME,
         CANDIDATE_TABLE: CANDIDATE_TABLE,   // #4944
         NAME_REQ: NAME_REQ,
+        padCodeHint: padCodeHint,
         trimText: trimText,
         findTable: findTable,
         findCandidateTable: findCandidateTable, // #4944
