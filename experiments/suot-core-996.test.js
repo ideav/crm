@@ -1,4 +1,4 @@
-// rules: none (demo #996)
+// rules: none (defect #)
 // СУОТ и учёт СИЗ (демо-копия, ideav/backlogram#996): сроки, комплект по нормам, инструктажи, медосмотр, допуск, наряд-допуск, выдача, сводка.
 const test = require('node:test');
 const assert = require('node:assert');
