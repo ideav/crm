@@ -87,7 +87,8 @@ function core_function($src, $name){
     exit(1);
 }
 $core = file_get_contents(__DIR__."/../index.php");
-eval("namespace Test1008;\n".core_function($core, "Rec_masks_denial").core_function($core, "Mask_denial").core_function($core, "Check_Rec_masks"));
+eval("namespace Test1008;\n".core_function($core, "Rec_masks_denial").core_function($core, "Mask_denial")
+    .core_function($core, "Mask_empty_denial").core_function($core, "Check_Rec_masks"));
 
 # --- схема: таблица «Заявка» 100 с колонками -------------------------------------------------
 # 3 SHORT, 13 NUMBER — базовые; 50 — ссылка на «Компанию» (def 50: t=200 — не базовый тип).
@@ -136,7 +137,7 @@ $cases = array(
     array("новая запись своей компании — без отказа", $company, "alpha", 0, array("t101" => "2001", "t100" => "З-9"), 100, ""),
     array("новая запись чужой компании — отказ", $company, "alpha", 0, array("t101" => "2002"), 100, "(2002)"),
     array("множественная ссылка: одна из компаний чужая — отказ", $company, "alpha", 0, array("t101" => "2001,2002"), 100, "(2002)"),
-    array("пустое сохранённое значение не проверяется", $company, "alpha", 7201, NULL, 0, ""),
+    array("пустое сохранённое значение колонки с маской WRITE — на запись отказ (python2node#1449)", $company, "alpha", 7201, NULL, 0, "(101)"),
     array("пустое новое значение не проверяется", $company, "alpha", 7001, array("t101" => ""), 0, ""),
     array("маски разных колонок — И: статус «Одобрена» отбит", $both, "alpha", 7001, array("t102" => "3004"), 0, "(3004)"),
     array("маски разных колонок — И: статус «Подана» пропущен", $both, "alpha", 7001, array("t102" => "3002"), 0, ""),
@@ -157,6 +158,20 @@ foreach($cases as list($name, $masks, $user, $id, $fields, $typ, $want)){
     else
         expect(strpos($got, $want) !== FALSE && strpos($got, "по маске") !== FALSE, "$name (получено: «{$got}»)");
 }
+
+# python2node#1449: пустое поле маски на чтение (карточка) не проверяется, маска READ запись не закрывает,
+# маска, пропускающая пустое значение, пропускает и запись.
+as_user($company);
+expect(Rec_masks_denial(7201, NULL, 0, FALSE) === "", "пустое сохранённое значение на чтение не проверяется");
+as_user(array(101 => array("2001" => "READ")));
+expect(Rec_masks_denial(7201) === "", "маска уровня READ: пустое поле запись не закрывает");
+as_user(array(101 => array("2001" => "WRITE", "!2001" => "WRITE")));
+expect(Rec_masks_denial(7201) === "", "маска, которую пустое значение проходит, — без отказа");
+as_user(array(101 => array("@7001" => "WRITE")));
+expect(Rec_masks_denial(7201) === "", "маска по id (@N) пустым значением не решается");
+as_user($company);
+try{ Check_Rec_masks(7201); $died = ""; } catch(Died $e){ $died = $e->getMessage(); }
+expect(strpos($died, "403 Forbidden|") === 0, "правка записи с пустым полем маски — 403");
 
 # Без масок у роли — ни одного запроса к базе.
 as_user(array());

@@ -115,6 +115,7 @@ function edit_obj_branch($src){
 }
 eval("namespace Test5462;\n".core_function($core, "Rec_masks_denial").core_function($core, "Mask_denial")
     .core_function($core, "Check_Rec_masks")
+    ."\nfunction Edit_obj_denied(\$id){ return FALSE; }"	# гранты карточки — предмет edit-obj-grants-1449.test.php
     ."\nfunction run_edit_obj(\$id){ global \$z; \$block = '&main'; \$blocks = array(); ".edit_obj_branch($core)." return \$blocks; }");
 
 # --- схема timepad: «Билет» 494 (главное поле — код), реквизит «Email» 495 ----------------------

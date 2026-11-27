@@ -94,6 +94,7 @@ if($part === ""){
 function t9n($msg){ return preg_replace('/\[RU\](.*?)\[EN\].*/s', '$1', $msg); }
 function trace($msg){}
 class IntegramOpError extends \Exception {}
+class IntegramBatchStop extends IntegramOpError {}
 define("BATCH_OPS_LIMIT", 1000);
 function isApi(){ return TRUE; }
 function api_dump($json, $name = "api.json"){
@@ -209,14 +210,17 @@ if($part === "chain"){
     ok(strpos($r["results"][2]["error"], "ссылки") !== FALSE, "отказ удаления — ошибка своей операции", shown($r["results"][2]));
     ok(count($GLOBALS["CALLS"]) === 3, "del без id до обработчика не дошёл");
 
-    # ── «запись уже существует»: :id ведёт на неё, предупреждение в строке ────────────────
+    # ── «запись уже существует» (python2node#1449): ошибка и остановка пакета, в чужую запись не пишем ─
     $r = run(array(
         array("op" => "new", "id" => 18, "up" => 1, "fields" => array("dup" => "1")),
         array("op" => "set", "id" => ":id", "fields" => array("t1" => "x")),
+        array("op" => "set", "id" => 9, "fields" => array("t1" => "y")),
     ));
-    ok($r["results"][0]["id"] === 77 && strpos($r["results"][0]["warnings"], "существует") !== FALSE,
-        "существующая запись: её id и предупреждение", shown($r["results"][0]));
-    ok($GLOBALS["CALLS"][1]["id"] === 77, ":id указывает на существующую запись");
+    ok($r["results"][0]["ok"] === FALSE && strpos($r["results"][0]["error"], "существует") !== FALSE,
+        "существующая запись: ошибка операции new", shown($r["results"][0]));
+    ok(count($GLOBALS["CALLS"]) === 1, "после неё ни одна операция не выполнена", shown($GLOBALS["CALLS"]));
+    ok($r["ok"] === 0 && $r["failed"] === 3 && $r["stopped"] === 0, "пакет остановлен на операции 0", shown($r));
+    ok($r["results"][2]["error"] === "Не выполнена: пакет остановлен на операции 0", "невыполненная операция названа", shown($r["results"][2]));
 
     # ── права, открытые одной new, не достаются следующей операции ────────────────────────
     $GLOBALS["GRANTS"] = array(1 => "READ");

@@ -1965,6 +1965,8 @@ function Grant_1level($id)  # Check READ grant on the object
 	{
 		if(($GLOBALS["GRANTS"][$id] == "READ") || ($GLOBALS["GRANTS"][$id] == "WRITE"))
 			return $GLOBALS["GRANTS"][$id];  # Granted
+		if($GLOBALS["GRANTS"][$id] === "BARRED")	# python2node#1449: явный BARRED сильнее READ, выведенного по ссылке
+			return FALSE;
 	}
 	elseif(isset($GLOBALS["GRANTS"][1]))  # ROOT rights defined
 		if(($GLOBALS["GRANTS"][1] == "READ") || ($GLOBALS["GRANTS"][1] == "WRITE"))
