@@ -28,6 +28,32 @@
     tags.sort(function (a, b) { return a.localeCompare(b, 'ru'); });
 
     function chip(text, on, fn) { return E('button', { class: 'chip' + (on ? ' on' : ''), type: 'button', 'aria-pressed': on ? 'true' : 'false', text: text, onclick: fn }); }
+    function setOn(b, on) { b.className = 'chip' + (on ? ' on' : ''); b.setAttribute('aria-pressed', on ? 'true' : 'false'); }
+    // Теги — лента в одну строку с горизонтальной прокруткой (ideav/courses#212). Кнопки создаются
+    // один раз: перерисовка списка не сбрасывает прокрутку ленты, у выбранного меняется только класс.
+    var tagChips = tags.map(function (t) {
+      var b = chip('#' + t, false, function () { st.tag = AU.norm(st.tag) === AU.norm(t) ? '' : t; update(); });
+      b._tag = t; tagBox.appendChild(b); return b;
+    });
+    function edges() {
+      var max = tagBox.scrollWidth - tagBox.clientWidth;
+      tagBox.classList.toggle('fade-l', tagBox.scrollLeft > 1);
+      tagBox.classList.toggle('fade-r', tagBox.scrollLeft < max - 1);
+    }
+    tagBox.addEventListener('scroll', edges, { passive: true });
+    // Колесо мыши листает ленту вбок, пока ей есть куда; на краю прокручивается страница.
+    tagBox.addEventListener('wheel', function (ev) {
+      if (Math.abs(ev.deltaX) > Math.abs(ev.deltaY)) return;
+      var max = tagBox.scrollWidth - tagBox.clientWidth;
+      if (max <= 0 || (ev.deltaY < 0 && tagBox.scrollLeft <= 0) || (ev.deltaY > 0 && tagBox.scrollLeft >= max)) return;
+      ev.preventDefault();
+      tagBox.scrollLeft += ev.deltaY;
+    }, { passive: false });
+    function showActive() {
+      var b = tagChips.filter(function (x) { return x.classList.contains('on'); })[0];
+      if (b) tagBox.scrollLeft = b.offsetLeft - (tagBox.clientWidth - b.offsetWidth) / 2; // лента — offsetParent кнопок (position:relative)
+      edges();
+    }
     function keepUrl() {
       var p = new URLSearchParams();
       if (st.q.trim()) p.set('q', st.q.trim());
@@ -41,11 +67,7 @@
       [['', 'Все'], ['free', 'Бесплатные'], ['paid', 'Платные']].forEach(function (p) {
         priceBox.appendChild(chip(p[1], st.price === p[0], function () { st.price = p[0]; update(); }));
       });
-      tagBox.innerHTML = '';
-      tags.forEach(function (t) {
-        var on = AU.norm(st.tag) === AU.norm(t);
-        tagBox.appendChild(chip('#' + t, on, function () { st.tag = on ? '' : t; update(); }));
-      });
+      tagChips.forEach(function (b) { setOn(b, AU.norm(st.tag) === AU.norm(b._tag)); });
       var found = AU.filter(all, st);
       count.textContent = found.length ? 'Найдено курсов: ' + found.length : '';
       list.innerHTML = '';
@@ -67,6 +89,7 @@
     function update() { keepUrl(); draw(); }
     inp.addEventListener('input', function () { st.q = inp.value; update(); });
     draw();
+    setTimeout(showActive, 0);
     if (st.q) setTimeout(function () { inp.focus(); }, 0);
   };
   function plural(n, one, few, many) {
