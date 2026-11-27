@@ -95,8 +95,8 @@
       // своя ссылка оплаты автора — во вкладке, с «Я оплатил»; иначе — оплата картой/СБП через
       // courses-pay.php, доступ открывает вебхук (ideav/crm#5588)
       var ownPay = !c.payUrl && !c.free && Number(c.price) > 0;
-      if (c.payUrl) cta.appendChild(E('a', { class: 'btn btn-primary', href: c.payUrl, target: '_blank', rel: 'noopener', onclick: function () { A.goal('course_pay_click', c.code); }, text: 'Оплатить · ' + A.priceText(c) }));
-      if (ownPay) cta.appendChild(E('a', { class: 'btn btn-primary', href: '/courses-pay.php?course=' + encodeURIComponent(c.code), onclick: function () { A.goal('course_pay_click', c.code); }, text: 'Оплатить · ' + A.priceText(c) }));
+      if (c.payUrl) cta.appendChild(E('a', { class: 'btn btn-primary', href: c.payUrl, target: '_blank', rel: 'noopener', onclick: function () { if (A.goal) A.goal('course_pay_click', c.code); }, text: 'Оплатить · ' + A.priceText(c) }));
+      if (ownPay) cta.appendChild(E('a', { class: 'btn btn-primary', href: '/courses-pay.php?course=' + encodeURIComponent(c.code), onclick: function () { if (A.goal) A.goal('course_pay_click', c.code); }, text: 'Оплатить · ' + A.priceText(c) }));
       if (req) msg.textContent = req['Статус'] === 'done' ? 'Заявка обработана — обновите страницу.' : D.requestNote;
       else if (ownPay) {
         msg.textContent = 'Курс откроется сразу после оплаты картой или СБП. Если у вас есть промокод — введите его, и курс откроется сразу.';
