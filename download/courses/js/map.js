@@ -15,10 +15,20 @@
     var m = /[?&](paid|payfail)=([a-z0-9_-]+)/.exec(location.search);
     return m ? { ok: m[1] === 'paid', code: m[2] } : null;
   }
-  var payWait = 0;
+  var payWait = 0, paidSent = {};
+  // Цель course_paid — один раз за вкладку: флаг в модуле (перерисовки раз в 3 с) и в sessionStorage (перезагрузка той же вкладки)
+  function paidGoal(code) {
+    if (paidSent[code]) return;
+    paidSent[code] = 1;
+    var k = 'lms-goal-paid-' + code;
+    try { if (sessionStorage.getItem(k)) return; sessionStorage.setItem(k, '1'); } catch (e) { /* без sessionStorage хватает флага модуля */ }
+    if (A.goal) A.goal('course_paid', code);
+  }
   function payBanner(root) {
     var r = payReturn(), c = r && D.course(r.code);
     if (!r) return;
+    // Точка возвращает на ?paid= только после успешной оплаты
+    if (r.ok) paidGoal(r.code);
     if (!r.ok) {
       root.appendChild(E('p', { class: 'card warn', text: 'Оплата не прошла' + (c ? ' («' + c.title + '»)' : '') + '. Попробуйте ещё раз или напишите в поддержку.' }));
       return;
@@ -47,7 +57,7 @@
         if (A.isGuest()) { card.appendChild(E('p', { class: 'muted', text: 'Войдите, чтобы получить доступ к курсу.' })); card.appendChild(E('div', { class: 'row' }, A.loginButtons())); }
         var req = A.isGuest() ? null : D.requests.filter(function (r) { return r['Курс'] === c.code && A.refId(r['Пользователь']) === D.uid; })[0];
         if (!A.isGuest() && c.price) card.appendChild(E('div', { class: 'row' }, [E('a', { class: 'btn btn-primary', href: '/courses-pay.php?course=' + encodeURIComponent(c.code),
-          text: 'Оплатить ' + Number(c.price).toLocaleString('ru-RU') + ' ₽' })]));
+          onclick: function () { if (A.goal) A.goal('course_pay_click', c.code); }, text: 'Оплатить ' + Number(c.price).toLocaleString('ru-RU') + ' ₽' })]));
         if (!A.isGuest()) card.appendChild(E('p', { class: 'muted', text: 'Курс откроется сразу после оплаты картой или СБП. Если у вас есть промокод — введите его, и курс откроется сразу.' }));
         if (req && req['Статус'] !== 'reject') {
           card.appendChild(E('p', { class: 'good', text: req['Статус'] === 'done' ? 'Заявка обработана — обновите страницу.' : D.requestNote }));
