@@ -24,7 +24,7 @@
     root.classList.remove('ld'); // лендинг снимает max-width у .lms-main — иначе каталог и курс без полей до перезагрузки (courses#198)
     [].forEach.call(nav.querySelectorAll('a'), function (a) { a.classList.toggle('on', a.getAttribute('href') === '#' + h.split('/').slice(0, 2).join('/')); });
     if (h === '/catalog') A.views.catalog(root);
-    else if ((m = /^\/course\/([^/]+)$/.exec(h))) A.views.course(root, decodeURIComponent(m[1]));
+    else if ((m = /^\/course\/([^/]+)$/.exec(h))) { A.goal('course_open', decodeURIComponent(m[1])); A.views.course(root, decodeURIComponent(m[1])); }
     else if (h === '/author') A.views.author(root);
     else if (h === '/author/help') A.views.authorHelp(root);
     else if ((m = /^\/author\/(\d+)(?:\/(\d+))?$/.exec(h))) A.views.authorCourse(root, m[1], m[2] || null);

@@ -132,19 +132,22 @@
     if (m && !A.hasCookie('_aff')) setCookie('_aff', m[1], 15552000);
   };
   A.beforeLogin = function () { setCookie('sso_back', 'courses', 86400); A.rememberAff(); };
+  // цель Метрики; счётчик подключён в templates/courses/info.html, без него вызов ничего не делает
+  A.goal = function (name, code) { if (window.LMS && window.LMS.goal) window.LMS.goal(name, code ? { course: code } : {}); };
   A.loginYandex = function () {
+    A.goal('course_login_click');
     A.beforeLogin();
     location.href = 'https://oauth.yandex.ru/authorize?response_type=code&client_id=959da92b09364e42bf4c7704db0b992f&redirect_uri=' +
       encodeURIComponent(location.origin + '/auth.asp') + '&state=yandex';
   };
-  A.loginMail = function () { A.beforeLogin(); location.href = '/start.html?db=my&uri=%2Fcourses%2F'; };
+  A.loginMail = function () { A.goal('course_login_click'); A.beforeLogin(); location.href = '/start.html?db=my&uri=%2Fcourses%2F'; };
   A.loginButtons = function () {
     return [A.el('button', { class: 'btn btn-primary', type: 'button', text: 'Войти через Яндекс', onclick: A.loginYandex }),
       A.el('button', { class: 'btn', type: 'button', text: 'Войти по почте', onclick: A.loginMail })];
   };
   // на новом ядре Яндекса и входа через ЛК нет (python2node#1287/#1288): логин и пароль базы
   if (A.core && window.LMSCore) {
-    A.loginYandex = A.loginMail = function () { window.LMSCore.showLogin(A, A.z); };
+    A.loginYandex = A.loginMail = function () { A.goal('course_login_click'); window.LMSCore.showLogin(A, A.z); };
     A.loginButtons = function () { return [A.el('button', { class: 'btn btn-primary', type: 'button', text: 'Войти', onclick: A.loginYandex })]; };
   }
   // --- «Вы вошли как …» и выход (courses#176) ---
