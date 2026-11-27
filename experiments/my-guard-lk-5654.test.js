@@ -128,10 +128,16 @@ test('#5654: сервис не ответил — настройки не пок
     assert.ok(h.includes('не отвечает'));
 });
 
-test('#5654: «использовано N из лимита» — только когда есть GuardRuns', () => {
-    const active = st({ state: 'active', plan: 'start', until: 1900000000 });
-    assert.ok(plain(render(active, { GuardRuns: '1234' })).includes('1234 из 5 000'));
-    assert.ok(!plain(render(active, {})).includes('из 5 000'), 'нет ключа — не показываем');
+test('#5654: «использовано N из лимита (+пакеты)» — из счётчика сервиса, не из GuardRuns', () => {
+    const active = st({ state: 'active', plan: 'start', until: 1900000000, limit: 5000, used: 1234, packs: 0, pack_size: 1000 });
+    const h = plain(render(active, {}));
+    assert.ok(h.includes('1 234 из 5 000'), h);
+    assert.ok(!h.includes('куплено пакетов'), 'пакетов нет — про купленные не пишем');
+    const over = plain(render(st({ state: 'active', plan: 'start', until: 1900000000, limit: 5000, used: 5600, packs: 1, pack_size: 1000 }), {}));
+    assert.ok(over.includes('5 600 из 5 000 + 1 000'), over);
+    assert.ok(over.includes('куплено пакетов: 1'), over);
+    assert.ok(!plain(render(st({ state: 'active', plan: 'start', until: 1900000000, limit: 5000 }), { GuardRuns: '1234' })).includes('из 5 000 вопросов'),
+        'сервис не прислал счётчик — GuardRuns отчёта не подставляется');
 });
 
 test('#5654: сбор выбора из панели', () => {
