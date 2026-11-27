@@ -1,0 +1,130 @@
+/* Лояльность: стили рабочих мест программы лояльности. Тема берётся из переменных платформы, запасные значения - светлая тема. */
+.loy {
+    --p-bg: var(--bg-primary, #f6f8fb);
+    --p-card: var(--bg-secondary, #ffffff);
+    --p-text: var(--text-primary, #0f172a);
+    --p-muted: var(--text-secondary, #64748b);
+    --p-line: var(--border-color, #dbe1ea);
+    --p-blue: #2563eb;
+    --p-red: #dc2626;
+    --p-amber: #b45309;
+    --p-green: #15803d;
+    --p-teal: #0f766e;
+    --p-violet: #6d28d9;
+    --p-blue-soft: rgba(37, 99, 235, .12);
+    --p-red-soft: rgba(220, 38, 38, .13);
+    --p-amber-soft: rgba(217, 119, 6, .16);
+    --p-green-soft: rgba(22, 163, 74, .14);
+    padding: 20px 24px 32px; background: var(--p-bg); color: var(--p-text); min-height: 100%; box-sizing: border-box; font-size: 14px; line-height: 1.4;
+}
+.loy *, .loy *::before, .loy *::after { box-sizing: border-box; }
+.loy h1 { margin: 0 0 2px; font-size: 1.5rem; font-weight: 700; letter-spacing: -.01em; }
+.loy h2 { margin: 22px 0 10px; font-size: 1.05rem; font-weight: 650; }
+.loy h3 { margin: 0 0 6px; font-size: 1rem; }
+.loy-sub { color: var(--p-muted); margin: 0 0 14px; max-width: 920px; }
+.loy-bar { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: end; margin: 10px 0 14px; }
+.loy-bar .loy-grow { flex: 1; }
+.loy-field { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--p-muted); }
+.loy-field small { color: var(--p-muted); font-size: 11px; }
+.loy-field input, .loy-field select, .loy-field textarea, .loy-bar select, .loy-bar input[type=text], .loy-bar input[type=number], .loy-bar input[type=date] {
+    min-height: 36px; padding: 5px 10px; border: 1px solid var(--p-line); border-radius: 8px; background: var(--p-card); color: var(--p-text); font: inherit;
+}
+.loy-btn { min-height: 36px; padding: 5px 14px; border: 1px solid var(--p-line); border-radius: 8px; background: var(--p-card); color: var(--p-text); cursor: pointer; font: inherit; transition: border-color .12s, box-shadow .12s; }
+.loy-btn:hover { border-color: var(--p-blue); }
+.loy-btn:disabled { opacity: .5; cursor: not-allowed; }
+.loy-primary { background: var(--p-blue); border-color: var(--p-blue); color: #fff; font-weight: 600; }
+.loy-primary:hover { box-shadow: 0 2px 10px rgba(37, 99, 235, .35); }
+.loy-danger { color: var(--p-red); border-color: var(--p-red); }
+.loy-small { min-height: 28px; padding: 2px 10px; font-size: 12px; }
+.loy-btn:focus-visible, .loy-tab:focus-visible, .loy-hc:focus-visible { outline: 2px solid var(--p-blue); outline-offset: 2px; }
+.loy-tabs { display: flex; gap: 2px; flex-wrap: wrap; border-bottom: 1px solid var(--p-line); margin-bottom: 14px; }
+.loy-tab { border: 0; background: none; color: var(--p-muted); padding: 9px 14px; cursor: pointer; font: inherit; border-bottom: 2px solid transparent; }
+.loy-tab-on { color: var(--p-text); border-bottom-color: var(--p-blue); font-weight: 650; }
+.loy-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin: 8px 0 16px; }
+.loy-kpi { background: var(--p-card); border: 1px solid var(--p-line); border-radius: 12px; padding: 12px 14px; }
+.loy-kpi-v { font-size: 1.7rem; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.loy-kpi-l { color: var(--p-muted); font-size: 12px; margin-top: 2px; }
+.loy-kpi-s { font-size: 12px; margin-top: 4px; color: var(--p-muted); }
+.loy-kpi-bad { border-color: var(--p-red); } .loy-kpi-bad .loy-kpi-v { color: var(--p-red); }
+.loy-kpi-warn .loy-kpi-v { color: var(--p-amber); } .loy-kpi-good .loy-kpi-v { color: var(--p-green); }
+.loy-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+.loy-card { background: var(--p-card); border: 1px solid var(--p-line); border-radius: 12px; padding: 14px; }
+.loy-card.loy-bad { border-color: var(--p-red); }
+.loy-kv { display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; }
+.loy-kv span:first-child { color: var(--p-muted); }
+.loy-badge { display: inline-block; padding: 1px 9px; border-radius: 10px; font-size: 12px; white-space: nowrap; }
+.loy-info { background: var(--p-blue-soft); color: var(--p-blue); }
+.loy-ok { background: var(--p-green-soft); color: var(--p-green); }
+.loy-warn { background: var(--p-amber-soft); color: var(--p-amber); }
+.loy-crit { background: var(--p-red-soft); color: var(--p-red); }
+.loy-mute { background: rgba(100, 116, 139, .15); color: var(--p-muted); }
+.loy-tablewrap { overflow: auto; max-width: 100%; border: 1px solid var(--p-line); border-radius: 12px; background: var(--p-card); }
+.loy-table { border-collapse: collapse; width: 100%; }
+.loy-table th, .loy-table td { padding: 8px 12px; border-bottom: 1px solid var(--p-line); text-align: left; vertical-align: middle; }
+.loy-table tr:last-child td { border-bottom: 0; }
+.loy-table th { position: sticky; top: 0; background: var(--p-card); font-weight: 600; font-size: 12px; color: var(--p-muted); white-space: nowrap; }
+.loy-num { text-align: right !important; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.loy-click { cursor: pointer; }
+.loy-click:hover td { background: var(--p-blue-soft); }
+.loy-row-bad td { background: var(--p-red-soft); }
+.loy-row-warn td { background: var(--p-amber-soft); }
+.loy-empty { color: var(--p-muted); text-align: center !important; padding: 20px !important; }
+.loy-error { color: var(--p-red); padding: 12px; border: 1px solid var(--p-red); border-radius: 10px; }
+.loy-muted { color: var(--p-muted); }
+.loy-bar-track { height: 10px; background: rgba(100, 116, 139, .18); border-radius: 6px; overflow: hidden; min-width: 80px; }
+.loy-bar-fill { height: 100%; border-radius: 6px; background: var(--p-blue); }
+.loy-bar-fill.loy-g { background: #16a34a; } .loy-bar-fill.loy-a { background: #d97706; } .loy-bar-fill.loy-r { background: #dc2626; }
+.loy-two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.loy-chip { display: inline-block; padding: 1px 8px; border-radius: 6px; background: var(--p-blue-soft); font-size: 12px; margin: 1px 3px 1px 0; }
+.loy-warnbox { padding: 8px 12px; border-radius: 8px; margin: 6px 0; font-size: 13px; }
+.loy-warnbox.loy-w { background: var(--p-amber-soft); color: var(--p-amber); }
+.loy-warnbox.loy-e { background: var(--p-red-soft); color: var(--p-red); }
+.loy-warnbox.loy-g { background: var(--p-green-soft); color: var(--p-green); }
+.loy-modal-back { position: fixed; inset: 0; background: rgba(15, 23, 42, .5); display: flex; align-items: center; justify-content: center; z-index: 10001; padding: 12px; }
+.loy-modal { background: var(--bg-secondary, #fff); color: var(--text-primary, #0f172a); opacity: 1; border: 1px solid var(--border-color, #dbe1ea); border-radius: 14px; padding: 18px; width: min(560px, 100%); max-height: 92vh; overflow: auto; box-shadow: 0 20px 50px rgba(0, 0, 0, .25); }
+.loy-modal-wide { width: min(820px, 100%); }
+.loy-modal h3 { margin: 0 0 12px; font-size: 1.1rem; }
+.loy-modal .loy-field { margin-bottom: 10px; }
+.loy-modal-foot { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; flex-wrap: wrap; }
+.loy-toast { position: fixed; right: 18px; bottom: 18px; background: #0f172a; color: #fff; padding: 10px 16px; border-radius: 10px; z-index: 10002; box-shadow: 0 6px 20px rgba(0, 0, 0, .3); }
+.loy-toast-bad { background: #dc2626; }
+.loy-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 14px; }
+@media (max-width: 800px) { .loy { padding: 12px; } .loy-two, .loy-grid2 { grid-template-columns: 1fr; } }
+
+/* карточка гостя */
+.loy-search { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0 14px; position: relative; }
+.loy-search input { min-width: 280px; flex: 1; max-width: 460px; min-height: 36px; padding: 5px 10px; border: 1px solid var(--p-line); border-radius: 8px; background: var(--p-card); color: var(--p-text); font: inherit; }
+.loy-suggest { position: absolute; top: 40px; left: 0; z-index: 20; background: var(--p-card); border: 1px solid var(--p-line); border-radius: 10px; min-width: 320px; max-height: 320px; overflow: auto; box-shadow: 0 8px 24px rgba(0, 0, 0, .15); }
+.loy-suggest div { padding: 7px 12px; cursor: pointer; }
+.loy-suggest div:hover, .loy-suggest div.loy-on { background: var(--p-blue-soft); }
+.loy-ghead { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: baseline; margin-bottom: 6px; }
+.loy-ghead h2 { margin: 0; font-size: 1.35rem; }
+.loy-grid3 { display: grid; grid-template-columns: 1.1fr 1fr 1fr; gap: 14px; align-items: start; }
+.loy-rule { border-left: 4px solid var(--p-violet); }
+.loy-lot { display: flex; justify-content: space-between; gap: 8px; padding: 3px 0; font-variant-numeric: tabular-nums; }
+.loy-lot.loy-soon { color: var(--p-red); font-weight: 600; }
+.loy-mech { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px; }
+.loy-mech button { border: 1px solid var(--p-line); background: var(--p-card); color: var(--p-text); border-radius: 18px; padding: 5px 12px; cursor: pointer; font: inherit; font-size: 13px; }
+.loy-mech button.loy-on { background: var(--p-blue); border-color: var(--p-blue); color: #fff; font-weight: 600; }
+.loy-mech button.loy-opt { border-style: dashed; color: var(--p-muted); }
+.loy-receipt .loy-kv { border-bottom: 1px dashed var(--p-line); }
+.loy-receipt .loy-total { font-weight: 700; font-size: 1.1rem; }
+/* RFM-матрица: R по строкам, F по столбцам */
+.loy-rfm { display: grid; grid-template-columns: 70px repeat(5, minmax(60px, 1fr)); gap: 4px; max-width: 640px; font-size: 12px; }
+.loy-rfm > div { padding: 8px 4px; text-align: center; border-radius: 6px; font-variant-numeric: tabular-nums; }
+.loy-rfm .loy-ax { color: var(--p-muted); background: none; }
+.loy-rfm .loy-cell { cursor: pointer; font-weight: 650; border: 1px solid transparent; }
+.loy-rfm .loy-cell:hover { border-color: var(--p-blue); }
+.loy-seg-Чемпион { background: var(--p-green-soft); color: var(--p-green); }
+.loy-seg-Лояльный { background: rgba(15, 118, 110, .15); color: var(--p-teal); }
+.loy-seg-Растущий, .loy-seg-Новичок { background: var(--p-blue-soft); color: var(--p-blue); }
+.loy-seg-Под { background: var(--p-red-soft); color: var(--p-red); }
+.loy-seg-Спящий { background: var(--p-amber-soft); color: var(--p-amber); }
+.loy-seg-Потерянный { background: rgba(100, 116, 139, .15); color: var(--p-muted); }
+.loy-hbar { display: grid; grid-template-columns: 110px 1fr 110px; gap: 8px; align-items: center; margin: 4px 0; font-size: 13px; }
+@media (max-width: 1000px) { .loy-grid3 { grid-template-columns: 1fr; } .loy-search input { min-width: 0; } }
+.loy-field input[type=checkbox] { min-height: 0; width: 20px; height: 20px; padding: 0; }
+.loy a { color: var(--p-blue); }
+/* тёмная тема платформы: светлее акценты, чтобы текст на мягком фоне читался */
+[data-theme="dark"] .loy { --p-blue: #60a5fa; --p-red: #f87171; --p-amber: #fbbf24; --p-green: #4ade80; --p-teal: #2dd4bf; --p-violet: #a78bfa; }
+[data-theme="dark"] .loy-primary, [data-theme="dark"] .loy-mech button.loy-on { color: #0b1220; }
