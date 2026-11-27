@@ -1,5 +1,5 @@
 // MES-демо (backlogram#990): поведенческие проверки расчётов цеха в download/mes/js/mes-core.js.
-// rules: none (defect #)
+// rules: none (defect #5748)
 // Запуск: node experiments/mes-core-990.test.js
 'use strict';
 const assert = require('assert');
