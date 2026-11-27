@@ -168,8 +168,11 @@
         var fixedReq = extra.sreq(jobTable, 'Зафиксировано');
         // физические валы (#5720): { id, no, cylinderId }; «Применить» пишет выбранный вал в задание
         var shaftCylReq = extra.sreq(extra.serialTable, 'Вал');
+        // «Не ставить в работу» (#5726): вал остаётся в реестре ИТС, планировщик его не берёт
+        var shaftOffReq = extra.sreq(extra.serialTable, 'Не ставить в работу');
         var shafts = (r[16] || []).map(function(x) {
-            return { id: String(x.id), no: String(x.val == null ? '' : x.val).trim(), cylinderId: shaftCylReq ? String(C.refIds(x, shaftCylReq)[0] || '') : '' };
+            return { id: String(x.id), no: String(x.val == null ? '' : x.val).trim(), cylinderId: shaftCylReq ? String(C.refIds(x, shaftCylReq)[0] || '') : '',
+                off: !!(shaftOffReq && C.flagOn(x.reqs[shaftOffReq])) };
         }).filter(function(x) { return x.cylinderId; });
         var shaftReq = extra.sreq(jobTable, 'Серийный номер вала');
         if (shaftReq) t.dieJob.reqs.shaft = shaftReq;
@@ -397,6 +400,7 @@
             '<div class="atex-dp-cut-line">' + (j.pullsPlan ? 'съёмов ' + fmtNum(j.pullsPlan) + ' · ' : '') + (j.rolls ? fmtNum(j.rolls) + ' рул. · ' : '') +
             'формат ' + fmtNum(j.usedFormat || j.minFormat || 0) + ' мм' + (j.due > 0 ? ' · срок ' + esc(j.dueText) : '') + (j.masterRoll ? ' · МР ' + esc(j.masterRoll) : '') + '</div>' +
             this.factsLine(j) +
+            (it && it.noShaft ? '<div class="atex-dp-cut-line"><span class="atex-dp-badge is-warn">нет рабочего вала ' + esc(j.cylinder || '') + ': все «Не ставить в работу»</span></div>' : '') +
             (it && it.shaftWait ? '<div class="atex-dp-cut-line"><span class="atex-dp-badge is-warn">ждёт вал ' + esc(it.shaftWait.cylinder) + ' со станка «' + esc(this.machineName(it.shaftWait.machineId)) + '»</span></div>' : '') +
             ((it && it.late) || /работ/i.test(j.status) || f.blocks.length || f.warnings.length ? '<div class="atex-dp-cut-line">' + (it && it.late ? '<span class="atex-dp-badge is-bad">просрочка</span> ' : '') +
                 (/работ/i.test(j.status) ? '<span class="atex-dp-badge is-info">в работе</span> ' : '') + this.badges(j) + '</div>' : '') +
