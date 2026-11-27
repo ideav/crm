@@ -229,6 +229,8 @@ define("VAL_LIM", 127);  # Maximum length of the value (val) field on UI
 # своего домена в /<база>/… — до разбора REQUEST_URI.
 require_once __DIR__."/include/custom_domain.php";
 Cd_route();
+# Страж данных ИИ-чата из ЛК (#5654): оплата с баланса и настройка на сервисе агента.
+require_once __DIR__."/include/ai_guard_lk.php";
 
 $com = explode("?", strtolower($_SERVER["REQUEST_URI"]));
 $com = explode("/", $com[0]);
@@ -328,6 +330,9 @@ if(!$billing && ($z !== "auth.asp")){
 # Служебный вызов биллинга (#5206): POST /{db}/billing/add, без сессии, по X-Billing-Token.
 if((isset($com[2]) ? $com[2] : "") === "billing" && (isset($com[3]) ? $com[3] : "") === "add")
     handleBillingAdd($z);
+# #5654: сверхлимитный пакет стража данных ИИ-чата — POST /my/billing/guard_pack, тоже по X-Billing-Token.
+if($z === "my" && (isset($com[2]) ? $com[2] : "") === "billing" && (isset($com[3]) ? $com[3] : "") === "guard_pack")
+    handleGuardPack();
 																									
 # TRACE_IT включается после Validate_Token() и только администратору — Trace_start()
 $row = mysqli_fetch_assoc($billing);
@@ -895,6 +900,8 @@ function createDb($id, $name, $email, $pwd=""){
         Insert($id, 1, 275, date("Ymd"), "Insert new DB date");
         Insert($id, 1, 283, $template, "Insert new DB template");
         Insert($id, 1, 276, t9n("[RU]Тестовая база, создана при регистрации[EN]Test one, created upon registration"), "Insert new DB notes");
+        if(function_exists("Gd_db_created"))  # #5654: страж прежней записи с тем же именем не наследуется
+            Gd_db_created($db, $id);
         $z = $db;
     }
 }
@@ -12605,6 +12612,7 @@ function aiChatHttpStatusText($code){
         403 => "Forbidden",
         404 => "Not Found",
         405 => "Method Not Allowed",
+        409 => "Conflict",
         429 => "Too Many Requests",
         502 => "Bad Gateway",
         503 => "Service Unavailable"
@@ -12701,22 +12709,38 @@ function aiAgentGuardRequest(){
     aiAgentRequireUser();
     api_dump(json_encode(aiAgentGuardStatus($z), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "ai-agent-guard.json");
 }
-function aiAgentGuardStatus($db){
-    $off = array("available" => false);
-    $safeDb = preg_replace('/[^a-z0-9_]/i', '', (string)$db);
+# Сервис стража: адрес агента без /chat и заголовки с Bearer агента; null — агент не настроен.
+# Им же пользуется ЛК (include/ai_guard_lk.php, #5654).
+function aiAgentGuardService(){
     $endpoint = aiConfigValue(array("INTEGRAM_AGENT_ENDPOINT", "AI_AGENT_ENDPOINT"));
-    if($safeDb === "" || $endpoint === "" || !preg_match('#^(https?://.+)/chat/?$#', $endpoint, $m))
-        return $off;
-    # Ключ — база и адрес агента: другая установка CRM на этом хосте с той же базой не прочтёт чужой статус.
-    $cache = sys_get_temp_dir()."/ai_agent_guard_".$safeDb."_".substr(md5($endpoint), 0, 12).".json";
-    $cached = @json_decode((string)@file_get_contents($cache), true);
-    if(is_array($cached) && isset($cached["at"], $cached["status"]) && time() - (int)$cached["at"] < 300)
-        return $cached["status"];
+    if($endpoint === "" || !preg_match('#^(https?://.+)/chat/?$#', $endpoint, $m))
+        return null;
     $headers = array("Accept: application/json", "User-Agent: Integram AI Agent");
     $token = aiConfigValue(array("INTEGRAM_AGENT_TOKEN", "AI_AGENT_TOKEN"));
     if($token !== "")
         $headers[] = "Authorization: Bearer ".$token;
-    $raw = aiAgentGuardFetch($m[1]."/guard?db=".rawurlencode($safeDb), $headers);
+    return array("base" => $m[1], "headers" => $headers, "endpoint" => $endpoint);
+}
+# Файл кеша статуса стража для чата ("" — агент не настроен). Ключ — база и адрес агента: другая
+# установка CRM на этом хосте с той же базой не прочтёт чужой статус. ЛК удаляет его после оплаты и настройки.
+function aiAgentGuardCacheFile($db){
+    $safeDb = preg_replace('/[^a-z0-9_]/i', '', (string)$db);
+    $svc = aiAgentGuardService();
+    if($safeDb === "" || !$svc)
+        return "";
+    return sys_get_temp_dir()."/ai_agent_guard_".$safeDb."_".substr(md5($svc["endpoint"]), 0, 12).".json";
+}
+function aiAgentGuardStatus($db){
+    $off = array("available" => false);
+    $safeDb = preg_replace('/[^a-z0-9_]/i', '', (string)$db);
+    $svc = aiAgentGuardService();
+    if($safeDb === "" || !$svc)
+        return $off;
+    $cache = aiAgentGuardCacheFile($safeDb);
+    $cached = @json_decode((string)@file_get_contents($cache), true);
+    if(is_array($cached) && isset($cached["at"], $cached["status"]) && time() - (int)$cached["at"] < 300)
+        return $cached["status"];
+    $raw = aiAgentGuardFetch($svc["base"]."/guard?db=".rawurlencode($safeDb), $svc["headers"]);
     $in = is_string($raw) ? json_decode($raw, true) : null;
     if(!is_array($in) || !isset($in["available"]))
         return $off;
@@ -12741,6 +12765,22 @@ function aiAgentGuardFetch($url, $headers){
     curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
     curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 3);
     curl_setopt($ch, CURLOPT_TIMEOUT, 5);
+    $raw = curl_exec($ch);
+    $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    return ($raw !== FALSE && $code === 200) ? $raw : FALSE;
+}
+# POST JSON сервису агента (настройка стража из ЛК, #5654): тело ответа или FALSE.
+function aiAgentGuardPost($url, $headers, $body){
+    if(!function_exists("curl_init"))
+        return FALSE;
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, array_merge($headers, array("Content-Type: application/json")));
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 5);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 10);
     $raw = curl_exec($ch);
     $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
@@ -14940,6 +14980,14 @@ function handleBillingAdd($db){
     if($r["code"] !== 200)
         header("HTTP/1.0 ".$r["code"]." ".aiChatHttpStatusText($r["code"]));
     api_dump(json_encode($r["body"], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "billing.json");
+}
+# POST /my/billing/guard_pack — пакет вопросов стража сверх лимита тарифа (include/ai_guard_lk.php).
+function handleGuardPack(){
+    $headers = array_change_key_case(function_exists("getallheaders") ? (array)getallheaders() : array(), CASE_LOWER);
+    $r = Gd_pack_request(isset($_SERVER["REQUEST_METHOD"]) ? $_SERVER["REQUEST_METHOD"] : "", $headers, file_get_contents("php://input"));
+    if($r["code"] !== 200)
+        header("HTTP/1.0 ".$r["code"]." ".aiChatHttpStatusText($r["code"]));
+    api_dump(json_encode($r["body"], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "guard_pack.json");
 }
 # <m-batch-4981> Пакетная запись: _m_save, _m_set, _m_new и _m_del одним запросом (issue #4981, #4988)
 # Ошибка одной операции пакета.
@@ -17713,6 +17761,8 @@ if(Validate_Token())
             Insert($id, 1, 275, date("Ymd"), "Insert new DB date");
             Insert($id, 1, 283, $template, "Insert new DB template");
             Insert($id, 1, 276, $_POST["descr"], "Insert new DB notes");
+            if(function_exists("Gd_db_created"))  # #5654: страж прежней записи с тем же именем не наследуется
+                Gd_db_created($db, $id);
 			api_dump(json_encode(array("status"=>"Ok","id"=>$id)), "_new_db.json");
 			break;
 
@@ -17746,6 +17796,27 @@ if(Validate_Token())
 			else
 				$cdRes = Cd_status($cdDb);
 			api_dump(json_encode($cdRes, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "_domain.json");
+			break;
+
+		# #5654: страж данных ИИ-чата базы — состояние, настройка, оплата с баланса
+		case "_guard_status":
+		case "_guard_set":
+		case "_guard_pay":
+			if($z !== "my")
+				my_die(t9n("[RU]Страж данных настраивается в Личном кабинете[EN]The data guard is managed in your private space"));
+			$gdDb = isset($_REQUEST["db"]) ? (string)$_REQUEST["db"] : "";
+			if($a !== "_guard_status"){
+				if($_SERVER["REQUEST_METHOD"] !== "POST")
+					my_die(t9n("[RU]Используйте POST[EN]Use POST"));
+				check();
+			}
+			if($a === "_guard_set")
+				$gdRes = Gd_action_set($gdDb, $_REQUEST);
+			elseif($a === "_guard_pay")
+				$gdRes = Gd_action_pay($gdDb, isset($_REQUEST["plan"]) ? (string)$_REQUEST["plan"] : "", isset($_REQUEST["period"]) ? (string)$_REQUEST["period"] : "");
+			else
+				$gdRes = Gd_status($gdDb);
+			api_dump(json_encode($gdRes, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), "_guard.json");
 			break;
 
 		# #5364: шаблоны баз — список (в my — для выбора при создании базы и модерации; в своей базе — её шаблон)
