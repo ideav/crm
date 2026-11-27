@@ -330,11 +330,13 @@
     // inp.shafts — физические валы [{ id, no, cylinderId }] («Серийный номер вала» → «Вал»). Вал не стоит
     // на двух станках одновременно: задание берёт свободный в это время вал своего типоразмера, а если
     // все заняты — ждёт ближайший освободившийся (#5720). У типоразмера нет серийных — считается один вал.
+    // sh.off — «Не ставить в работу» (#5726): вал в реестре, но новым заданиям не достаётся; уже записанный
+    // в начатое задание вал за ним остаётся. Все валы типоразмера off — задание ставится с пометкой noShaft.
     function orderQueue(inp) {
         var s = withDefaults(inp.settings), cal = createCalendar(s);
         var from = inp.from, blocked = inp.blocked || {}, jobs = inp.jobs || [], machines = inp.machines || [];
         var trace = typeof inp.trace === 'function' ? inp.trace : null;
-        var st = {}, order = [], jobById = {}, poolByCyl = {};
+        var st = {}, order = [], jobById = {}, poolByCyl = {}, offByCyl = {};
         machines.forEach(function(m) {
             st[m.id] = { machine: m, cursor0: cal.cursorAt(from), prev0: null, fixed: [], seq: [], cursor: null, prev: null };
             order.push(m.id);
@@ -342,7 +344,8 @@
         jobs.forEach(function(j) { jobById[j.id] = j; });
         (inp.shafts || []).forEach(function(sh) {
             if (!sh || !sh.cylinderId) return;
-            (poolByCyl[String(sh.cylinderId)] = poolByCyl[String(sh.cylinderId)] || []).push({ id: String(sh.id), no: String(sh.no == null ? '' : sh.no) });
+            var to = sh.off ? offByCyl : poolByCyl;
+            (to[String(sh.cylinderId)] = to[String(sh.cylinderId)] || []).push({ id: String(sh.id), no: String(sh.no == null ? '' : sh.no), off: !!sh.off });
         });
         function say(j, machineId, text) { if (trace) trace({ jobId: j ? String(j.id) : '', machineId: machineId ? String(machineId) : '', text: text }); }
         function mName(id) { return (st[id] && st[id].machine.name) || String(id); }
@@ -353,8 +356,11 @@
         function poolOf(j) {
             var k = shaftKey(j);
             if (!k) return [];
-            return poolByCyl[String(j.cylinderId)] || [{ id: k, no: '', virtual: true }];
+            if (poolByCyl[String(j.cylinderId)]) return poolByCyl[String(j.cylinderId)];
+            return offByCyl[String(j.cylinderId)] ? [] : [{ id: k, no: '', virtual: true }];
         }
+        // все серийные валы типоразмера сняты с работы (#5726)
+        function noWorkingShaft(j) { return !!(shaftKey(j) && !poolByCyl[String(j.cylinderId)] && offByCyl[String(j.cylinderId)]); }
         function shaftNoText(sh) { return sh && sh.no ? ' №' + sh.no : ''; }
         // Занятость физических валов: { id вала: [{ start, end, machineId, jobId }] }; null — валы не
         // проверяются (перестановки внутри станка в improve), иначе place() выбирает свободный вал.
@@ -374,6 +380,8 @@
             order.forEach(function(id) {
                 st[id].fixed.forEach(function(it) {
                     var j = jobById[it.jobId], pool = j ? poolOf(j) : [];
+                    var own = j ? (offByCyl[String(j.cylinderId)] || []).filter(function(p) { return p.id === String(j.shaftId || ''); })[0] : null;
+                    if (own) pool = [own].concat(pool);
                     if (!pool.length) return;
                     var sh = pool.filter(function(p) { return p.id === String(j.shaftId || ''); })[0] ||
                         pool.filter(function(p) { return !busyOn(p.id, id, j.id, it.start, it.end).length; })[0] || pool[0];
@@ -394,7 +402,11 @@
         // станке вал ждут. Другой физический вал или вал, побывавший на другом станке после prev, — смена вала.
         function place(cur, prev, job, machine) {
             var pool = shafts ? poolOf(job) : [];
-            if (!pool.length) return placeRaw(cur, prev, job, machine, false);
+            if (!pool.length) {
+                var raw = placeRaw(cur, prev, job, machine, false);
+                if (shafts && noWorkingShaft(job)) raw.item.noShaft = true;
+                return raw;
+            }
             var mounted = prev ? shaftOfJob[prev.id] : '', t0 = curTs(cur), best = null;
             pool.forEach(function(sh) {
                 var c = cur, wait = null;
@@ -714,6 +726,7 @@
                 var L = pick.L, it = pick.t.item;
                 it.machineId = L.x.machine.id;
                 if (lockedSet[pick.j.id] === 'fixed') it.locked = true;
+                if (it.noShaft) say(pick.j, it.machineId, traceLabel(pick.j) + ': нет рабочего вала ' + String(pick.j.cylinder || '') + ' — все валы типоразмера «Не ставить в работу»');
                 if (it.shaftWait) say(pick.j, it.machineId, traceLabel(pick.j) + ' на «' + mName(it.machineId) + '» ждёт вал ' + it.shaftWait.cylinder + shaftNoText({ no: it.shaftWait.no }) + ' до ' + tt(it.shaftWait.until) +
                     ': он на «' + mName(it.shaftWait.machineId) + '» (задание ' + it.shaftWait.jobId + ')');
                 if (it.remount) say(pick.j, it.machineId, traceLabel(pick.j) + ' на «' + mName(it.machineId) + '»: вал побывал на другом станке — снова смена вала');
