@@ -15196,7 +15196,7 @@ function ApplyMBatch($payload)
 		if($stopped !== NULL){
 			$res["op"] = (is_array($op) && isset($op["op"])) ? strtolower(trim((string)$op["op"])) : "save";
 			$res["ok"] = FALSE;
-			$res["error"] = t9n("[RU]Не выполнена: пакет остановлен на операции $stopped[EN]Not executed: the batch stopped at operation $stopped");
+			$res["error"] = t9n("[RU]Не выполнена: пакет остановлен на операции[EN]Not executed: the batch stopped at operation")." $stopped";
 			$failed++;
 			$results[] = $res;
 			continue;
