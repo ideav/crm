@@ -3133,7 +3133,7 @@ function Check_Val_granted($t, $val, $id=0){
 # ссылка сравнивается по id записи-цели; маски одной колонки складываются по ИЛИ, разных — по И.
 # Пустое значение не проверяется, как в карточке: запись, созданная без значения колонки с маской,
 # иначе стала бы недоступна своему же автору. Возвращает текст отказа или "" (проверка пройдена).
-function Rec_masks_denial($id, $fields = NULL, $typ = 0)
+function Rec_masks_denial($id, $fields = NULL, $typ = 0, $write = TRUE)
 {
 	global $z;
 	if(($GLOBALS["GLOBAL_VARS"]["user"] == "admin") || empty($GLOBALS["GRANTS"]["mask"]))
@@ -3194,9 +3194,39 @@ function Rec_masks_denial($id, $fields = NULL, $typ = 0)
 		foreach($set as $req => $list)
 			if(($msg = Mask_denial($req, $list, $masked[$req], isset($setIds[$req]) ? $setIds[$req] : array())) !== "")
 				return $msg;
+	# python2node#1449: на запись колонка с маской уровня WRITE обязана быть заполнена: запись с пустым
+	# полем маски не принадлежит роли (в списке object/ её не видно), и правка такой записи закрыта.
+	if($write && $id)
+		foreach($masked as $req => $kind)
+			if(!count(array_filter(isset($vals[$req]) ? $vals[$req] : array(), function($v){ return trim((string)$v) !== ""; }))
+					&& (($msg = Mask_empty_denial($req)) !== ""))
+				return $msg;
 	if($up > 1)	# Подчинённая запись наследует маски родителя
-		return Rec_masks_denial($up);
+		return Rec_masks_denial($up, NULL, 0, $write);
 	return "";
+}
+# Пустое значение колонки проходит маску на запись, только если его пропускает сама маска (например, «!%»).
+# Маски по id записи (@N, @IN(…)) значением не решаются, маски уровня READ/BARRED на запись не дают.
+function Mask_empty_denial($req)
+{
+	$writes = FALSE;
+	foreach($GLOBALS["GRANTS"]["mask"][$req] as $mask => $level){
+		if(preg_match('/^\s*!?@/', (string)$mask))
+			return "";
+		if($level === "WRITE")
+			$writes = TRUE;
+	}
+	if(!$writes)
+		return "";
+	foreach($GLOBALS["GRANTS"]["mask"][$req] as $mask => $level){
+		$cond = Fetch_WHERE_for_mask($req, "", $mask);
+		if($cond === "")
+			return "";
+		$row = mysqli_fetch_array(Exec_sql("SELECT $cond", "Check value by mask"));
+		if($row && ($row[0] === "1"))
+			return "";
+	}
+	return t9n("[RU]У вас нет доступа к этому объекту по маске: поле маски не заполнено[EN]You do not have this object granted by mask: the masked field is empty")." ($req)";
 }
 # Маска @N / !@N / @IN(…) задаёт id записи, а не значение: значение колонки на неё не подставляется
 # (MySQL приводит '~код' к 0, и маска @0 пропускала любую запись). Сравнивается id из $ids;
@@ -3235,9 +3265,9 @@ function Mask_denial($req, $list, $kind, $ids = array())
 	}
 	return "";
 }
-function Check_Rec_masks($id, $fields = NULL, $typ = 0)
+function Check_Rec_masks($id, $fields = NULL, $typ = 0, $write = TRUE)	# $write: FALSE — проверка на чтение
 {
-	if(($msg = Rec_masks_denial($id, $fields, $typ)) !== "")
+	if(($msg = Rec_masks_denial($id, $fields, $typ, $write)) !== "")
 		my_die($msg, "403 Forbidden");
 }
 function Check_Types_Grant($fatal=TRUE)	# $fatal stops the script on no access
@@ -3422,6 +3452,8 @@ function Grant_1level($id)  # Check READ grant on the object
 	{
 		if(($GLOBALS["GRANTS"][$id] == "READ") || ($GLOBALS["GRANTS"][$id] == "WRITE"))
 			return $GLOBALS["GRANTS"][$id];  # Granted
+		if($GLOBALS["GRANTS"][$id] === "BARRED")	# python2node#1449: явный BARRED сильнее READ, выведенного по ссылке
+			return FALSE;
 	}
 	elseif(isset($GLOBALS["GRANTS"][1]))  # ROOT rights defined
 		if(($GLOBALS["GRANTS"][1] == "READ") || ($GLOBALS["GRANTS"][1] == "WRITE"))
@@ -3435,6 +3467,44 @@ function Grant_1level($id)  # Check READ grant on the object
     	        return "READ";
 	
 	return FALSE;
+}
+# python2node#1449: карточка edit_obj/{id} без гранта на запись (Check_Grant READ) закрыта, если таблица
+# записи или её родителя явно BARRED, а также для служебных записей: пользователей (18) и ролей (42) вместе
+# с их подчинёнными (гранты 116, меню 151). Своя учётная запись и своя роль открываются как прежде.
+# Прочие записи без гранта открываются, как и раньше (умолчание не меняется).
+function Edit_obj_denied($id)
+{
+	global $z;
+	$user = isset($GLOBALS["GLOBAL_VARS"]["user"]) ? $GLOBALS["GLOBAL_VARS"]["user"] : "";
+	if(($user === "admin") || ($user === $z) || Check_Grant($id, 0, "READ", FALSE))
+		return FALSE;
+	$cur = (int)$id;
+	for($depth = 0; $depth < 16; $depth++){
+		if(!($row = mysqli_fetch_array(Exec_sql("SELECT t, up FROM $z WHERE id=$cur", "Edit_obj: record and parent"))))
+			return FALSE;
+		$t = (int)$row["t"];
+		if(isset($GLOBALS["GRANTS"][$t]) && ($GLOBALS["GRANTS"][$t] === "BARRED"))
+			return TRUE;
+		if((int)$row["up"] <= 1)
+			break;
+		$cur = (int)$row["up"];
+	}
+	if($t === USER)
+		return $cur !== (int)$GLOBALS["GLOBAL_VARS"]["user_id"];
+	if($t === ROLE)
+		return $cur !== (int)$GLOBALS["GLOBAL_VARS"]["role_id"];
+	return FALSE;
+}
+# python2node#1449: Token, Secret и xsrf пользователя видны только администратору базы и самому пользователю
+function Secret_req_hidden($req, $rec)
+{
+	global $z;
+	if(!in_array((int)$req, array(TOKEN, SECRET, XSRF), TRUE))
+		return FALSE;
+	$user = isset($GLOBALS["GLOBAL_VARS"]["user"]) ? $GLOBALS["GLOBAL_VARS"]["user"] : "";
+	if(($user === "admin") || ($user === $z))
+		return FALSE;
+	return (int)$rec !== (int)$GLOBALS["GLOBAL_VARS"]["user_id"];
 }
 function Validate_Token(){ # Validates the cookie token and gathers the user permissions
 	global $z, $blocks;
@@ -3796,7 +3866,16 @@ function getGrants($r){
 			$v = BuiltIn($builtins[1]);
 			if($v == $builtins[1]){	# No Built in for this
 				$attrs = substr($v, 1, strlen($v) - 2);
+				# python2node#1449: запрос маски — служебный: его ответ не уходит клиентом вместо запрошенного
+				# отчёта (report/), а скомпилированный запрос не подменяет собой отчёт, который откроют дальше
+				$savedReps = isset($GLOBALS["STORED_REPS"]) ? $GLOBALS["STORED_REPS"] : NULL;
+				$GLOBALS["MASK_REPORT"] = TRUE;
 				Get_block_data($attrs);
+				unset($GLOBALS["MASK_REPORT"]);
+				if($savedReps === NULL)
+					unset($GLOBALS["STORED_REPS"]);
+				else
+					$GLOBALS["STORED_REPS"] = $savedReps;
 				if(isset($blocks[$attrs][mb_strtolower($attrs)])){
 					if(count($blocks[$attrs][mb_strtolower($attrs)]))
 						$v = array_shift($blocks[$attrs][mb_strtolower($attrs)]);
@@ -6910,7 +6989,7 @@ function Compile_Report($id, $cur_block, $exe=TRUE, $check=FALSE, $noFilters=FAL
     				if($GLOBALS["STORED_REPS"][$id][REP_COL_FUNC][$k] == "COUNT")
     					$blocks["col_totals"][$id][$key] = Format_Val_View($GLOBALS["BT"]["NUMBER"], $value);
 			}
-	if((isApi() || isset($args["json"])) && ($GLOBALS["GLOBAL_VARS"]["action"] == "report"))
+	if((isApi() || isset($args["json"])) && ($GLOBALS["GLOBAL_VARS"]["action"] == "report") && empty($GLOBALS["MASK_REPORT"]))
 	{
 	    if(isset($_REQUEST["JSON_DATA"])){
     		foreach($GLOBALS["STORED_REPS"][$id]["head"] as $key => $value)
@@ -7470,7 +7549,9 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 										, "Get Object & type name");
 					if($row = mysqli_fetch_array($data_set))
 					{
-						Check_Rec_masks($id);	# #5462: запись вне масок роли не читается и по id
+						Check_Rec_masks($id, NULL, 0, FALSE);	# #5462: запись вне масок роли не читается и по id
+						if(Edit_obj_denied($id))
+							my_die(t9n("[RU]У вас нет доступа к этой записи[EN]You have no access to this record")." ($id)", "403 Forbidden");
 						$blocks[$block]["title"][] = $row[0]." ".Format_Val_View($row[1], $row[2], $id);
 						$GLOBALS["REV_BT"][$row["id"]] = $GLOBALS["REV_BT"][$row["t"]];
 					}
@@ -8034,6 +8115,8 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 				if(isset($GLOBALS["GRANTS"][$key])) # Skip barred Reqs - hide them
 					if($GLOBALS["GRANTS"][$key] == "BARRED")
 						continue;
+				if(Secret_req_hidden($key, $id))	# python2node#1449: чужие Token/Secret/xsrf в карточке не показываются
+					continue;
 				if($GLOBALS["REV_BT"][$base_typ] == "BUTTON"){ # Remember Buttons to show them later as buttons
 					$blocks["BUTTONS"][$GLOBALS["REQS"][$key]["val"]] = $GLOBALS["REQS"][$key]["attrs"];
     				$GLOBALS["GLOBAL_VARS"]["api"]["reqs"][$key]["type"] = $GLOBALS["REQS"][$key]["val"];
@@ -10218,6 +10301,8 @@ function Get_block_data($block, $exe=TRUE, $noFilters=FALSE)
 					if($GLOBALS["GRANTS"][$key] == "BARRED")
 						continue;
 				$val = isset($row["val"]) ? $row["val"] : "";
+				if(!is_array($val) && ($val !== "") && Secret_req_hidden($key, $parent_id))	# python2node#1449
+					$val = PASSWORDSTARS;
 				$literal_typ = $GLOBALS["REV_BT"][$key];
 				$base_typ = isset($GLOBALS["BT"][$literal_typ]) ? $GLOBALS["BT"][$literal_typ] : $GLOBALS["BT"]["SHORT"];
                 $blocks[$block]["typ"][] = $key;
@@ -14992,6 +15077,8 @@ function handleGuardPack(){
 # <m-batch-4981> Пакетная запись: _m_save, _m_set, _m_new и _m_del одним запросом (issue #4981, #4988)
 # Ошибка одной операции пакета.
 class IntegramOpError extends Exception {}
+# python2node#1449: ошибка, после которой пакет не продолжается (остальные операции не выполняются)
+class IntegramBatchStop extends IntegramOpError {}
 
 # Предел размера пакета: каждая операция — это полноценное сохранение записи.
 define("BATCH_OPS_LIMIT", 1000);
@@ -15037,6 +15124,11 @@ function ApplyOp($op, $rec_id, $fields, $up = 0, &$rec = NULL)
 			ApplyMSet($rec_id, $fields, array());
 		elseif($op === "new"){
 			$res = ApplyMNew($rec_id, $up, array());
+			# python2node#1449: new с занятым уникальным значением — ошибка и остановка пакета: иначе :id
+			# следующих операций указал бы на чужую существующую запись
+			if(InBatchOp() && isset($res["warning"]))
+				throw new IntegramBatchStop(t9n("[RU]Запись уже существует[EN]The record already exists")." (".(int)$res["rec"]."): "
+					.t9n("[RU]пакет остановлен[EN]the batch is stopped"));
 			$rec = $res["rec"];
 			$GLOBALS["BT_NEW_CREATED"] = ($res["json"] !== "") && !isset($res["warning"]);	# python2node#866
 			if(isset($res["warning"]))
@@ -15098,8 +15190,17 @@ function ApplyMBatch($payload)
 	$created = array();	# Номер операции new => запись, которую она создала (или FALSE, если упала)
 	$last = NULL;		# Номер последней операции new — на неё указывает :id
 	$GLOBALS["BATCH_OP"] = TRUE;
+	$stopped = NULL;	# Номер операции, остановившей пакет
 	foreach($ops as $n => $op){
 		$res = array("n" => (int)$n);
+		if($stopped !== NULL){
+			$res["op"] = (is_array($op) && isset($op["op"])) ? strtolower(trim((string)$op["op"])) : "save";
+			$res["ok"] = FALSE;
+			$res["error"] = t9n("[RU]Не выполнена: пакет остановлен на операции $stopped[EN]Not executed: the batch stopped at operation $stopped");
+			$failed++;
+			$results[] = $res;
+			continue;
+		}
 		try{
 			if(!is_array($op))
 				throw new IntegramOpError(t9n("[RU]Операция должна быть объектом[EN]An operation must be an object"));
@@ -15159,12 +15260,17 @@ function ApplyMBatch($payload)
 			$res["ok"] = FALSE;
 			$res["error"] = $e->getMessage();
 			$failed++;
+			if($e instanceof IntegramBatchStop)
+				$stopped = (int)$n;
 		}
 		$results[] = $res;
 	}
 	unset($GLOBALS["BATCH_OP"]);
 	Insert_batch("", "", "", "", "Flush batch");	# Дослать отложенные вставки, если они появились
-	return array("results" => $results, "ok" => $done, "failed" => $failed);
+	$out = array("results" => $results, "ok" => $done, "failed" => $failed);
+	if($stopped !== NULL)
+		$out["stopped"] = $stopped;
+	return $out;
 }
 # Issue #5068: в ссылочное поле _m_set пишется только id записи. Значение ссылки приводится
 # к числу, и имя записи («Январь») стало бы нулём, а ноль у ссылки значит «очистить» —
