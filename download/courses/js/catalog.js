@@ -18,10 +18,20 @@
     var inp = E('input', { class: 'inp', type: 'search', value: st.q, placeholder: 'Название, автор, тема, урок…', 'aria-label': 'Поиск по каталогу' });
     var priceBox = E('div', { class: 'chips', role: 'group', 'aria-label': 'Цена' });
     var tagBox = E('div', { class: 'chips chips-tags', role: 'group', 'aria-label': 'Теги' });
+    // Стрелки по краям ленты видны, пока ей есть куда листать (ideav/crm#5779): одного затухания
+    // края мало, чтобы понять, что тегов больше. Из Tab-обхода убраны — сами теги и так доступны.
+    function arrow(dir) {
+      return E('button', { class: 'tags-arr ' + dir, type: 'button', tabindex: '-1', 'aria-label': dir === 'l' ? 'Предыдущие теги' : 'Ещё теги', text: dir === 'l' ? '‹' : '›',
+        onclick: function () {
+          var d = (dir === 'l' ? -1 : 1) * Math.max(tagBox.clientWidth * 0.8, 80);
+          if (tagBox.scrollBy) tagBox.scrollBy({ left: d, behavior: 'smooth' }); else { tagBox.scrollLeft += d; edges(); }
+        } });
+    }
+    var tagWrap = E('div', { class: 'tags-wrap' }, [arrow('l'), tagBox, arrow('r')]);
     var count = E('p', { class: 'muted small cat-count', 'aria-live': 'polite' });
     var list = E('div', { class: 'cat-list' });
     root.appendChild(E('div', { class: 'cat-search' }, [inp]));
-    root.appendChild(priceBox); root.appendChild(tagBox); root.appendChild(count); root.appendChild(list);
+    root.appendChild(priceBox); root.appendChild(tagWrap); root.appendChild(count); root.appendChild(list);
 
     var tags = [], seen = {};
     all.forEach(function (c) { (c.tags || []).forEach(function (t) { var k = AU.norm(t); if (!seen[k]) { seen[k] = 1; tags.push(t); } }); });
@@ -39,6 +49,8 @@
       var max = tagBox.scrollWidth - tagBox.clientWidth;
       tagBox.classList.toggle('fade-l', tagBox.scrollLeft > 1);
       tagBox.classList.toggle('fade-r', tagBox.scrollLeft < max - 1);
+      tagWrap.classList.toggle('can-l', tagBox.scrollLeft > 1);
+      tagWrap.classList.toggle('can-r', tagBox.scrollLeft < max - 1);
     }
     tagBox.addEventListener('scroll', edges, { passive: true });
     // Колесо мыши листает ленту вбок, пока ей есть куда; на краю прокручивается страница.

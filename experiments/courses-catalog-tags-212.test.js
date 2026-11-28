@@ -3,7 +3,8 @@
 //   у выбранной меняется класс on и aria-pressed;
 // - колесо мыши листает ленту вбок, пока есть куда; на краю событие уходит странице;
 // - выбранный в ссылке тег (#/catalog?tag=) подкручивается в видимую часть ленты;
-// - края затухают (fade-l / fade-r) только там, где лента продолжается.
+// - края затухают (fade-l / fade-r) только там, где лента продолжается;
+// - ideav/crm#5779: стрелки по краям видны (can-l / can-r у обёртки), пока есть куда листать, и листают ленту.
 // rules: none (defect ideav/courses#212)
 //
 // Run with: node experiments/courses-catalog-tags-212.test.js
@@ -62,8 +63,12 @@ function render(query) {
   const root = document.createElement('div');
   ctx.LMSApp.views.catalog(root);
   timers.splice(0).forEach((fn) => fn());
-  const box = root.children.find((n) => n.className.split(' ').includes('chips-tags'));
-  return { box };
+  const has = (n, c) => (n.className || '').split(' ').includes(c);
+  const wrap = root.children.find((n) => has(n, 'tags-wrap'));
+  const box = wrap.children.find((n) => has(n, 'chips-tags'));
+  const arrL = wrap.children.find((n) => has(n, 'tags-arr') && has(n, 'l'));
+  const arrR = wrap.children.find((n) => has(n, 'tags-arr') && has(n, 'r'));
+  return { box, wrap, arrL, arrR };
 }
 const label = (b) => b.textContent;
 const wheel = (box, deltaY, deltaX) => { let prevented = false; box.dispatch('wheel', { deltaY, deltaX: deltaX || 0, preventDefault() { prevented = true; } }); return prevented; };
@@ -108,6 +113,28 @@ t('выбранный в ссылке тег подкручивается в с�
   assert.ok(box.classList.contains('fade-l') && box.classList.contains('fade-r'), box.className);
   box.scrollLeft = 0; box.dispatch('scroll');
   assert.ok(!box.classList.contains('fade-l') && box.classList.contains('fade-r'), 'в начале — только правое');
+});
+
+t('стрелки видны, только пока есть куда листать, и листают ленту (crm#5779)', () => {
+  const { box, wrap, arrL, arrR } = render('');   // максимум прокрутки 360, шаг стрелки 0.8*200=160
+  assert.ok(arrL && arrR, 'обе стрелки есть');
+  assert.strictEqual(arrR.getAttribute('tabindex'), '-1');
+  assert.ok(!wrap.classList.contains('can-l') && wrap.classList.contains('can-r'), 'в начале — только правая: ' + wrap.className);
+  arrR.dispatch('click');
+  assert.strictEqual(box.scrollLeft, 160);
+  assert.ok(wrap.classList.contains('can-l') && wrap.classList.contains('can-r'), 'в середине — обе');
+  box.scrollLeft = 360; box.dispatch('scroll');
+  assert.ok(wrap.classList.contains('can-l') && !wrap.classList.contains('can-r'), 'в конце — только левая');
+  arrL.dispatch('click');
+  assert.strictEqual(box.scrollLeft, 200);
+});
+
+t('все теги влезают — стрелок нет', () => {
+  const saved = COURSES.splice(0, COURSES.length, { code: 'c', title: 'Гамма', free: true, tags: ['agile', 'crm'], lessons: [] });
+  try {
+    const { wrap } = render('');                  // 2 тега * 80 = 160 < 200 — листать некуда
+    assert.ok(!wrap.classList.contains('can-l') && !wrap.classList.contains('can-r'), wrap.className);
+  } finally { COURSES.splice(0, COURSES.length, ...saved); }
 });
 
 if (failed) { console.log(failed + ' failed'); process.exit(1); }
