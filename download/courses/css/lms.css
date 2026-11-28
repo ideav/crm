@@ -140,12 +140,19 @@ html.lms-on,html.lms-on body{overflow:hidden}
 #lms-shell .chip{font:inherit;font-size:15px;border:1px solid var(--bd);background:#fff;border-radius:99px;padding:4px 14px;cursor:pointer;color:var(--tx);min-height:34px}
 #lms-shell .chip.on{background:var(--grad);color:#fff;border-color:transparent}
 /* ideav/courses#212: теги — одна строка с горизонтальной прокруткой; края затухают, где лента продолжается */
-#lms-shell .chips-tags{position:relative;flex-wrap:nowrap;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:none;-webkit-overflow-scrolling:touch;scroll-snap-type:x proximity;scroll-padding-inline:28px;gap:5px;margin:4px 0 10px;padding:1px 0}
+#lms-shell .chips-tags{position:relative;flex-wrap:nowrap;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:none;-webkit-overflow-scrolling:touch;scroll-snap-type:x proximity;scroll-padding-inline:28px;gap:5px;margin:0;padding:1px 0}
 #lms-shell .chips-tags::-webkit-scrollbar{display:none}
 #lms-shell .chips-tags .chip{flex:none;white-space:nowrap;font-size:13px;padding:2px 10px;min-height:28px;scroll-snap-align:start}
 #lms-shell .chips-tags.fade-r{-webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 32px),transparent);mask-image:linear-gradient(90deg,#000 calc(100% - 32px),transparent)}
 #lms-shell .chips-tags.fade-l{-webkit-mask-image:linear-gradient(90deg,transparent,#000 32px);mask-image:linear-gradient(90deg,transparent,#000 32px)}
 #lms-shell .chips-tags.fade-l.fade-r{-webkit-mask-image:linear-gradient(90deg,transparent,#000 32px,#000 calc(100% - 32px),transparent);mask-image:linear-gradient(90deg,transparent,#000 32px,#000 calc(100% - 32px),transparent)}
+/* ideav/crm#5779: стрелки по краям ленты тегов — видны, только пока ей есть куда листать */
+#lms-shell .tags-wrap{position:relative;margin:4px 0 10px}
+#lms-shell .tags-arr{position:absolute;top:50%;z-index:1;width:28px;height:28px;margin-top:-14px;padding:0;border:1px solid var(--bd);border-radius:50%;background:#fff;color:var(--tx);font:inherit;font-size:20px;line-height:24px;text-align:center;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.15);display:none}
+#lms-shell .tags-arr:hover{border-color:var(--ac2)}
+#lms-shell .tags-arr.l{left:0}
+#lms-shell .tags-arr.r{right:0}
+#lms-shell .tags-wrap.can-l .tags-arr.l,#lms-shell .tags-wrap.can-r .tags-arr.r{display:block}
 #lms-shell .cat-list{display:grid;gap:12px}
 #lms-shell .cat-card{display:flex;gap:14px;background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:14px;text-decoration:none;color:var(--tx);min-width:0}
 #lms-shell .cat-card:hover{border-color:var(--ac2)}
