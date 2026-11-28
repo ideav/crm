@@ -5,6 +5,8 @@
 # cookie (/courses/xsrf), цена берётся из каталога courses.json, Точка создаёт платёж
 # (payments_with_receipt), заказ сохраняется файлом <store_dir>/<operationId>.json, ученик уходит
 # на страницу оплаты. После оплаты Точка возвращает его в /courses/?paid=<код>.
+# &promo=<промокод> со «Скидкой» 1–99% (include/courses_promo.php, ideav/crm#5781) — цена со скидкой,
+# место промокода списывает вебхук; код не подошёл — возврат в /courses/?promofail=<код>.
 #
 # Вебхук: у мерчанта один адрес — twh.php (он же обслуживает пополнение счёта в my). twh.php после
 # проверки подписи зовёт Cp_webhook(): платёж с нашим operationId записывается в базу courses —
@@ -187,7 +189,7 @@ function Cp_order_save($cfg, $op, $o){
 
 # ---- ссылка на оплату ----
 # Возвращает ['redirect' => url] или ['error' => код, 'redirect' => url]
-function Cp_start_payment($cfg, $cookie, $code){
+function Cp_start_payment($cfg, $cookie, $code, $promo = ''){
     $site = rtrim($cfg['site'], '/');
     $back = $site . '/courses/#/map';
     $course = Cp_course($cfg, $code);
@@ -208,8 +210,15 @@ function Cp_start_payment($cfg, $cookie, $code){
             Cp_log($cfg, 'no_manifest', array('user' => $uid, 'course' => $code));
             return array('error' => 'course', 'redirect' => $back);
         }
+        $price = (float)$course['price']; $p = null;
+        if (is_string($promo) && trim($promo) !== '') {
+            require_once __DIR__ . '/courses_promo.php';
+            $p = Cpr_for_payment($cfg, $tables, $uid, $code, $promo);
+            if (!$p) return array('error' => 'promo', 'redirect' => $site . '/courses/?promofail=' . $code . '#/map');
+            $price = Cpr_price($price, Cpr_discount($p));
+        }
         $email = Cp_user_email($cfg, $uid);
-        $amount = number_format((float)$course['price'], 2, '.', '');
+        $amount = number_format($price, 2, '.', '');
         $title = 'Доступ к курсу «' . Cp_no_digits($course['title']) . '» — ideav.ru/courses';
         $data = array(
             'customerCode' => $cfg['customer_code'],
@@ -236,8 +245,10 @@ function Cp_start_payment($cfg, $cookie, $code){
         $link = isset($d['Data']['paymentLink']) ? $d['Data']['paymentLink'] : null;
         if (!Cp_order_path($cfg, $op) || !$link || !preg_match('~^https://[^\s"<>]+$~', $link))
             throw new Exception('Точка не вернула operationId/paymentLink');
-        Cp_order_save($cfg, $op, array('user' => $uid, 'login' => isset($me['user']) ? $me['user'] : '', 'course' => $code,
-            'amount' => (float)$course['price'], 'created' => date('Y-m-d H:i:s')));
+        $order = array('user' => $uid, 'login' => isset($me['user']) ? $me['user'] : '', 'course' => $code,
+            'amount' => $price, 'created' => date('Y-m-d H:i:s'));
+        if ($p) $order += array('promo' => $p['_main'], 'promo_id' => $p['_id'], 'discount' => Cpr_discount($p), 'full' => (float)$course['price']);
+        Cp_order_save($cfg, $op, $order);
         Cp_log($cfg, 'link', array('op' => $op, 'user' => $uid, 'course' => $code, 'amount' => $amount));
         return array('redirect' => $link);
     } catch (Exception $e) {
@@ -281,6 +292,11 @@ function Cp_webhook($cfg, $payload){
                     'Пользователь' => $uid, 'Курс' => $code, 'Ключ' => $key, 'Основание' => 'оплата', 'Дата и время' => date('d.m.Y H:i:s')));
             }
             $granted = true;
+            if (!empty($o['promo_id'])) { # место промокода со скидкой — за подтверждённую оплату, один раз (дальше done)
+                require_once __DIR__ . '/courses_promo.php';
+                try { Cpr_use($cfg, $tables, $o['promo_id']); }
+                catch (Exception $e) { Cp_log($cfg, 'promo_use_failed', array('op' => $op, 'promo' => $o['promo'], 'error' => $e->getMessage())); }
+            }
         } else {
             Cp_log($cfg, 'underpaid', array('op' => $op, 'user' => $uid, 'course' => $code, 'amount' => $amount, 'price' => $o['amount']));
         }
