@@ -12,5 +12,6 @@ try {
     header('Location: /courses/?payfail=config#/map', true, 302);
     exit;
 }
-$r = Cp_start_payment($cfg, isset($_SERVER['HTTP_COOKIE']) ? $_SERVER['HTTP_COOKIE'] : '', isset($_GET['course']) ? $_GET['course'] : '');
+$r = Cp_start_payment($cfg, isset($_SERVER['HTTP_COOKIE']) ? $_SERVER['HTTP_COOKIE'] : '', isset($_GET['course']) ? $_GET['course'] : '',
+    isset($_GET['promo']) ? $_GET['promo'] : ''); # &promo= — цена со скидкой промокода (ideav/crm#5781)
 header('Location: ' . $r['redirect'], true, 302);

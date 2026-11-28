@@ -191,7 +191,8 @@
   };
 
   // Промокод (courses#172): сервер проверяет код, списывает активацию и открывает курс сразу.
-  // Результат {ok,status:'granted'|'already'|'requested'} или {ok:false,error}. Сервера нет — прежняя заявка на модерацию.
+  // Результат {ok,status:'granted'|'already'|'requested'} или {ok:false,error}; код со скидкой (ideav/crm#5781) —
+  // {ok,status:'discount',code,discount,full,price}: курс не открыт, портал ведёт на оплату со скидкой. Сервера нет — прежняя заявка на модерацию.
   D.PROMO_MSG = {
     invalid: 'Такого промокода нет. Проверьте написание.', wrong_course: 'Этот промокод не подходит к выбранному курсу.',
     expired: 'Срок действия промокода истёк.', exhausted: 'Промокод уже использован максимальное число раз.',
@@ -200,7 +201,7 @@
   };
   D.redeemPromo = function (course, code) {
     return A.redeemPromo(course, code).then(function (r) {
-      if (r.ok && r.status !== 'already') return D.init().then(function () { return r; });
+      if (r.ok && r.status !== 'already' && r.status !== 'discount') return D.init().then(function () { return r; });
       return r;
     }, function (e) {
       if (!e.unsupported) throw e;

@@ -73,6 +73,7 @@
   function promos(pane) {
     var code = field('Код (регистр не важен)'), lim = field('Лимит активаций (пусто — без лимита)', { inputmode: 'numeric' }), due = field('Срок действия, ДД.ММ.ГГГГ (пусто — бессрочно)');
     var key = field('Ключ курса (пусто — сервер возьмёт из каталога контента)');
+    var disc = field('Скидка, % (пусто или 100 — курс бесплатно; 1–99 — скидка на оплату)', { inputmode: 'numeric' });
     var c = courseSel(), msg = E('span', { class: 'muted' }), list = E('div');
     function show() {
       list.innerHTML = '';
@@ -80,7 +81,8 @@
         if (!rows.length) list.appendChild(E('p', { class: 'lms-empty', text: 'Промокодов нет.' }));
         rows.forEach(function (r) {
           list.appendChild(E('div', { class: 'card req' }, [E('b', { text: r._main }),
-            E('div', { class: 'muted', text: (r['Курс'] || 'любой курс') + ' · использовано ' + (r['Использовано'] || 0) + (r['Лимит'] ? ' из ' + r['Лимит'] : ' (без лимита)') + (r['Срок'] ? ' · до ' + r['Срок'] : '') })]));
+            E('div', { class: 'muted', text: (r['Курс'] || 'любой курс') + ' · использовано ' + (r['Использовано'] || 0) + (r['Лимит'] ? ' из ' + r['Лимит'] : ' (без лимита)') + (r['Срок'] ? ' · до ' + r['Срок'] : '') +
+            (Number(r['Скидка']) > 0 && Number(r['Скидка']) < 100 ? ' · скидка ' + r['Скидка'] + '%' : ' · бесплатно') })]));
         });
       }, function (e) { list.appendChild(E('p', { class: 'warn', text: e.message })); });
     }
@@ -89,11 +91,12 @@
       if (!v) { msg.textContent = 'Введите код'; return; }
       var f = { 'Курс': c.value, 'Лимит': lim.i.value.trim(), 'Использовано': '0', 'Срок': due.i.value.trim() };
       if (A.hasField('Промокод', 'Ключ')) f['Ключ'] = key.i.value.trim();
+      if (A.hasField('Промокод', 'Скидка')) f['Скидка'] = disc.i.value.trim();
       go.disabled = true;
       A.create('Промокод', v, f).then(function () { msg.textContent = 'Создан'; code.i.value = ''; go.disabled = false; show(); },
         function (e) { msg.textContent = 'Ошибка: ' + e.message; go.disabled = false; });
     } });
-    pane.appendChild(E('div', { class: 'card' }, [E('h3', { text: 'Новый промокод' }), code.w, E('label', { class: 'fld' }, [E('span', { class: 'lbl', text: 'Курс' }), c]), lim.w, due.w, key.w, E('div', { class: 'row' }, [go, msg])]));
+    pane.appendChild(E('div', { class: 'card' }, [E('h3', { text: 'Новый промокод' }), code.w, E('label', { class: 'fld' }, [E('span', { class: 'lbl', text: 'Курс' }), c]), lim.w, due.w, A.hasField('Промокод', 'Скидка') ? disc.w : null, key.w, E('div', { class: 'row' }, [go, msg])]));
     pane.appendChild(list);
     show();
   }

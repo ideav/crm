@@ -8,7 +8,11 @@
 # последнего места). Успех → «Доступ» (основание «промокод») и «Заявка» со статусом done (журнал).
 #
 # Хелперы Cp_* — из courses_pay.php (тот же конфиг COURSES_PAY_CONFIG, schema_file, content_dir, store_dir).
-# Ответ: [http, массив]; ok=true, status=granted|already; ошибки — error=login|bad_code|invalid|wrong_course|
+# «Скидка» (%, ideav/crm#5781): пусто, 0 или 100 — код открывает курс бесплатно; 1–99 — курс не открывается,
+# ответ status=discount с ценой со скидкой, портал ведёт на courses-pay.php?course=…&promo=…; Cp_start_payment
+# перепроверяет код (Cpr_for_payment) и отправляет в Точку цену со скидкой, место в лимите списывает вебхук
+# после подтверждённой оплаты (Cpr_use).
+# Ответ: [http, массив]; ok=true, status=granted|already|discount; ошибки — error=login|bad_code|invalid|wrong_course|
 # expired|exhausted|course|too_many|server.
 
 require_once __DIR__ . '/courses_pay.php';
@@ -67,24 +71,79 @@ function Cpr_find($cfg, $tables, $code){
     return null;
 }
 
+# «Скидка» кода, %: 1–99 — скидка на оплату; пусто, 0, 100 и больше — курс бесплатно (100)
+function Cpr_discount($p){
+    $d = isset($p['Скидка']) ? (float)str_replace(',', '.', trim($p['Скидка'])) : 0;
+    return ($d > 0 && $d < 100) ? $d : 100;
+}
+
+# Цена со скидкой, до копеек; не меньше рубля
+function Cpr_price($price, $discount){ return max(1, round((float)$price * (100 - $discount) / 100, 2)); }
+
+# Подходит ли код к курсу: null — да, иначе код ошибки
+function Cpr_check($p, $course){
+    if (!$p) return 'invalid';
+    if ($p['Курс'] !== '' && $p['Курс'] !== $course) return 'wrong_course';
+    $end = Cpr_date_end($p['Срок']);
+    if ($end !== null && time() > $end) return 'expired';
+    if ((int)$p['Лимит'] > 0 && (int)$p['Использовано'] >= (int)$p['Лимит']) return 'exhausted';
+    return null;
+}
+
+function Cpr_bad_code($code){ return $code === '' || mb_strlen($code, 'UTF-8') > 64 || (bool)preg_match('/[\x00-\x1f<>"]/', $code); }
+
+# $fn под общей блокировкой промокодов (store_dir/promo.lock)
+function Cpr_locked($cfg, $fn){
+    if (!is_dir($cfg['store_dir'])) mkdir($cfg['store_dir'], 0700, true);
+    $lock = fopen(rtrim($cfg['store_dir'], '/') . '/promo.lock', 'c');
+    flock($lock, LOCK_EX);
+    try {
+        return $fn();
+    } finally {
+        flock($lock, LOCK_UN); fclose($lock);
+    }
+}
+
+# Код со скидкой для ссылки оплаты: строка «Промокод» или null (нет кода, не подходит, без скидки, перебор)
+function Cpr_for_payment($cfg, $tables, $uid, $course, $code){
+    $code = trim((string)$code);
+    if (!isset($tables['Промокод']['id']) || Cpr_bad_code($code)) return null;
+    return Cpr_locked($cfg, function () use ($cfg, $tables, $uid, $course, $code) {
+        if (count(Cpr_fails($cfg, $uid)) >= CPR_MAX_FAILS) return null;
+        $p = Cpr_find($cfg, $tables, $code);
+        $err = Cpr_check($p, $course);
+        if ($err === 'invalid' || $err === 'wrong_course') Cpr_fail_add($cfg, $uid);
+        if ($err) { Cp_log($cfg, 'promo_pay_denied', array('user' => $uid, 'course' => $course, 'error' => $err)); return null; }
+        return Cpr_discount($p) < 100 ? $p : null;
+    });
+}
+
+# Списать место кода после оплаты со скидкой (вебхук)
+function Cpr_use($cfg, $tables, $id){
+    Cpr_locked($cfg, function () use ($cfg, $tables, $id) {
+        foreach (Cp_rows($cfg, $tables['Промокод']) as $r) {
+            if ((string)$r['_id'] !== (string)$id) continue;
+            $xsrf = null;
+            Cpr_admin_set($cfg, $xsrf, $tables['Промокод'], $id, array('Использовано' => (int)$r['Использовано'] + 1));
+            return;
+        }
+        throw new Exception('нет промокода ' . $id);
+    });
+}
+
 # Погасить код: [http, ответ]
 function Cpr_redeem($cfg, $cookie, $course, $code){
     $code = trim((string)$code);
     if (!is_string($course) || !preg_match('/^[a-z0-9_-]{1,32}$/', $course)) return array(400, array('ok' => false, 'error' => 'course'));
-    if ($code === '' || mb_strlen($code, 'UTF-8') > 64 || preg_match('/[\x00-\x1f<>"]/', $code)) return array(400, array('ok' => false, 'error' => 'bad_code'));
+    if (Cpr_bad_code($code)) return array(400, array('ok' => false, 'error' => 'bad_code'));
     try {
         $uid = Cpr_whoami($cfg, $cookie);
         if ($uid === null) return array(401, array('ok' => false, 'error' => 'login'));
         $tables = Cp_schema($cfg);
         foreach (array('Промокод', 'Заявка') as $n) if (!isset($tables[$n]['id'])) throw new Exception('нет таблицы ' . $n . ' в schema.json');
-        if (!is_dir($cfg['store_dir'])) mkdir($cfg['store_dir'], 0700, true);
-        $lock = fopen(rtrim($cfg['store_dir'], '/') . '/promo.lock', 'c');
-        flock($lock, LOCK_EX);
-        try {
+        return Cpr_locked($cfg, function () use ($cfg, $tables, $uid, $course, $code) {
             return Cpr_redeem_locked($cfg, $tables, $uid, $course, $code);
-        } finally {
-            flock($lock, LOCK_UN); fclose($lock);
-        }
+        });
     } catch (Exception $e) {
         Cp_log($cfg, 'promo_failed', array('course' => $course, 'error' => $e->getMessage()));
         return array(500, array('ok' => false, 'error' => 'server'));
@@ -95,18 +154,18 @@ function Cpr_redeem_locked($cfg, $tables, $uid, $course, $code){
     if (Cp_has_access($cfg, $tables, $uid, $course)) return array(200, array('ok' => true, 'status' => 'already', 'course' => $course));
     if (count(Cpr_fails($cfg, $uid)) >= CPR_MAX_FAILS) return array(429, array('ok' => false, 'error' => 'too_many'));
     $p = Cpr_find($cfg, $tables, $code);
-    $err = null;
-    if (!$p) $err = 'invalid';
-    elseif ($p['Курс'] !== '' && $p['Курс'] !== $course) $err = 'wrong_course';
-    else {
-        $end = Cpr_date_end($p['Срок']);
-        if ($end !== null && time() > $end) $err = 'expired';
-        elseif ((int)$p['Лимит'] > 0 && (int)$p['Использовано'] >= (int)$p['Лимит']) $err = 'exhausted';
-    }
+    $err = Cpr_check($p, $course);
     if ($err) {
         if ($err === 'invalid' || $err === 'wrong_course') Cpr_fail_add($cfg, $uid);
         Cp_log($cfg, 'promo_denied', array('user' => $uid, 'course' => $course, 'error' => $err));
         return array(200, array('ok' => false, 'error' => $err));
+    }
+    $d = Cpr_discount($p);
+    if ($d < 100) { # скидка: курс открывает оплата по цене со скидкой, место списывает вебхук
+        $c = Cp_course($cfg, $course);
+        if (!$c) return array(200, array('ok' => false, 'error' => 'course'));
+        return array(200, array('ok' => true, 'status' => 'discount', 'course' => $course, 'code' => $p['_main'],
+            'discount' => $d, 'full' => (float)$c['price'], 'price' => Cpr_price($c['price'], $d)));
     }
     $key = (isset($tables['Промокод']['req']['Ключ']) && !empty($p['Ключ'])) ? $p['Ключ'] : Cp_course_key($cfg, $tables, $course);
     if (!$key) return array(200, array('ok' => false, 'error' => 'course'));

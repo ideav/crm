@@ -10,10 +10,11 @@
   }
   var LABEL = { done: 'Пройден', open: 'В процессе', new: '' };
 
-  // Возврат со страницы оплаты Точки: ?paid=<код> / ?payfail=<код> (courses-pay.php, courses#92)
+  // Возврат со страницы оплаты Точки: ?paid=<код> / ?payfail=<код> (courses-pay.php, courses#92);
+  // ?promofail=<код> — промокод со скидкой не подошёл при создании оплаты (ideav/crm#5781)
   function payReturn() {
-    var m = /[?&](paid|payfail)=([a-z0-9_-]+)/.exec(location.search);
-    return m ? { ok: m[1] === 'paid', code: m[2] } : null;
+    var m = /[?&](paid|payfail|promofail)=([a-z0-9_-]+)/.exec(location.search);
+    return m ? { ok: m[1] === 'paid', promo: m[1] === 'promofail', code: m[2] } : null;
   }
   var payWait = 0, paidSent = {};
   // Цель course_paid — один раз за вкладку: флаг в модуле (перерисовки раз в 3 с) и в sessionStorage (перезагрузка той же вкладки)
@@ -29,6 +30,10 @@
     if (!r) return;
     // Точка возвращает на ?paid= только после успешной оплаты
     if (r.ok) paidGoal(r.code);
+    if (r.promo) {
+      root.appendChild(E('p', { class: 'card warn', text: 'Промокод не подошёл' + (c ? ' к курсу «' + c.title + '»' : '') + ': срок истёк или места закончились. Оплата не создана.' }));
+      return;
+    }
     if (!r.ok) {
       root.appendChild(E('p', { class: 'card warn', text: 'Оплата не прошла' + (c ? ' («' + c.title + '»)' : '') + '. Попробуйте ещё раз или напишите в поддержку.' }));
       return;
@@ -85,6 +90,14 @@
       btn.disabled = true;
       msg.textContent = '';
       D.redeemPromo(c.code, inp.value.trim()).then(function (r) {
+        if (r.ok && r.status === 'discount') { // скидка (ideav/crm#5781): курс откроет оплата по цене со скидкой
+          var rub = function (v) { return Number(v).toLocaleString('ru-RU') + ' ₽'; };
+          msg.textContent = 'Скидка ' + r.discount + '%: ' + rub(r.price) + ' вместо ' + rub(r.full) + '. ';
+          msg.appendChild(E('a', { class: 'btn btn-primary', href: '/courses-pay.php?course=' + encodeURIComponent(c.code) + '&promo=' + encodeURIComponent(r.code),
+            onclick: function () { if (A.goal) A.goal('course_pay_click', c.code); }, text: 'Оплатить ' + rub(r.price) }));
+          btn.disabled = false;
+          return;
+        }
         if (r.ok) { A.route(); return; } // открыто (granted/already) или заявка (requested)
         msg.textContent = D.PROMO_MSG[r.error] || D.PROMO_MSG.server; btn.disabled = false;
       }, function () { msg.textContent = D.PROMO_MSG.server; btn.disabled = false; });
